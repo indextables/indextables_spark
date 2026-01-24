@@ -133,9 +133,9 @@ class ConcurrentStateWriteTest extends TestBase {
         val written5 = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 5L, json5)
         written5 shouldBe false
 
-        // Try to write checkpoint at version 10 (same) - should be skipped
+        // Try to write checkpoint at version 10 (same) - should succeed to allow format upgrades (JSON -> Avro)
         val written10Same = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 10L, json10)
-        written10Same shouldBe false
+        written10Same shouldBe true
 
         // Write checkpoint at version 15 (newer) - should succeed
         val json15 = """{"version":15,"size":150,"sizeInBytes":1500,"numFiles":150,"createdTime":1234567890000}"""
@@ -369,6 +369,142 @@ class ConcurrentStateWriteTest extends TestBase {
       spark.conf.unset("spark.indextables.state.retry.maxAttempts")
       spark.conf.unset("spark.indextables.state.retry.baseDelayMs")
       spark.conf.unset("spark.indextables.state.retry.maxDelayMs")
+    }
+  }
+
+  test("verifyCheckpointVersion detects _last_checkpoint regression using N+1 probe") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
+      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        transactionLogPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        cloudProvider.createDirectory(transactionLogPath)
+        val manifestIO = StateManifestIO(cloudProvider)
+
+        // Create state directories for versions 5, 6, and 7 (simulating successful concurrent writes)
+        for (v <- 5L to 7L) {
+          val stateDir = s"$transactionLogPath/${manifestIO.formatStateDir(v)}"
+          cloudProvider.createDirectory(stateDir)
+          val manifest = StateManifest(
+            formatVersion = 1,
+            stateVersion = v,
+            createdAt = System.currentTimeMillis(),
+            numFiles = v.toInt,
+            totalBytes = v * 1000,
+            manifests = Seq.empty,
+            tombstones = Seq.empty,
+            schemaRegistry = Map.empty,
+            protocolVersion = 4
+          )
+          manifestIO.writeStateManifest(stateDir, manifest)
+        }
+
+        // Test 1: Hint is correct (v7) - should return v7 with just one check
+        val correctHint = manifestIO.verifyCheckpointVersion(transactionLogPath, 7L)
+        correctHint shouldBe 7L
+
+        // Test 2: Hint is stale by 1 (v6) - should detect v7 exists and return v7
+        val staleBy1 = manifestIO.verifyCheckpointVersion(transactionLogPath, 6L)
+        staleBy1 shouldBe 7L
+
+        // Test 3: Hint is stale by 2 (v5) - should detect v6, v7 exist and return v7
+        val staleBy2 = manifestIO.verifyCheckpointVersion(transactionLogPath, 5L)
+        staleBy2 shouldBe 7L
+
+        // Test 4: Hint is ahead (v10) - should return v10 (can't go backwards)
+        // This shouldn't happen in practice but verifies the loop terminates
+        val aheadHint = manifestIO.verifyCheckpointVersion(transactionLogPath, 10L)
+        aheadHint shouldBe 10L
+
+      } finally {
+        cloudProvider.close()
+      }
+    }
+  }
+
+  test("getLastCheckpointInfoVerified corrects stale _last_checkpoint") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create initial table with data
+      val data = Seq((1, "doc1"), (2, "doc2"))
+      spark.createDataFrame(data).toDF("id", "content")
+        .write.format(provider)
+        .mode("overwrite")
+        .save(path)
+
+      // Enable Avro format and create checkpoint
+      spark.conf.set("spark.indextables.state.format", "avro")
+
+      try {
+        // Create checkpoint at version N
+        val result1 = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+        result1(0).getAs[String]("status") shouldBe "SUCCESS"
+        val v1 = result1(0).getAs[Long]("checkpoint_version")
+
+        // Add more data and create another checkpoint
+        val data2 = Seq((3, "doc3"), (4, "doc4"))
+        spark.createDataFrame(data2).toDF("id", "content")
+          .write.format(provider)
+          .mode("append")
+          .save(path)
+
+        val result2 = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+        result2(0).getAs[String]("status") shouldBe "SUCCESS"
+        val v2 = result2(0).getAs[Long]("checkpoint_version")
+        v2 should be > v1
+
+        // Now manually write a stale _last_checkpoint pointing to v1
+        // This simulates the TOCTOU race regression
+        val transactionLogPath = s"$path/_transaction_log"
+        val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val manifestIO = StateManifestIO(cloudProvider)
+          val staleCheckpointJson =
+            s"""{"version":$v1,"size":2,"sizeInBytes":1000,"numFiles":2,"createdTime":${System.currentTimeMillis()},"format":"avro-state","stateDir":"${manifestIO.formatStateDir(v1)}"}"""
+          cloudProvider.writeFile(s"$transactionLogPath/_last_checkpoint", staleCheckpointJson.getBytes("UTF-8"))
+
+          // Verify _last_checkpoint now points to v1 (stale)
+          val currentVersion = manifestIO.getCurrentCheckpointVersion(transactionLogPath)
+          currentVersion shouldBe Some(v1)
+
+          // But state v2 still exists
+          manifestIO.stateExists(s"$transactionLogPath/${manifestIO.formatStateDir(v2)}") shouldBe true
+
+          // Use TransactionLogCheckpoint to get verified info
+          val checkpoint = new io.indextables.spark.transaction.TransactionLogCheckpoint(
+            new org.apache.hadoop.fs.Path(transactionLogPath),
+            cloudProvider,
+            new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
+          )
+
+          // getLastCheckpointInfo should return stale v1
+          val unverifiedInfo = checkpoint.getLastCheckpointInfo()
+          unverifiedInfo.isDefined shouldBe true
+          unverifiedInfo.get.version shouldBe v1
+
+          // getLastCheckpointInfoVerified should detect and return corrected v2
+          val verifiedInfo = checkpoint.getLastCheckpointInfoVerified()
+          verifiedInfo.isDefined shouldBe true
+          verifiedInfo.get.version shouldBe v2
+          verifiedInfo.get.stateDir shouldBe Some(manifestIO.formatStateDir(v2))
+
+          checkpoint.close()
+        } finally {
+          cloudProvider.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.state.format")
+      }
     }
   }
 }

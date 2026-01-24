@@ -114,7 +114,7 @@ class CompactionTest extends TestBase {
     }
   }
 
-  test("compaction should trigger when large remove operation occurs (> 1000 files)") {
+  test("compaction should trigger when large remove operation occurs (with forceCompaction)") {
     withTempPath { tempPath =>
       val cloudProvider = CloudStorageProviderFactory.createProvider(
         tempPath,
@@ -133,12 +133,15 @@ class CompactionTest extends TestBase {
           removedPaths = Set.empty
         )
 
-        // Remove 1001 files (triggers large remove compaction)
+        // Remove 1001 files with forceCompaction to test compaction behavior
+        // Note: largeRemoveThreshold is Int.MaxValue by default (disabled)
+        // so we use forceCompaction to verify compaction clears tombstones
         val removedPaths = (1 to 1001).map(i => s"file$i.split").toSet
         val stateDir2 = stateWriter.writeState(
           currentVersion = 2,
           newFiles = Seq.empty,
-          removedPaths = removedPaths
+          removedPaths = removedPaths,
+          forceCompaction = true
         )
 
         // After compaction, tombstones should be empty
@@ -315,13 +318,18 @@ class CompactionTest extends TestBase {
         protocolVersion = 4
       )
 
-      // 10 removes on 100 files = 11.1% > 10% threshold
-      stateWriter.needsCompaction(manifest100Files, 10) shouldBe true
+      // 11 removes on 100 files = 11% > 10% threshold (triggers compaction)
+      stateWriter.needsCompaction(manifest100Files, 11) shouldBe true
 
-      // 8 removes on 100 files = 8.7% < 10% threshold
+      // 10 removes on 100 files = 10% == 10% threshold (does NOT trigger, need > not >=)
+      stateWriter.needsCompaction(manifest100Files, 10) shouldBe false
+
+      // 8 removes on 100 files = 8% < 10% threshold
       stateWriter.needsCompaction(manifest100Files, 8) shouldBe false
 
       // Test large remove threshold (> 1000 removes)
+      // Note: largeRemoveThreshold defaults to Int.MaxValue (disabled)
+      // Must pass explicit config to test this behavior
       val manifest50kFiles = StateManifest(
         formatVersion = 1,
         stateVersion = 1,
@@ -334,11 +342,15 @@ class CompactionTest extends TestBase {
         protocolVersion = 4
       )
 
-      // 1001 removes triggers compaction regardless of ratio
-      stateWriter.needsCompaction(manifest50kFiles, 1001) shouldBe true
+      // With explicit largeRemoveThreshold=1000, 1001 removes triggers compaction
+      val configWithLargeRemoveThreshold = CompactionConfig(largeRemoveThreshold = 1000)
+      stateWriter.needsCompaction(manifest50kFiles, 1001, configWithLargeRemoveThreshold) shouldBe true
 
-      // 999 removes doesn't trigger (ratio still low)
-      stateWriter.needsCompaction(manifest50kFiles, 999) shouldBe false
+      // 999 removes doesn't trigger (ratio still low, below 1000 threshold)
+      stateWriter.needsCompaction(manifest50kFiles, 999, configWithLargeRemoveThreshold) shouldBe false
+
+      // With default config (largeRemoveThreshold=Int.MaxValue), large removes don't trigger
+      stateWriter.needsCompaction(manifest50kFiles, 1001) shouldBe false
 
       // Test manifest count threshold (> 20 manifests)
       val manifestManyParts = StateManifest(

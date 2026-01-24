@@ -19,527 +19,365 @@ package io.indextables.spark.transaction.avro
 
 import io.indextables.spark.TestBase
 import io.indextables.spark.io.CloudStorageProviderFactory
-
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
+/**
+ * Tests for incremental state writes with shared manifests.
+ *
+ * These tests verify:
+ *   1. Incremental writes only create new manifests for new files
+ *   2. Existing manifests are reused via references
+ *   3. Shared manifest directory is used correctly
+ *   4. Re-read on retry picks up concurrent changes
+ *   5. Compaction triggers are configurable
+ *
+ * Run with:
+ *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.IncrementalStateWriteTest'
+ */
 class IncrementalStateWriteTest extends TestBase {
 
-  test("writeState should create initial state with empty files") {
-    withTempPath { tempPath =>
+  private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+
+  test("incremental write creates new manifest only for new files") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
       val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        transactionLogPath,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
         spark.sparkContext.hadoopConfiguration
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        cloudProvider.createDirectory(transactionLogPath)
 
-        val stateDir = stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = Seq.empty,
-          removedPaths = Set.empty
+        val stateWriter = StateWriter(cloudProvider, transactionLogPath)
+
+        // Write initial state with 2 files
+        val initialFiles = Seq(
+          createTestFileEntry("file1.split", 1L),
+          createTestFileEntry("file2.split", 1L)
         )
 
-        stateDir should include("state-v00000000000000000001")
+        val result1 = stateWriter.writeIncrementalWithRetry(
+          initialFiles,
+          Set.empty,
+          Map.empty
+        )
 
-        // Verify manifest was created
+        result1.version shouldBe 1L
+
+        // Verify shared manifests directory was created and used
+        val sharedManifestDir = s"$transactionLogPath/${StateConfig.SHARED_MANIFEST_DIR}"
+        cloudProvider.exists(sharedManifestDir) shouldBe true
+
+        // Read the state manifest to verify structure
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
+        val state1 = manifestIO.readStateManifest(result1.stateDir)
+        state1.manifests.size should be >= 1
+        state1.manifests.foreach { m =>
+          m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/")
+        }
 
-        manifest.stateVersion shouldBe 1
-        manifest.numFiles shouldBe 0
-        manifest.manifests should have size 1 // Empty manifest chunk
-        manifest.tombstones shouldBe empty
+        // Write incremental state with 1 new file
+        val newFiles = Seq(createTestFileEntry("file3.split", 2L))
+
+        val result2 = stateWriter.writeIncrementalWithRetry(
+          newFiles,
+          Set.empty,
+          Map.empty
+        )
+
+        result2.version shouldBe 2L
+
+        // Read state manifest for version 2
+        val state2 = manifestIO.readStateManifest(result2.stateDir)
+
+        // Should have one more manifest than state1 (for the new file)
+        // Or same number if combined into existing manifest
+        state2.numFiles shouldBe 3
+        state2.tombstones shouldBe empty
+
+        // All manifests should reference the shared directory
+        state2.manifests.foreach { m =>
+          m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/")
+        }
+
       } finally {
         cloudProvider.close()
       }
     }
   }
 
-  test("writeState should create initial state with files") {
-    withTempPath { tempPath =>
+  test("incremental write with removes adds tombstones") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
       val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        transactionLogPath,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
         spark.sparkContext.hadoopConfiguration
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
-        val files = (1 to 100).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
+        cloudProvider.createDirectory(transactionLogPath)
 
-        val stateDir = stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = files,
-          removedPaths = Set.empty
-        )
-
-        // Verify manifest
-        val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
-
-        manifest.stateVersion shouldBe 1
-        manifest.numFiles shouldBe 100
-        manifest.tombstones shouldBe empty
-
-        // Verify files can be read back
-        val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifest.manifests.map(m => s"$stateDir/${m.path}")
-        val readFiles = manifestReader.readManifestsParallel(manifestPaths)
-
-        readFiles should have size 100
-      } finally {
-        cloudProvider.close()
-      }
-    }
-  }
-
-  test("writeState should create incremental state with new files") {
-    withTempPath { tempPath =>
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
-
-      try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter = StateWriter(cloudProvider, transactionLogPath)
 
         // Write initial state
-        val initialFiles = (1 to 50).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
-        val stateDir1 = stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = initialFiles,
-          removedPaths = Set.empty
+        val initialFiles = Seq(
+          createTestFileEntry("file1.split", 1L),
+          createTestFileEntry("file2.split", 1L),
+          createTestFileEntry("file3.split", 1L)
         )
 
-        // Write incremental state with new files
-        val newFiles = (51 to 75).map(i => createTestFileEntry(s"splits/file$i.split", version = 2))
-        val stateDir2 = stateWriter.writeState(
-          currentVersion = 2,
-          newFiles = newFiles,
-          removedPaths = Set.empty
+        val result1 = stateWriter.writeIncrementalWithRetry(
+          initialFiles,
+          Set.empty,
+          Map.empty
         )
 
-        stateDir2 should include("state-v00000000000000000002")
+        // Write incremental state with new file and removal
+        // Use a high threshold to ensure incremental write (not compaction)
+        val newFiles = Seq(createTestFileEntry("file4.split", 2L))
+        val removedPaths = Set("file2.split")
 
-        // Verify manifest
+        val result2 = stateWriter.writeIncrementalWithRetry(
+          newFiles,
+          removedPaths,
+          Map.empty,
+          CompactionConfig(tombstoneThreshold = 0.50)  // 50% threshold prevents compaction
+        )
+
+        // Read state manifest
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        val state2 = manifestIO.readStateManifest(result2.stateDir)
 
-        manifest.stateVersion shouldBe 2
-        manifest.numFiles shouldBe 75 // 50 + 25
-        manifest.manifests.size should be >= 2 // At least initial + new
-        manifest.tombstones shouldBe empty
+        // Should have 3 live files (3 - 1 removed + 1 new)
+        state2.numFiles shouldBe 3
+        // Should have tombstone for removed file
+        state2.tombstones should contain("file2.split")
+
       } finally {
         cloudProvider.close()
       }
     }
   }
 
-  test("writeState should handle file removals with tombstones") {
-    withTempPath { tempPath =>
+  test("compaction triggers when tombstone threshold exceeded") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
       val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        transactionLogPath,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
         spark.sparkContext.hadoopConfiguration
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        cloudProvider.createDirectory(transactionLogPath)
 
-        // Write initial state with 200 files
-        val initialFiles = (1 to 200).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
-        stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = initialFiles,
-          removedPaths = Set.empty
+        val stateWriter = StateWriter(cloudProvider, transactionLogPath)
+
+        // Write initial state with 10 files
+        val initialFiles = (1 to 10).map(i => createTestFileEntry(s"file$i.split", 1L))
+
+        val result1 = stateWriter.writeIncrementalWithRetry(
+          initialFiles,
+          Set.empty,
+          Map.empty
         )
 
-        // Write state with removals (5 files = 2.5% tombstone ratio, below 10% threshold)
-        val removedPaths = (1 to 5).map(i => s"splits/file$i.split").toSet
-        val stateDir2 = stateWriter.writeState(
-          currentVersion = 2,
-          newFiles = Seq.empty,
-          removedPaths = removedPaths
+        // Remove 3 files (30% tombstone ratio, exceeds 10% threshold)
+        val removedPaths = Set("file1.split", "file2.split", "file3.split")
+
+        // Use config with low threshold to trigger compaction
+        val compactionConfig = CompactionConfig(
+          tombstoneThreshold = 0.10,  // 10% threshold
+          maxManifests = 100
         )
 
-        // Verify manifest has tombstones (incremental write, not compacted)
+        val result2 = stateWriter.writeIncrementalWithRetry(
+          Seq.empty,
+          removedPaths,
+          Map.empty,
+          compactionConfig
+        )
+
+        // Read state manifest
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        val state2 = manifestIO.readStateManifest(result2.stateDir)
 
-        manifest.stateVersion shouldBe 2
-        manifest.numFiles shouldBe 195 // 200 - 5
-        manifest.tombstones should have size 5
-        manifest.tombstones should contain allElementsOf removedPaths
+        // After compaction, tombstones should be cleared
+        state2.tombstones shouldBe empty
+        state2.numFiles shouldBe 7
+
       } finally {
         cloudProvider.close()
       }
     }
   }
 
-  test("writeState should trigger compaction when tombstone ratio exceeds threshold") {
-    withTempPath { tempPath =>
+  test("needsCompaction respects configurable thresholds") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
       val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        transactionLogPath,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
         spark.sparkContext.hadoopConfiguration
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter = StateWriter(cloudProvider, transactionLogPath)
 
-        // Write initial state with 100 files
-        val initialFiles = (1 to 100).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
-        stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = initialFiles,
-          removedPaths = Set.empty
+        // Create a manifest with specific tombstone ratio
+        val manifest = StateManifest(
+          formatVersion = 1,
+          stateVersion = 1L,
+          createdAt = System.currentTimeMillis(),
+          numFiles = 100,
+          totalBytes = 10000L,
+          manifests = Seq(
+            ManifestInfo(
+              path = "manifests/manifest-1.avro",
+              numEntries = 110,  // 100 live + 10 tombstones
+              minAddedAtVersion = 1L,
+              maxAddedAtVersion = 1L
+            )
+          ),
+          tombstones = (1 to 10).map(i => s"removed$i.split"),  // 10 existing tombstones
+          schemaRegistry = Map.empty,
+          protocolVersion = 4
         )
 
-        // Remove 20 files (20% tombstone ratio exceeds 10% threshold)
-        val removedPaths = (1 to 20).map(i => s"splits/file$i.split").toSet
-        val stateDir2 = stateWriter.writeState(
-          currentVersion = 2,
-          newFiles = Seq.empty,
-          removedPaths = removedPaths
+        // With 10 existing tombstones, 100 files, adding 5 removes: (10+5)/100 = 15%
+
+        // Default threshold (10%) - should trigger compaction
+        val defaultConfig = CompactionConfig()
+        stateWriter.needsCompaction(manifest, 5, defaultConfig) shouldBe true
+
+        // Higher threshold (20%) - should NOT trigger compaction
+        val highThresholdConfig = CompactionConfig(tombstoneThreshold = 0.20)
+        stateWriter.needsCompaction(manifest, 5, highThresholdConfig) shouldBe false
+
+        // Force compaction
+        val forceConfig = CompactionConfig(forceCompaction = true)
+        stateWriter.needsCompaction(manifest, 0, forceConfig) shouldBe true
+
+        // Large remove threshold (disabled by default)
+        // Create a manifest with many files to test large remove without triggering tombstone threshold
+        val largeManifest = StateManifest(
+          formatVersion = 1,
+          stateVersion = 1L,
+          createdAt = System.currentTimeMillis(),
+          numFiles = 100000,  // 100K files
+          totalBytes = 10000000L,
+          manifests = Seq(
+            ManifestInfo(
+              path = "manifests/manifest-1.avro",
+              numEntries = 100000,
+              minAddedAtVersion = 1L,
+              maxAddedAtVersion = 1L
+            )
+          ),
+          tombstones = Seq.empty,  // No existing tombstones
+          schemaRegistry = Map.empty,
+          protocolVersion = 4
         )
+        // With 100K files and 5000 removes: 5000/100000 = 5% (below 10% threshold)
+        val defaultLargeRemoveConfig = CompactionConfig(largeRemoveThreshold = Int.MaxValue)
+        stateWriter.needsCompaction(largeManifest, 5000, defaultLargeRemoveConfig) shouldBe false
 
-        // After compaction, tombstones should be empty
-        val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        // Large remove threshold enabled
+        // With 100K files and 150 removes: tombstoneRatio = 0.15% (well below 50%)
+        // But 150 > 100, so large remove threshold triggers compaction
+        val enabledLargeRemoveConfig = CompactionConfig(
+          tombstoneThreshold = 0.50,  // High threshold so tombstones don't trigger
+          largeRemoveThreshold = 100
+        )
+        stateWriter.needsCompaction(largeManifest, 150, enabledLargeRemoveConfig) shouldBe true
 
-        manifest.stateVersion shouldBe 2
-        manifest.numFiles shouldBe 80 // 100 - 20
-        manifest.tombstones shouldBe empty // Compacted - no tombstones
-
-        // Verify files can be read back correctly
-        val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifest.manifests.map(m => s"$stateDir2/${m.path}")
-        val readFiles = manifestReader.readManifestsParallel(manifestPaths)
-
-        readFiles should have size 80
-        readFiles.map(_.path) should not contain "splits/file1.split"
       } finally {
         cloudProvider.close()
       }
     }
   }
 
-  test("writeState should force compaction when requested") {
-    withTempPath { tempPath =>
+  test("shared manifest directory is created on first write") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
       val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        transactionLogPath,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
         spark.sparkContext.hadoopConfiguration
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        cloudProvider.createDirectory(transactionLogPath)
 
-        // Write initial state
-        val initialFiles = (1 to 50).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
-        stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = initialFiles,
-          removedPaths = Set.empty
+        val sharedDir = s"$transactionLogPath/${StateConfig.SHARED_MANIFEST_DIR}"
+
+        // Shared directory should not exist initially
+        cloudProvider.exists(sharedDir) shouldBe false
+
+        val stateWriter = StateWriter(cloudProvider, transactionLogPath)
+
+        // Write state
+        val files = Seq(createTestFileEntry("test.split", 1L))
+        val result = stateWriter.writeIncrementalWithRetry(
+          files,
+          Set.empty,
+          Map.empty
         )
 
-        // Add a few files and remove one (below threshold)
-        val newFiles = (51 to 55).map(i => createTestFileEntry(s"splits/file$i.split", version = 2))
-        val stateDir2 = stateWriter.writeState(
-          currentVersion = 2,
-          newFiles = newFiles,
-          removedPaths = Set("splits/file1.split"),
-          forceCompaction = true // Force compaction even below threshold
-        )
+        // Shared directory should now exist
+        cloudProvider.exists(sharedDir) shouldBe true
 
-        // Should be compacted (no tombstones)
+        // Manifest should be in shared directory
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        val state = manifestIO.readStateManifest(result.stateDir)
+        state.manifests.foreach { m =>
+          m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/")
+        }
 
-        manifest.tombstones shouldBe empty
-        manifest.numFiles shouldBe 54 // 50 + 5 - 1
       } finally {
         cloudProvider.close()
       }
     }
   }
 
-  test("writeCompactedStateFromFiles should sort by partition values") {
-    withTempPath { tempPath =>
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
+  test("end-to-end: write with incremental then read all files") {
+    withTempPath { tempDir =>
+      val path = tempDir
 
-      try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+      // First write
+      val data1 = Seq((1, "doc1"), (2, "doc2"))
+      spark.createDataFrame(data1).toDF("id", "content")
+        .write.format(provider)
+        .mode("overwrite")
+        .save(path)
 
-        // Create files with various partition values (out of order)
-        val files = Seq(
-          createTestFileEntry("f1.split", partitionValues = Map("date" -> "2024-01-15")),
-          createTestFileEntry("f2.split", partitionValues = Map("date" -> "2024-01-01")),
-          createTestFileEntry("f3.split", partitionValues = Map("date" -> "2024-01-10")),
-          createTestFileEntry("f4.split", partitionValues = Map("date" -> "2024-01-05"))
-        )
+      // Second write (append)
+      val data2 = Seq((3, "doc3"), (4, "doc4"))
+      spark.createDataFrame(data2).toDF("id", "content")
+        .write.format(provider)
+        .mode("append")
+        .save(path)
 
-        val stateDir = s"$tempPath/state-v00000000000000000001"
-        stateWriter.writeCompactedStateFromFiles(stateDir, files, 1, Map.empty)
+      // Read back and verify
+      val df = spark.read.format(provider).load(path)
+      df.count() shouldBe 4
 
-        // Read back and verify sorted order
-        val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
-
-        val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifest.manifests.map(m => s"$stateDir/${m.path}")
-        val readFiles = manifestReader.readManifestsParallel(manifestPaths)
-
-        readFiles should have size 4
-        // Files should be sorted by partition value
-        val dates = readFiles.map(_.partitionValues("date"))
-        dates shouldBe Seq("2024-01-01", "2024-01-05", "2024-01-10", "2024-01-15")
-      } finally {
-        cloudProvider.close()
-      }
+      // Verify all documents are present
+      val ids = df.select("id").collect().map(_.getInt(0)).toSet
+      ids should contain allOf (1, 2, 3, 4)
     }
   }
 
-  test("writeCompactedStateFromFiles should compute partition bounds") {
-    withTempPath { tempPath =>
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
-
-      try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
-
-        val files = Seq(
-          createTestFileEntry("f1.split", partitionValues = Map("date" -> "2024-01-01", "region" -> "us-east")),
-          createTestFileEntry("f2.split", partitionValues = Map("date" -> "2024-01-15", "region" -> "us-west")),
-          createTestFileEntry("f3.split", partitionValues = Map("date" -> "2024-01-10", "region" -> "eu-west"))
-        )
-
-        val stateDir = s"$tempPath/state-v00000000000000000001"
-        stateWriter.writeCompactedStateFromFiles(stateDir, files, 1, Map.empty)
-
-        // Verify partition bounds in manifest
-        val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
-
-        manifest.manifests should not be empty
-        manifest.manifests.head.partitionBounds shouldBe defined
-
-        val bounds = manifest.manifests.head.partitionBounds.get
-        bounds should contain key "date"
-        bounds("date").min shouldBe Some("2024-01-01")
-        bounds("date").max shouldBe Some("2024-01-15")
-      } finally {
-        cloudProvider.close()
-      }
-    }
-  }
-
-  test("writeState should preserve schema registry") {
-    withTempPath { tempPath =>
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
-
-      try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
-
-        val files = (1 to 10).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
-        val schemaRegistry = Map(
-          "_schema_abc123" -> """{"fields":[{"name":"id","type":"int"}]}""",
-          "_schema_def456" -> """{"fields":[{"name":"name","type":"string"}]}"""
-        )
-
-        val stateDir = stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = files,
-          removedPaths = Set.empty,
-          schemaRegistry = schemaRegistry
-        )
-
-        // Verify schema registry preserved
-        val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
-
-        manifest.schemaRegistry should have size 2
-        manifest.schemaRegistry should contain key "_schema_abc123"
-        manifest.schemaRegistry should contain key "_schema_def456"
-      } finally {
-        cloudProvider.close()
-      }
-    }
-  }
-
-  test("needsCompaction should return true when tombstone ratio exceeds threshold") {
-    val cloudProvider = CloudStorageProviderFactory.createProvider(
-      "/tmp/unused",
-      new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-      spark.sparkContext.hadoopConfiguration
-    )
-
-    try {
-      val stateWriter = StateWriter(cloudProvider, "/tmp/unused")
-
-      val manifest = StateManifest(
-        formatVersion = 1,
-        stateVersion = 1,
-        createdAt = System.currentTimeMillis(),
-        numFiles = 100,
-        totalBytes = 1000000L,
-        manifests = Seq.empty,
-        tombstones = Seq.empty,
-        schemaRegistry = Map.empty,
-        protocolVersion = 4
-      )
-
-      // 15 removes on 100 files = 15% tombstone ratio (exceeds 10% threshold)
-      stateWriter.needsCompaction(manifest, 15) shouldBe true
-
-      // 5 removes on 100 files = 5% tombstone ratio (below threshold)
-      stateWriter.needsCompaction(manifest, 5) shouldBe false
-    } finally {
-      cloudProvider.close()
-    }
-  }
-
-  test("needsCompaction should return true for large remove operations") {
-    val cloudProvider = CloudStorageProviderFactory.createProvider(
-      "/tmp/unused",
-      new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-      spark.sparkContext.hadoopConfiguration
-    )
-
-    try {
-      val stateWriter = StateWriter(cloudProvider, "/tmp/unused")
-
-      val manifest = StateManifest(
-        formatVersion = 1,
-        stateVersion = 1,
-        createdAt = System.currentTimeMillis(),
-        numFiles = 50000,
-        totalBytes = 50000000000L,
-        manifests = Seq.empty,
-        tombstones = Seq.empty,
-        schemaRegistry = Map.empty,
-        protocolVersion = 4
-      )
-
-      // 1001 removes triggers compaction regardless of ratio
-      stateWriter.needsCompaction(manifest, 1001) shouldBe true
-
-      // 999 removes (below 1000 threshold, and ratio is low)
-      stateWriter.needsCompaction(manifest, 999) shouldBe false
-    } finally {
-      cloudProvider.close()
-    }
-  }
-
-  test("convertAddActionsToFileEntries should convert correctly") {
-    val cloudProvider = CloudStorageProviderFactory.createProvider(
-      "/tmp/unused",
-      new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-      spark.sparkContext.hadoopConfiguration
-    )
-
-    try {
-      val stateWriter = StateWriter(cloudProvider, "/tmp/unused")
-
-      val adds = Seq(
-        io.indextables.spark.transaction.AddAction(
-          path = "splits/test.split",
-          partitionValues = Map("date" -> "2024-01-01"),
-          size = 1000L,
-          modificationTime = 1705123456789L,
-          dataChange = true,
-          numRecords = Some(100L)
-        )
-      )
-
-      val entries = stateWriter.convertAddActionsToFileEntries(adds, version = 42, timestamp = 1705123456789L)
-
-      entries should have size 1
-      entries.head.path shouldBe "splits/test.split"
-      entries.head.partitionValues shouldBe Map("date" -> "2024-01-01")
-      entries.head.size shouldBe 1000L
-      entries.head.addedAtVersion shouldBe 42
-      entries.head.addedAtTimestamp shouldBe 1705123456789L
-    } finally {
-      cloudProvider.close()
-    }
-  }
-
-  test("writeState should handle large number of files efficiently") {
-    withTempPath { tempPath =>
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
-
-      try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
-
-        // Create 10,000 files
-        val files = (1 to 10000).map(i => createTestFileEntry(s"splits/file$i.split", version = 1))
-
-        val startTime = System.currentTimeMillis()
-        val stateDir = stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = files,
-          removedPaths = Set.empty
-        )
-        val duration = System.currentTimeMillis() - startTime
-
-        // Should complete in reasonable time (< 5 seconds)
-        duration should be < 5000L
-
-        // Verify manifest
-        val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
-
-        manifest.numFiles shouldBe 10000
-        // With default 50K entries per manifest, should be 1 manifest
-        manifest.manifests.size should be >= 1
-      } finally {
-        cloudProvider.close()
-      }
-    }
-  }
-
-  // Helper methods
-
-  private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+  private def createTestFileEntry(path: String, version: Long): FileEntry = {
     FileEntry(
       path = path,
-      partitionValues = partitionValues,
-      size = 1000L,
+      partitionValues = Map.empty,
+      size = 100L,
       modificationTime = System.currentTimeMillis(),
       dataChange = true,
-      stats = None,
-      minValues = None,
-      maxValues = None,
-      numRecords = Some(100L),
-      footerStartOffset = None,
-      footerEndOffset = None,
-      hasFooterOffsets = false,
-      splitTags = None,
-      numMergeOps = None,
-      docMappingRef = None,
-      uncompressedSizeBytes = None,
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )

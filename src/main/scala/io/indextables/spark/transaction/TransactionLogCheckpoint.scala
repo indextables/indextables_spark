@@ -644,7 +644,8 @@ class TransactionLogCheckpoint(
     }
 
     // Read selected Avro manifests in parallel
-    val manifestPaths = manifestsToRead.map(m => s"$stateDirPath/${m.path}")
+    // Resolve manifest paths - handles both shared manifests (manifests/xxx.avro) and legacy state-local
+    val manifestPaths = manifestsToRead.map(m => manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath))
     val fileEntries = manifestReader.readManifestsParallel(manifestPaths)
 
     // Apply tombstones to filter out removed files
@@ -948,6 +949,47 @@ class TransactionLogCheckpoint(
 
   def getLastCheckpointVersion(): Option[Long] =
     getLastCheckpointInfo().map(_.version)
+
+  /**
+   * Get last checkpoint info with verification for Avro state format.
+   *
+   * This method ensures readers see the authoritative latest state by probing
+   * for version N+1 to detect if `_last_checkpoint` has regressed due to a
+   * rare TOCTOU race condition between concurrent writers.
+   *
+   * The verification is cheap: just one existence check (HEAD request) in the
+   * common case where the hint is correct. Only in the rare regression case
+   * do we probe further (O(k) checks where k is typically 1-2).
+   *
+   * The key insight (matching the old JSON implementation): The state directories
+   * themselves are the source of truth, using monotonically incrementing versions
+   * with conditional writes for coordination. The `_last_checkpoint` file is just
+   * an optimization hint.
+   *
+   * @return Last checkpoint info pointing to the actual latest state
+   */
+  def getLastCheckpointInfoVerified(): Option[LastCheckpointInfo] = {
+    val hint = getLastCheckpointInfo()
+
+    // Only verify for Avro state format (JSON format doesn't use state directories)
+    hint match {
+      case Some(info) if info.format.contains(StateConfig.Format.AVRO_STATE) =>
+        val manifestIO = StateManifestIO(cloudProvider)
+        val verifiedVersion = manifestIO.verifyCheckpointVersion(transactionLogPath.toString, info.version)
+
+        if (verifiedVersion > info.version) {
+          // _last_checkpoint was stale - return corrected info pointing to actual latest
+          val stateDirName = manifestIO.formatStateDir(verifiedVersion)
+          Some(info.copy(version = verifiedVersion, stateDir = Some(stateDirName)))
+        } else {
+          // Hint was accurate
+          hint
+        }
+      case _ =>
+        // Not Avro format or no hint - return as-is
+        hint
+    }
+  }
 
   def cleanupOldVersions(currentVersion: Long): Unit =
     getLastCheckpointVersion() match {

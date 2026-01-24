@@ -35,7 +35,7 @@ import org.apache.spark.sql.sources.Filter
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifest, StateManifestIO, StateRetryConfig, StateWriter}
+import io.indextables.spark.transaction.avro.{CompactionConfig, FileEntry, StateConfig, StateManifest, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
@@ -734,7 +734,8 @@ class OptimizedTransactionLog(
                   s"${stateManifest.numFiles} files, ${stateManifest.manifests.size} manifests")
 
                 // Use cached avroReader field to avoid object allocation per query
-                val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
+                // Resolve manifest paths - handles both shared manifests (manifests/xxx.avro) and legacy state-local
+                val manifestPaths = manifestIO.resolveManifestPaths(stateManifest, transactionLogPath.toString, stateDirPath)
                 val fileEntries = avroReader.readManifestsParallel(manifestPaths)
                 val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
                 // This toAddActions call is expensive (JSON parsing) - cached globally
@@ -1262,11 +1263,17 @@ class OptimizedTransactionLog(
    * Get last checkpoint info using global cache. This avoids repeated S3 calls for _last_checkpoint file.
    * The cache is shared across all TransactionLog instances with configurable TTL (default 5 minutes).
    * Configure via spark.indextables.cache.checkpoint.ttl
+   *
+   * For Avro state format, uses verified discovery that probes for version N+1 to detect if
+   * `_last_checkpoint` has regressed due to a rare TOCTOU race between concurrent writers.
+   * This ensures readers (including merge operations) always see the authoritative latest state.
+   *
+   * Verification cost: 1 HEAD request in the common case (hint is correct).
    */
   private def getLastCheckpointInfoCached(): Option[LastCheckpointInfo] =
     enhancedCache.getOrComputeLastCheckpointInfo(
       tablePath.toString,
-      checkpoint.flatMap(_.getLastCheckpointInfo())
+      checkpoint.flatMap(_.getLastCheckpointInfoVerified())
     )
 
   /** Get all actions from the latest checkpoint (consolidated state). */
@@ -1739,7 +1746,7 @@ class OptimizedTransactionLog(
   private def writeActionsToAvroState(actions: Seq[Action]): Long = {
     val timestamp = System.currentTimeMillis()
 
-    // Invalidate all caches before reading current state to ensure we get fresh data
+    // Invalidate all caches before writing to ensure consistent state
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
     enhancedCache.invalidateLastCheckpointInfo(tablePath.toString)
     // Clear snapshot to ensure fresh read
@@ -1750,111 +1757,11 @@ class OptimizedTransactionLog(
     val removeActions = actions.collect { case remove: RemoveAction => remove }
     val removedPaths = removeActions.map(_.path).toSet
 
-    // Build schema registry from AddActions
+    // Build schema registry from NEW AddActions only
+    // Existing schemas are already in the base state's schema registry
     val newSchemaRegistry = scala.collection.mutable.Map[String, String]()
 
-    // Get current version from Avro state or JSON version files (for migration)
-    // Re-read checkpoint info to get fresh data after cache invalidation
-    val currentCheckpointInfo = checkpoint.flatMap(_.getLastCheckpointInfo())
-    val currentAvroVersion = currentCheckpointInfo.flatMap { info =>
-      if (info.format.contains(StateConfig.Format.AVRO_STATE)) Some(info.version)
-      else None
-    }
-
-    // For the new state version:
-    // - If Avro state exists, increment from that version
-    // - Otherwise, use JSON version counter (for first Avro write on existing table)
-    // - Or 1 for new tables
-    val newVersion = currentAvroVersion match {
-      case Some(avroVersion) =>
-        avroVersion + 1
-      case None =>
-        // Check for JSON versions (migration case)
-        val jsonVersions = getVersions()
-        if (jsonVersions.nonEmpty) jsonVersions.max + 1 else 1L
-    }
-
-    logger.debug(s"Avro state: currentAvroVersion=$currentAvroVersion, newVersion=$newVersion")
-
-    // Read existing live files from current state (if any)
-    // Read directly from Avro state files to avoid caching issues
-    val existingFiles: Seq[AddAction] = currentCheckpointInfo match {
-      case Some(info) if info.format.contains(StateConfig.Format.AVRO_STATE) && info.stateDir.isDefined =>
-        // Read directly from Avro state directory
-        val stateDirPath = s"${transactionLogPath.toString}/${info.stateDir.get}"
-        logger.debug(s"Reading existing files directly from Avro state: $stateDirPath")
-        try {
-          val stateManifest = manifestIO.readStateManifest(stateDirPath)
-          // Use cached avroReader field to avoid object allocation per query
-          val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
-          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
-          val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
-          avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
-        } catch {
-          case e: Exception =>
-            logger.warn(s"Failed to read from Avro state $stateDirPath: ${e.getMessage}, falling back to empty")
-            Seq.empty
-        }
-      case Some(_) =>
-        // JSON checkpoint - use checkpoint path
-        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
-          case Some(checkpointActions) =>
-            checkpointActions.collect { case add: AddAction => add }
-          case None =>
-            Seq.empty
-        }
-      case None =>
-        // No checkpoint - start fresh
-        Seq.empty
-    }
-
-    // Filter out removed files and collect existing schema refs
-    val liveExistingFiles = existingFiles.filterNot(f => removedPaths.contains(f.path))
-
-    // Check if we need to re-normalize schemas (threshold-based optimization)
-    // If unique docMappingRef count is above threshold, there may be buggy hashes that need consolidation
-    val renormalizeThreshold = Option(options.get(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_KEY))
-      .map(_.toInt)
-      .getOrElse(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT)
-    val existingRefCount = liveExistingFiles.flatMap(_.docMappingRef).toSet.size
-    val shouldRenormalize = existingRefCount > renormalizeThreshold
-
-    if (shouldRenormalize) {
-      logger.info(s"Schema renormalization triggered: $existingRefCount unique docMappingRef values exceeds threshold of $renormalizeThreshold")
-    }
-
-    // Collect schema refs from existing files
-    liveExistingFiles.foreach { add =>
-      add.docMappingJson.foreach { json =>
-        // Compute normalized hash if renormalizing, otherwise trust existing ref
-        val ref = if (shouldRenormalize) {
-          SchemaDeduplication.computeSchemaHash(json)
-        } else {
-          add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
-        }
-        newSchemaRegistry.put(ref, json)
-      }
-    }
-
-    // Convert existing files to FileEntries (preserve their original version/timestamp)
-    val existingFileEntries = liveExistingFiles.map { add =>
-      // For existing files, use version 0 if unknown (will be preserved in compaction)
-      val refAndJson = add.docMappingJson.map { json =>
-        // Compute normalized hash if renormalizing, otherwise trust existing ref
-        if (shouldRenormalize) {
-          SchemaDeduplication.computeSchemaHash(json)
-        } else {
-          add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
-        }
-      }
-      FileEntry.fromAddAction(
-        add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)),
-        0L, // Original version unknown for migrated files
-        add.modificationTime
-      )
-    }
-
-    // Convert new AddActions to FileEntries
+    // Convert NEW AddActions to FileEntries
     // Always compute normalized hash for new files to ensure correct hashes
     val newFileEntries = addActions.map { add =>
       val refAndJson = add.docMappingJson.map { json =>
@@ -1864,30 +1771,49 @@ class OptimizedTransactionLog(
       }
       FileEntry.fromAddAction(
         add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)),
-        newVersion,
+        0L, // Version will be assigned by StateWriter based on actual write version
         timestamp
       )
     }
 
-    // All live files for the new state
-    val allLiveFiles = existingFileEntries ++ newFileEntries
+    // Build compaction config from options
+    val compactionConfig = CompactionConfig(
+      tombstoneThreshold = Option(options.get(StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_KEY))
+        .map(_.toDouble)
+        .getOrElse(StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT),
+      maxManifests = Option(options.get(StateConfig.COMPACTION_MAX_MANIFESTS_KEY))
+        .map(_.toInt)
+        .getOrElse(StateConfig.COMPACTION_MAX_MANIFESTS_DEFAULT),
+      largeRemoveThreshold = Option(options.get(StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_KEY))
+        .map(_.toInt)
+        .getOrElse(StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT),
+      forceCompaction = false
+    )
 
-    // Write compacted state with retry support for concurrent conflicts
-    val writeResult = stateWriter.writeStateWithRetry(
-      newVersion,
-      allLiveFiles,
-      newSchemaRegistry.toMap
+    // Use INCREMENTAL write path - only passes new files and removed paths
+    // StateWriter handles reading existing state and deciding on compaction vs append
+    val writeResult = stateWriter.writeIncrementalWithRetry(
+      newFileEntries,
+      removedPaths,
+      newSchemaRegistry.toMap,
+      compactionConfig
     )
 
     // Update _last_checkpoint to point to new Avro state
     val actualVersion = writeResult.version
     val stateDir = manifestIO.formatStateDir(actualVersion)
 
+    // Read the actual state manifest to get accurate file counts
+    val actualStateDir = s"${transactionLogPath.toString}/$stateDir"
+    val stateManifest = Try(manifestIO.readStateManifest(actualStateDir)).toOption
+    val totalFiles = stateManifest.map(_.numFiles).getOrElse(newFileEntries.size.toLong)
+    val totalBytes = stateManifest.map(_.totalBytes).getOrElse(newFileEntries.map(_.size).sum)
+
     val lastCheckpointInfo = LastCheckpointInfo(
       version = actualVersion,
-      size = allLiveFiles.size,
-      sizeInBytes = allLiveFiles.map(_.size).sum,
-      numFiles = allLiveFiles.size,
+      size = totalFiles,
+      sizeInBytes = totalBytes,
+      numFiles = totalFiles,
       createdTime = timestamp,
       parts = None,
       checkpointId = None,
@@ -1903,7 +1829,8 @@ class OptimizedTransactionLog(
     )
 
     if (checkpointUpdated) {
-      logger.info(s"Avro state written at version $actualVersion with ${allLiveFiles.size} total files")
+      logger.info(s"Avro state written at version $actualVersion with $totalFiles total files " +
+        s"(new=${newFileEntries.size}, removed=${removedPaths.size})")
     } else {
       logger.debug(s"Avro state written at version $actualVersion but _last_checkpoint not updated (newer exists)")
     }

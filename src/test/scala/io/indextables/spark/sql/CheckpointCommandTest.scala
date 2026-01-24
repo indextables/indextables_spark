@@ -124,6 +124,32 @@ class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfte
     result.count() shouldBe 1
   }
 
+  test("COMPACT INDEXTABLES should work as alias for CHECKPOINT") {
+    val tablePath = new File(tempDir, "compact_alias_test").getAbsolutePath
+    createTestTable(tablePath)
+
+    val result = spark.sql(s"COMPACT INDEXTABLES '$tablePath'")
+
+    result.columns should contain("table_path")
+    result.columns should contain("status")
+    result.count() shouldBe 1
+
+    val row = result.collect().head
+    row.getString(1) shouldBe "SUCCESS"
+    row.getLong(5) shouldBe 4L // protocol_version (V4 with Avro state)
+  }
+
+  test("COMPACT TANTIVY4SPARK should work as alias for CHECKPOINT") {
+    val tablePath = new File(tempDir, "compact_tantivy_alias_test").getAbsolutePath
+    createTestTable(tablePath)
+
+    val result = spark.sql(s"COMPACT TANTIVY4SPARK '$tablePath'")
+
+    result.columns should contain("status")
+    result.count() shouldBe 1
+    result.collect().head.getString(1) shouldBe "SUCCESS"
+  }
+
   // ===== Functional Tests =====
 
   test("CHECKPOINT INDEXTABLES should create checkpoint and return SUCCESS") {

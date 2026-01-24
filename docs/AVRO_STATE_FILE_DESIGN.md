@@ -31,12 +31,16 @@ _transaction_log/
   00000000000000000002.json
   ...
 
-  # State directory (new Avro format)
-  state-v00000000000000000100/
-    _manifest.json              # State manifest (small JSON)
-    manifest-a1b2c3d4.avro      # File entries (Avro)
+  # Shared manifest directory (Iceberg-style, written once, reused across versions)
+  manifests/
+    manifest-a1b2c3d4.avro      # File entries (Avro) - shared across state versions
     manifest-e5f6g7h8.avro      # File entries (Avro)
+    manifest-i9j0k1l2.avro      # New files from latest transaction
     ...
+
+  # State directory (contains only _manifest.json, references shared manifests)
+  state-v00000000000000000100/
+    _manifest.json              # State manifest (references manifests/ directory)
 
   # Legacy checkpoint (for backward compatibility)
   00000000000000000050.checkpoint.json
@@ -44,6 +48,12 @@ _transaction_log/
   # Pointer to latest state
   _last_checkpoint
 ```
+
+**Key Change: Shared Manifest Location**
+
+Manifests are stored in a shared `manifests/` directory instead of per-state directories.
+This enables Iceberg-style incremental writes where new transactions only write new
+manifests for new files, referencing existing manifests by path.
 
 ## State Manifest Format
 
@@ -58,7 +68,7 @@ The `_manifest.json` file is small JSON that describes the state:
   "totalBytes": 1234567890,
   "manifests": [
     {
-      "path": "manifest-a1b2c3d4.avro",
+      "path": "manifests/manifest-a1b2c3d4.avro",
       "numEntries": 50000,
       "minAddedAtVersion": 1,
       "maxAddedAtVersion": 50,
@@ -68,7 +78,7 @@ The `_manifest.json` file is small JSON that describes the state:
       }
     },
     {
-      "path": "manifest-e5f6g7h8.avro",
+      "path": "manifests/manifest-e5f6g7h8.avro",
       "numEntries": 20000,
       "minAddedAtVersion": 51,
       "maxAddedAtVersion": 99,
@@ -78,7 +88,7 @@ The `_manifest.json` file is small JSON that describes the state:
       }
     },
     {
-      "path": "manifest-i9j0k1l2.avro",
+      "path": "manifests/manifest-i9j0k1l2.avro",
       "numEntries": 500,
       "minAddedAtVersion": 100,
       "maxAddedAtVersion": 100,
@@ -99,6 +109,10 @@ The `_manifest.json` file is small JSON that describes the state:
   "protocolVersion": 4
 }
 ```
+
+**Note:** Manifest paths are relative to the transaction log root. The `manifests/`
+prefix indicates the shared manifest directory. For backward compatibility, paths
+starting with `state-v` are also supported (normalized legacy format).
 
 ### Manifest Entry Schema
 
@@ -248,75 +262,108 @@ def getChangesSince(tablePath: String, sinceVersion: Long): ChangeSet = {
 
 ## Write Path
 
-### Writing New State (Incremental)
+### Writing New State (Incremental with Retry)
+
+The key insight is that writes should **re-read the base state on every retry attempt**
+to pick up concurrent changes. This prevents stale manifest lists from causing conflicts.
 
 ```scala
-def writeState(
-  tablePath: String,
+def writeIncrementalWithRetry(
   newFiles: Seq[FileEntry],
   removedPaths: Set[String],
-  currentVersion: Long
-): Unit = {
-  val oldManifest = readStateManifest(currentStateDir)
-  val newStateDir = s"state-v${formatVersion(currentVersion)}"
+  schemaRegistry: Map[String, String],
+  config: CompactionConfig = CompactionConfig()
+): StateWriteResult = {
+  var attempt = 1
 
-  // 1. Decide whether to compact or append
-  val shouldCompact = needsCompaction(oldManifest, removedPaths.size)
+  while (attempt <= maxAttempts) {
+    // CRITICAL: Re-read base state on EVERY retry to pick up concurrent changes
+    val baseState = findLatestState()
 
-  if (shouldCompact) {
-    writeCompactedState(tablePath, newStateDir, currentVersion)
-  } else {
-    writeIncrementalState(tablePath, newStateDir, oldManifest, newFiles, removedPaths, currentVersion)
+    val newVersion = baseState match {
+      case Some((_, manifest)) => manifest.stateVersion + 1
+      case None => 1L
+    }
+
+    val newStateDir = s"$transactionLogPath/${formatStateDir(newVersion)}"
+
+    // Check if state already exists (conflict)
+    if (stateExists(newStateDir)) {
+      attempt += 1
+      Thread.sleep(calculateBackoff(attempt))
+      continue
+    }
+
+    val success = baseState match {
+      case Some((oldStateDir, oldManifest)) =>
+        if (needsCompaction(oldManifest, removedPaths.size, config)) {
+          tryWriteCompactedState(newStateDir, oldManifest, newFiles, removedPaths, ...)
+        } else {
+          tryWriteIncrementalStateToShared(newStateDir, oldManifest, newFiles, removedPaths, ...)
+        }
+      case None =>
+        tryWriteInitialState(newStateDir, newFiles, ...)
+    }
+
+    if (success) return StateWriteResult(newStateDir, newVersion, attempt, retried = attempt > 1)
+
+    attempt += 1
   }
-}
 
-def writeIncrementalState(
-  tablePath: String,
+  throw new ConcurrentStateWriteException(...)
+}
+```
+
+### Incremental State to Shared Manifests
+
+```scala
+def tryWriteIncrementalStateToShared(
   newStateDir: String,
-  oldManifest: StateManifest,
+  baseManifest: StateManifest,
   newFiles: Seq[FileEntry],
   removedPaths: Set[String],
-  currentVersion: Long
-): Unit = {
-  // 1. Copy references to existing manifests
-  val existingManifests = oldManifest.manifests
+  currentVersion: Long,
+  schemaRegistry: Map[String, String]
+): Boolean = {
+  cloudProvider.createDirectory(newStateDir)
 
-  // 2. Write new manifest with only new files (if any)
-  val newManifests = if (newFiles.nonEmpty) {
+  // 1. Normalize existing manifest paths (handle CHECKPOINT → write → read cycles)
+  //    Paths like "manifest-xxx.avro" become "state-vN/manifest-xxx.avro"
+  var newManifests = normalizeManifestPaths(baseManifest.manifests, baseManifest.stateVersion)
+
+  // 2. Write NEW manifest to SHARED location (if new files exist)
+  if (newFiles.nonEmpty) {
     val manifestId = generateManifestId()
-    val manifestPath = s"manifest-$manifestId.avro"
-    writeAvroManifest(s"$newStateDir/$manifestPath", newFiles)
+    val manifestRelPath = s"${SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+    val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
-    existingManifests :+ ManifestInfo(
-      path = manifestPath,
+    ensureSharedManifestDir()  // Create manifests/ if not exists
+    writeAvroManifest(fullManifestPath, newFiles)
+
+    newManifests = newManifests :+ ManifestInfo(
+      path = manifestRelPath,  // Relative to tx log root: "manifests/manifest-xxx.avro"
       numEntries = newFiles.size,
-      minAddedAtVersion = newFiles.map(_.addedAtVersion).min,
-      maxAddedAtVersion = newFiles.map(_.addedAtVersion).max
+      minAddedAtVersion = currentVersion,
+      maxAddedAtVersion = currentVersion,
+      partitionBounds = computePartitionBounds(newFiles)
     )
-  } else {
-    existingManifests
   }
 
   // 3. Merge tombstones
-  val newTombstones = oldManifest.tombstones ++ removedPaths
+  val newTombstones = baseManifest.tombstones ++ removedPaths
 
-  // 4. Write new manifest
-  val newManifest = StateManifest(
+  // 4. Write state manifest with conditional write
+  val stateManifest = StateManifest(
     formatVersion = 1,
     stateVersion = currentVersion,
-    createdAt = System.currentTimeMillis(),
-    numFiles = calculateLiveFileCount(newManifests, newTombstones),
-    totalBytes = calculateTotalBytes(newManifests, newTombstones),
+    numFiles = baseManifest.numFiles + newFiles.size - removedPaths.size,
     manifests = newManifests,
     tombstones = newTombstones.toSeq,
-    schemaRegistry = mergeSchemaRegistries(oldManifest.schemaRegistry, newSchemas),
+    schemaRegistry = baseManifest.schemaRegistry ++ schemaRegistry,
     protocolVersion = 4
   )
 
-  writeStateManifest(s"$newStateDir/_manifest.json", newManifest)
-
-  // 5. Update _last_checkpoint
-  updateLastCheckpoint(currentVersion, newStateDir, format = "avro-state")
+  writeStateManifestIfNotExists(newStateDir, stateManifest)
 }
 ```
 
@@ -346,20 +393,34 @@ def writeAvroManifest(path: String, entries: Seq[FileEntry]): Unit = {
 
 ### When to Compact
 
+Compaction is configurable via `CompactionConfig`:
+
 ```scala
-def needsCompaction(manifest: StateManifest, newRemoves: Int): Boolean = {
-  val tombstoneRatio = manifest.tombstones.size.toDouble / manifest.numFiles
-  val manifestCount = manifest.manifests.size
+case class CompactionConfig(
+  tombstoneThreshold: Double = 0.10,      // Compact when tombstones > 10%
+  maxManifests: Int = 20,                  // Compact when manifests > 20
+  largeRemoveThreshold: Int = Int.MaxValue, // Disabled by default
+  forceCompaction: Boolean = false
+)
+
+def needsCompaction(
+  manifest: StateManifest,
+  newRemoves: Int,
+  config: CompactionConfig
+): Boolean = {
+  if (config.forceCompaction) return true
+  if (manifest.numFiles <= 0) return true
+
+  val totalTombstones = manifest.tombstones.size + newRemoves
+  val tombstoneRatio = totalTombstones.toDouble / manifest.numFiles
 
   // Compact when:
-  // 1. Tombstones exceed 10% of live files
-  tombstoneRatio > 0.10 ||
-  // 2. Too many small manifests (fragmentation)
-  manifestCount > 20 ||
-  // 3. After a merge operation (lots of removes)
-  newRemoves > 1000 ||
-  // 4. Explicit compaction requested
-  forceCompaction
+  // 1. Tombstone ratio exceeds threshold
+  tombstoneRatio > config.tombstoneThreshold ||
+  // 2. Too many manifests (fragmentation)
+  manifest.manifests.size > config.maxManifests ||
+  // 3. Large remove operation (optional, disabled by default)
+  newRemoves > config.largeRemoveThreshold
 }
 ```
 
@@ -609,6 +670,7 @@ spark.indextables.state.entriesPerManifest: 50000         // Max entries per man
 // Compaction configuration
 spark.indextables.state.compaction.tombstoneThreshold: 0.10   // Compact when tombstones > 10% (default: 0.10)
 spark.indextables.state.compaction.maxManifests: 20           // Compact when manifests > 20 (default: 20)
+spark.indextables.state.compaction.largeRemoveThreshold: MAX_INT  // Disabled by default
 spark.indextables.state.compaction.afterMerge: true           // Auto-compact after merge (default: true)
 
 // Parallel read configuration
@@ -617,6 +679,9 @@ spark.indextables.state.read.parallelism: 8               // Parallel manifest r
 // Retention configuration
 spark.indextables.state.retention.versions: 2             // Keep N old state versions (default: 2)
 spark.indextables.state.retention.hours: 168              // Keep states for N hours (default: 168 = 7 days)
+
+// Manifest garbage collection
+spark.indextables.state.gc.minManifestAgeHours: 1         // Don't delete manifests < 1 hour old (default: 1)
 ```
 
 ## Migration Strategy
@@ -697,6 +762,91 @@ def cleanupOldStates(tablePath: String): Unit = {
     .foreach(deleteStateDir)
 }
 ```
+
+### Manifest Garbage Collection
+
+With shared manifests, orphaned manifest files can accumulate when state directories
+are deleted but their manifests are no longer referenced by any retained state.
+
+```scala
+class ManifestGarbageCollector(cloudProvider: CloudStorageProvider, txLogPath: String) {
+
+  /**
+   * Find all manifests reachable from retained state versions.
+   */
+  def findReachableManifests(config: GCConfig): Set[String] = {
+    val reachable = mutable.Set[String]()
+
+    // List all state directories
+    val stateDirs = listStateDirs()
+
+    // Read each retained state's manifest list
+    stateDirs.foreach { stateDir =>
+      try {
+        val manifest = readStateManifest(stateDir)
+        manifest.manifests.foreach { m =>
+          reachable.add(resolveManifestPath(m, txLogPath))
+        }
+      } catch {
+        case e: Exception => log.warn(s"Failed to read state: ${e.getMessage}")
+      }
+    }
+
+    reachable.toSet
+  }
+
+  /**
+   * Delete orphaned manifests from shared directory.
+   * Age-based protection prevents race conditions with in-flight writes.
+   */
+  def collectGarbage(config: GCConfig, dryRun: Boolean): GCResult = {
+    val reachable = findReachableManifests(config)
+    val sharedDir = s"$txLogPath/$SHARED_MANIFEST_DIR"
+
+    if (!cloudProvider.exists(sharedDir)) return GCResult.empty
+
+    val allManifests = cloudProvider.listFiles(sharedDir)
+      .filter(_.path.endsWith(".avro"))
+
+    val cutoffTime = System.currentTimeMillis() - (config.minManifestAgeHours * 3600 * 1000)
+
+    val orphaned = allManifests.filterNot { f =>
+      reachable.contains(f.path) || f.modificationTime > cutoffTime
+    }
+
+    if (!dryRun) {
+      orphaned.foreach(f => cloudProvider.deleteFile(f.path))
+    }
+
+    GCResult(
+      orphanedManifests = orphaned.size,
+      deletedManifests = if (dryRun) 0 else orphaned.size,
+      dryRun = dryRun
+    )
+  }
+}
+
+case class GCConfig(
+  retentionVersions: Int = 2,       // State versions to retain
+  minManifestAgeHours: Int = 1      // Don't delete manifests younger than 1 hour
+)
+
+case class GCResult(
+  orphanedManifests: Int,
+  deletedManifests: Int,
+  dryRun: Boolean
+)
+```
+
+**Key Safety Features:**
+
+1. **Age-based protection**: Manifests younger than `minManifestAgeHours` are never
+   deleted, preventing race conditions with in-flight writes that reference new manifests.
+
+2. **Dry-run mode**: Preview what would be deleted without making changes.
+
+3. **Integration with PURGE**: The `PURGE INDEXTABLE` command invokes manifest GC
+   after state directory cleanup.
 
 ### Integration with PURGE
 

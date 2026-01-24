@@ -115,7 +115,9 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
         numEntries = elem.get("numEntries").asLong(),
         minAddedAtVersion = elem.get("minAddedAtVersion").asLong(),
         maxAddedAtVersion = elem.get("maxAddedAtVersion").asLong(),
-        partitionBounds = parsePartitionBounds(elem.get("partitionBounds"))
+        partitionBounds = parsePartitionBounds(elem.get("partitionBounds")),
+        tombstoneCount = Option(elem.get("tombstoneCount")).map(_.asLong()).getOrElse(0L),
+        liveEntryCount = Option(elem.get("liveEntryCount")).map(_.asLong()).getOrElse(-1L)
       )
     }.toSeq
   }
@@ -236,6 +238,14 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
           pb.max.foreach(colNode.put("max", _))
         }
       }
+
+      // Only write tombstone tracking fields if they have meaningful values
+      if (info.tombstoneCount > 0) {
+        manifestNode.put("tombstoneCount", info.tombstoneCount)
+      }
+      if (info.liveEntryCount >= 0) {
+        manifestNode.put("liveEntryCount", info.liveEntryCount)
+      }
     }
 
     // Tombstones array
@@ -318,6 +328,69 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       case pattern(version) => Some(version.toLong)
       case _                => None
     }
+  }
+
+  /**
+   * Resolve a manifest path to a full path.
+   *
+   * Manifest paths are stored relative to the transaction log root:
+   *   - Shared manifests: "manifests/manifest-abc123.avro"
+   *   - Legacy state-local manifests: "manifest-abc123.avro" (relative to state dir)
+   *
+   * This method handles both formats for backward compatibility.
+   *
+   * @param manifestInfo
+   *   ManifestInfo containing the relative path
+   * @param transactionLogPath
+   *   Full path to the transaction log directory
+   * @param stateDir
+   *   Full path to the state directory (for legacy state-local manifests)
+   * @return
+   *   Full path to the manifest file
+   */
+  def resolveManifestPath(
+      manifestInfo: ManifestInfo,
+      transactionLogPath: String,
+      stateDir: String): String = {
+    val path = manifestInfo.path
+
+    if (path.startsWith(StateConfig.SHARED_MANIFEST_DIR + "/")) {
+      // New format: shared manifest relative to tx log root
+      s"$transactionLogPath/$path"
+    } else if (path.startsWith("state-v")) {
+      // Normalized legacy format: includes state directory prefix
+      // e.g., "state-v00000001/manifest-xxx.avro"
+      s"$transactionLogPath/$path"
+    } else if (path.startsWith("s3://") || path.startsWith("abfss://") ||
+               path.startsWith("wasbs://") || path.startsWith("gs://") ||
+               path.startsWith("hdfs://") || path.startsWith("/")) {
+      // Absolute path (shouldn't happen, but handle defensively)
+      log.warn(s"Manifest has absolute path (unexpected): $path")
+      path
+    } else {
+      // Legacy format: relative to current state directory
+      // This should only happen when reading the original state that created the manifest
+      s"$stateDir/$path"
+    }
+  }
+
+  /**
+   * Resolve manifest paths for a state manifest.
+   *
+   * @param manifest
+   *   StateManifest containing manifest references
+   * @param transactionLogPath
+   *   Full path to the transaction log directory
+   * @param stateDir
+   *   Full path to the state directory
+   * @return
+   *   Sequence of full paths to manifest files
+   */
+  def resolveManifestPaths(
+      manifest: StateManifest,
+      transactionLogPath: String,
+      stateDir: String): Seq[String] = {
+    manifest.manifests.map(m => resolveManifestPath(m, transactionLogPath, stateDir))
   }
 
   /**
@@ -405,6 +478,41 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
         log.debug(s"Updated _last_checkpoint to version $newVersion")
         true
     }
+  }
+
+  /**
+   * Verify a checkpoint version hint by probing for version N+1.
+   *
+   * This uses the monotonically incrementing version property: if version N+1 exists,
+   * then the hint is stale. We keep probing N+2, N+3, etc. until we find a version
+   * that doesn't exist - that's the true latest.
+   *
+   * This is much cheaper than a directory scan:
+   * - Common case (hint is correct): 1 existence check (HEAD request)
+   * - Rare regression case: O(k) existence checks where k is typically 1-2
+   *
+   * @param transactionLogPath
+   *   Path to the transaction log directory
+   * @param hintVersion
+   *   Version from `_last_checkpoint` to verify
+   * @return
+   *   The actual latest version (>= hintVersion)
+   */
+  def verifyCheckpointVersion(transactionLogPath: String, hintVersion: Long): Long = {
+    var version = hintVersion
+    var nextStateDir = s"$transactionLogPath/${formatStateDir(version + 1)}"
+
+    while (stateExists(nextStateDir)) {
+      version += 1
+      log.info(s"_last_checkpoint regression detected: found state at version $version")
+      nextStateDir = s"$transactionLogPath/${formatStateDir(version + 1)}"
+    }
+
+    if (version > hintVersion) {
+      log.warn(s"_last_checkpoint was stale: hint=$hintVersion, actual=$version")
+    }
+
+    version
   }
 }
 

@@ -624,7 +624,15 @@ class PurgeOrphanedSplitsExecutor(
           logger.info("No old state directories to delete")
         }
 
-        deletedCount
+        // Clean up orphaned manifests from the shared manifest directory
+        // This handles the Iceberg-style shared manifest location introduced with incremental writes
+        val manifestsDeleted = cleanupOrphanedManifests(provider, transactionLogPath.toString)
+        if (manifestsDeleted > 0) {
+          val action = if (dryRun) "Would delete" else "Deleted"
+          logger.info(s"$action $manifestsDeleted orphaned manifests from shared directory")
+        }
+
+        deletedCount + manifestsDeleted
       } finally
         provider.close()
 
@@ -632,6 +640,54 @@ class PurgeOrphanedSplitsExecutor(
       case e: Exception =>
         // Don't fail the entire purge operation if state directory cleanup fails
         logger.warn(s"Failed to clean up old state directories: ${e.getMessage}", e)
+        0L
+    }
+
+  /**
+   * Clean up orphaned manifests from the shared manifest directory.
+   *
+   * With the incremental write feature, manifests are stored in a shared location
+   * (_transaction_log/manifests/) and referenced by multiple state versions.
+   * This method finds and deletes manifests that are no longer referenced by any
+   * retained state version.
+   *
+   * @param provider
+   *   Cloud storage provider
+   * @param txLogPath
+   *   Path to the transaction log directory
+   * @return
+   *   Number of manifests deleted (or would be deleted in dry-run mode)
+   */
+  private def cleanupOrphanedManifests(provider: CloudStorageProvider, txLogPath: String): Long =
+    try {
+      import io.indextables.spark.transaction.avro.{GCConfig, ManifestGarbageCollector, StateConfig}
+
+      // Get GC configuration from Spark conf
+      val retentionVersions = spark.conf
+        .getOption(StateConfig.RETENTION_VERSIONS_KEY)
+        .map(_.toInt)
+        .getOrElse(StateConfig.RETENTION_VERSIONS_DEFAULT)
+      val minManifestAgeHours = spark.conf
+        .getOption(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_KEY)
+        .map(_.toInt)
+        .getOrElse(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
+
+      val gcConfig = GCConfig(
+        retentionVersions = retentionVersions,
+        minManifestAgeHours = minManifestAgeHours
+      )
+
+      val gc = ManifestGarbageCollector(provider, txLogPath)
+      val result = gc.collectGarbage(gcConfig, dryRun)
+
+      logger.info(s"Manifest GC: ${result.reachableManifests} reachable, ${result.orphanedManifests} orphaned, " +
+        s"${result.deletedManifests} deleted (dryRun=$dryRun)")
+
+      result.deletedManifests
+    } catch {
+      case e: Exception =>
+        // Don't fail the entire purge operation if manifest GC fails
+        logger.warn(s"Failed to clean up orphaned manifests: ${e.getMessage}", e)
         0L
     }
 

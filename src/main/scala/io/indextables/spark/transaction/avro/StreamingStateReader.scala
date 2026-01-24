@@ -149,8 +149,9 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
 
     log.debug(s"Reading ${relevantManifests.size} of ${manifest.manifests.size} manifests for version range")
 
-    // Read all relevant manifests
-    val manifestPaths = relevantManifests.map(m => s"$stateDir/${m.path}")
+    // Read all relevant manifests - resolve paths for both shared and legacy manifests
+    val relevantManifestInfos = relevantManifests
+    val manifestPaths = relevantManifestInfos.map(m => manifestIO.resolveManifestPath(m, transactionLogPath, stateDir))
     val allEntries = manifestReader.readManifestsParallel(manifestPaths)
 
     // Filter by version range
@@ -194,7 +195,7 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
         if (relevantManifests.isEmpty) {
           Seq.empty
         } else {
-          val manifestPaths = relevantManifests.map(m => s"$stateDir/${m.path}")
+          val manifestPaths = relevantManifests.map(m => manifestIO.resolveManifestPath(m, transactionLogPath, stateDir))
           val allEntries = manifestReader.readManifestsParallel(manifestPaths)
           allEntries.filter(_.addedAtVersion == version)
         }
