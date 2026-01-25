@@ -226,7 +226,7 @@ case class ManifestInfo(
 }
 
 /**
- * The state manifest (`_manifest.json`) that describes the complete table state.
+ * The state manifest (`_manifest.avro`) that describes the complete table state.
  *
  * @param formatVersion
  *   Version of the state file format

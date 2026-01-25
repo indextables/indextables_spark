@@ -38,9 +38,9 @@ _transaction_log/
     manifest-i9j0k1l2.avro      # New files from latest transaction
     ...
 
-  # State directory (contains only _manifest.json, references shared manifests)
+  # State directory (contains only _manifest.avro, references shared manifests)
   state-v00000000000000000100/
-    _manifest.json              # State manifest (references manifests/ directory)
+    _manifest.avro              # State manifest in binary Avro format (references manifests/ directory)
 
   # Legacy checkpoint (for backward compatibility)
   00000000000000000050.checkpoint.json
@@ -57,7 +57,7 @@ manifests for new files, referencing existing manifests by path.
 
 ## State Manifest Format
 
-The `_manifest.json` file is small JSON that describes the state:
+The `_manifest.avro` file is a binary Avro file that describes the state:
 
 ```json
 {
@@ -180,7 +180,7 @@ def readState(tablePath: String, partitionFilter: Option[Expression] = None): St
 }
 
 def readAvroState(stateDir: String, partitionFilter: Option[Expression] = None): StateSnapshot = {
-  // 1. Read manifest (small JSON)
+  // 1. Read manifest (binary Avro)
   val manifest = readStateManifest(stateDir)
   val tombstoneSet = manifest.tombstones.toSet
 
@@ -476,7 +476,7 @@ def writeCompactedState(
     protocolVersion = 4
   )
 
-  writeStateManifest(s"$newStateDir/_manifest.json", newManifest)
+  writeStateManifest(s"$newStateDir/_manifest.avro", newManifest)
   updateLastCheckpoint(currentVersion, newStateDir, format = "avro-state")
 
   // 6. Schedule cleanup of old state directories (after retention)
@@ -1084,8 +1084,8 @@ This section outlines comprehensive test coverage for the Avro state file implem
 
 | Test Name | Description | Priority |
 |-----------|-------------|----------|
-| `testReadStateManifest` | Parse `_manifest.json` correctly | High |
-| `testWriteStateManifest` | Write valid `_manifest.json` | High |
+| `testReadStateManifest` | Parse `_manifest.avro` correctly | High |
+| `testWriteStateManifest` | Write valid `_manifest.avro` | High |
 | `testStateManifestWithTombstones` | Handle tombstone list | High |
 | `testStateManifestWithSchemaRegistry` | Parse embedded schema registry | High |
 | `testStateManifestVersionBounds` | Verify min/max version tracking per manifest | High |

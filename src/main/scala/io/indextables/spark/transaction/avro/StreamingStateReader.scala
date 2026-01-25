@@ -240,7 +240,7 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
     try {
       val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
       val manifestFiles = files
-        .filter(f => f.path.endsWith("/_manifest.json"))
+        .filter(f => f.path.endsWith("/_manifest.avro"))
         .filter(f => f.path.contains("/state-v"))
 
       if (manifestFiles.isEmpty) {
@@ -249,7 +249,7 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
 
       // Extract versions from the manifest file paths
       val versions = manifestFiles.flatMap { f =>
-        manifestIO.parseStateDirVersion(f.path.stripSuffix("/_manifest.json"))
+        manifestIO.parseStateDirVersion(f.path.stripSuffix("/_manifest.avro"))
       }
 
       if (versions.isEmpty) {

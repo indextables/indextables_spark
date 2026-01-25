@@ -74,25 +74,28 @@ class DescribeStateCommandTest extends TestBase {
 
         // Create Avro state
         val stateWriter = StateWriter(cloudProvider, txLogPath.toString)
-        val files = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 10))
-        stateWriter.writeState(
-          currentVersion = 10,
+        val manifestIO = StateManifestIO(cloudProvider)
+        val files = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
+        val stateDir = stateWriter.writeState(
+          currentVersion = 1,
           newFiles = files,
           removedPaths = Set.empty
         )
 
+        // Extract the actual version from the returned state directory
+        val actualVersion = manifestIO.parseStateDirVersion(stateDir).getOrElse(1L)
+
         // Write _last_checkpoint pointing to Avro state
-        val manifestIO = StateManifestIO(cloudProvider)
         val lastCheckpointPath = new Path(txLogPath, "_last_checkpoint")
         val lastCheckpointJson =
           s"""{
-             |  "version": 10,
+             |  "version": $actualVersion,
              |  "size": 100,
              |  "sizeInBytes": 100000,
              |  "numFiles": 100,
              |  "createdTime": ${System.currentTimeMillis()},
              |  "format": "${StateConfig.Format.AVRO_STATE}",
-             |  "stateDir": "${manifestIO.formatStateDir(10)}"
+             |  "stateDir": "${manifestIO.formatStateDir(actualVersion)}"
              |}""".stripMargin
         cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
       } finally {
@@ -103,7 +106,7 @@ class DescribeStateCommandTest extends TestBase {
 
       result should have length 1
       result(0).getAs[String]("format") shouldBe "avro-state"
-      result(0).getAs[Long]("version") shouldBe 10L
+      result(0).getAs[Long]("version") should be >= 1L
       result(0).getAs[Long]("num_files") shouldBe 100L
       result(0).getAs[Int]("num_manifests") should be >= 1
       result(0).getAs[Int]("num_tombstones") shouldBe 0

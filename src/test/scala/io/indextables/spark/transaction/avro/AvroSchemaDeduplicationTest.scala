@@ -27,7 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  * Tests for schema deduplication in Avro state format.
  *
  * These tests validate that:
- * 1. schemaRegistry is properly populated in _manifest.json
+ * 1. schemaRegistry is properly populated in _manifest.avro
  * 2. docMappingRef is correctly resolved to docMappingJson when reading
  * 3. Schema deduplication works correctly across incremental writes
  */
@@ -40,7 +40,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
   private val largeSchema =
     """{"fields":[""" + (1 to 100).map(i => s"""{"name":"field$i","type":"text"}""").mkString(",") + "]}"
 
-  test("schemaRegistry should be populated in _manifest.json") {
+  test("schemaRegistry should be populated in _manifest.avro") {
     withTempPath { tempPath =>
       val cloudProvider = CloudStorageProviderFactory.createProvider(
         tempPath,
@@ -73,7 +73,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
           schemaRegistry = schemaRegistry
         )
 
-        // Verify schema registry was written to _manifest.json
+        // Verify schema registry was written to _manifest.avro
         val manifestIO = StateManifestIO(cloudProvider)
         val manifest = manifestIO.readStateManifest(stateDir)
 
@@ -122,7 +122,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
         val manifestIO = StateManifestIO(cloudProvider)
         val manifest = manifestIO.readStateManifest(stateDir)
 
-        val manifestPaths = manifest.manifests.map(m => s"$stateDir/${m.path}")
+        val manifestPaths = manifestIO.resolveManifestPaths(manifest, tempPath, stateDir)
         val readEntries = manifestReader.readManifestsParallel(manifestPaths)
 
         // Verify entries have docMappingRef
@@ -191,12 +191,13 @@ class AvroSchemaDeduplicationTest extends TestBase {
         )
 
         // Verify incremental state
-        val manifest2 = StateManifestIO(cloudProvider).readStateManifest(stateDir2)
+        val manifestIO2 = StateManifestIO(cloudProvider)
+        val manifest2 = manifestIO2.readStateManifest(stateDir2)
         manifest2.schemaRegistry should have size 1 // Still only 1 schema
         manifest2.numFiles shouldBe 75
 
         // Read all files and verify docMappingJson is resolved
-        val manifestPaths = manifest2.manifests.map(m => s"$stateDir2/${m.path}")
+        val manifestPaths = manifestIO2.resolveManifestPaths(manifest2, tempPath, stateDir2)
         val readEntries = manifestReader.readManifestsParallel(manifestPaths)
         val addActions = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
 
@@ -253,13 +254,14 @@ class AvroSchemaDeduplicationTest extends TestBase {
         )
 
         // Verify merged schema registry
-        val manifest2 = StateManifestIO(cloudProvider).readStateManifest(stateDir2)
+        val manifestIO2 = StateManifestIO(cloudProvider)
+        val manifest2 = manifestIO2.readStateManifest(stateDir2)
         manifest2.schemaRegistry should have size 2
         manifest2.schemaRegistry should contain key schemaHash1
         manifest2.schemaRegistry should contain key schemaHash2
 
         // Read all files and verify correct schema resolution
-        val manifestPaths = manifest2.manifests.map(m => s"$stateDir2/${m.path}")
+        val manifestPaths = manifestIO2.resolveManifestPaths(manifest2, tempPath, stateDir2)
         val readEntries = manifestReader.readManifestsParallel(manifestPaths)
         val addActions = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
 
@@ -321,7 +323,8 @@ class AvroSchemaDeduplicationTest extends TestBase {
         )
 
         // Verify state after compaction
-        val manifest2 = StateManifestIO(cloudProvider).readStateManifest(stateDir2)
+        val manifestIO2 = StateManifestIO(cloudProvider)
+        val manifest2 = manifestIO2.readStateManifest(stateDir2)
         manifest2.numFiles shouldBe 80
         manifest2.tombstones shouldBe empty // Compacted - no tombstones
 
@@ -330,7 +333,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
         manifest2.schemaRegistry should contain key schemaHash
 
         // Read files and verify docMappingJson resolution still works
-        val manifestPaths = manifest2.manifests.map(m => s"$stateDir2/${m.path}")
+        val manifestPaths = manifestIO2.resolveManifestPaths(manifest2, tempPath, stateDir2)
         val readEntries = manifestReader.readManifestsParallel(manifestPaths)
         val addActions = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
 

@@ -514,7 +514,7 @@ class PurgeOrphanedSplitsExecutor(
    * Clean up old Avro state directories based on retention policy.
    *
    * State directories follow the format `state-v{version}` and contain:
-   *   - _manifest.json: Metadata about the state
+   *   - _manifest.avro: Metadata about the state (binary Avro format)
    *   - manifest-*.avro: Avro manifest files containing file entries
    *
    * This method:

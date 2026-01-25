@@ -297,7 +297,7 @@ class TransactionLogCheckpoint(
     logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}")
 
     // Write compacted state with retry support for concurrent conflicts
-    // This uses conditional writes for _manifest.json and automatic version increment on conflict
+    // This uses conditional writes for _manifest.avro and automatic version increment on conflict
     val writeResult = stateWriter.writeStateWithRetry(
       currentVersion,
       fileEntries,

@@ -20,10 +20,8 @@ package io.indextables.spark.transaction
 import java.nio.file.Files
 import java.util.UUID
 
-import scala.collection.JavaConverters._
 import scala.util.Random
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -31,9 +29,8 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import io.indextables.spark.transaction.avro.{StateConfig, StateManifestIO}
+import io.indextables.spark.transaction.avro.StateManifestIO
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.util.JsonUtil
 
 /**
  * Scale test to validate schema deduplication works correctly with:
@@ -88,12 +85,12 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
   }
 
   /**
-   * Read the _manifest.json directly to count schema refs.
+   * Read the _manifest.avro directly to count schema refs.
    */
   private def countSchemaRefs(tablePath: String): (Int, Long) = {
     val transactionLogPath = s"$tablePath/_transaction_log"
 
-    // Find state directories and read _manifest.json
+    // Find state directories and read _manifest.avro
     val txLogDir = new java.io.File(transactionLogPath)
     val stateDirs = txLogDir.listFiles().filter(f => f.isDirectory && f.getName.startsWith("state-v"))
 
@@ -102,26 +99,21 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
     }
 
     val latestStateDir = stateDirs.maxBy(_.getName)
-    val manifestFile = new java.io.File(latestStateDir, "_manifest.json")
 
-    if (!manifestFile.exists()) {
-      return (0, 0L)
-    }
+    // Read using StateManifestIO since format is now Avro binary
+    val cloudProvider = CloudStorageProviderFactory.createProvider(
+      transactionLogPath,
+      new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+      spark.sparkContext.hadoopConfiguration
+    )
+    val manifestIO = StateManifestIO(cloudProvider)
+    val manifest = manifestIO.readStateManifest(latestStateDir.getAbsolutePath)
+    cloudProvider.close()
 
-    val manifestJson = scala.io.Source.fromFile(manifestFile).mkString
-    val manifestNode = JsonUtil.mapper.readTree(manifestJson)
+    val schemaRefCount = manifest.schemaRegistry.size
+    val numFiles = manifest.numFiles
 
-    val schemaRegistry = manifestNode.get("schemaRegistry")
-    val numFiles = manifestNode.get("numFiles").asLong()
-
-    if (schemaRegistry == null || schemaRegistry.isNull) {
-      (0, numFiles)
-    } else {
-      // In Avro state manifest, schema registry keys are just the hash (no prefix)
-      // The prefix is only used when storing in metadata.configuration
-      val schemaRefCount = schemaRegistry.fieldNames().asScala.size
-      (schemaRefCount, numFiles)
-    }
+    (schemaRefCount, numFiles)
   }
 
   /**

@@ -26,6 +26,7 @@ import io.indextables.spark.TestBase
 class SQLIndexQueryValidationTest extends TestBase {
 
   private var testDataPath: String = _
+  private var sharedTempDir: java.nio.file.Path = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -33,8 +34,9 @@ class SQLIndexQueryValidationTest extends TestBase {
     val spark = this.spark
     import spark.implicits._
 
-    // Create a shared path for all tests
-    testDataPath = s"$tempDir/sql_indexquery_test"
+    // Create a dedicated temp directory for this test suite (beforeAll runs before beforeEach)
+    sharedTempDir = java.nio.file.Files.createTempDirectory("sql-indexquery-test")
+    testDataPath = s"${sharedTempDir.toString}/sql_indexquery_test"
 
     // Create a comprehensive dataset with predictable content for validation
     val testData = Seq(
@@ -67,6 +69,14 @@ class SQLIndexQueryValidationTest extends TestBase {
       .save(testDataPath)
 
     println("✅ Created comprehensive test dataset with 12 documents for SQL IndexQuery validation")
+  }
+
+  override def afterAll(): Unit = {
+    // Clean up the shared temp directory
+    if (sharedTempDir != null) {
+      deleteRecursively(sharedTempDir.toFile)
+    }
+    super.afterAll()
   }
 
   override def beforeEach(): Unit = {

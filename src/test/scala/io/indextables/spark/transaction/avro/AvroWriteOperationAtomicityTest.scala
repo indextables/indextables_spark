@@ -64,7 +64,7 @@ class AvroWriteOperationAtomicityTest extends TestBase {
 
       // Verify manifest exists (state is complete)
       val stateDir = stateDirs.head
-      val manifestFile = new File(stateDir, "_manifest.json")
+      val manifestFile = new File(stateDir, "_manifest.avro")
       manifestFile.exists() shouldBe true
 
       // Verify data can be read

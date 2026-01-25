@@ -63,7 +63,7 @@ class CompactionTest extends TestBase {
 
         // Verify data integrity after compaction
         val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = compactedManifest.manifests.map(m => s"$stateDir2/${m.path}")
+        val manifestPaths = manifestIO.resolveManifestPaths(compactedManifest, tempPath, stateDir2)
         val readFiles = manifestReader.readManifestsParallel(manifestPaths)
 
         readFiles should have size 85
@@ -186,10 +186,11 @@ class CompactionTest extends TestBase {
 
         // Read back and verify sorted order
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(s"$tempPath/state-v00000000000000000001")
+        val stateDir = s"$tempPath/state-v00000000000000000001"
+        val manifest = manifestIO.readStateManifest(stateDir)
 
         val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifest.manifests.map(m => s"$tempPath/state-v00000000000000000001/${m.path}")
+        val manifestPaths = manifestIO.resolveManifestPaths(manifest, tempPath, stateDir)
         val readFiles = manifestReader.readManifestsParallel(manifestPaths)
 
         readFiles should have size 5

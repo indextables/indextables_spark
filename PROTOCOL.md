@@ -30,7 +30,7 @@ IndexTables4Spark stores table metadata in a transaction log directory (`_transa
     │   ├── manifest-<hash>.avro      # Reusable Avro manifest files
     │   └── ...
     └── state-v00000000000000000042/  # Avro state directory (Protocol V4+)
-        └── _manifest.json            # State manifest (references shared manifests)
+        └── _manifest.avro            # State manifest (references shared manifests)
 ```
 
 ---
@@ -300,7 +300,7 @@ _transaction_log/
 │   ├── manifest-<hash>.avro          # Reusable across state versions
 │   └── manifest-<hash2>.avro
 └── state-v<version>/
-    └── _manifest.json                # References manifests/ directory
+    └── _manifest.avro                # References manifests/ directory
 ```
 
 **Incremental Writes (Iceberg-style):**
@@ -316,11 +316,11 @@ BEFORE (full rewrite):
 AFTER (incremental):
   manifests/manifest-001.avro   (100K entries - written once, shared)
   manifests/manifest-002.avro   (10 entries - only NEW files)
-  state-v100/_manifest.json → [manifests/manifest-001.avro]
-  state-v101/_manifest.json → [manifests/manifest-001.avro, manifests/manifest-002.avro]
+  state-v100/_manifest.avro → [manifests/manifest-001.avro]
+  state-v101/_manifest.avro → [manifests/manifest-001.avro, manifests/manifest-002.avro]
 ```
 
-#### State Manifest (`_manifest.json`)
+#### State Manifest (`_manifest.avro`)
 
 ```json
 {
@@ -521,7 +521,7 @@ Writers use optimistic concurrency with atomic `ifNotExists` writes:
 
 Avro state writes also use conditional writes:
 - State directory existence check before writing
-- `_manifest.json` written with `ifNotExists`
+- `_manifest.avro` written with `ifNotExists`
 - On conflict, increment version and retry
 - **Re-read base state on every retry**: Prevents stale manifest lists from concurrent writers
 

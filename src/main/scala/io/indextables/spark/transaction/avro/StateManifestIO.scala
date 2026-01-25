@@ -22,16 +22,19 @@ import io.indextables.spark.transaction.EnhancedTransactionLogCache
 
 import com.fasterxml.jackson.databind.{DeserializationFeature, JsonNode, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import org.apache.avro.file.{CodecFactory, DataFileReader, DataFileWriter, SeekableByteArrayInput}
+import org.apache.avro.generic.{GenericDatumReader, GenericDatumWriter, GenericRecord}
 
 import org.slf4j.LoggerFactory
 
+import java.io.ByteArrayOutputStream
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
 /**
- * IO operations for the state manifest (`_manifest.json`) file.
+ * IO operations for the state manifest (`_manifest.avro`) file.
  *
- * The state manifest is a small JSON file that describes the complete table state, including references to Avro manifest
+ * The state manifest is a binary Avro file that describes the complete table state, including references to Avro manifest
  * files and tombstones for removed files.
  */
 class StateManifestIO(cloudProvider: CloudStorageProvider) {
@@ -39,10 +42,11 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
   private val log = LoggerFactory.getLogger(getClass)
 
   // Use shared ObjectMapper from companion object - Jackson ObjectMapper creation is expensive
+  // (kept for _last_checkpoint JSON parsing)
   private val mapper: ObjectMapper = StateManifestIO.sharedMapper
 
-  /** Manifest file name within a state directory */
-  val MANIFEST_FILE_NAME = "_manifest.json"
+  /** Manifest file name within a state directory (Avro format) */
+  val MANIFEST_FILE_NAME = "_manifest.avro"
 
   /**
    * Read the state manifest from a state directory.
@@ -54,15 +58,14 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    */
   def readStateManifest(stateDir: String): StateManifest = {
     val manifestPath = s"$stateDir/$MANIFEST_FILE_NAME"
-    log.debug(s"Reading state manifest: $manifestPath")
+    log.debug(s"Reading Avro state manifest: $manifestPath")
 
     // Increment counter for testing/monitoring - tracks actual cloud reads
     StateManifestIO.incrementReadCounter()
 
     Try {
       val content = cloudProvider.readFile(manifestPath)
-      val json = new String(content, "UTF-8")
-      parseStateManifest(json)
+      parseStateManifestAvro(content)
     } match {
       case Success(manifest) =>
         log.debug(
@@ -73,6 +76,35 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       case Failure(e) =>
         log.error(s"Failed to read state manifest: $manifestPath", e)
         throw new RuntimeException(s"Failed to read state manifest: $manifestPath", e)
+    }
+  }
+
+  /**
+   * Parse a state manifest from Avro bytes.
+   *
+   * @param bytes
+   *   Avro binary content
+   * @return
+   *   Parsed StateManifest
+   */
+  def parseStateManifestAvro(bytes: Array[Byte]): StateManifest = {
+    // Track actual parses for testing/monitoring
+    StateManifestIO.incrementParseCounter()
+    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
+
+    val schema = AvroSchemas.STATE_MANIFEST_SCHEMA
+    val datumReader = new GenericDatumReader[GenericRecord](schema)
+    val input = new SeekableByteArrayInput(bytes)
+    val dataFileReader = new DataFileReader[GenericRecord](input, datumReader)
+
+    try {
+      if (!dataFileReader.hasNext) {
+        throw new RuntimeException("Empty Avro state manifest file")
+      }
+      val record = dataFileReader.next()
+      AvroSchemas.genericRecordToStateManifest(record)
+    } finally {
+      dataFileReader.close()
     }
   }
 
@@ -157,23 +189,32 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
   }
 
   /**
-   * Write a state manifest to a state directory.
+   * Write a state manifest to a state directory in Avro format.
    *
    * @param stateDir
    *   Full path to state directory
    * @param manifest
    *   StateManifest to write
+   * @param compression
+   *   Compression codec (default: zstd)
+   * @param compressionLevel
+   *   Compression level (default: 3)
    */
-  def writeStateManifest(stateDir: String, manifest: StateManifest): Unit = {
+  def writeStateManifest(
+      stateDir: String,
+      manifest: StateManifest,
+      compression: String = StateConfig.COMPRESSION_DEFAULT,
+      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Unit = {
     val manifestPath = s"$stateDir/$MANIFEST_FILE_NAME"
-    log.debug(s"Writing state manifest: $manifestPath")
+    log.debug(s"Writing Avro state manifest: $manifestPath")
 
-    val json = serializeStateManifest(manifest)
-    cloudProvider.writeFile(manifestPath, json.getBytes("UTF-8"))
+    val bytes = serializeStateManifestAvro(manifest, compression, compressionLevel)
+    cloudProvider.writeFile(manifestPath, bytes)
 
     log.debug(
-      s"Wrote state manifest: version=${manifest.stateVersion}, " +
-        s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}")
+      s"Wrote Avro state manifest: version=${manifest.stateVersion}, " +
+        s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}, " +
+        s"size=${bytes.length} bytes")
   }
 
   /**
@@ -183,25 +224,82 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   Full path to state directory
    * @param manifest
    *   StateManifest to write
+   * @param compression
+   *   Compression codec (default: zstd)
+   * @param compressionLevel
+   *   Compression level (default: 3)
    * @return
    *   true if written, false if already exists
    */
-  def writeStateManifestIfNotExists(stateDir: String, manifest: StateManifest): Boolean = {
+  def writeStateManifestIfNotExists(
+      stateDir: String,
+      manifest: StateManifest,
+      compression: String = StateConfig.COMPRESSION_DEFAULT,
+      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Boolean = {
     val manifestPath = s"$stateDir/$MANIFEST_FILE_NAME"
-    log.debug(s"Writing state manifest (if not exists): $manifestPath")
+    log.debug(s"Writing Avro state manifest (if not exists): $manifestPath")
 
-    val json = serializeStateManifest(manifest)
-    val written = cloudProvider.writeFileIfNotExists(manifestPath, json.getBytes("UTF-8"))
+    val bytes = serializeStateManifestAvro(manifest, compression, compressionLevel)
+    val written = cloudProvider.writeFileIfNotExists(manifestPath, bytes)
 
     if (written) {
       log.debug(
-        s"Wrote state manifest: version=${manifest.stateVersion}, " +
-          s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}")
+        s"Wrote Avro state manifest: version=${manifest.stateVersion}, " +
+          s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}, " +
+          s"size=${bytes.length} bytes")
     } else {
       log.debug(s"State manifest already exists: $manifestPath")
     }
 
     written
+  }
+
+  /**
+   * Serialize a StateManifest to Avro bytes.
+   *
+   * @param manifest
+   *   StateManifest to serialize
+   * @param compression
+   *   Compression codec (default: zstd)
+   * @param compressionLevel
+   *   Compression level (default: 3)
+   * @return
+   *   Avro binary bytes
+   */
+  def serializeStateManifestAvro(
+      manifest: StateManifest,
+      compression: String = StateConfig.COMPRESSION_DEFAULT,
+      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Array[Byte] = {
+
+    val schema = AvroSchemas.STATE_MANIFEST_SCHEMA
+    val record = AvroSchemas.stateManifestToGenericRecord(manifest)
+
+    val baos = new ByteArrayOutputStream()
+    val datumWriter = new GenericDatumWriter[GenericRecord](schema)
+    val dataFileWriter = new DataFileWriter[GenericRecord](datumWriter)
+
+    try {
+      // Set compression codec
+      val codec = compression.toLowerCase match {
+        case StateConfig.Compression.ZSTD =>
+          CodecFactory.zstandardCodec(compressionLevel)
+        case StateConfig.Compression.SNAPPY =>
+          CodecFactory.snappyCodec()
+        case StateConfig.Compression.NONE | "" =>
+          CodecFactory.nullCodec()
+        case other =>
+          log.warn(s"Unknown compression codec '$other', using zstd")
+          CodecFactory.zstandardCodec(compressionLevel)
+      }
+
+      dataFileWriter.setCodec(codec)
+      dataFileWriter.create(schema, baos)
+      dataFileWriter.append(record)
+    } finally {
+      dataFileWriter.close()
+    }
+
+    baos.toByteArray
   }
 
   /**
@@ -295,7 +393,7 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    * @param stateDir
    *   Full path to state directory
    * @return
-   *   true if state directory exists (contains _manifest.json)
+   *   true if state directory exists (contains _manifest.avro)
    */
   def stateExists(stateDir: String): Boolean = {
     cloudProvider.exists(s"$stateDir/$MANIFEST_FILE_NAME")

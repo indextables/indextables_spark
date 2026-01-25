@@ -193,8 +193,8 @@ class GarbageCollectionTest extends TestBase {
         val stateDir = new Path(txLogPath, "state-v00000000000000000005").toString
         val stateFiles = cloudProvider.listFiles(stateDir, recursive = true)
 
-        // Should have _manifest.json
-        stateFiles.exists(_.path.endsWith("/_manifest.json")) shouldBe true
+        // Should have _manifest.avro
+        stateFiles.exists(_.path.endsWith("/_manifest.avro")) shouldBe true
 
         // Should have at least one .avro manifest file
         stateFiles.exists(_.path.endsWith(".avro")) shouldBe true
