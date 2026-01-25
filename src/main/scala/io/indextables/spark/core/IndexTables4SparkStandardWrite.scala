@@ -733,7 +733,8 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"   - Orphaned files found: ${result.orphanedFilesFound}")
       logger.info(s"   - Orphaned files deleted: ${result.orphanedFilesDeleted}")
       logger.info(s"   - Size deleted: ${result.sizeMBDeleted} MB")
-      logger.info(s"   - Transaction logs deleted: ${result.transactionLogsDeleted}")
+      logger.info(s"   - Expired states found: ${result.expiredStatesFound}")
+      logger.info(s"   - Expired states deleted: ${result.expiredStatesDeleted}")
 
     } catch {
       case e: Exception =>
