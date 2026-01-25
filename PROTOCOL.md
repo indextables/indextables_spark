@@ -525,6 +525,14 @@ Avro state writes also use conditional writes:
 - On conflict, increment version and retry
 - **Re-read base state on every retry**: Prevents stale manifest lists from concurrent writers
 
+### State Retry Configuration
+
+| Config | Default | Description |
+|--------|---------|-------------|
+| `spark.indextables.state.retry.maxAttempts` | 10 | Maximum retry attempts for state writes |
+| `spark.indextables.state.retry.baseDelayMs` | 100 | Base delay for exponential backoff |
+| `spark.indextables.state.retry.maxDelayMs` | 5000 | Maximum backoff delay |
+
 **Incremental Write with Retry:**
 
 ```scala

@@ -78,6 +78,7 @@ case class PurgeOrphanedSplitsCommand(
           StructField("orphaned_files_deleted", LongType, nullable = true),
           StructField("size_mb_deleted", DoubleType, nullable = true),
           StructField("retention_hours", LongType, nullable = true),
+          StructField("tx_log_files_deleted", LongType, nullable = true),
           StructField("expired_states_found", LongType, nullable = true),
           StructField("expired_states_deleted", LongType, nullable = true),
           StructField("dry_run", BooleanType, nullable = false),
@@ -132,6 +133,7 @@ case class PurgeOrphanedSplitsCommand(
           result.orphanedFilesDeleted,
           result.sizeMBDeleted,
           effectiveRetention,
+          result.txLogFilesDeleted,
           result.expiredStatesFound,
           result.expiredStatesDeleted,
           dryRun,
@@ -176,6 +178,8 @@ case class PurgeOrphanedSplitsCommand(
  *   Total size in MB of deleted split files
  * @param retentionHours
  *   Retention period used for split files (hours)
+ * @param txLogFilesDeleted
+ *   Number of transaction log version files deleted
  * @param expiredStatesFound
  *   Number of expired state directories found (older than retention)
  * @param expiredStatesDeleted
@@ -192,6 +196,7 @@ case class PurgeResult(
   orphanedFilesFound: Long,
   orphanedFilesDeleted: Long,
   sizeMBDeleted: Double,
+  txLogFilesDeleted: Long,
   retentionHours: Long,
   expiredStatesFound: Long,
   expiredStatesDeleted: Long,

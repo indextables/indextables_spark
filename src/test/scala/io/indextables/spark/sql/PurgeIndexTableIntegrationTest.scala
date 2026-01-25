@@ -120,7 +120,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val dryRunMetrics = dryRunResult(0).getStruct(1)
     assert(dryRunMetrics.getString(0) == "DRY_RUN")
     assert(dryRunMetrics.getLong(1) == 3)       // Found 3 orphaned files
-    assert(dryRunMetrics.getBoolean(6) == true) // dry_run flag (field index 6)
+    assert(dryRunMetrics.getBoolean(8) == true) // dry_run flag (field index 8)
 
     // Files should still exist after DRY RUN
     assert(fs.exists(orphanedSplit1))
@@ -298,7 +298,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(metrics.getString(0) == "SUCCESS")
     assert(metrics.getLong(1) == 0)                                  // Found 0 orphaned files
     assert(metrics.getLong(2) == 0)                                  // Deleted 0 files
-    assert(metrics.getString(8).contains("No orphaned files found")) // message field is at index 8
+    assert(metrics.getString(10).contains("No orphaned files found")) // message field is at index 10
   }
 
   test("PURGE INDEXTABLE should respect maxFilesToDelete limit") {
