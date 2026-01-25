@@ -507,4 +507,183 @@ class ConcurrentStateWriteTest extends TestBase {
       }
     }
   }
+
+  test("schemaRegistry works with Map fields WITHOUT explicit avro config (like JsonMapFieldIntegrationTest)") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // DO NOT set spark.indextables.state.format - let it use defaults
+      // This simulates what JsonMapFieldIntegrationTest does
+
+      try {
+        // Write data with Map field - similar to JsonMapFieldIntegrationTest
+        val data = Seq(
+          (1, Map("color" -> "red", "size" -> "large")),
+          (2, Map("color" -> "blue", "size" -> "small"))
+        )
+        spark.createDataFrame(data).toDF("id", "attributes")
+          .write.format(provider)
+          .mode("overwrite")
+          .save(path)
+
+        // Debug: Check what _last_checkpoint contains
+        val transactionLogPath = s"$path/_transaction_log"
+        val lastCheckpointPath = s"$transactionLogPath/_last_checkpoint"
+        val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+        try {
+          val checkpointExists = cloudProvider.exists(lastCheckpointPath)
+          println(s"DEBUG: _last_checkpoint exists = $checkpointExists")
+          if (checkpointExists) {
+            val content = new String(cloudProvider.readFile(lastCheckpointPath), "UTF-8")
+            println(s"DEBUG: _last_checkpoint content = $content")
+          }
+
+          // List files in transaction log
+          val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
+          println(s"DEBUG: Transaction log files:")
+          files.foreach(f => println(s"  - ${f.path}"))
+        } finally {
+          cloudProvider.close()
+        }
+
+        // Now create a new cloud provider to read state
+        val cloudProvider2 = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val manifestIO = StateManifestIO(cloudProvider2)
+
+          // Find the state directory
+          val stateDir = cloudProvider2.listFiles(transactionLogPath, recursive = false)
+            .filter(f => f.path.contains("state-v"))
+            .headOption
+            .map(_.path)
+            .getOrElse(fail("No state directory found"))
+
+          println(s"DEBUG: Found state directory: $stateDir")
+
+          // Read the state manifest
+          val manifest = manifestIO.readStateManifest(stateDir)
+
+          println(s"DEBUG MAP: schemaRegistry size = ${manifest.schemaRegistry.size}")
+          println(s"DEBUG MAP: schemaRegistry keys = ${manifest.schemaRegistry.keys.mkString(", ")}")
+          manifest.schemaRegistry should not be empty
+
+          // Read entries and verify docMappingRef
+          val manifestPaths = manifestIO.resolveManifestPaths(manifest, transactionLogPath, stateDir)
+          val avroReader = AvroManifestReader(cloudProvider2)
+          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+
+          fileEntries.foreach { entry =>
+            println(s"DEBUG MAP: entry docMappingRef=${entry.docMappingRef}")
+            entry.docMappingRef shouldBe defined
+          }
+
+          // Convert and verify docMappingJson restored
+          val addActions = avroReader.toAddActions(fileEntries, manifest.schemaRegistry)
+          addActions.foreach { add =>
+            println(s"DEBUG MAP: AddAction docMappingJson defined=${add.docMappingJson.isDefined}")
+            add.docMappingJson shouldBe defined
+          }
+
+          // Read the actual data using Spark DataFrame
+          val df = spark.read.format(provider).load(path)
+          println(s"DEBUG: About to call df.count()")
+          df.count() shouldBe 2
+          println(s"DEBUG: df.count() succeeded!")
+
+        } finally {
+          cloudProvider2.close()
+        }
+      } finally {
+        // No config to unset since we didn't set any
+      }
+    }
+  }
+
+  test("schemaRegistry is correctly stored and restored through Avro state") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Enable Avro format for the write
+      spark.conf.set("spark.indextables.state.format", "avro")
+
+      try {
+        // Write data - this should create AddActions with docMappingJson
+        val data = Seq((1, "doc1"), (2, "doc2"))
+        spark.createDataFrame(data).toDF("id", "content")
+          .write.format(provider)
+          .mode("overwrite")
+          .save(path)
+
+        // Read and verify the state manifest has schemaRegistry populated
+        val transactionLogPath = s"$path/_transaction_log"
+        val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val manifestIO = StateManifestIO(cloudProvider)
+
+          // Find the state directory
+          val stateDir = cloudProvider.listFiles(transactionLogPath, recursive = false)
+            .filter(f => f.path.contains("state-v"))
+            .headOption
+            .map(_.path)
+            .getOrElse(fail("No state directory found"))
+
+          // Read the state manifest
+          val manifest = manifestIO.readStateManifest(stateDir)
+
+          // Verify schemaRegistry is NOT empty
+          println(s"DEBUG: schemaRegistry size = ${manifest.schemaRegistry.size}")
+          println(s"DEBUG: schemaRegistry keys = ${manifest.schemaRegistry.keys.mkString(", ")}")
+          println(s"DEBUG: numFiles = ${manifest.numFiles}")
+          println(s"DEBUG: manifests = ${manifest.manifests.size}")
+
+          manifest.schemaRegistry should not be empty
+
+          // Read the manifest file entries and verify they have docMappingRef
+          val manifestPaths = manifestIO.resolveManifestPaths(manifest, transactionLogPath, stateDir)
+          val avroReader = AvroManifestReader(cloudProvider)
+          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+
+          println(s"DEBUG: fileEntries count = ${fileEntries.size}")
+          fileEntries.foreach { entry =>
+            println(s"DEBUG: entry path=${entry.path}, docMappingRef=${entry.docMappingRef}")
+          }
+
+          // All entries should have docMappingRef set
+          fileEntries.foreach { entry =>
+            entry.docMappingRef shouldBe defined
+          }
+
+          // Convert to AddActions and verify docMappingJson is restored
+          val addActions = avroReader.toAddActions(fileEntries, manifest.schemaRegistry)
+          addActions.foreach { add =>
+            println(s"DEBUG: AddAction path=${add.path}, docMappingJson defined=${add.docMappingJson.isDefined}")
+            add.docMappingJson shouldBe defined
+          }
+
+          // Finally, verify we can actually read the table
+          val df = spark.read.format(provider).load(path)
+          df.count() shouldBe 2
+
+        } finally {
+          cloudProvider.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.state.format")
+      }
+    }
+  }
 }

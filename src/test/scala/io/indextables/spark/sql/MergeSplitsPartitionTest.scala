@@ -203,11 +203,18 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     // Verify each partition still has the correct data
     testData.foreach {
       case (year, quarter, idRange) =>
-        val partitionData = finalData.filter(
+        // Read fresh data for each partition
+        val freshData = spark.read
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .load(tempTablePath)
+
+        val partitionData = freshData.filter(
           col("year") === year && col("quarter") === quarter
         )
-        val partitionCount = partitionData.count()
-        val expectedCount  = idRange.size
+
+        val collectedData = partitionData.collect()
+        val partitionCount = collectedData.length
+        val expectedCount = idRange.size
 
         assert(
           partitionCount == expectedCount,
@@ -215,8 +222,9 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         )
 
         // Verify ID ranges are correct
-        val actualIds   = partitionData.select("id").collect().map(_.getLong(0)).sorted
-        val expectedIds = idRange.toArray
+        val actualIds = collectedData.map(_.getLong(0)).sorted
+        val expectedIds = idRange.toArray.map(_.toLong)
+
         assert(actualIds.sameElements(expectedIds), s"Partition year=$year quarter=$quarter has incorrect IDs")
     }
 

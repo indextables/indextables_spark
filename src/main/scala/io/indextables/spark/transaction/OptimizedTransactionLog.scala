@@ -1763,6 +1763,7 @@ class OptimizedTransactionLog(
 
     // Convert NEW AddActions to FileEntries
     // Always compute normalized hash for new files to ensure correct hashes
+    // IMPORTANT: Use .toList to force strict evaluation so all schemas are collected before write
     val newFileEntries = addActions.map { add =>
       val refAndJson = add.docMappingJson.map { json =>
         val ref = SchemaDeduplication.computeSchemaHash(json)
@@ -1774,7 +1775,7 @@ class OptimizedTransactionLog(
         0L, // Version will be assigned by StateWriter based on actual write version
         timestamp
       )
-    }
+    }.toList  // Force strict evaluation - CRITICAL for schema registry population
 
     // Build compaction config from options
     val compactionConfig = CompactionConfig(

@@ -152,7 +152,11 @@ object PartitionIndex {
       return empty
     }
 
-    val key = CacheKey(tablePath, version, partitionColumns.hashCode())
+    // IMPORTANT: Include a hash of the addActions in the cache key to avoid returning
+    // a cached index built from a different set of files. This can happen when
+    // listFilesWithPartitionFilters returns different file subsets for different partition filters.
+    val addActionsHash = addActions.map(_.path).hashCode()
+    val key = CacheKey(tablePath, version, partitionColumns.hashCode() ^ addActionsHash)
 
     Option(indexCache.getIfPresent(key)) match {
       case Some(cached) =>
