@@ -862,7 +862,17 @@ class PurgeOrphanedSplitsExecutor(
     val allFilePaths     = scala.collection.mutable.Set[String]()
     val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
-    // Step 1: Get files from ALL retained checkpoints
+    // Step 1: Get files from ALL retained Avro state directories (Protocol V4)
+    // This is the primary source of truth for tables using the Avro state format
+    val avroStateFiles = getFilesFromAvroState()
+    avroStateFiles.foreach { add =>
+      allFilePaths += add.path
+      filePathToAction(add.path) = add
+    }
+    logger.info(s"Found ${avroStateFiles.size} files from Avro state directories")
+
+    // Step 2: Get files from ALL retained JSON checkpoints (legacy/fallback)
+    // This handles tables that haven't been migrated to Avro state format yet
     val checkpointFiles = getFilesFromRetainedCheckpoints(txLog)
     checkpointFiles.foreach { add =>
       allFilePaths += add.path
@@ -870,7 +880,7 @@ class PurgeOrphanedSplitsExecutor(
     }
     logger.info(s"Found ${checkpointFiles.size} files from retained checkpoints")
 
-    // Step 2: Get AddActions from ALL retained version files
+    // Step 3: Get AddActions from ALL retained version files
     val versionFiles = getAllFilesFromVersions(txLog, versionsToKeep)
     versionFiles.foreach { add =>
       allFilePaths += add.path
@@ -881,6 +891,124 @@ class PurgeOrphanedSplitsExecutor(
 
     logger.info(s"Total unique files in retained transaction state: ${allFilePaths.size}")
     filePathToAction.values.toSeq
+  }
+
+  /**
+   * Get files from all retained Avro state directories.
+   *
+   * Reads file entries from the latest Avro state directory (state-v*) and any
+   * older state directories within the retention period. This is the primary
+   * method for Protocol V4 tables that use the Avro state format.
+   *
+   * @return
+   *   All AddActions from retained Avro state directories
+   */
+  private def getFilesFromAvroState(): Seq[AddAction] = {
+    import io.indextables.spark.transaction.avro.{AvroManifestReader, StateManifestIO}
+
+    val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+    // Get retention configuration
+    val logRetentionDuration = txLogRetentionDuration.getOrElse {
+      spark.conf
+        .getOption("spark.indextables.logRetention.duration")
+        .map(_.toLong)
+        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+    }
+
+    val currentTime = System.currentTimeMillis()
+
+    // Use CloudStorageProvider for multi-cloud support
+    val cloudConfigs = extractCloudStorageConfigs()
+    val optionsMap   = new java.util.HashMap[String, String]()
+    cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+    val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
+    val provider = CloudStorageProviderFactory.createProvider(
+      transactionLogPath.toString,
+      configOptions,
+      spark.sparkContext.hadoopConfiguration
+    )
+
+    try {
+      // List all files/directories in transaction log directory
+      val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+
+      // Find Avro state directories (state-v*)
+      val stateDirectories = allFiles.filter { f =>
+        val name = new Path(f.path).getName
+        StateDirectoryPattern.findFirstIn(name).isDefined
+      }
+
+      if (stateDirectories.isEmpty) {
+        logger.debug("No Avro state directories found")
+        return Seq.empty
+      }
+
+      // Extract versions and find the latest
+      val stateVersions = stateDirectories.flatMap { f =>
+        val name = new Path(f.path).getName
+        name match {
+          case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
+          case _ => None
+        }
+      }
+
+      if (stateVersions.isEmpty) {
+        logger.debug("No valid Avro state versions found")
+        return Seq.empty
+      }
+
+      val latestVersion = stateVersions.map(_._1).max
+      logger.info(s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion)")
+
+      val manifestIO = StateManifestIO(provider)
+      val manifestReader = AvroManifestReader(provider)
+      val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
+
+      // Process state directories - always include latest, plus any within retention
+      stateVersions.foreach { case (version, stateDir) =>
+        val isLatest = version == latestVersion
+        val fileAge = currentTime - stateDir.modificationTime
+        val isWithinRetention = fileAge <= logRetentionDuration
+        val isRetained = isLatest || isWithinRetention
+
+        if (isRetained) {
+          try {
+            logger.debug(s"Reading Avro state directory: state-v$version (latest=$isLatest, withinRetention=$isWithinRetention)")
+
+            // Read the state manifest
+            val stateManifest = manifestIO.readStateManifest(stateDir.path)
+
+            // Resolve manifest paths and read all file entries
+            val manifestPaths = stateManifest.manifests.map { m =>
+              manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDir.path)
+            }
+
+            val allEntries = manifestReader.readManifestsParallel(manifestPaths)
+
+            // Apply tombstones to get live files
+            val liveEntries = manifestIO.applyTombstones(allEntries, stateManifest.tombstones)
+
+            // Convert to AddActions and add to result
+            val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+            addActions.foreach { add =>
+              filePathToAction(add.path) = add
+            }
+
+            logger.debug(s"Read ${liveEntries.size} live files from Avro state v$version (${allEntries.size} total, ${stateManifest.tombstones.size} tombstoned)")
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to read Avro state directory state-v$version: ${e.getMessage}")
+          }
+        } else {
+          logger.debug(s"Skipping old Avro state directory: state-v$version (age: ${fileAge / 1000}s)")
+        }
+      }
+
+      filePathToAction.values.toSeq
+    } finally
+      provider.close()
   }
 
   /**
