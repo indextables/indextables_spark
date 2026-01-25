@@ -145,6 +145,7 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesFound = 0,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted,
         retentionHours = retentionHours,
         expiredStatesFound = stateCleanupResult.found,
         expiredStatesDeleted = stateCleanupResult.deleted,
@@ -172,6 +173,7 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesFound = 0,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted,
         retentionHours = retentionHours,
         expiredStatesFound = stateCleanupResult.found,
         expiredStatesDeleted = stateCleanupResult.deleted,
@@ -196,6 +198,7 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesFound = orphanedCount,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted,
         retentionHours = retentionHours,
         expiredStatesFound = stateCleanupResult.found,
         expiredStatesDeleted = stateCleanupResult.deleted,
@@ -220,9 +223,9 @@ class PurgeOrphanedSplitsExecutor(
 
     // Step 7: Delete or preview orphaned splits
     if (dryRun) {
-      previewDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, startTime)
+      previewDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, versionFilesDeleted, startTime)
     } else {
-      executeDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, startTime)
+      executeDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, versionFilesDeleted, startTime)
     }
   }
 
@@ -1493,6 +1496,7 @@ class PurgeOrphanedSplitsExecutor(
     totalEligibleCount: Long,
     orphanedCount: Long,
     stateCleanupResult: StateCleanupResult,
+    versionFilesDeleted: Long,
     startTime: Long
   ): PurgeResult = {
     val filesToPreview = files.collect()
@@ -1533,6 +1537,7 @@ class PurgeOrphanedSplitsExecutor(
       orphanedFilesFound = orphanedCount,
       orphanedFilesDeleted = 0,
       sizeMBDeleted = totalSizeMB,
+      txLogFilesDeleted = versionFilesDeleted,
       retentionHours = retentionHours,
       expiredStatesFound = stateCleanupResult.found,
       expiredStatesDeleted = 0, // DRY_RUN doesn't delete
@@ -1548,6 +1553,7 @@ class PurgeOrphanedSplitsExecutor(
     totalEligibleCount: Long,
     orphanedCount: Long,
     stateCleanupResult: StateCleanupResult,
+    versionFilesDeleted: Long,
     startTime: Long
   ): PurgeResult = {
     import spark.implicits._
@@ -1679,6 +1685,7 @@ class PurgeOrphanedSplitsExecutor(
       orphanedFilesFound = orphanedCount,
       orphanedFilesDeleted = totalSuccess,
       sizeMBDeleted = deletedSizeMB,
+      txLogFilesDeleted = versionFilesDeleted,
       retentionHours = retentionHours,
       expiredStatesFound = stateCleanupResult.found,
       expiredStatesDeleted = stateCleanupResult.deleted,
