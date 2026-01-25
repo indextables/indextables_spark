@@ -192,7 +192,9 @@ case class PartitionBounds(min: Option[String], max: Option[String]) extends Ser
  * Metadata about a manifest file within a state directory.
  *
  * @param path
- *   Relative path to the manifest file (e.g., "manifest-a1b2c3d4.avro")
+ *   Relative path to the manifest file. For shared manifests: "manifests/manifest-a1b2c3d4.avro"
+ *   (relative to transaction log root). For legacy state-local manifests: "manifest-a1b2c3d4.avro"
+ *   (relative to state directory).
  * @param numEntries
  *   Number of file entries in this manifest
  * @param minAddedAtVersion
@@ -201,17 +203,30 @@ case class PartitionBounds(min: Option[String], max: Option[String]) extends Ser
  *   Maximum addedAtVersion across all entries
  * @param partitionBounds
  *   Optional partition bounds for partition pruning
+ * @param tombstoneCount
+ *   Number of tombstones affecting entries in this manifest (for selective compaction)
+ * @param liveEntryCount
+ *   Number of live entries (numEntries - tombstoneCount). Used for selective compaction decisions.
  */
 case class ManifestInfo(
     path: String,
     numEntries: Long,
     minAddedAtVersion: Long,
     maxAddedAtVersion: Long,
-    partitionBounds: Option[Map[String, PartitionBounds]] = None)
-    extends Serializable
+    partitionBounds: Option[Map[String, PartitionBounds]] = None,
+    tombstoneCount: Long = 0,
+    liveEntryCount: Long = -1)  // -1 means not computed (use numEntries)
+    extends Serializable {
+
+  /** Get effective live entry count, falling back to numEntries if not computed */
+  def effectiveLiveEntryCount: Long = if (liveEntryCount >= 0) liveEntryCount else numEntries
+
+  /** Check if this manifest uses the shared manifest location */
+  def isSharedManifest: Boolean = path.startsWith(StateConfig.SHARED_MANIFEST_DIR + "/")
+}
 
 /**
- * The state manifest (`_manifest.json`) that describes the complete table state.
+ * The state manifest (`_manifest.avro`) that describes the complete table state.
  *
  * @param formatVersion
  *   Version of the state file format
@@ -301,9 +316,24 @@ object StateConfig {
   val COMPACTION_AFTER_MERGE_KEY = s"$PREFIX.compaction.afterMerge"
   val COMPACTION_AFTER_MERGE_DEFAULT = true
 
+  // Large remove threshold - disabled by default (use Int.MaxValue)
+  // When enabled, triggers compaction if a single operation removes more than this many files
+  val COMPACTION_LARGE_REMOVE_THRESHOLD_KEY = s"$PREFIX.compaction.largeRemoveThreshold"
+  val COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT = Int.MaxValue // Disabled by default
+
+  // Shared manifest directory (relative to transaction log root)
+  val SHARED_MANIFEST_DIR = "manifests"
+
+  // Garbage collection configuration
+  val GC_MIN_MANIFEST_AGE_HOURS_KEY = s"$PREFIX.gc.minManifestAgeHours"
+  val GC_MIN_MANIFEST_AGE_HOURS_DEFAULT = 1 // Never delete manifests < 1 hour old
+
   // Read configuration
   val READ_PARALLELISM_KEY = s"$PREFIX.read.parallelism"
   val READ_PARALLELISM_DEFAULT = 8
+
+  // Auto-parallelism: use available processors as default when set to 0
+  val READ_PARALLELISM_AUTO = 0
 
   // Retention configuration
   val RETENTION_VERSIONS_KEY = s"$PREFIX.retention.versions"
@@ -368,6 +398,37 @@ case class StateRetryConfig(
     maxAttempts: Int = StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT,
     baseDelayMs: Long = StateConfig.RETRY_BASE_DELAY_MS_DEFAULT,
     maxDelayMs: Long = StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
+
+/**
+ * Configuration for compaction behavior.
+ *
+ * @param tombstoneThreshold
+ *   Compact when tombstone ratio exceeds this value (default: 0.10 = 10%)
+ * @param maxManifests
+ *   Compact when manifest count exceeds this value (default: 20)
+ * @param largeRemoveThreshold
+ *   Compact when a single operation removes more than this many files (default: Int.MaxValue = disabled)
+ * @param forceCompaction
+ *   Force full compaction regardless of other thresholds
+ */
+case class CompactionConfig(
+    tombstoneThreshold: Double = StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT,
+    maxManifests: Int = StateConfig.COMPACTION_MAX_MANIFESTS_DEFAULT,
+    largeRemoveThreshold: Int = StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT,
+    forceCompaction: Boolean = false)
+
+/**
+ * Configuration for manifest garbage collection.
+ *
+ * @param retentionVersions
+ *   Number of state versions to retain (default: 2)
+ * @param minManifestAgeHours
+ *   Minimum age in hours before a manifest can be deleted (default: 1)
+ *   Prevents deleting manifests that may be in use by active readers.
+ */
+case class GCConfig(
+    retentionVersions: Int = StateConfig.RETENTION_VERSIONS_DEFAULT,
+    minManifestAgeHours: Int = StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
 
 /**
  * Result of a state write operation.

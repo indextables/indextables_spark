@@ -75,6 +75,8 @@ class PurgeOrphanedSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
 
   def purge(): PurgeResult = {
+    val startTime = System.currentTimeMillis()
+
     // Step 1: Get transaction log with resolved credentials
     val cloudConfigs = extractCloudStorageConfigs()
     import scala.jdk.CollectionConverters._
@@ -104,8 +106,8 @@ class PurgeOrphanedSplitsExecutor(
     // Step 4: Clean up old transaction log files AFTER getting current state
     // This prevents race condition where we delete tx logs and then try to read them.
     // Use pre-computed versionsToDelete to ensure consistency.
-    val transactionLogsDeleted = cleanupOldTransactionLogFilesWithVersions(txLog, versionsToDelete)
-    logger.info(s"Transaction log cleanup: deleted $transactionLogsDeleted old log files")
+    val versionFilesDeleted = cleanupOldTransactionLogFilesWithVersions(txLog, versionsToDelete)
+    logger.info(s"Transaction log cleanup: deleted $versionFilesDeleted old version files")
 
     // Step 5: Clean up old checkpoint files
     // Checkpoints older than retention period are safe to delete (except the most recent one)
@@ -114,11 +116,21 @@ class PurgeOrphanedSplitsExecutor(
 
     // Step 5b: Clean up old Avro state directories
     // State directories older than retention period are safe to delete (except the latest one)
-    val stateDirectoriesDeleted = cleanupOldStateDirectories()
-    logger.info(s"State directory cleanup: deleted $stateDirectoriesDeleted old state directories")
+    val stateCleanupResult = cleanupOldStateDirectories()
+    logger.info(s"State directory cleanup: found ${stateCleanupResult.found}, deleted ${stateCleanupResult.deleted} old state directories")
 
     // Use all retained files as the valid files set
     val allFiles = allRetainedFiles
+
+    // Helper to create consistent messages
+    def stateMessage: String = {
+      val action = if (dryRun) "Would delete" else "Deleted"
+      if (stateCleanupResult.found > 0) {
+        s" $action ${stateCleanupResult.found} expired state directories."
+      } else {
+        ""
+      }
+    }
 
     // Step 2: List all .split and .crc files from filesystem (distributed)
     val allSplitFiles        = listAllSplitFiles(tablePath)
@@ -127,14 +139,18 @@ class PurgeOrphanedSplitsExecutor(
 
     if (totalFilesystemCount == 0) {
       logger.info("No split files found in filesystem")
+      val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
         orphanedFilesFound = 0,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
-        transactionLogsDeleted = transactionLogsDeleted,
-        message =
-          Some(s"No split files found in table directory. Deleted $transactionLogsDeleted old transaction log files.")
+        retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found,
+        expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun,
+        durationMs = durationMs,
+        message = Some(s"No split files found in table directory.$stateMessage")
       )
     }
 
@@ -150,13 +166,18 @@ class PurgeOrphanedSplitsExecutor(
 
     if (orphanedCount == 0) {
       logger.info("No orphaned files found")
+      val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
         orphanedFilesFound = 0,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
-        transactionLogsDeleted = transactionLogsDeleted,
-        message = Some(s"No orphaned files found. Deleted $transactionLogsDeleted old transaction log files.")
+        retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found,
+        expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun,
+        durationMs = durationMs,
+        message = Some(s"No orphaned files found.$stateMessage")
       )
     }
 
@@ -169,14 +190,18 @@ class PurgeOrphanedSplitsExecutor(
     logger.info(s"Orphaned files skipped (too recent): ${orphanedCount - eligibleCount}")
 
     if (eligibleCount == 0) {
+      val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
         orphanedFilesFound = orphanedCount,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
-        transactionLogsDeleted = transactionLogsDeleted,
-        message =
-          Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours). Deleted $transactionLogsDeleted old transaction log files.")
+        retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found,
+        expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun,
+        durationMs = durationMs,
+        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
       )
     }
 
@@ -195,9 +220,9 @@ class PurgeOrphanedSplitsExecutor(
 
     // Step 7: Delete or preview orphaned splits
     if (dryRun) {
-      previewDeletion(filesToDelete, eligibleCount, orphanedCount, transactionLogsDeleted)
+      previewDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, startTime)
     } else {
-      executeDeletion(filesToDelete, eligibleCount, orphanedCount, transactionLogsDeleted)
+      executeDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, startTime)
     }
   }
 
@@ -514,7 +539,7 @@ class PurgeOrphanedSplitsExecutor(
    * Clean up old Avro state directories based on retention policy.
    *
    * State directories follow the format `state-v{version}` and contain:
-   *   - _manifest.json: Metadata about the state
+   *   - _manifest.avro: Metadata about the state (binary Avro format)
    *   - manifest-*.avro: Avro manifest files containing file entries
    *
    * This method:
@@ -525,7 +550,17 @@ class PurgeOrphanedSplitsExecutor(
    * @return
    *   Number of state directories deleted (or would be deleted in DRY RUN)
    */
-  private def cleanupOldStateDirectories(): Long =
+  /**
+   * Result of state directory cleanup operation.
+   *
+   * @param found
+   *   Number of expired state directories found (eligible for deletion)
+   * @param deleted
+   *   Number of state directories actually deleted (0 for DRY_RUN, same as found otherwise)
+   */
+  private case class StateCleanupResult(found: Long, deleted: Long)
+
+  private def cleanupOldStateDirectories(): StateCleanupResult =
     try {
       val transactionLogPath = new Path(tablePath, "_transaction_log")
 
@@ -563,7 +598,7 @@ class PurgeOrphanedSplitsExecutor(
 
         if (stateDirectories.isEmpty) {
           logger.info("No Avro state directories found")
-          return 0L
+          return StateCleanupResult(0L, 0L)
         }
 
         // Extract versions and find the latest
@@ -580,6 +615,7 @@ class PurgeOrphanedSplitsExecutor(
           s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion, dryRun=$dryRun)"
         )
 
+        var foundCount   = 0L
         var deletedCount = 0L
 
         stateVersions.foreach { case (version, stateDir) =>
@@ -591,11 +627,11 @@ class PurgeOrphanedSplitsExecutor(
             val fileAge = currentTime - stateDir.modificationTime
 
             if (fileAge > logRetentionDuration) {
+              foundCount += 1
               if (dryRun) {
                 logger.info(
                   s"DRY RUN: Would delete old state directory: state-v$version (age: ${fileAge / 1000}s)"
                 )
-                deletedCount += 1
               } else {
                 // Delete the state directory and all its contents
                 try {
@@ -617,14 +653,23 @@ class PurgeOrphanedSplitsExecutor(
           }
         }
 
-        if (deletedCount > 0) {
+        if (foundCount > 0) {
           val action = if (dryRun) "Would delete" else "Deleted"
-          logger.info(s"$action $deletedCount old state directories")
+          logger.info(s"$action $foundCount old state directories")
         } else {
           logger.info("No old state directories to delete")
         }
 
-        deletedCount
+        // Clean up orphaned manifests from the shared manifest directory
+        // This handles the Iceberg-style shared manifest location introduced with incremental writes
+        val manifestsDeleted = cleanupOrphanedManifests(provider, transactionLogPath.toString)
+        if (manifestsDeleted > 0) {
+          val action = if (dryRun) "Would delete" else "Deleted"
+          logger.info(s"$action $manifestsDeleted orphaned manifests from shared directory")
+        }
+
+        // Include manifests in both found and deleted counts
+        StateCleanupResult(foundCount + manifestsDeleted, deletedCount + manifestsDeleted)
       } finally
         provider.close()
 
@@ -632,6 +677,54 @@ class PurgeOrphanedSplitsExecutor(
       case e: Exception =>
         // Don't fail the entire purge operation if state directory cleanup fails
         logger.warn(s"Failed to clean up old state directories: ${e.getMessage}", e)
+        StateCleanupResult(0L, 0L)
+    }
+
+  /**
+   * Clean up orphaned manifests from the shared manifest directory.
+   *
+   * With the incremental write feature, manifests are stored in a shared location
+   * (_transaction_log/manifests/) and referenced by multiple state versions.
+   * This method finds and deletes manifests that are no longer referenced by any
+   * retained state version.
+   *
+   * @param provider
+   *   Cloud storage provider
+   * @param txLogPath
+   *   Path to the transaction log directory
+   * @return
+   *   Number of manifests deleted (or would be deleted in dry-run mode)
+   */
+  private def cleanupOrphanedManifests(provider: CloudStorageProvider, txLogPath: String): Long =
+    try {
+      import io.indextables.spark.transaction.avro.{GCConfig, ManifestGarbageCollector, StateConfig}
+
+      // Get GC configuration from Spark conf
+      val retentionVersions = spark.conf
+        .getOption(StateConfig.RETENTION_VERSIONS_KEY)
+        .map(_.toInt)
+        .getOrElse(StateConfig.RETENTION_VERSIONS_DEFAULT)
+      val minManifestAgeHours = spark.conf
+        .getOption(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_KEY)
+        .map(_.toInt)
+        .getOrElse(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
+
+      val gcConfig = GCConfig(
+        retentionVersions = retentionVersions,
+        minManifestAgeHours = minManifestAgeHours
+      )
+
+      val gc = ManifestGarbageCollector(provider, txLogPath)
+      val result = gc.collectGarbage(gcConfig, dryRun)
+
+      logger.info(s"Manifest GC: ${result.reachableManifests} reachable, ${result.orphanedManifests} orphaned, " +
+        s"${result.deletedManifests} deleted (dryRun=$dryRun)")
+
+      result.deletedManifests
+    } catch {
+      case e: Exception =>
+        // Don't fail the entire purge operation if manifest GC fails
+        logger.warn(s"Failed to clean up orphaned manifests: ${e.getMessage}", e)
         0L
     }
 
@@ -806,7 +899,17 @@ class PurgeOrphanedSplitsExecutor(
     val allFilePaths     = scala.collection.mutable.Set[String]()
     val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
-    // Step 1: Get files from ALL retained checkpoints
+    // Step 1: Get files from ALL retained Avro state directories (Protocol V4)
+    // This is the primary source of truth for tables using the Avro state format
+    val avroStateFiles = getFilesFromAvroState()
+    avroStateFiles.foreach { add =>
+      allFilePaths += add.path
+      filePathToAction(add.path) = add
+    }
+    logger.info(s"Found ${avroStateFiles.size} files from Avro state directories")
+
+    // Step 2: Get files from ALL retained JSON checkpoints (legacy/fallback)
+    // This handles tables that haven't been migrated to Avro state format yet
     val checkpointFiles = getFilesFromRetainedCheckpoints(txLog)
     checkpointFiles.foreach { add =>
       allFilePaths += add.path
@@ -814,7 +917,7 @@ class PurgeOrphanedSplitsExecutor(
     }
     logger.info(s"Found ${checkpointFiles.size} files from retained checkpoints")
 
-    // Step 2: Get AddActions from ALL retained version files
+    // Step 3: Get AddActions from ALL retained version files
     val versionFiles = getAllFilesFromVersions(txLog, versionsToKeep)
     versionFiles.foreach { add =>
       allFilePaths += add.path
@@ -825,6 +928,127 @@ class PurgeOrphanedSplitsExecutor(
 
     logger.info(s"Total unique files in retained transaction state: ${allFilePaths.size}")
     filePathToAction.values.toSeq
+  }
+
+  /**
+   * Get files from all retained Avro state directories.
+   *
+   * Reads file entries from the latest Avro state directory (state-v*) and any
+   * older state directories within the retention period. This is the primary
+   * method for Protocol V4 tables that use the Avro state format.
+   *
+   * @return
+   *   All AddActions from retained Avro state directories
+   */
+  private def getFilesFromAvroState(): Seq[AddAction] = {
+    import io.indextables.spark.transaction.avro.{AvroManifestReader, StateManifestIO}
+
+    val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+    // Get retention configuration
+    val logRetentionDuration = txLogRetentionDuration.getOrElse {
+      spark.conf
+        .getOption("spark.indextables.logRetention.duration")
+        .map(_.toLong)
+        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+    }
+
+    val currentTime = System.currentTimeMillis()
+
+    // Use CloudStorageProvider for multi-cloud support
+    val cloudConfigs = extractCloudStorageConfigs()
+    val optionsMap   = new java.util.HashMap[String, String]()
+    cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+    val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
+    val provider = CloudStorageProviderFactory.createProvider(
+      transactionLogPath.toString,
+      configOptions,
+      spark.sparkContext.hadoopConfiguration
+    )
+
+    try {
+      // List all files/directories in transaction log directory
+      val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+
+      // Find Avro state directories (state-v*)
+      val stateDirectories = allFiles.filter { f =>
+        val name = new Path(f.path).getName
+        StateDirectoryPattern.findFirstIn(name).isDefined
+      }
+
+      if (stateDirectories.isEmpty) {
+        logger.debug("No Avro state directories found")
+        return Seq.empty
+      }
+
+      // Extract versions and find the latest
+      val stateVersions = stateDirectories.flatMap { f =>
+        val name = new Path(f.path).getName
+        name match {
+          case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
+          case _ => None
+        }
+      }
+
+      if (stateVersions.isEmpty) {
+        logger.debug("No valid Avro state versions found")
+        return Seq.empty
+      }
+
+      val latestVersion = stateVersions.map(_._1).max
+      logger.info(s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion)")
+
+      val manifestIO = StateManifestIO(provider)
+      val manifestReader = AvroManifestReader(provider)
+      val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
+
+      // Process state directories - always include latest, plus any within retention
+      stateVersions.foreach { case (version, stateDir) =>
+        val isLatest = version == latestVersion
+        val fileAge = currentTime - stateDir.modificationTime
+        val isWithinRetention = fileAge <= logRetentionDuration
+        val isRetained = isLatest || isWithinRetention
+
+        if (isRetained) {
+          try {
+            logger.debug(s"Reading Avro state directory: state-v$version (latest=$isLatest, withinRetention=$isWithinRetention)")
+
+            // Strip trailing slashes to avoid double-slash paths (e.g., state-v1//_manifest.avro)
+            val stateDirPath = stateDir.path.stripSuffix("/")
+
+            // Read the state manifest
+            val stateManifest = manifestIO.readStateManifest(stateDirPath)
+
+            // Resolve manifest paths and read all file entries
+            val manifestPaths = stateManifest.manifests.map { m =>
+              manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath)
+            }
+
+            val allEntries = manifestReader.readManifestsParallel(manifestPaths)
+
+            // Apply tombstones to get live files
+            val liveEntries = manifestIO.applyTombstones(allEntries, stateManifest.tombstones)
+
+            // Convert to AddActions and add to result
+            val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+            addActions.foreach { add =>
+              filePathToAction(add.path) = add
+            }
+
+            logger.debug(s"Read ${liveEntries.size} live files from Avro state v$version (${allEntries.size} total, ${stateManifest.tombstones.size} tombstoned)")
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to read Avro state directory state-v$version: ${e.getMessage}")
+          }
+        } else {
+          logger.debug(s"Skipping old Avro state directory: state-v$version (age: ${fileAge / 1000}s)")
+        }
+      }
+
+      filePathToAction.values.toSeq
+    } finally
+      provider.close()
   }
 
   /**
@@ -1268,7 +1492,8 @@ class PurgeOrphanedSplitsExecutor(
     files: Dataset[FileInfo],
     totalEligibleCount: Long,
     orphanedCount: Long,
-    transactionLogsDeleted: Long
+    stateCleanupResult: StateCleanupResult,
+    startTime: Long
   ): PurgeResult = {
     val filesToPreview = files.collect()
     val totalSizeBytes = filesToPreview.map(_.size).sum
@@ -1296,14 +1521,24 @@ class PurgeOrphanedSplitsExecutor(
     }
     println("=" * 135)
 
+    val durationMs = System.currentTimeMillis() - startTime
+    val stateMessage = if (stateCleanupResult.found > 0) {
+      s" Would delete ${stateCleanupResult.found} expired state directories."
+    } else {
+      ""
+    }
+
     PurgeResult(
       status = "DRY_RUN",
       orphanedFilesFound = orphanedCount,
       orphanedFilesDeleted = 0,
       sizeMBDeleted = totalSizeMB,
-      transactionLogsDeleted = transactionLogsDeleted,
-      message =
-        Some(s"Dry run completed. $count split files would be deleted ($totalSizeMB MB). $transactionLogsDeleted transaction log files would be deleted.")
+      retentionHours = retentionHours,
+      expiredStatesFound = stateCleanupResult.found,
+      expiredStatesDeleted = 0, // DRY_RUN doesn't delete
+      dryRun = true,
+      durationMs = durationMs,
+      message = Some(s"Dry run completed. $count split files would be deleted (${"%.2f".format(totalSizeMB)} MB).$stateMessage")
     )
   }
 
@@ -1312,7 +1547,8 @@ class PurgeOrphanedSplitsExecutor(
     files: Dataset[FileInfo],
     totalEligibleCount: Long,
     orphanedCount: Long,
-    transactionLogsDeleted: Long
+    stateCleanupResult: StateCleanupResult,
+    startTime: Long
   ): PurgeResult = {
     import spark.implicits._
 
@@ -1431,16 +1667,27 @@ class PurgeOrphanedSplitsExecutor(
     logger.info(s"Deletion complete: $totalSuccess succeeded, $totalFailed failed")
     logger.info(s"Total size deleted: $deletedSizeMB MB")
 
+    val durationMs = System.currentTimeMillis() - startTime
+    val stateMessage = if (stateCleanupResult.deleted > 0) {
+      s" Deleted ${stateCleanupResult.deleted} expired state directories."
+    } else {
+      ""
+    }
+
     PurgeResult(
       status = if (totalFailed == 0) "SUCCESS" else "PARTIAL_SUCCESS",
       orphanedFilesFound = orphanedCount,
       orphanedFilesDeleted = totalSuccess,
       sizeMBDeleted = deletedSizeMB,
-      transactionLogsDeleted = transactionLogsDeleted,
+      retentionHours = retentionHours,
+      expiredStatesFound = stateCleanupResult.found,
+      expiredStatesDeleted = stateCleanupResult.deleted,
+      dryRun = false,
+      durationMs = durationMs,
       message = if (totalFailed > 0) {
-        Some(s"Successfully deleted $totalSuccess split files, $totalFailed files failed to delete. Deleted $transactionLogsDeleted transaction log files.")
+        Some(s"Deleted $totalSuccess split files, $totalFailed failed.$stateMessage")
       } else {
-        Some(s"Successfully deleted $totalSuccess orphaned split files ($deletedSizeMB MB) and $transactionLogsDeleted transaction log files.")
+        Some(s"Deleted $totalSuccess orphaned split files (${"%.2f".format(deletedSizeMB)} MB).$stateMessage")
       }
     )
   }

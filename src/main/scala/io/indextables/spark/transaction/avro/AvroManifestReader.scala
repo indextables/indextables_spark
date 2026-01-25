@@ -142,7 +142,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @param manifestPaths
    *   Paths to manifest files
    * @param parallelism
-   *   Maximum number of parallel reads (default: 8, ignored - uses shared thread pool)
+   *   Maximum number of parallel reads. Use 0 for auto (available processors).
+   *   Default: 8, but can be increased for high-throughput storage backends.
    * @return
    *   Combined sequence of all file entries
    */
@@ -157,23 +158,45 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
       return readManifest(manifestPaths.head)
     }
 
-    log.debug(s"Reading ${manifestPaths.size} manifests in parallel (using shared thread pool)")
-    val startTime = System.currentTimeMillis()
-
-    // Use shared thread pool from companion object - avoids thread creation overhead on every call
-    val futures = manifestPaths.map { path =>
-      Future {
-        readManifest(path)
-      }(sharedExecutionContext)
+    // Resolve parallelism: 0 means auto (use available processors)
+    val effectiveParallelism = if (parallelism <= 0) {
+      Runtime.getRuntime.availableProcessors()
+    } else {
+      parallelism
     }
 
-    val results = Await.result(Future.sequence(futures)(implicitly, sharedExecutionContext), 5.minutes)
-    val allEntries = results.flatten
+    log.debug(s"Reading ${manifestPaths.size} manifests in parallel (parallelism=$effectiveParallelism)")
+    val startTime = System.currentTimeMillis()
+
+    // Process in batches to control memory and parallelism
+    val allEntries = if (manifestPaths.size <= effectiveParallelism) {
+      // Small number of manifests - read all in parallel
+      val futures = manifestPaths.map { path =>
+        Future {
+          readManifest(path)
+        }(sharedExecutionContext)
+      }
+      val results = Await.result(Future.sequence(futures)(implicitly, sharedExecutionContext), 5.minutes)
+      results.flatten
+    } else {
+      // Large number of manifests - process in batches to control memory
+      val results = scala.collection.mutable.ArrayBuffer[FileEntry]()
+      manifestPaths.grouped(effectiveParallelism).foreach { batch =>
+        val futures = batch.map { path =>
+          Future {
+            readManifest(path)
+          }(sharedExecutionContext)
+        }
+        val batchResults = Await.result(Future.sequence(futures)(implicitly, sharedExecutionContext), 5.minutes)
+        results ++= batchResults.flatten
+      }
+      results.toSeq
+    }
 
     val duration = System.currentTimeMillis() - startTime
     log.info(
       s"Read ${allEntries.size} entries from ${manifestPaths.size} manifests in ${duration}ms " +
-        s"(avg ${duration / manifestPaths.size}ms per manifest)")
+        s"(parallelism=$effectiveParallelism, avg ${duration / manifestPaths.size}ms per manifest)")
 
     allEntries
   }
@@ -200,11 +223,14 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @param manifests
    *   ManifestInfo records to read
    * @param stateDir
-   *   Base directory containing manifests
+   *   Base directory containing manifests (legacy state-local manifests)
    * @param sinceVersion
    *   Only return entries with addedAtVersion > sinceVersion
    * @param parallelism
    *   Maximum number of parallel reads
+   * @param transactionLogPath
+   *   Optional transaction log path for resolving shared manifests. If not provided,
+   *   assumes legacy state-local manifests.
    * @return
    *   Filtered sequence of FileEntry records
    */
@@ -212,7 +238,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
       manifests: Seq[ManifestInfo],
       stateDir: String,
       sinceVersion: Long,
-      parallelism: Int = StateConfig.READ_PARALLELISM_DEFAULT): Seq[FileEntry] = {
+      parallelism: Int = StateConfig.READ_PARALLELISM_DEFAULT,
+      transactionLogPath: Option[String] = None): Seq[FileEntry] = {
 
     // Filter manifests by version bounds - skip manifests that can't contain new entries
     val relevantManifests = manifests.filter(_.maxAddedAtVersion > sinceVersion)
@@ -226,7 +253,14 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
       s"Version filtering: ${manifests.size} manifests -> ${relevantManifests.size} " +
         s"(filtered ${manifests.size - relevantManifests.size} by version bounds)")
 
-    val paths = relevantManifests.map(m => s"$stateDir/${m.path}")
+    // Resolve manifest paths - handles both shared manifests and legacy state-local
+    val paths = relevantManifests.map { m =>
+      if (m.isSharedManifest && transactionLogPath.isDefined) {
+        s"${transactionLogPath.get}/${m.path}"
+      } else {
+        s"$stateDir/${m.path}"
+      }
+    }
     readManifestsParallel(paths, parallelism).filter(_.addedAtVersion > sinceVersion)
   }
 

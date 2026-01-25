@@ -692,34 +692,40 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 - Fails if table has no partition columns defined
 - Returns no_action if no partitions match the predicates
 
-### Checkpoint IndexTable
+### Checkpoint / Compact IndexTable
 ```sql
 -- Register extensions (same as above)
 spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Force a checkpoint on a table (creates V3 checkpoint, upgrades protocol)
+-- Force a checkpoint on a table (creates V4 checkpoint with Avro state format)
 CHECKPOINT INDEXTABLES 's3://bucket/path';
 CHECKPOINT INDEXTABLES my_table;
 CHECKPOINT TANTIVY4SPARK 's3://bucket/path';  -- alternate syntax
+
+-- COMPACT is an alias for CHECKPOINT (clearer for compaction use cases)
+COMPACT INDEXTABLES 's3://bucket/path';
+COMPACT TANTIVY4SPARK 's3://bucket/path';
 
 -- Example output:
 -- +--------------------+-------+------------------+-----------+---------+----------------+-------------+
 -- |table_path          |status |checkpoint_version|num_actions|num_files|protocol_version|is_multi_part|
 -- +--------------------+-------+------------------+-----------+---------+----------------+-------------+
--- |s3://bucket/path    |SUCCESS|               42 |      1502 |     1500|               3|        false|
+-- |s3://bucket/path    |SUCCESS|               42 |      1502 |     1500|               4|        false|
 -- +--------------------+-------+------------------+-----------+---------+----------------+-------------+
 ```
 
 **Key features:**
-- **Protocol upgrade**: Always creates a V3 checkpoint with latest protocol features
-- **Schema deduplication**: V3 checkpoints use hash-based schema references to reduce checkpoint size
-- **Multi-part support**: Large checkpoints (>10K actions) are automatically split into parts
+- **Full compaction**: Reads all current files and writes a fresh Avro state with no tombstones
+- **Protocol upgrade**: Creates V4 checkpoint with Avro state format (10x faster reads)
+- **Schema deduplication**: Uses hash-based schema references to reduce state size
 - **Streaming write**: Uses streaming to avoid OOM for large tables
+- **Removes tombstones**: Clears accumulated tombstones by writing only live file entries
 
 **When to use:**
-- **Force V3 upgrade**: Upgrade existing V2 tables to V3 protocol
-- **After bulk operations**: Create checkpoint after large batch inserts or merges
-- **Performance optimization**: Checkpoints speed up table reads by consolidating transaction log state
+- **Force compaction**: Use `COMPACT` when tombstone ratio is high (check with `DESCRIBE INDEXTABLES STATE`)
+- **Force V4 upgrade**: Upgrade existing V2/V3 tables to V4 protocol with Avro state
+- **After bulk deletes**: Compact after DROP PARTITIONS or large MERGE operations to remove tombstones
+- **Performance optimization**: Compaction speeds up table reads by consolidating state
 - **Before maintenance**: Create checkpoint before PURGE operations to ensure consistent state
 
 **Output schema:**
@@ -730,7 +736,7 @@ CHECKPOINT TANTIVY4SPARK 's3://bucket/path';  -- alternate syntax
 | `checkpoint_version` | Long | Transaction version at checkpoint |
 | `num_actions` | Long | Total actions in checkpoint |
 | `num_files` | Long | Number of split files |
-| `protocol_version` | Long | Protocol version (3 for V3) |
+| `protocol_version` | Long | Protocol version (4 for V4 with Avro state) |
 | `is_multi_part` | Boolean | True if checkpoint split into parts |
 
 ### Truncate Time Travel

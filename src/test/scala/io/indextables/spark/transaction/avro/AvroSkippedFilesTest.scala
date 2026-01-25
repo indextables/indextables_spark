@@ -325,7 +325,7 @@ class AvroSkippedFilesTest extends TestBase {
 
       // Verify manifest exists
       val latestStateDir = stateDirs.maxBy(_.getName)
-      val manifestFile = new java.io.File(latestStateDir, "_manifest.json")
+      val manifestFile = new java.io.File(latestStateDir, "_manifest.avro")
       manifestFile.exists() shouldBe true
 
       // Verify data integrity

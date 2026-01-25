@@ -242,7 +242,7 @@ class AvroMultiPartStateTest extends TestBase {
 
       // Verify manifest exists in state directory
       val latestStateDir = stateDirs.maxBy(_.getName)
-      val manifestFile = new File(latestStateDir, "_manifest.json")
+      val manifestFile = new File(latestStateDir, "_manifest.avro")
       manifestFile.exists() shouldBe true
 
       logger.info("State directory structure test passed")

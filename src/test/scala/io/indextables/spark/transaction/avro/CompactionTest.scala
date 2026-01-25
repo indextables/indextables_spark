@@ -63,7 +63,7 @@ class CompactionTest extends TestBase {
 
         // Verify data integrity after compaction
         val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = compactedManifest.manifests.map(m => s"$stateDir2/${m.path}")
+        val manifestPaths = manifestIO.resolveManifestPaths(compactedManifest, tempPath, stateDir2)
         val readFiles = manifestReader.readManifestsParallel(manifestPaths)
 
         readFiles should have size 85
@@ -114,7 +114,7 @@ class CompactionTest extends TestBase {
     }
   }
 
-  test("compaction should trigger when large remove operation occurs (> 1000 files)") {
+  test("compaction should trigger when large remove operation occurs (with forceCompaction)") {
     withTempPath { tempPath =>
       val cloudProvider = CloudStorageProviderFactory.createProvider(
         tempPath,
@@ -133,12 +133,15 @@ class CompactionTest extends TestBase {
           removedPaths = Set.empty
         )
 
-        // Remove 1001 files (triggers large remove compaction)
+        // Remove 1001 files with forceCompaction to test compaction behavior
+        // Note: largeRemoveThreshold is Int.MaxValue by default (disabled)
+        // so we use forceCompaction to verify compaction clears tombstones
         val removedPaths = (1 to 1001).map(i => s"file$i.split").toSet
         val stateDir2 = stateWriter.writeState(
           currentVersion = 2,
           newFiles = Seq.empty,
-          removedPaths = removedPaths
+          removedPaths = removedPaths,
+          forceCompaction = true
         )
 
         // After compaction, tombstones should be empty
@@ -183,10 +186,11 @@ class CompactionTest extends TestBase {
 
         // Read back and verify sorted order
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(s"$tempPath/state-v00000000000000000001")
+        val stateDir = s"$tempPath/state-v00000000000000000001"
+        val manifest = manifestIO.readStateManifest(stateDir)
 
         val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifest.manifests.map(m => s"$tempPath/state-v00000000000000000001/${m.path}")
+        val manifestPaths = manifestIO.resolveManifestPaths(manifest, tempPath, stateDir)
         val readFiles = manifestReader.readManifestsParallel(manifestPaths)
 
         readFiles should have size 5
@@ -315,13 +319,18 @@ class CompactionTest extends TestBase {
         protocolVersion = 4
       )
 
-      // 10 removes on 100 files = 11.1% > 10% threshold
-      stateWriter.needsCompaction(manifest100Files, 10) shouldBe true
+      // 11 removes on 100 files = 11% > 10% threshold (triggers compaction)
+      stateWriter.needsCompaction(manifest100Files, 11) shouldBe true
 
-      // 8 removes on 100 files = 8.7% < 10% threshold
+      // 10 removes on 100 files = 10% == 10% threshold (does NOT trigger, need > not >=)
+      stateWriter.needsCompaction(manifest100Files, 10) shouldBe false
+
+      // 8 removes on 100 files = 8% < 10% threshold
       stateWriter.needsCompaction(manifest100Files, 8) shouldBe false
 
       // Test large remove threshold (> 1000 removes)
+      // Note: largeRemoveThreshold defaults to Int.MaxValue (disabled)
+      // Must pass explicit config to test this behavior
       val manifest50kFiles = StateManifest(
         formatVersion = 1,
         stateVersion = 1,
@@ -334,11 +343,15 @@ class CompactionTest extends TestBase {
         protocolVersion = 4
       )
 
-      // 1001 removes triggers compaction regardless of ratio
-      stateWriter.needsCompaction(manifest50kFiles, 1001) shouldBe true
+      // With explicit largeRemoveThreshold=1000, 1001 removes triggers compaction
+      val configWithLargeRemoveThreshold = CompactionConfig(largeRemoveThreshold = 1000)
+      stateWriter.needsCompaction(manifest50kFiles, 1001, configWithLargeRemoveThreshold) shouldBe true
 
-      // 999 removes doesn't trigger (ratio still low)
-      stateWriter.needsCompaction(manifest50kFiles, 999) shouldBe false
+      // 999 removes doesn't trigger (ratio still low, below 1000 threshold)
+      stateWriter.needsCompaction(manifest50kFiles, 999, configWithLargeRemoveThreshold) shouldBe false
+
+      // With default config (largeRemoveThreshold=Int.MaxValue), large removes don't trigger
+      stateWriter.needsCompaction(manifest50kFiles, 1001) shouldBe false
 
       // Test manifest count threshold (> 20 manifests)
       val manifestManyParts = StateManifest(
@@ -357,6 +370,96 @@ class CompactionTest extends TestBase {
       stateWriter.needsCompaction(manifestManyParts, 0) shouldBe true
     } finally {
       cloudProvider.close()
+    }
+  }
+
+  test("selective compaction only rewrites dirty manifests (partition-aware)") {
+    withTempPath { tempPath =>
+      val cloudProvider = CloudStorageProviderFactory.createProvider(
+        tempPath,
+        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        val stateWriter = StateWriter(cloudProvider, tempPath, entriesPerManifest = 50)
+        val manifestIO = StateManifestIO(cloudProvider)
+
+        // Create 3 manifests with different partitions:
+        // - January: 50 files (manifest 1)
+        // - February: 50 files (manifest 2)
+        // - March: 50 files (manifest 3)
+        val januaryFiles = (1 to 50).map(i =>
+          createTestFileEntry(s"date=2024-01/file$i.split", version = 1, Map("date" -> "2024-01")))
+        val februaryFiles = (1 to 50).map(i =>
+          createTestFileEntry(s"date=2024-02/file$i.split", version = 1, Map("date" -> "2024-02")))
+        val marchFiles = (1 to 50).map(i =>
+          createTestFileEntry(s"date=2024-03/file$i.split", version = 1, Map("date" -> "2024-03")))
+
+        // Write initial state (creates 3 manifests due to entriesPerManifest=50)
+        val initialResult = stateWriter.writeIncrementalWithRetry(
+          newFiles = januaryFiles ++ februaryFiles ++ marchFiles,
+          removedPaths = Set.empty,
+          schemaRegistry = Map.empty
+        )
+
+        val initialManifest = manifestIO.readStateManifest(initialResult.stateDir)
+        initialManifest.manifests.size shouldBe 3
+        initialManifest.numFiles shouldBe 150
+
+        // Record the initial manifest paths (in shared directory)
+        val initialManifestPaths = initialManifest.manifests.map(_.path).toSet
+
+        // Delete 30 files from March only (60% tombstone ratio for that manifest)
+        // This should trigger selective compaction: keep Jan/Feb manifests, rewrite March
+        val marchTombstones = (1 to 30).map(i => s"date=2024-03/file$i.split").toSet
+
+        val compactionConfig = CompactionConfig(tombstoneThreshold = 0.10) // 10% threshold
+        val compactedResult = stateWriter.writeIncrementalWithRetry(
+          newFiles = Seq.empty,
+          removedPaths = marchTombstones,
+          schemaRegistry = Map.empty,
+          compactionConfig = compactionConfig
+        )
+
+        val compactedManifest = manifestIO.readStateManifest(compactedResult.stateDir)
+
+        // Verify compaction happened (tombstones cleared)
+        compactedManifest.tombstones shouldBe empty
+
+        // Verify correct file count (150 - 30 = 120)
+        compactedManifest.numFiles shouldBe 120
+
+        // Verify we kept some manifests (selective compaction)
+        // The Jan and Feb manifests should be reused (their paths should appear in the new manifest list)
+        val newManifestPaths = compactedManifest.manifests.map(_.path).toSet
+
+        // At least 2 manifests should be reused (Jan and Feb)
+        val reusedManifests = initialManifestPaths.intersect(newManifestPaths)
+        reusedManifests.size should be >= 2
+
+        // Verify data integrity - read all files and check count
+        val manifestReader = AvroManifestReader(cloudProvider)
+        val resolvedPaths = compactedManifest.manifests.map { m =>
+          manifestIO.resolveManifestPath(m, tempPath, compactedResult.stateDir)
+        }
+        val allFiles = manifestReader.readManifestsParallel(resolvedPaths)
+
+        allFiles should have size 120
+
+        // Verify March files were properly filtered (only 20 remain)
+        val marchFileCount = allFiles.count(_.partitionValues.get("date").contains("2024-03"))
+        marchFileCount shouldBe 20
+
+        // Verify Jan and Feb files are intact
+        val janFileCount = allFiles.count(_.partitionValues.get("date").contains("2024-01"))
+        val febFileCount = allFiles.count(_.partitionValues.get("date").contains("2024-02"))
+        janFileCount shouldBe 50
+        febFileCount shouldBe 50
+
+      } finally {
+        cloudProvider.close()
+      }
     }
   }
 

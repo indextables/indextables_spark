@@ -646,6 +646,98 @@ class AvroStateCommandsTest extends TestBase {
     }
   }
 
+  test("MERGE SPLITS with WHERE clause should ONLY merge targeted partition files") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create multiple small splits per partition to trigger merge
+      val regions = Seq("us-east", "eu-west")
+      (1 to 4).foreach { batch =>
+        regions.foreach { region =>
+          val data = (1 to 10).map(i => (batch * 100 + i, s"User-$batch-$i", region, i * 10))
+          spark.createDataFrame(data).toDF("id", "name", "region", "score")
+            .write.format(provider)
+            .partitionBy("region")
+            .option("spark.indextables.indexing.fastfields", "score")
+            .mode("append")
+            .save(path)
+        }
+      }
+
+      // Create Avro checkpoint
+      spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+
+      // Verify we're using Avro state
+      val stateResult = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      stateResult(0).getAs[String]("format") shouldBe "avro-state"
+
+      // Create transaction log to check files by partition
+      val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(path), spark)
+
+      // Get initial file counts by partition
+      val initialFiles = txLog.listFiles()
+      val initialFilesByPartition = initialFiles.groupBy(_.partitionValues)
+
+      println(s"=== INITIAL FILE STATE ===")
+      initialFilesByPartition.foreach { case (partition, files) =>
+        println(s"  Partition $partition: ${files.size} files")
+        files.foreach(f => println(s"    - ${f.path}"))
+      }
+
+      val initialUsEastCount = initialFilesByPartition.getOrElse(Map("region" -> "us-east"), Seq.empty).size
+      val initialEuWestCount = initialFilesByPartition.getOrElse(Map("region" -> "eu-west"), Seq.empty).size
+
+      println(s"Initial files: us-east=$initialUsEastCount, eu-west=$initialEuWestCount")
+      // Spark may create multiple files per batch - verify we have files in both partitions
+      initialUsEastCount should be > 0
+      initialEuWestCount should be > 0
+
+      // MERGE SPLITS with WHERE clause - should ONLY affect us-east
+      println(s"=== EXECUTING MERGE SPLITS WITH WHERE region = 'us-east' ===")
+      val mergeResult = spark.sql(s"MERGE SPLITS '$path' WHERE region = 'us-east' TARGET SIZE 100M").collect()
+
+      // Print merge result details
+      val metricsRow = mergeResult(0).getStruct(1)
+      println(s"  Merge status: ${metricsRow.getAs[String]("status")}")
+      println(s"  Merged files: ${metricsRow.getAs[Any]("merged_files")}")
+      println(s"  Merge groups: ${metricsRow.getAs[Any]("merge_groups")}")
+
+      // Invalidate cache to get fresh state
+      txLog.invalidateCache()
+
+      // Get file counts after merge
+      val afterMergeFiles = txLog.listFiles()
+      val afterMergeByPartition = afterMergeFiles.groupBy(_.partitionValues)
+
+      println(s"=== AFTER MERGE FILE STATE ===")
+      afterMergeByPartition.foreach { case (partition, files) =>
+        println(s"  Partition $partition: ${files.size} files")
+        files.foreach(f => println(s"    - ${f.path}"))
+      }
+
+      val afterUsEastCount = afterMergeByPartition.getOrElse(Map("region" -> "us-east"), Seq.empty).size
+      val afterEuWestCount = afterMergeByPartition.getOrElse(Map("region" -> "eu-west"), Seq.empty).size
+
+      println(s"After merge files: us-east=$afterUsEastCount, eu-west=$afterEuWestCount")
+
+      // Key assertion: eu-west should be UNCHANGED!
+      afterEuWestCount shouldBe initialEuWestCount
+
+      // us-east should have merged (fewer files)
+      val status = mergeResult(0).getStruct(1).getAs[String]("status")
+      if (status == "success") {
+        afterUsEastCount should be < initialUsEastCount
+      }
+
+      // Verify data integrity
+      val afterMergeCount = spark.read.format(provider).load(path).count()
+      afterMergeCount shouldBe 80
+
+      txLog.close()
+    }
+  }
+
   test("PREWARM CACHE with WHERE clause should use Avro manifest pruning") {
     withTempPath { tempDir =>
       val path = tempDir
@@ -782,6 +874,211 @@ class AvroStateCommandsTest extends TestBase {
           .filter(col("region") === region).count()
         count shouldBe 10
       }
+    }
+  }
+
+  // ==========================================================================
+  // Bug Reproduction: MERGE SPLITS visibility after multiple appends
+  // https://github.com/anthropics/claude-code/issues/XXX
+  // ==========================================================================
+
+  test("MERGE SPLITS should see ALL files from multiple append transactions") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Clear global caches to ensure fresh state
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+      println("=== TEST: MERGE SPLITS visibility after multiple appends ===")
+
+      // First append: create 3 splits (3 batches of data)
+      println("\n--- First append: writing 3 batches (should create 3 splits) ---")
+      (1 to 3).foreach { batch =>
+        val data = (1 to 10).map(i => (batch * 100 + i, s"Batch1-$batch-$i", batch * 10))
+        spark.createDataFrame(data).toDF("id", "name", "score")
+          .write.format(provider)
+          .option("spark.indextables.indexing.fastfields", "id,score")
+          .mode("append")
+          .save(path)
+      }
+
+      // Check transaction log files after first append
+      val txLog1 = io.indextables.spark.transaction.TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(path), spark)
+      val filesAfterAppend1 = txLog1.listFiles()
+      println(s"After first append: ${filesAfterAppend1.size} files")
+      filesAfterAppend1.foreach(f => println(s"  - ${f.path}"))
+      txLog1.close()
+
+      // Clear caches between appends to simulate separate sessions
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+      // Second append: create 4 more splits (4 batches of data)
+      println("\n--- Second append: writing 4 batches (should create 4 splits) ---")
+      (4 to 7).foreach { batch =>
+        val data = (1 to 10).map(i => (batch * 100 + i, s"Batch2-$batch-$i", batch * 10))
+        spark.createDataFrame(data).toDF("id", "name", "score")
+          .write.format(provider)
+          .option("spark.indextables.indexing.fastfields", "id,score")
+          .mode("append")
+          .save(path)
+      }
+
+      // Check transaction log files after second append
+      val txLog2 = io.indextables.spark.transaction.TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(path), spark)
+      val filesAfterAppend2 = txLog2.listFiles()
+      println(s"After second append: ${filesAfterAppend2.size} files")
+      filesAfterAppend2.foreach(f => println(s"  - ${f.path}"))
+      txLog2.close()
+
+      // Verify total row count
+      val totalCount = spark.read.format(provider).load(path).count()
+      println(s"Total row count: $totalCount (expected 70)")
+      totalCount shouldBe 70 // 7 batches * 10 rows
+
+      // Clear caches to simulate a new session for MERGE
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+      // Run MERGE SPLITS
+      println("\n--- Running MERGE SPLITS ---")
+      val mergeResult = spark.sql(s"MERGE SPLITS '$path' TARGET SIZE 100M").collect()
+
+      // Check merge result
+      val metricsRow = mergeResult(0).getStruct(1)
+      val status = metricsRow.getAs[String]("status")
+      val mergedFiles = Option(metricsRow.getAs[java.lang.Long]("merged_files")).map(_.toLong).getOrElse(0L)
+      println(s"Merge status: $status")
+      println(s"Merged files: $mergedFiles")
+
+      // CRITICAL ASSERTION: The merge should have seen ALL files
+      // If only 3 files were merged (from first append), this indicates the bug
+      if (status == "success") {
+        // We expect at least 6-7 files to be merged (from both appends)
+        // Each write batch creates at least 1 split
+        assert(mergedFiles >= 6L,
+          s"Bug detected: MERGE only saw $mergedFiles files, but expected at least 6 from both appends")
+      }
+
+      // Verify data integrity after merge
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+      val afterMergeCount = spark.read.format(provider).load(path).count()
+      println(s"After merge row count: $afterMergeCount (expected 70)")
+      afterMergeCount shouldBe 70
+
+      // Verify files from both appends are represented in the data using ID ranges
+      // Batch1 IDs: 101-110, 201-210, 301-310 (total 30 rows)
+      // Batch2 IDs: 401-410, 501-510, 601-610, 701-710 (total 40 rows)
+      val batch1Count = spark.read.format(provider).load(path)
+        .filter(col("id") < 400).count()
+      val batch2Count = spark.read.format(provider).load(path)
+        .filter(col("id") >= 400).count()
+
+      println(s"Batch1 rows (id < 400): $batch1Count (expected 30)")
+      println(s"Batch2 rows (id >= 400): $batch2Count (expected 40)")
+
+      batch1Count shouldBe 30
+      batch2Count shouldBe 40
+
+      println("\n=== TEST PASSED: All files visible to MERGE SPLITS ===")
+    }
+  }
+
+  test("Transaction log correctly tracks files across multiple Avro state versions") {
+    withTempPath { tempDir =>
+      val path = tempDir
+      val txLogPath = s"$path/_transaction_log"
+
+      // Clear global caches
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+      println("=== TEST: Transaction log state version tracking ===")
+
+      // First write
+      println("\n--- First write ---")
+      val data1 = (1 to 5).map(i => (i, s"First-$i", i * 10))
+      spark.createDataFrame(data1).toDF("id", "name", "score")
+        .write.format(provider)
+        .option("spark.indextables.indexing.fastfields", "id,score")
+        .mode("overwrite")
+        .save(path)
+
+      // Check state after first write
+      val cloudProvider1 = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        txLogPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+        spark.sparkContext.hadoopConfiguration
+      )
+      val stateDirs1 = cloudProvider1.listFiles(txLogPath, recursive = false)
+        .filter(_.path.contains("state-v"))
+        .map(_.path)
+      println(s"State directories after first write: ${stateDirs1.mkString(", ")}")
+      cloudProvider1.close()
+
+      // Clear caches
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+      // Second write (append)
+      println("\n--- Second write (append) ---")
+      val data2 = (6 to 10).map(i => (i, s"Second-$i", i * 10))
+      spark.createDataFrame(data2).toDF("id", "name", "score")
+        .write.format(provider)
+        .option("spark.indextables.indexing.fastfields", "id,score")
+        .mode("append")
+        .save(path)
+
+      // Check state after second write
+      val cloudProvider2 = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        txLogPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+        spark.sparkContext.hadoopConfiguration
+      )
+      val stateDirs2 = cloudProvider2.listFiles(txLogPath, recursive = false)
+        .filter(_.path.contains("state-v"))
+        .map(_.path)
+        .sorted
+      println(s"State directories after second write: ${stateDirs2.mkString(", ")}")
+
+      // Read _last_checkpoint to see which state it points to
+      val lastCheckpointPath = s"$txLogPath/_last_checkpoint"
+      if (cloudProvider2.exists(lastCheckpointPath)) {
+        val content = new String(cloudProvider2.readFile(lastCheckpointPath), "UTF-8")
+        println(s"_last_checkpoint content: $content")
+      }
+      cloudProvider2.close()
+
+      // Verify state version incremented
+      assert(stateDirs2.size >= 2,
+        "Expected at least 2 state directories after two writes")
+
+      // Clear caches and read with fresh TransactionLog
+      io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+      val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(path), spark)
+      val allFiles = txLog.listFiles()
+      println(s"\nTotal files from TransactionLog: ${allFiles.size}")
+      allFiles.foreach(f => println(s"  - ${f.path}"))
+
+      // Verify all data is readable
+      val totalCount = spark.read.format(provider).load(path).count()
+      println(s"Total row count: $totalCount (expected 10)")
+      totalCount shouldBe 10
+
+      // First batch IDs: 1-5, Second batch IDs: 6-10
+      val firstCount = spark.read.format(provider).load(path)
+        .filter(col("id") <= 5).count()
+      val secondCount = spark.read.format(provider).load(path)
+        .filter(col("id") > 5).count()
+
+      println(s"First batch rows (id <= 5): $firstCount (expected 5)")
+      println(s"Second batch rows (id > 5): $secondCount (expected 5)")
+
+      firstCount shouldBe 5
+      secondCount shouldBe 5
+
+      txLog.close()
+      println("\n=== TEST PASSED ===")
     }
   }
 }

@@ -78,7 +78,8 @@ case class PurgeOrphanedSplitsCommand(
           StructField("orphaned_files_deleted", LongType, nullable = true),
           StructField("size_mb_deleted", DoubleType, nullable = true),
           StructField("retention_hours", LongType, nullable = true),
-          StructField("transaction_logs_deleted", LongType, nullable = true),
+          StructField("expired_states_found", LongType, nullable = true),
+          StructField("expired_states_deleted", LongType, nullable = true),
           StructField("dry_run", BooleanType, nullable = false),
           StructField("duration_ms", LongType, nullable = true),
           StructField("message", StringType, nullable = true)
@@ -131,7 +132,8 @@ case class PurgeOrphanedSplitsCommand(
           result.orphanedFilesDeleted,
           result.sizeMBDeleted,
           effectiveRetention,
-          result.transactionLogsDeleted,
+          result.expiredStatesFound,
+          result.expiredStatesDeleted,
           dryRun,
           duration,
           result.message.orNull
@@ -172,8 +174,16 @@ case class PurgeOrphanedSplitsCommand(
  *   Number of split files successfully deleted
  * @param sizeMBDeleted
  *   Total size in MB of deleted split files
- * @param transactionLogsDeleted
- *   Number of old transaction log files deleted
+ * @param retentionHours
+ *   Retention period used for split files (hours)
+ * @param expiredStatesFound
+ *   Number of expired state directories found (older than retention)
+ * @param expiredStatesDeleted
+ *   Number of expired state directories deleted (0 for DRY_RUN)
+ * @param dryRun
+ *   Whether this was a dry run
+ * @param durationMs
+ *   Duration of the purge operation in milliseconds
  * @param message
  *   Optional message with details
  */
@@ -182,5 +192,9 @@ case class PurgeResult(
   orphanedFilesFound: Long,
   orphanedFilesDeleted: Long,
   sizeMBDeleted: Double,
-  transactionLogsDeleted: Long,
+  retentionHours: Long,
+  expiredStatesFound: Long,
+  expiredStatesDeleted: Long,
+  dryRun: Boolean,
+  durationMs: Long,
   message: Option[String])

@@ -687,7 +687,7 @@ class EnhancedTransactionLogCache(
   }
 
   /**
-   * Get or compute Avro state manifest - caches the StateManifest read from _manifest.json.
+   * Get or compute Avro state manifest - caches the StateManifest read from _manifest.avro.
    * Uses GLOBAL cache shared across all TransactionLog instances.
    * Key is the full state directory path (e.g., "s3://bucket/table/_transaction_log/state-v00000000000000000100")
    */

@@ -78,7 +78,7 @@ statement
         (path=STRING | table=qualifiedName)?
         (JOB jobId=STRING)?
         (TIMEOUT timeoutSeconds=INTEGER_VALUE)?                 #waitForPrewarmJobs
-    | CHECKPOINT indexTablesKeyword (path=STRING | table=qualifiedName)   #checkpointIndexTable
+    | (CHECKPOINT | COMPACT) indexTablesKeyword (path=STRING | table=qualifiedName)   #checkpointIndexTable
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
         (DRY RUN)?                                              #truncateTimeTravel
@@ -120,7 +120,7 @@ nonReserved
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
-    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | TRUNCATE | TIME | TRAVEL | STATE
+    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT
     ;
 
@@ -177,6 +177,7 @@ SOURCE: [Ss][Oo][Uu][Rr][Cc][Ee];
 PER: [Pp][Ee][Rr];
 ENVIRONMENT: [Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt];
 CHECKPOINT: [Cc][Hh][Ee][Cc][Kk][Pp][Oo][Ii][Nn][Tt];
+COMPACT: [Cc][Oo][Mm][Pp][Aa][Cc][Tt];
 TRUNCATE: [Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee];
 TIME: [Tt][Ii][Mm][Ee];
 TRAVEL: [Tt][Rr][Aa][Vv][Ee][Ll];

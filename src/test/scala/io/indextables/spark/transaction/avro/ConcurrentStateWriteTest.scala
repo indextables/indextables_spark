@@ -133,9 +133,9 @@ class ConcurrentStateWriteTest extends TestBase {
         val written5 = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 5L, json5)
         written5 shouldBe false
 
-        // Try to write checkpoint at version 10 (same) - should be skipped
+        // Try to write checkpoint at version 10 (same) - should succeed to allow format upgrades (JSON -> Avro)
         val written10Same = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 10L, json10)
-        written10Same shouldBe false
+        written10Same shouldBe true
 
         // Write checkpoint at version 15 (newer) - should succeed
         val json15 = """{"version":15,"size":150,"sizeInBytes":1500,"numFiles":150,"createdTime":1234567890000}"""
@@ -369,6 +369,321 @@ class ConcurrentStateWriteTest extends TestBase {
       spark.conf.unset("spark.indextables.state.retry.maxAttempts")
       spark.conf.unset("spark.indextables.state.retry.baseDelayMs")
       spark.conf.unset("spark.indextables.state.retry.maxDelayMs")
+    }
+  }
+
+  test("verifyCheckpointVersion detects _last_checkpoint regression using N+1 probe") {
+    withTempPath { tempDir =>
+      val transactionLogPath = s"$tempDir/_transaction_log"
+      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        transactionLogPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        cloudProvider.createDirectory(transactionLogPath)
+        val manifestIO = StateManifestIO(cloudProvider)
+
+        // Create state directories for versions 5, 6, and 7 (simulating successful concurrent writes)
+        for (v <- 5L to 7L) {
+          val stateDir = s"$transactionLogPath/${manifestIO.formatStateDir(v)}"
+          cloudProvider.createDirectory(stateDir)
+          val manifest = StateManifest(
+            formatVersion = 1,
+            stateVersion = v,
+            createdAt = System.currentTimeMillis(),
+            numFiles = v.toInt,
+            totalBytes = v * 1000,
+            manifests = Seq.empty,
+            tombstones = Seq.empty,
+            schemaRegistry = Map.empty,
+            protocolVersion = 4
+          )
+          manifestIO.writeStateManifest(stateDir, manifest)
+        }
+
+        // Test 1: Hint is correct (v7) - should return v7 with just one check
+        val correctHint = manifestIO.verifyCheckpointVersion(transactionLogPath, 7L)
+        correctHint shouldBe 7L
+
+        // Test 2: Hint is stale by 1 (v6) - should detect v7 exists and return v7
+        val staleBy1 = manifestIO.verifyCheckpointVersion(transactionLogPath, 6L)
+        staleBy1 shouldBe 7L
+
+        // Test 3: Hint is stale by 2 (v5) - should detect v6, v7 exist and return v7
+        val staleBy2 = manifestIO.verifyCheckpointVersion(transactionLogPath, 5L)
+        staleBy2 shouldBe 7L
+
+        // Test 4: Hint is ahead (v10) - should return v10 (can't go backwards)
+        // This shouldn't happen in practice but verifies the loop terminates
+        val aheadHint = manifestIO.verifyCheckpointVersion(transactionLogPath, 10L)
+        aheadHint shouldBe 10L
+
+      } finally {
+        cloudProvider.close()
+      }
+    }
+  }
+
+  test("getLastCheckpointInfoVerified corrects stale _last_checkpoint") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create initial table with data
+      val data = Seq((1, "doc1"), (2, "doc2"))
+      spark.createDataFrame(data).toDF("id", "content")
+        .write.format(provider)
+        .mode("overwrite")
+        .save(path)
+
+      // Enable Avro format and create checkpoint
+      spark.conf.set("spark.indextables.state.format", "avro")
+
+      try {
+        // Create checkpoint at version N
+        val result1 = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+        result1(0).getAs[String]("status") shouldBe "SUCCESS"
+        val v1 = result1(0).getAs[Long]("checkpoint_version")
+
+        // Add more data and create another checkpoint
+        val data2 = Seq((3, "doc3"), (4, "doc4"))
+        spark.createDataFrame(data2).toDF("id", "content")
+          .write.format(provider)
+          .mode("append")
+          .save(path)
+
+        val result2 = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+        result2(0).getAs[String]("status") shouldBe "SUCCESS"
+        val v2 = result2(0).getAs[Long]("checkpoint_version")
+        v2 should be > v1
+
+        // Now manually write a stale _last_checkpoint pointing to v1
+        // This simulates the TOCTOU race regression
+        val transactionLogPath = s"$path/_transaction_log"
+        val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val manifestIO = StateManifestIO(cloudProvider)
+          val staleCheckpointJson =
+            s"""{"version":$v1,"size":2,"sizeInBytes":1000,"numFiles":2,"createdTime":${System.currentTimeMillis()},"format":"avro-state","stateDir":"${manifestIO.formatStateDir(v1)}"}"""
+          cloudProvider.writeFile(s"$transactionLogPath/_last_checkpoint", staleCheckpointJson.getBytes("UTF-8"))
+
+          // Verify _last_checkpoint now points to v1 (stale)
+          val currentVersion = manifestIO.getCurrentCheckpointVersion(transactionLogPath)
+          currentVersion shouldBe Some(v1)
+
+          // But state v2 still exists
+          manifestIO.stateExists(s"$transactionLogPath/${manifestIO.formatStateDir(v2)}") shouldBe true
+
+          // Use TransactionLogCheckpoint to get verified info
+          val checkpoint = new io.indextables.spark.transaction.TransactionLogCheckpoint(
+            new org.apache.hadoop.fs.Path(transactionLogPath),
+            cloudProvider,
+            new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
+          )
+
+          // getLastCheckpointInfo should return stale v1
+          val unverifiedInfo = checkpoint.getLastCheckpointInfo()
+          unverifiedInfo.isDefined shouldBe true
+          unverifiedInfo.get.version shouldBe v1
+
+          // getLastCheckpointInfoVerified should detect and return corrected v2
+          val verifiedInfo = checkpoint.getLastCheckpointInfoVerified()
+          verifiedInfo.isDefined shouldBe true
+          verifiedInfo.get.version shouldBe v2
+          verifiedInfo.get.stateDir shouldBe Some(manifestIO.formatStateDir(v2))
+
+          checkpoint.close()
+        } finally {
+          cloudProvider.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.state.format")
+      }
+    }
+  }
+
+  test("schemaRegistry works with Map fields WITHOUT explicit avro config (like JsonMapFieldIntegrationTest)") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // DO NOT set spark.indextables.state.format - let it use defaults
+      // This simulates what JsonMapFieldIntegrationTest does
+
+      try {
+        // Write data with Map field - similar to JsonMapFieldIntegrationTest
+        val data = Seq(
+          (1, Map("color" -> "red", "size" -> "large")),
+          (2, Map("color" -> "blue", "size" -> "small"))
+        )
+        spark.createDataFrame(data).toDF("id", "attributes")
+          .write.format(provider)
+          .mode("overwrite")
+          .save(path)
+
+        // Debug: Check what _last_checkpoint contains
+        val transactionLogPath = s"$path/_transaction_log"
+        val lastCheckpointPath = s"$transactionLogPath/_last_checkpoint"
+        val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+        try {
+          val checkpointExists = cloudProvider.exists(lastCheckpointPath)
+          println(s"DEBUG: _last_checkpoint exists = $checkpointExists")
+          if (checkpointExists) {
+            val content = new String(cloudProvider.readFile(lastCheckpointPath), "UTF-8")
+            println(s"DEBUG: _last_checkpoint content = $content")
+          }
+
+          // List files in transaction log
+          val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
+          println(s"DEBUG: Transaction log files:")
+          files.foreach(f => println(s"  - ${f.path}"))
+        } finally {
+          cloudProvider.close()
+        }
+
+        // Now create a new cloud provider to read state
+        val cloudProvider2 = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val manifestIO = StateManifestIO(cloudProvider2)
+
+          // Find the state directory
+          val stateDir = cloudProvider2.listFiles(transactionLogPath, recursive = false)
+            .filter(f => f.path.contains("state-v"))
+            .headOption
+            .map(_.path)
+            .getOrElse(fail("No state directory found"))
+
+          println(s"DEBUG: Found state directory: $stateDir")
+
+          // Read the state manifest
+          val manifest = manifestIO.readStateManifest(stateDir)
+
+          println(s"DEBUG MAP: schemaRegistry size = ${manifest.schemaRegistry.size}")
+          println(s"DEBUG MAP: schemaRegistry keys = ${manifest.schemaRegistry.keys.mkString(", ")}")
+          manifest.schemaRegistry should not be empty
+
+          // Read entries and verify docMappingRef
+          val manifestPaths = manifestIO.resolveManifestPaths(manifest, transactionLogPath, stateDir)
+          val avroReader = AvroManifestReader(cloudProvider2)
+          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+
+          fileEntries.foreach { entry =>
+            println(s"DEBUG MAP: entry docMappingRef=${entry.docMappingRef}")
+            entry.docMappingRef shouldBe defined
+          }
+
+          // Convert and verify docMappingJson restored
+          val addActions = avroReader.toAddActions(fileEntries, manifest.schemaRegistry)
+          addActions.foreach { add =>
+            println(s"DEBUG MAP: AddAction docMappingJson defined=${add.docMappingJson.isDefined}")
+            add.docMappingJson shouldBe defined
+          }
+
+          // Read the actual data using Spark DataFrame
+          val df = spark.read.format(provider).load(path)
+          println(s"DEBUG: About to call df.count()")
+          df.count() shouldBe 2
+          println(s"DEBUG: df.count() succeeded!")
+
+        } finally {
+          cloudProvider2.close()
+        }
+      } finally {
+        // No config to unset since we didn't set any
+      }
+    }
+  }
+
+  test("schemaRegistry is correctly stored and restored through Avro state") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Enable Avro format for the write
+      spark.conf.set("spark.indextables.state.format", "avro")
+
+      try {
+        // Write data - this should create AddActions with docMappingJson
+        val data = Seq((1, "doc1"), (2, "doc2"))
+        spark.createDataFrame(data).toDF("id", "content")
+          .write.format(provider)
+          .mode("overwrite")
+          .save(path)
+
+        // Read and verify the state manifest has schemaRegistry populated
+        val transactionLogPath = s"$path/_transaction_log"
+        val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+          transactionLogPath,
+          new org.apache.spark.sql.util.CaseInsensitiveStringMap(new java.util.HashMap[String, String]()),
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val manifestIO = StateManifestIO(cloudProvider)
+
+          // Find the state directory
+          val stateDir = cloudProvider.listFiles(transactionLogPath, recursive = false)
+            .filter(f => f.path.contains("state-v"))
+            .headOption
+            .map(_.path)
+            .getOrElse(fail("No state directory found"))
+
+          // Read the state manifest
+          val manifest = manifestIO.readStateManifest(stateDir)
+
+          // Verify schemaRegistry is NOT empty
+          println(s"DEBUG: schemaRegistry size = ${manifest.schemaRegistry.size}")
+          println(s"DEBUG: schemaRegistry keys = ${manifest.schemaRegistry.keys.mkString(", ")}")
+          println(s"DEBUG: numFiles = ${manifest.numFiles}")
+          println(s"DEBUG: manifests = ${manifest.manifests.size}")
+
+          manifest.schemaRegistry should not be empty
+
+          // Read the manifest file entries and verify they have docMappingRef
+          val manifestPaths = manifestIO.resolveManifestPaths(manifest, transactionLogPath, stateDir)
+          val avroReader = AvroManifestReader(cloudProvider)
+          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+
+          println(s"DEBUG: fileEntries count = ${fileEntries.size}")
+          fileEntries.foreach { entry =>
+            println(s"DEBUG: entry path=${entry.path}, docMappingRef=${entry.docMappingRef}")
+          }
+
+          // All entries should have docMappingRef set
+          fileEntries.foreach { entry =>
+            entry.docMappingRef shouldBe defined
+          }
+
+          // Convert to AddActions and verify docMappingJson is restored
+          val addActions = avroReader.toAddActions(fileEntries, manifest.schemaRegistry)
+          addActions.foreach { add =>
+            println(s"DEBUG: AddAction path=${add.path}, docMappingJson defined=${add.docMappingJson.isDefined}")
+            add.docMappingJson shouldBe defined
+          }
+
+          // Finally, verify we can actually read the table
+          val df = spark.read.format(provider).load(path)
+          df.count() shouldBe 2
+
+        } finally {
+          cloudProvider.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.state.format")
+      }
     }
   }
 }

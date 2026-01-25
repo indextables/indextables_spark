@@ -422,6 +422,197 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(afterDrop.filter($"month" === 6).count() == 1)
   }
 
+  test("DROP PARTITIONS should work with separate inserts to different partitions") {
+    // Bug reproduction: https://github.com/...
+    // 1. Create table with partition key
+    // 2. Insert to partition 01
+    // 3. Insert to partition 02 (separate transaction)
+    // 4. Try to drop partition 02 - should work, but bug shows "no_action" "table is empty"
+    // 5. Try to drop partition 01 - success but partition 02 also becomes unreadable
+
+    val tablePath = s"$tempDir/separate_inserts_bug"
+
+    val sparkSession = spark
+    import sparkSession.implicits._
+
+    // First insert: partition 01
+    println("=== Insert 1: partition=01 ===")
+    val data1 = Seq(
+      (1, "Alice", "01"),
+      (2, "Bob", "01")
+    ).toDF("id", "name", "partition_key")
+
+    data1.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .partitionBy("partition_key")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Verify first insert
+    val count1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+    println(s"After insert 1: count=$count1")
+    assert(count1 == 2, s"Expected 2 records after first insert, got $count1")
+
+    // Second insert: partition 02 (separate transaction)
+    println("=== Insert 2: partition=02 ===")
+    val data2 = Seq(
+      (3, "Charlie", "02"),
+      (4, "Diana", "02")
+    ).toDF("id", "name", "partition_key")
+
+    data2.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .partitionBy("partition_key")
+      .mode("append")
+      .save(tablePath)
+
+    // Verify second insert
+    val count2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+    println(s"After insert 2: count=$count2")
+    assert(count2 == 4, s"Expected 4 records after second insert, got $count2")
+
+    // Verify both partitions exist
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val partition01Count = df.filter($"partition_key" === "01").count()
+    val partition02Count = df.filter($"partition_key" === "02").count()
+    println(s"Partition counts: 01=$partition01Count, 02=$partition02Count")
+    assert(partition01Count == 2, s"Expected 2 in partition 01, got $partition01Count")
+    assert(partition02Count == 2, s"Expected 2 in partition 02, got $partition02Count")
+
+    // Now try to drop partition 02
+    println("=== Drop partition 02 ===")
+    val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE partition_key = '02'").collect()
+    dropResult.foreach(r => println(s"Drop result: ${r.mkString(", ")}"))
+
+    val dropStatus = dropResult(0).getString(1)
+    val dropMessage = dropResult(0).getString(5)
+    println(s"Drop status: $dropStatus, message: $dropMessage")
+
+    // BUG: User reported getting "no_action" "table is empty" here
+    assert(dropStatus == "success", s"Expected 'success' but got '$dropStatus' with message: $dropMessage")
+    assert(dropResult(0).getLong(2) == 1, s"Expected 1 partition dropped, got ${dropResult(0).getLong(2)}")
+
+    // Verify partition 02 is dropped but partition 01 still exists
+    val afterDropCount = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+    println(s"After drop 02: count=$afterDropCount")
+    assert(afterDropCount == 2, s"Expected 2 records after dropping partition 02, got $afterDropCount")
+
+    val afterDrop01 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath).filter($"partition_key" === "01").count()
+    val afterDrop02 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath).filter($"partition_key" === "02").count()
+    println(s"After drop: partition 01=$afterDrop01, partition 02=$afterDrop02")
+
+    assert(afterDrop01 == 2, s"Partition 01 should still have 2 records, got $afterDrop01")
+    assert(afterDrop02 == 0, s"Partition 02 should be empty, got $afterDrop02")
+
+    println("=== Test passed: DROP PARTITIONS works correctly with separate inserts ===")
+  }
+
+  test("DROP PARTITIONS with Avro checkpoint should work with separate inserts to different partitions") {
+    // Same bug but with explicit Avro checkpoint creation between inserts
+    val tablePath = s"$tempDir/avro_separate_inserts_bug"
+
+    val sparkSession = spark
+    import sparkSession.implicits._
+
+    // Enable Avro state format
+    spark.conf.set("spark.indextables.state.format", "avro")
+
+    try {
+      // First insert: partition 01
+      println("=== [AVRO] Insert 1: partition=01 ===")
+      val data1 = Seq(
+        (1, "Alice", "01"),
+        (2, "Bob", "01")
+      ).toDF("id", "name", "partition_key")
+
+      data1.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("partition_key")
+        .mode("overwrite")
+        .save(tablePath)
+
+      // Create Avro checkpoint after first insert
+      println("=== [AVRO] Creating checkpoint after insert 1 ===")
+      spark.sql(s"CHECKPOINT INDEXTABLES '$tablePath'").collect()
+
+      // Verify checkpoint format
+      val stateResult1 = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tablePath'").collect()
+      println(s"State format after insert 1: ${stateResult1(0).getAs[String]("format")}")
+
+      // Verify first insert
+      val count1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      println(s"[AVRO] After insert 1: count=$count1")
+      assert(count1 == 2, s"Expected 2 records after first insert, got $count1")
+
+      // Second insert: partition 02 (separate transaction)
+      println("=== [AVRO] Insert 2: partition=02 ===")
+      val data2 = Seq(
+        (3, "Charlie", "02"),
+        (4, "Diana", "02")
+      ).toDF("id", "name", "partition_key")
+
+      data2.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("partition_key")
+        .mode("append")
+        .save(tablePath)
+
+      // Create Avro checkpoint after second insert
+      println("=== [AVRO] Creating checkpoint after insert 2 ===")
+      spark.sql(s"CHECKPOINT INDEXTABLES '$tablePath'").collect()
+
+      // Verify checkpoint format
+      val stateResult2 = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tablePath'").collect()
+      println(s"State format after insert 2: ${stateResult2(0).getAs[String]("format")}")
+
+      // Verify second insert
+      val count2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      println(s"[AVRO] After insert 2: count=$count2")
+      assert(count2 == 4, s"Expected 4 records after second insert, got $count2")
+
+      // Verify both partitions exist
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val partition01Count = df.filter($"partition_key" === "01").count()
+      val partition02Count = df.filter($"partition_key" === "02").count()
+      println(s"[AVRO] Partition counts: 01=$partition01Count, 02=$partition02Count")
+      assert(partition01Count == 2, s"Expected 2 in partition 01, got $partition01Count")
+      assert(partition02Count == 2, s"Expected 2 in partition 02, got $partition02Count")
+
+      // Now try to drop partition 02
+      println("=== [AVRO] Drop partition 02 ===")
+      val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE partition_key = '02'").collect()
+      dropResult.foreach(r => println(s"[AVRO] Drop result: ${r.mkString(", ")}"))
+
+      val dropStatus = dropResult(0).getString(1)
+      val dropMessage = dropResult(0).getString(5)
+      println(s"[AVRO] Drop status: $dropStatus, message: $dropMessage")
+
+      // BUG: User reported getting "no_action" "table is empty" here
+      assert(dropStatus == "success", s"Expected 'success' but got '$dropStatus' with message: $dropMessage")
+      assert(dropResult(0).getLong(2) == 1, s"Expected 1 partition dropped, got ${dropResult(0).getLong(2)}")
+
+      // Verify partition 02 is dropped but partition 01 still exists
+      val afterDropCount = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      println(s"[AVRO] After drop 02: count=$afterDropCount")
+      assert(afterDropCount == 2, s"Expected 2 records after dropping partition 02, got $afterDropCount")
+
+      val afterDrop01 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath).filter($"partition_key" === "01").count()
+      val afterDrop02 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath).filter($"partition_key" === "02").count()
+      println(s"[AVRO] After drop: partition 01=$afterDrop01, partition 02=$afterDrop02")
+
+      assert(afterDrop01 == 2, s"Partition 01 should still have 2 records, got $afterDrop01")
+      assert(afterDrop02 == 0, s"Partition 02 should be empty, got $afterDrop02")
+
+      println("=== [AVRO] Test passed: DROP PARTITIONS works correctly with separate inserts ===")
+    } finally {
+      spark.conf.unset("spark.indextables.state.format")
+    }
+  }
+
   test("Multiple DROP INDEXTABLES PARTITIONS operations should be cumulative") {
     val tablePath = s"$tempDir/cumulative_test"
 

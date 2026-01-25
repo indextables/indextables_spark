@@ -168,6 +168,190 @@ object AvroSchemas {
   lazy val FILE_ENTRY_SCHEMA: Schema = new Schema.Parser().parse(FILE_ENTRY_SCHEMA_JSON)
 
   /**
+   * The PartitionBounds Avro schema definition as a JSON string.
+   */
+  val PARTITION_BOUNDS_SCHEMA_JSON: String =
+    """{
+      |  "type": "record",
+      |  "name": "PartitionBounds",
+      |  "namespace": "io.indextables.state",
+      |  "doc": "Min/max bounds for a partition column",
+      |  "fields": [
+      |    {
+      |      "name": "min",
+      |      "type": ["null", "string"],
+      |      "default": null,
+      |      "doc": "Minimum value for this partition column (None if all nulls)"
+      |    },
+      |    {
+      |      "name": "max",
+      |      "type": ["null", "string"],
+      |      "default": null,
+      |      "doc": "Maximum value for this partition column (None if all nulls)"
+      |    }
+      |  ]
+      |}""".stripMargin
+
+  /** Parsed PartitionBounds schema (lazily initialized) */
+  lazy val PARTITION_BOUNDS_SCHEMA: Schema = new Schema.Parser().parse(PARTITION_BOUNDS_SCHEMA_JSON)
+
+  /**
+   * The ManifestInfo Avro schema definition as a JSON string.
+   */
+  val MANIFEST_INFO_SCHEMA_JSON: String =
+    """{
+      |  "type": "record",
+      |  "name": "ManifestInfo",
+      |  "namespace": "io.indextables.state",
+      |  "doc": "Metadata about a manifest file within a state directory",
+      |  "fields": [
+      |    {
+      |      "name": "path",
+      |      "type": "string",
+      |      "doc": "Relative path to the manifest file"
+      |    },
+      |    {
+      |      "name": "numEntries",
+      |      "type": "long",
+      |      "doc": "Number of file entries in this manifest"
+      |    },
+      |    {
+      |      "name": "minAddedAtVersion",
+      |      "type": "long",
+      |      "doc": "Minimum addedAtVersion across all entries"
+      |    },
+      |    {
+      |      "name": "maxAddedAtVersion",
+      |      "type": "long",
+      |      "doc": "Maximum addedAtVersion across all entries"
+      |    },
+      |    {
+      |      "name": "partitionBounds",
+      |      "type": ["null", {"type": "map", "values": {
+      |        "type": "record",
+      |        "name": "PartitionBoundsInline",
+      |        "fields": [
+      |          {"name": "min", "type": ["null", "string"], "default": null},
+      |          {"name": "max", "type": ["null", "string"], "default": null}
+      |        ]
+      |      }}],
+      |      "default": null,
+      |      "doc": "Optional partition bounds for partition pruning"
+      |    },
+      |    {
+      |      "name": "tombstoneCount",
+      |      "type": "long",
+      |      "default": 0,
+      |      "doc": "Number of tombstones affecting entries in this manifest"
+      |    },
+      |    {
+      |      "name": "liveEntryCount",
+      |      "type": "long",
+      |      "default": -1,
+      |      "doc": "Number of live entries (numEntries - tombstoneCount)"
+      |    }
+      |  ]
+      |}""".stripMargin
+
+  /** Parsed ManifestInfo schema (lazily initialized) */
+  lazy val MANIFEST_INFO_SCHEMA: Schema = new Schema.Parser().parse(MANIFEST_INFO_SCHEMA_JSON)
+
+  /**
+   * The StateManifest Avro schema definition as a JSON string.
+   *
+   * This is the metadata file stored in each state directory that describes
+   * the complete table state at a specific version.
+   */
+  val STATE_MANIFEST_SCHEMA_JSON: String =
+    """{
+      |  "type": "record",
+      |  "name": "StateManifest",
+      |  "namespace": "io.indextables.state",
+      |  "doc": "The state manifest that describes the complete table state",
+      |  "fields": [
+      |    {
+      |      "name": "formatVersion",
+      |      "type": "int",
+      |      "doc": "Version of the state file format"
+      |    },
+      |    {
+      |      "name": "stateVersion",
+      |      "type": "long",
+      |      "doc": "Transaction version this state represents"
+      |    },
+      |    {
+      |      "name": "createdAt",
+      |      "type": "long",
+      |      "doc": "Timestamp when this state was created (epoch milliseconds)"
+      |    },
+      |    {
+      |      "name": "numFiles",
+      |      "type": "long",
+      |      "doc": "Total number of live files (after applying tombstones)"
+      |    },
+      |    {
+      |      "name": "totalBytes",
+      |      "type": "long",
+      |      "doc": "Total size of all live files in bytes"
+      |    },
+      |    {
+      |      "name": "manifests",
+      |      "type": {
+      |        "type": "array",
+      |        "items": {
+      |          "type": "record",
+      |          "name": "ManifestInfoItem",
+      |          "fields": [
+      |            {"name": "path", "type": "string"},
+      |            {"name": "numEntries", "type": "long"},
+      |            {"name": "minAddedAtVersion", "type": "long"},
+      |            {"name": "maxAddedAtVersion", "type": "long"},
+      |            {"name": "partitionBounds", "type": ["null", {"type": "map", "values": {
+      |              "type": "record",
+      |              "name": "PartitionBoundsItem",
+      |              "fields": [
+      |                {"name": "min", "type": ["null", "string"], "default": null},
+      |                {"name": "max", "type": ["null", "string"], "default": null}
+      |              ]
+      |            }}], "default": null},
+      |            {"name": "tombstoneCount", "type": "long", "default": 0},
+      |            {"name": "liveEntryCount", "type": "long", "default": -1}
+      |          ]
+      |        }
+      |      },
+      |      "doc": "List of manifest files containing file entries"
+      |    },
+      |    {
+      |      "name": "tombstones",
+      |      "type": {"type": "array", "items": "string"},
+      |      "default": [],
+      |      "doc": "List of paths that have been removed (applied during read)"
+      |    },
+      |    {
+      |      "name": "schemaRegistry",
+      |      "type": {"type": "map", "values": "string"},
+      |      "default": {},
+      |      "doc": "Schema registry for doc mapping deduplication"
+      |    },
+      |    {
+      |      "name": "protocolVersion",
+      |      "type": "int",
+      |      "default": 4,
+      |      "doc": "Protocol version (4 for Avro state format)"
+      |    },
+      |    {
+      |      "name": "metadata",
+      |      "type": ["null", "string"],
+      |      "default": null,
+      |      "doc": "JSON-encoded MetadataAction for fast getMetadata()"
+      |    }
+      |  ]
+      |}""".stripMargin
+
+  /** Parsed StateManifest schema (lazily initialized) */
+  lazy val STATE_MANIFEST_SCHEMA: Schema = new Schema.Parser().parse(STATE_MANIFEST_SCHEMA_JSON)
+
+  /**
    * Load schema from resources (alternative to embedded schema).
    *
    * @param resourcePath
@@ -298,5 +482,120 @@ object AvroSchemas {
     record.put("addedAtTimestamp", entry.addedAtTimestamp)
 
     record
+  }
+
+  /**
+   * Convert a StateManifest to a GenericRecord.
+   *
+   * @param manifest
+   *   StateManifest model object
+   * @return
+   *   Avro GenericRecord
+   */
+  def stateManifestToGenericRecord(manifest: StateManifest): GenericRecord = {
+    import scala.jdk.CollectionConverters._
+    import org.apache.avro.generic.GenericData
+
+    val schema = STATE_MANIFEST_SCHEMA
+    val record = new GenericData.Record(schema)
+
+    record.put("formatVersion", manifest.formatVersion)
+    record.put("stateVersion", manifest.stateVersion)
+    record.put("createdAt", manifest.createdAt)
+    record.put("numFiles", manifest.numFiles)
+    record.put("totalBytes", manifest.totalBytes)
+
+    // Convert manifests array
+    val manifestInfoSchema = schema.getField("manifests").schema().getElementType
+    val partitionBoundsSchema = manifestInfoSchema.getField("partitionBounds").schema().getTypes.get(1).getValueType
+    val manifestRecords = manifest.manifests.map { info =>
+      val manifestRecord = new GenericData.Record(manifestInfoSchema)
+      manifestRecord.put("path", info.path)
+      manifestRecord.put("numEntries", info.numEntries)
+      manifestRecord.put("minAddedAtVersion", info.minAddedAtVersion)
+      manifestRecord.put("maxAddedAtVersion", info.maxAddedAtVersion)
+
+      // Convert partition bounds
+      val boundsMap = info.partitionBounds.map { bounds =>
+        bounds.map { case (col, pb) =>
+          val boundsRecord = new GenericData.Record(partitionBoundsSchema)
+          boundsRecord.put("min", pb.min.orNull)
+          boundsRecord.put("max", pb.max.orNull)
+          col -> boundsRecord
+        }.asJava
+      }.orNull
+      manifestRecord.put("partitionBounds", boundsMap)
+
+      manifestRecord.put("tombstoneCount", info.tombstoneCount)
+      manifestRecord.put("liveEntryCount", info.liveEntryCount)
+      manifestRecord
+    }.asJava
+
+    record.put("manifests", manifestRecords)
+    record.put("tombstones", manifest.tombstones.asJava)
+    record.put("schemaRegistry", manifest.schemaRegistry.asJava)
+    record.put("protocolVersion", manifest.protocolVersion)
+    record.put("metadata", manifest.metadata.orNull)
+
+    record
+  }
+
+  /**
+   * Convert a GenericRecord to a StateManifest.
+   *
+   * @param record
+   *   Avro GenericRecord with StateManifest schema
+   * @return
+   *   StateManifest model object
+   */
+  def genericRecordToStateManifest(record: GenericRecord): StateManifest = {
+    import scala.jdk.CollectionConverters._
+
+    def getOptionalString(field: String): Option[String] = {
+      Option(record.get(field)).map(_.toString)
+    }
+
+    // Parse manifests array
+    val manifestRecords = record.get("manifests").asInstanceOf[java.util.Collection[GenericRecord]].asScala
+    val manifests = manifestRecords.map { manifestRecord =>
+      val partitionBounds = Option(manifestRecord.get("partitionBounds")).map { boundsMap =>
+        boundsMap.asInstanceOf[java.util.Map[CharSequence, GenericRecord]].asScala.map { case (col, boundsRecord) =>
+          val min = Option(boundsRecord.get("min")).map(_.toString)
+          val max = Option(boundsRecord.get("max")).map(_.toString)
+          col.toString -> PartitionBounds(min, max)
+        }.toMap
+      }
+
+      ManifestInfo(
+        path = manifestRecord.get("path").toString,
+        numEntries = manifestRecord.get("numEntries").asInstanceOf[Long],
+        minAddedAtVersion = manifestRecord.get("minAddedAtVersion").asInstanceOf[Long],
+        maxAddedAtVersion = manifestRecord.get("maxAddedAtVersion").asInstanceOf[Long],
+        partitionBounds = partitionBounds,
+        tombstoneCount = Option(manifestRecord.get("tombstoneCount")).map(_.asInstanceOf[Long]).getOrElse(0L),
+        liveEntryCount = Option(manifestRecord.get("liveEntryCount")).map(_.asInstanceOf[Long]).getOrElse(-1L)
+      )
+    }.toSeq
+
+    // Parse tombstones
+    val tombstones = record.get("tombstones").asInstanceOf[java.util.Collection[CharSequence]].asScala
+      .map(_.toString).toSeq
+
+    // Parse schema registry
+    val schemaRegistry = record.get("schemaRegistry").asInstanceOf[java.util.Map[CharSequence, CharSequence]].asScala
+      .map { case (k, v) => k.toString -> v.toString }.toMap
+
+    StateManifest(
+      formatVersion = record.get("formatVersion").asInstanceOf[Int],
+      stateVersion = record.get("stateVersion").asInstanceOf[Long],
+      createdAt = record.get("createdAt").asInstanceOf[Long],
+      numFiles = record.get("numFiles").asInstanceOf[Long],
+      totalBytes = record.get("totalBytes").asInstanceOf[Long],
+      manifests = manifests,
+      tombstones = tombstones,
+      schemaRegistry = schemaRegistry,
+      protocolVersion = Option(record.get("protocolVersion")).map(_.asInstanceOf[Int]).getOrElse(4),
+      metadata = getOptionalString("metadata")
+    )
   }
 }

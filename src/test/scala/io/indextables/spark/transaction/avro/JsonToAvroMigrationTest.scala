@@ -419,4 +419,157 @@ class JsonToAvroMigrationTest extends TestBase {
       spark.conf.unset("spark.indextables.state.format")
     }
   }
+
+  test("Migration from JSON with 11 transactions validates shared manifest directory structure") {
+    withTempPath { tempDir =>
+      val path = tempDir
+      val txLogPath = new java.io.File(path, "_transaction_log")
+      val manifestsDir = new java.io.File(txLogPath, "manifests")
+
+      println(s"Testing shared manifest directory structure after migration at: $path")
+
+      // ========================================
+      // Phase 1: Create JSON-based table with 11 transactions
+      // ========================================
+      println("\nPhase 1: Creating JSON-based table with 11 transactions...")
+
+      // Explicitly set JSON format (default is now avro)
+      spark.conf.set("spark.indextables.state.format", "json")
+
+      // Create 11 transactions (each write is a transaction)
+      var totalRecords = 0
+      for (i <- 1 to 11) {
+        val data = (1 to 5).map(j => ((i - 1) * 5 + j, s"Document $i-$j", i * 10))
+        val df = spark.createDataFrame(data).toDF("id", "content", "score")
+        df.write.format(provider)
+          .option("spark.indextables.indexing.fastfields", "score")
+          .option("spark.indextables.state.format", "json")
+          .mode(if (i == 1) "overwrite" else "append")
+          .save(path)
+        totalRecords += 5
+      }
+
+      println(s"  Created 11 transactions with $totalRecords total records")
+
+      // Verify count before migration
+      val preMigrationCount = spark.read.format(provider).load(path).count()
+      preMigrationCount shouldBe totalRecords
+
+      println(s"  Pre-migration count: $preMigrationCount")
+
+      // ========================================
+      // Phase 2: Run CHECKPOINT to convert to Avro
+      // ========================================
+      println("\nPhase 2: Running CHECKPOINT to convert to Avro format...")
+
+      spark.conf.set("spark.indextables.state.format", "avro")
+      val checkpointResult = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+
+      val checkpointVersion = checkpointResult(0).getAs[Long]("checkpoint_version")
+      println(s"  Checkpoint created at version: $checkpointVersion")
+
+      // Verify state format is avro-state
+      val state1 = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      state1(0).getAs[String]("format") shouldBe "avro-state"
+
+      println(s"  State format after checkpoint: ${state1(0).getAs[String]("format")}")
+
+      // ========================================
+      // Phase 3: Run an Avro transaction (append more data)
+      // ========================================
+      println("\nPhase 3: Running additional Avro transaction...")
+
+      val avroTxData = (1 to 10).map(j => (totalRecords + j, s"Avro document $j", 999))
+      val dfAvro = spark.createDataFrame(avroTxData).toDF("id", "content", "score")
+      dfAvro.write.format(provider)
+        .option("spark.indextables.indexing.fastfields", "score")
+        .mode("append")
+        .save(path)
+      totalRecords += 10
+
+      println(s"  Added 10 more records, total now: $totalRecords")
+
+      // ========================================
+      // Validation 1: Verify all data can be read
+      // ========================================
+      println("\nValidation 1: Verifying all data can be read...")
+
+      val finalRead = spark.read.format(provider).load(path)
+      val finalCount = finalRead.count()
+      finalCount shouldBe totalRecords
+
+      // Verify we can read specific data from both phases
+      val avroRecords = finalRead.filter(col("score") === 999).count()
+      avroRecords shouldBe 10
+
+      val jsonRecords = finalRead.filter(col("score") =!= 999).count()
+      jsonRecords shouldBe (totalRecords - 10)
+
+      println(s"  Total records: $finalCount")
+      println(s"  Records from JSON phase: $jsonRecords")
+      println(s"  Records from Avro phase: $avroRecords")
+
+      // ========================================
+      // Validation 2: Verify 2 manifests in manifests/ directory
+      // ========================================
+      println("\nValidation 2: Verifying manifests in shared directory...")
+
+      manifestsDir.exists() shouldBe true
+
+      val manifestFiles = manifestsDir.listFiles().filter(_.getName.endsWith(".avro"))
+      println(s"  Manifests directory exists: ${manifestsDir.exists()}")
+      println(s"  Manifest files found: ${manifestFiles.length}")
+      manifestFiles.foreach(f => println(s"    - ${f.getName}"))
+
+      // Should have exactly 2 manifests:
+      // - One from the CHECKPOINT (containing all JSON transaction files)
+      // - One from the Avro append (containing new files)
+      manifestFiles.length shouldBe 2
+
+      // ========================================
+      // Validation 3: Verify 2 state directories contain only manifest JSON
+      // ========================================
+      println("\nValidation 3: Verifying state directories contain only _manifest.avro...")
+
+      val stateDirs = txLogPath.listFiles()
+        .filter(f => f.isDirectory && f.getName.startsWith("state-v"))
+        .sortBy(_.getName)
+
+      println(s"  State directories found: ${stateDirs.length}")
+      stateDirs.foreach { dir =>
+        val contents = dir.listFiles().map(_.getName).sorted
+        println(s"    - ${dir.getName}: [${contents.mkString(", ")}]")
+      }
+
+      // Should have exactly 2 state directories
+      stateDirs.length shouldBe 2
+
+      // Each state directory should only contain _manifest.avro (no nested manifests)
+      // Filter out Hadoop .crc checksum files
+      stateDirs.foreach { dir =>
+        val contents = dir.listFiles().filterNot(_.getName.endsWith(".crc"))
+        contents.length shouldBe 1
+        contents.head.getName shouldBe "_manifest.avro"
+      }
+
+      // ========================================
+      // Final summary
+      // ========================================
+      println(s"""
+      |============================================
+      |SHARED MANIFEST DIRECTORY TEST COMPLETED
+      |============================================
+      |Path: $path
+      |Total transactions: 12 (11 JSON + 1 Avro)
+      |Total records: $totalRecords
+      |Manifests in shared directory: ${manifestFiles.length}
+      |State directories: ${stateDirs.length}
+      |All state dirs contain only _manifest.avro: Yes
+      |============================================
+      """.stripMargin)
+
+      // Clean up
+      spark.conf.unset("spark.indextables.state.format")
+    }
+  }
 }
