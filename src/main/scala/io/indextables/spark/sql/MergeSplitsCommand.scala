@@ -596,8 +596,23 @@ class MergeSplitsExecutor(
 
     logger.info(s"Using MAX SOURCE SPLITS PER MERGE: $effectiveMaxSourceSplitsPerMerge")
 
-    // === SINGLE PLANNING PHASE: Read transaction log ONCE and plan ALL merge groups upfront ===
+    // === MULTI-GENERATION MERGE LOOP ===
+    // Execute merge generations until no more work is found.
+    // Each iteration: read fresh files from txlog, plan one generation, execute it.
 
+    // Accumulator variables for tracking total results across all generations
+    var totalMergedFilesAccum = 0
+    var totalMergeGroupsAccum = 0
+    var totalOriginalSizeAccum = 0L
+    var totalMergedSizeAccum = 0L
+    var totalSuccessfulBatchesAccum = 0
+    var totalFailedBatchesAccum = 0
+    var totalBatchesAccum = 0
+    var currentGeneration = 0
+    var totalGenerations = 0
+    var hasMoreWork = true
+
+    // Parse partition predicates once (doesn't change between generations)
     // Parse partition predicates and convert to Spark Filters for Avro manifest pruning
     val (parsedPredicates, partitionFilters) = if (partitionPredicates.nonEmpty && metadata.partitionColumns.nonEmpty) {
       try {
@@ -617,6 +632,16 @@ class MergeSplitsExecutor(
     } else {
       (Seq.empty, Seq.empty)
     }
+
+    // === GENERATION LOOP: Execute until no more merge groups are found ===
+    while (hasMoreWork && currentGeneration < maxPasses) {
+      currentGeneration += 1
+      logger.info(s"=== Starting merge generation $currentGeneration ===")
+
+      // Invalidate transaction log cache to get fresh state after previous generation
+      if (currentGeneration > 1) {
+        transactionLog.invalidateCache()
+      }
 
     // Get current files from transaction log with manifest-level pruning if filters are available
     val allFiles = if (partitionFilters.nonEmpty) {
@@ -667,20 +692,16 @@ class MergeSplitsExecutor(
       effectiveMaxSourceSplitsPerMerge
     )
 
-    logger.info(s"Planned ${allMergeGroups.length} total merge groups across $generationCount generations")
+    logger.info(s"Planned ${allMergeGroups.length} merge groups for generation $currentGeneration (estimated $generationCount total generations)")
 
-    // If no merge groups found, return early
+    // If no merge groups found in this generation, we're done
     if (allMergeGroups.isEmpty) {
-      logger.info("No merge groups found - all splits are already optimal size")
-      return Seq(
-        Row(
-          tablePath.toString,
-          Row("no_action", null, null, null, null, "All splits are already optimal size"),
-          awsConfig.tempDirectoryPath.getOrElse(null),
-          if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
-        )
-      )
-    }
+      logger.info(s"Generation $currentGeneration: No merge groups found - all splits are optimal size")
+      hasMoreWork = false
+      // For generation 1, this means no work at all - will be handled after the loop
+      // For generation 2+, this means we've completed all generations
+    } else {
+    // Continue with execution for this generation
 
     // Sort ALL merge groups by:
     // 1. Primary: source split count (descending) - prioritize high-impact merges
@@ -1120,23 +1141,47 @@ class MergeSplitsExecutor(
         } finally
           customTaskSupport.environment.shutdown()
 
-    // Aggregate results from all batches
-    val totalMergedFiles  = allResults.map(_.mergedFiles).sum
-    val totalMergeGroups  = allResults.length
-    val totalOriginalSize = allResults.map(_.originalSize).sum
-    val totalMergedSize   = allResults.map(_.mergedSize).sum
-    val totalSuccessful   = successfulBatchCount
-    val totalFailed       = failedBatchCount
+    // Aggregate results from this generation's batches into accumulators
+    val genMergedFiles  = allResults.map(_.mergedFiles).sum
+    val genMergeGroups  = allResults.length
+    val genOriginalSize = allResults.map(_.originalSize).sum
+    val genMergedSize   = allResults.map(_.mergedSize).sum
 
-    val status = if (totalFailed == 0 && totalMergedFiles > 0) "success"
-                 else if (totalMergedFiles == 0) "no_action"
+    totalMergedFilesAccum += genMergedFiles
+    totalMergeGroupsAccum += genMergeGroups
+    totalOriginalSizeAccum += genOriginalSize
+    totalMergedSizeAccum += genMergedSize
+    totalSuccessfulBatchesAccum += successfulBatchCount
+    totalFailedBatchesAccum += failedBatchCount
+    totalBatchesAccum += totalBatches
+    totalGenerations = currentGeneration
+
+    logger.info(s"Generation $currentGeneration completed: merged $genMergedFiles files into $genMergeGroups new splits")
+    logger.info(s"Generation $currentGeneration batches: $totalBatches, successful: $successfulBatchCount, failed: $failedBatchCount")
+    logger.info(s"Generation $currentGeneration size change: $genOriginalSize bytes -> $genMergedSize bytes")
+
+    // Check if we need to continue (more generations might be needed)
+    // If this generation produced merged files, there might be more work in the next generation
+    if (genMergedFiles == 0) {
+      hasMoreWork = false
+      logger.info(s"Generation $currentGeneration produced no merges, stopping")
+    } else {
+      logger.info(s"Generation $currentGeneration produced $genMergeGroups merged splits, checking for more work...")
+    }
+
+    } // End of else block (allMergeGroups.nonEmpty)
+    } // End of generation while loop
+
+    // Final result aggregation
+    logger.info(s"MERGE SPLITS completed: merged $totalMergedFilesAccum files into $totalMergeGroupsAccum new splits across $totalGenerations merge generations")
+    logger.info(s"Total batches: $totalBatchesAccum, successful: $totalSuccessfulBatchesAccum, failed: $totalFailedBatchesAccum")
+    logger.info(s"Size change: $totalOriginalSizeAccum bytes -> $totalMergedSizeAccum bytes")
+
+    val status = if (totalFailedBatchesAccum == 0 && totalMergedFilesAccum > 0) "success"
+                 else if (totalMergedFilesAccum == 0) "no_action"
                  else "partial_success"
 
-    logger.info(s"MERGE SPLITS completed: merged $totalMergedFiles files into $totalMergeGroups new splits across $generationCount merge generations")
-    logger.info(s"Total batches: $totalBatches, successful: $totalSuccessful, failed: $totalFailed")
-    logger.info(s"Size change: $totalOriginalSize bytes -> $totalMergedSize bytes")
-
-    if (totalMergedFiles == 0) {
+    if (totalMergedFilesAccum == 0) {
       Seq(
         Row(
           tablePath.toString,
@@ -1151,11 +1196,11 @@ class MergeSplitsExecutor(
           tablePath.toString,
           Row(
             status,
-            totalMergedFiles.asInstanceOf[Long],
-            totalMergeGroups.asInstanceOf[Long],
-            totalOriginalSize,
-            totalMergedSize,
-            s"batches: $totalBatches, successful: $totalSuccessful, failed: $totalFailed, merge_generations: $generationCount"
+            totalMergedFilesAccum.asInstanceOf[Long],
+            totalMergeGroupsAccum.asInstanceOf[Long],
+            totalOriginalSizeAccum,
+            totalMergedSizeAccum,
+            s"batches: $totalBatchesAccum, successful: $totalSuccessfulBatchesAccum, failed: $totalFailedBatchesAccum, merge_generations: $totalGenerations"
           ),
           awsConfig.tempDirectoryPath.getOrElse(null),
           if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
@@ -1341,17 +1386,18 @@ class MergeSplitsExecutor(
   }
 
   /**
-   * Plans all merge groups upfront by simulating multi-pass merging.
-   * Returns all groups that would be created across all passes, along with
-   * the number of merge generations (passes) that would be needed.
+   * Plans merge groups by simulating multi-pass merging.
+   * Returns ONLY first-generation groups (which have real file paths), along with
+   * the total number of merge generations that would be needed.
    *
-   * This approach reads the transaction log ONCE and simulates all merges
-   * to provide globally unique batch numbering and predictable total work.
+   * IMPORTANT: Only first-generation groups are returned because later generations
+   * have simulated file paths. The caller should execute the returned groups, then
+   * call this method again with fresh transaction log state to get the next generation.
    *
    * @param files files to consider for merging
    * @param partitionColumns partition columns from metadata
    * @param maxSourceSplitsPerMerge maximum source splits per merge operation
-   * @return tuple of (all merge groups, number of generations)
+   * @return tuple of (first-generation merge groups, total number of generations needed)
    */
   private def planAllMergeGroups(
       files: Seq[AddAction],
@@ -1387,8 +1433,13 @@ class MergeSplitsExecutor(
       } else {
         logger.debug(s"Generation $generation: Found ${generationGroups.length} merge groups")
 
-        // Add groups to result
-        allGroups ++= generationGroups
+        // Only add first generation groups - they have real file paths
+        // Later generations are counted for metrics but executed separately after re-reading actual paths
+        if (generation == 1) {
+          allGroups ++= generationGroups
+        }
+        // Note: Generation 2+ groups have simulated paths and are NOT added to allGroups
+        // The generationCount return value tells the caller how many passes are needed
 
         // Simulate: remove source files, add simulated merged files
         for (group <- generationGroups) {

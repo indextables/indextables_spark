@@ -507,4 +507,74 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     logger.info("✅ Partition filtering with WHERE clause works correctly")
     logger.info("✅ Non-target partitions remain unchanged")
   }
+
+  test("Multi-generational merge planning should never include same split in multiple groups") {
+    logger.info("Testing split uniqueness guarantee in multi-generational merge planning")
+
+    // Create a single partition with MANY small files to trigger multi-generation merges
+    // With target size 100MB and small files, this should create multiple merge groups
+    val numBatches = 20  // Many small files
+    val filesPerBatch = 2  // Spark typically creates 2 files per write
+
+    (1 to numBatches).foreach { batch =>
+      val data = spark
+        .range(batch * 10, (batch + 1) * 10)
+        .select(
+          col("id"),
+          lit(s"content_batch_$batch").as("content"),
+          lit("2024").as("year")
+        )
+
+      data
+        .coalesce(1)
+        .write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexWriter.batchSize", "5")
+        .partitionBy("year")
+        .mode("append")
+        .save(tempTablePath)
+    }
+
+    // Get initial state
+    val initialFiles = transactionLog.listFiles()
+    logger.info(s"Created ${initialFiles.length} files for testing")
+
+    // Use a 1MB target size (minimum allowed) to force multiple merge groups
+    // With many small files, this should still create multiple merge groups
+    val smallTargetSize = 1 * 1024 * 1024L  // 1MB target - minimum allowed
+
+    // Execute MERGE SPLITS with small target size
+    logger.info(s"Executing MERGE SPLITS with minimum target size ($smallTargetSize bytes = 1MB)")
+    val mergeResult = spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE $smallTargetSize")
+    mergeResult.show(false)
+
+    // Get the merge metrics
+    val metrics = mergeResult.collect().head.getStruct(1)
+    val status = metrics.getAs[String]("status")
+    val mergedFiles = Option(metrics.getAs[Any]("merged_files")).map(_.toString.toInt).getOrElse(0)
+    val mergeGroups = Option(metrics.getAs[Any]("merge_groups")).map(_.toString.toInt).getOrElse(0)
+
+    logger.info(s"Merge result: status=$status, mergedFiles=$mergedFiles, mergeGroups=$mergeGroups")
+
+    // Verify data integrity (this would fail if any files were merged twice)
+    val finalData = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tempTablePath)
+
+    val totalCount = finalData.count()
+    val expectedCount = numBatches * 10L  // 10 records per batch
+
+    logger.info(s"Final record count: $totalCount (expected: $expectedCount)")
+
+    // Key assertion: Data integrity preserved
+    // If the same split was included in multiple groups, we'd see data duplication or loss
+    assert(totalCount == expectedCount, s"Data integrity violated! Expected $expectedCount records but got $totalCount")
+
+    // Additional check: Verify no duplicate IDs exist
+    val distinctIds = finalData.select("id").distinct().count()
+    assert(distinctIds == expectedCount, s"Duplicate IDs found! Expected $expectedCount unique IDs but got $distinctIds")
+
+    logger.info("✅ Split uniqueness guarantee verified - no split appeared in multiple merge groups")
+    logger.info("✅ Data integrity preserved across multi-generational merge")
+  }
 }
