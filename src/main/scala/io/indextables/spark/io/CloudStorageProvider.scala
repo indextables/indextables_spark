@@ -314,6 +314,9 @@ object CloudStorageProviderFactory {
 
     logger.info(s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path")
 
+    // Convert options to Map for passing to providers (fast path for credential providers)
+    val optionsMap: Map[String, String] = options.asCaseSensitiveMap().asScala.toMap
+
     protocol match {
       case ProtocolBasedIOFactory.S3Protocol =>
         logger.info(s"S3 config - endpoint: ${config.awsEndpoint}, region: ${config.awsRegion}, pathStyle: ${config.awsPathStyleAccess}")
@@ -321,7 +324,8 @@ object CloudStorageProviderFactory {
             .map(_.take(4) + "...")
             .getOrElse("None")}, secretKey: ${config.awsSecretKey.map(_ => "***").getOrElse("None")}")
         logger.info(s"S3 custom provider - class: ${config.awsCredentialsProviderClass.getOrElse("None")}")
-        new S3CloudStorageProvider(config, enrichedHadoopConf, path)
+        // Pass optionsMap for fast credential provider path (avoids HadoopConf reconstruction for UC provider)
+        new S3CloudStorageProvider(config, enrichedHadoopConf, path, Some(optionsMap))
       case ProtocolBasedIOFactory.AzureProtocol =>
         logger.info(
           s"Azure config - endpoint: ${config.azureEndpoint}, accountName: ${config.azureAccountName.getOrElse("None")}"
