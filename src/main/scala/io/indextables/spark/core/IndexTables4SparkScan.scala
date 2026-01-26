@@ -293,15 +293,22 @@ class IndexTables4SparkScan(
         )
     }
 
+    // Interleave partitions by host for better executor utilization
+    // This ensures tasks are distributed across executors from the start
+    val interleavedPartitions = DriverSplitLocalityManager.interleaveByHost(
+      partitions,
+      (p: IndexTables4SparkInputPartition) => p.preferredHost
+    )
+
     // Log summary at info level, details at debug level
-    val totalPreferred = partitions.count(_.preferredLocations().nonEmpty)
+    val totalPreferred = interleavedPartitions.count(_.preferredLocations().nonEmpty)
     if (logger.isDebugEnabled) {
       val hostDistribution = assignments.values.groupBy(identity).map { case (h, s) => s"$h=${s.size}" }.mkString(", ")
       logger.debug(s"Partition host distribution: $hostDistribution")
     }
-    logger.info(s"Planned ${partitions.length} partitions ($totalPreferred with locality hints)")
+    logger.info(s"Planned ${interleavedPartitions.length} partitions ($totalPreferred with locality hints, interleaved by host)")
 
-    partitions.toArray[InputPartition]
+    interleavedPartitions.toArray[InputPartition]
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {

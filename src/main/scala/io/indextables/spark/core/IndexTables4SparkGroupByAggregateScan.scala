@@ -387,7 +387,7 @@ class IndexTables4SparkGroupByAggregateBatch(
     logger.debug(s"GROUP BY BATCH: Assigned ${assignments.size} splits to hosts")
 
     // Create one partition per filtered split for distributed GROUP BY processing
-    filteredSplits.map { split =>
+    val partitions = filteredSplits.map { split =>
       val preferredHost = assignments.get(split.path)
       // Extract partition values from split's partitionValues field
       val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
@@ -405,7 +405,17 @@ class IndexTables4SparkGroupByAggregateBatch(
         partitionColumns,
         splitPartitionValues
       )
-    }.toArray
+    }
+
+    // Interleave partitions by host for better executor utilization
+    // This ensures tasks are distributed across executors from the start
+    val interleavedPartitions = io.indextables.spark.storage.DriverSplitLocalityManager.interleaveByHost(
+      partitions,
+      (p: IndexTables4SparkGroupByAggregatePartition) => p.preferredHost
+    )
+    logger.debug(s"GROUP BY BATCH: Interleaved ${interleavedPartitions.length} partitions by host")
+
+    interleavedPartitions.toArray
   }
 
   override def createReaderFactory(): org.apache.spark.sql.connector.read.PartitionReaderFactory = {

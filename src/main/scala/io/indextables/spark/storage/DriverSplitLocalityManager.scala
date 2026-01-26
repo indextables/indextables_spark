@@ -480,6 +480,53 @@ object DriverSplitLocalityManager {
   /** Check if prewarm catch-up is enabled via configuration. */
   def isCatchUpEnabled(config: Map[String, String]): Boolean =
     config.getOrElse("spark.indextables.prewarm.catchUpNewHosts", "false").toBoolean
+
+  /**
+   * Interleave items by their assigned host in round-robin order.
+   *
+   * This ensures Spark tasks are distributed across executors evenly from the start,
+   * rather than having all tasks for host A followed by all tasks for host B.
+   * Since Spark executes tasks in the order they're provided, proper interleaving
+   * maximizes executor utilization.
+   *
+   * Example: Given items assigned to hosts [A, A, A, B, B, C], returns [A, B, C, A, B, A]
+   *
+   * @param items Sequence of items to interleave
+   * @param getHost Function to extract the assigned host from an item (None = no preference)
+   * @tparam T Type of items being interleaved
+   * @return Items reordered in round-robin fashion by host
+   */
+  def interleaveByHost[T](items: Seq[T], getHost: T => Option[String]): Seq[T] = {
+    if (items.isEmpty) return items
+
+    // Group items by their assigned host (None grouped separately)
+    val byHost = items.groupBy(getHost)
+
+    // Get sorted list of hosts for deterministic ordering
+    val hosts = byHost.keys.toSeq.sortBy {
+      case Some(h) => (0, h)  // Hosts with assignments first, sorted alphabetically
+      case None    => (1, "") // Items without preference last
+    }
+
+    // Create iterators for each host's items
+    val iterators = hosts.map(h => byHost(h).iterator).toArray
+
+    // Round-robin through iterators
+    val result = mutable.ArrayBuffer[T]()
+    var remaining = items.size
+    var hostIndex = 0
+
+    while (remaining > 0) {
+      val iterator = iterators(hostIndex)
+      if (iterator.hasNext) {
+        result += iterator.next()
+        remaining -= 1
+      }
+      hostIndex = (hostIndex + 1) % iterators.length
+    }
+
+    result.toSeq
+  }
 }
 
 /** Statistics about the driver locality manager state. */

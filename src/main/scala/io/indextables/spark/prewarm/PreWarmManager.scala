@@ -174,7 +174,14 @@ object PreWarmManager {
         }
     }.toSeq
 
-    logger.info(s"Created ${componentPrewarmTasks.length} prewarm tasks ($splitsPerTask splits per task)")
+    // Interleave tasks by host for better executor utilization
+    // This ensures prewarm tasks are distributed across executors from the start
+    val interleavedTasks = DriverSplitLocalityManager.interleaveByHost(
+      componentPrewarmTasks,
+      (t: ComponentPrewarmTask) => Some(t.hostname)
+    )
+
+    logger.info(s"Created ${interleavedTasks.length} prewarm tasks ($splitsPerTask splits per task, interleaved by host)")
 
     // Broadcast config for executor access
     val broadcastConfig = sc.broadcast(config)
@@ -187,7 +194,7 @@ object PreWarmManager {
 
     // Create (task, preferredLocations) tuples for makeRDD
     // This ensures prewarm tasks run on the same hosts where queries will execute
-    val tasksWithLocations = componentPrewarmTasks.map(task => (task, Seq(task.hostname)))
+    val tasksWithLocations = interleavedTasks.map(task => (task, Seq(task.hostname)))
 
     val taskResults =
       try
@@ -211,7 +218,7 @@ object PreWarmManager {
     PreWarmResult(
       warmupInitiated = true,
       warmupAssignments = warmupAssignments,
-      totalWarmupsCreated = componentPrewarmTasks.length
+      totalWarmupsCreated = interleavedTasks.length
     )
   }
 
