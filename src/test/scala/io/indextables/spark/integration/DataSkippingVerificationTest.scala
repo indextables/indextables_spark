@@ -25,9 +25,10 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.core.IndexTables4SparkScan
+import io.indextables.spark.core.{IndexTables4SparkScan, IndexTables4SparkInputPartition, IndexTables4SparkMultiSplitInputPartition}
 import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.TestBase
+import org.apache.spark.sql.connector.read.InputPartition
 import org.scalatest.BeforeAndAfterEach
 
 class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
@@ -78,11 +79,10 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val scan       = createScanWithFilters(Array(filter))
     val partitions = scan.planInputPartitions()
 
-    // Verify: Should only have 1 partition (file2)
-    assert(partitions.length == 1, s"Expected 1 partition after data skipping, got ${partitions.length}")
-
-    val partition = partitions.head.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition]
-    assert(partition.addAction.path.contains("file2"), s"Expected file2, got ${partition.addAction.path}")
+    // Verify: Should only scan file2
+    val paths = extractPaths(partitions)
+    assert(paths.length == 1, s"Expected 1 split after data skipping, got ${paths.length}")
+    assert(paths.head.contains("file2"), s"Expected file2, got ${paths.head}")
 
     println("✅ EqualTo filter test passed: Correctly skipped 2 out of 3 files")
   }
@@ -101,10 +101,9 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val gtScan       = createScanWithFilters(Array(gtFilter))
     val gtPartitions = gtScan.planInputPartitions()
 
-    assert(gtPartitions.length == 2, s"GreaterThan: Expected 2 partitions, got ${gtPartitions.length}")
+    val gtPaths = extractPaths(gtPartitions)
+    assert(gtPaths.length == 2, s"GreaterThan: Expected 2 splits, got ${gtPaths.length}")
 
-    val gtPaths =
-      gtPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(!gtPaths.exists(_.contains("range1")), "GreaterThan should skip range1")
     assert(gtPaths.exists(_.contains("range2")), "GreaterThan should include range2")
     assert(gtPaths.exists(_.contains("range3")), "GreaterThan should include range3")
@@ -114,10 +113,9 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val ltScan       = createScanWithFilters(Array(ltFilter))
     val ltPartitions = ltScan.planInputPartitions()
 
-    assert(ltPartitions.length == 2, s"LessThan: Expected 2 partitions, got ${ltPartitions.length}")
+    val ltPaths = extractPaths(ltPartitions)
+    assert(ltPaths.length == 2, s"LessThan: Expected 2 splits, got ${ltPaths.length}")
 
-    val ltPaths =
-      ltPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(ltPaths.exists(_.contains("range1")), "LessThan should include range1")
     assert(ltPaths.exists(_.contains("range2")), "LessThan should include range2")
     assert(!ltPaths.exists(_.contains("range3")), "LessThan should skip range3")
@@ -139,10 +137,9 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val partitions = scan.planInputPartitions()
 
     // Should still scan fileWithoutStats (no stats = can't skip)
-    assert(partitions.length == 1, s"Expected 1 partition (no stats file), got ${partitions.length}")
-
-    val partition = partitions.head.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition]
-    assert(partition.addAction.path.contains("no_stats"), "Should keep file without statistics")
+    val paths = extractPaths(partitions)
+    assert(paths.length == 1, s"Expected 1 split (no stats file), got ${paths.length}")
+    assert(paths.head.contains("no_stats"), "Should keep file without statistics")
 
     println("✅ Missing statistics test passed: Files without stats are not skipped")
   }
@@ -340,9 +337,8 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val partitions1 = scan1.planInputPartitions()
 
     // Should include file2 (because filterValue starts with max) and file3
-    assert(partitions1.length >= 2, s"Expected at least 2 partitions (file2 and file3), got ${partitions1.length}")
-    val paths1 =
-      partitions1.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    val paths1 = extractPaths(partitions1)
+    assert(paths1.length >= 2, s"Expected at least 2 splits (file2 and file3), got ${paths1.length}")
     assert(paths1.exists(_.contains("file2")), "Should include file2 (truncated max with matching prefix)")
     assert(paths1.exists(_.contains("file3")), "Should include file3")
 
@@ -352,13 +348,21 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val partitions2 = scan2.planInputPartitions()
 
     // Should include file1 and file2 (because filterValue starts with min)
-    assert(partitions2.length >= 2, s"Expected at least 2 partitions (file1 and file2), got ${partitions2.length}")
-    val paths2 =
-      partitions2.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    val paths2 = extractPaths(partitions2)
+    assert(paths2.length >= 2, s"Expected at least 2 splits (file1 and file2), got ${paths2.length}")
     assert(paths2.exists(_.contains("file1")), "Should include file1")
     assert(paths2.exists(_.contains("file2")), "Should include file2 (truncated min with matching prefix)")
 
     println("✅ Complex truncation scenarios passed: Correctly handling prefix matching with truncated statistics")
+  }
+
+  /** Extract all paths from partitions (handles both single-split and multi-split types) */
+  private def extractPaths(partitions: Array[InputPartition]): Seq[String] = {
+    partitions.flatMap {
+      case single: IndexTables4SparkInputPartition => Seq(single.addAction.path)
+      case multi: IndexTables4SparkMultiSplitInputPartition => multi.addActions.map(_.path)
+      case other => throw new IllegalArgumentException(s"Unknown partition type: ${other.getClass}")
+    }.toSeq
   }
 
   private def createScanWithFilters(filters: Array[Filter]): IndexTables4SparkScan = {
