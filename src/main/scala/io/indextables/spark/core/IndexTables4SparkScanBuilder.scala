@@ -1718,10 +1718,14 @@ object IndexTables4SparkScanBuilder {
     currentRelationId.remove()
   }
 
-  /** Store IndexQuery expressions for a specific relation object. */
+  /** Store IndexQuery expressions for a specific relation object.
+   *  IMPORTANT: This appends to existing entries to support multiple IndexQueries on the same relation
+   *  (e.g., IndexQuery in both inner CTE definition and outer query referencing the CTE).
+   */
   def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit =
     relationIndexQueries.synchronized {
-      relationIndexQueries.put(relation, indexQueries)
+      val existing = Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
+      relationIndexQueries.put(relation, existing ++ indexQueries)
     }
 
   /** Retrieve IndexQuery expressions for a specific relation object. */

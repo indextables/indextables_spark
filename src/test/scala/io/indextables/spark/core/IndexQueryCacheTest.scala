@@ -60,7 +60,10 @@ class IndexQueryCacheTest extends AnyFunSuite {
     assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).isEmpty)
   }
 
-  test("cache should overwrite existing entries") {
+  test("cache should append to existing entries for same relation") {
+    // This behavior is required for CTEs where IndexQuery can appear in both
+    // the inner CTE definition and the outer query referencing the CTE.
+    // Both IndexQueries need to be accumulated and applied together.
     val relation = new Object()
     val filters1 = Seq(IndexQueryFilter("field1", "query1"))
     val filters2 = Seq(IndexQueryFilter("field2", "query2"), IndexQueryFilter("field3", "query3"))
@@ -71,7 +74,8 @@ class IndexQueryCacheTest extends AnyFunSuite {
     IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters2)
     val retrieved = IndexTables4SparkScanBuilder.getIndexQueries(relation)
 
-    assert(retrieved.length == 2, s"Expected 2 filters after overwrite but got ${retrieved.length}")
+    // Should have all 3 filters (1 + 2 appended)
+    assert(retrieved.length == 3, s"Expected 3 filters after append but got ${retrieved.length}")
   }
 
   test("cache stats should be available") {
