@@ -314,8 +314,24 @@ object CloudStorageProviderFactory {
 
     logger.info(s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path")
 
-    // Convert options to Map for passing to providers (fast path for credential providers)
+    // Build a complete config map from options + Spark session config (for UC provider fast path)
+    // All keys are lowercased for case-insensitive matching
+    // Options take precedence over Spark session config
     val optionsMap: Map[String, String] = options.asCaseSensitiveMap().asScala.toMap
+      .map { case (k, v) => (k.toLowerCase, v) }
+    val sparkConfigMap: Map[String, String] = try {
+      import org.apache.spark.sql.SparkSession
+      SparkSession.getActiveSession match {
+        case Some(session) =>
+          io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromSpark(session)
+            .map { case (k, v) => (k.toLowerCase, v) }
+        case None => Map.empty[String, String]
+      }
+    } catch {
+      case _: Exception => Map.empty[String, String]
+    }
+    // Merge: Spark config first, then options (options take precedence)
+    val combinedConfigMap = sparkConfigMap ++ optionsMap
 
     protocol match {
       case ProtocolBasedIOFactory.S3Protocol =>
@@ -324,8 +340,8 @@ object CloudStorageProviderFactory {
             .map(_.take(4) + "...")
             .getOrElse("None")}, secretKey: ${config.awsSecretKey.map(_ => "***").getOrElse("None")}")
         logger.info(s"S3 custom provider - class: ${config.awsCredentialsProviderClass.getOrElse("None")}")
-        // Pass optionsMap for fast credential provider path (avoids HadoopConf reconstruction for UC provider)
-        new S3CloudStorageProvider(config, enrichedHadoopConf, path, Some(optionsMap))
+        // Pass combinedConfigMap for fast credential provider path (avoids HadoopConf reconstruction for UC provider)
+        new S3CloudStorageProvider(config, enrichedHadoopConf, path, Some(combinedConfigMap))
       case ProtocolBasedIOFactory.AzureProtocol =>
         logger.info(
           s"Azure config - endpoint: ${config.azureEndpoint}, accountName: ${config.azureAccountName.getOrElse("None")}"
