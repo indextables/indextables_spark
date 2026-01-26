@@ -34,6 +34,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.util.PartitionUtils
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -271,27 +272,25 @@ class IndexTables4SparkSimpleAggregateBatch(
       .groupBy(a => assignments.getOrElse(a.path, "unknown"))
 
     // Create multi-split partitions (or single-split if splitsPerTask == 1)
-    var partitionIndex = 0
+    // Interleave partitions by host for better cluster utilization (h1,h2,h3,h1,h2,h3,... instead of h1,h1,h1,h2,h2,h2,...)
     val partitions = if (splitsPerTask == 1) {
       // Fallback to single-split behavior for backward compatibility
-      filteredSplits.map { split =>
-        val preferredHost = assignments.get(split.path)
-        new IndexTables4SparkSimpleAggregatePartition(
-          split,
-          schema,
-          pushedFilters,
-          config,
-          aggregation,
-          transactionLog.getTablePath(),
-          indexQueryFilters,
-          preferredHost
-        )
+      // Still interleave by host for better distribution
+      val batchesByHost = splitsByHost.map { case (host, hostSplits) =>
+        host -> hostSplits.map { split =>
+          new IndexTables4SparkSimpleAggregatePartition(
+            split, schema, pushedFilters, config, aggregation,
+            transactionLog.getTablePath(), indexQueryFilters,
+            if (host == "unknown") None else Some(host)
+          )
+        }
       }
+      PartitionUtils.interleaveByHost(batchesByHost)
     } else {
       // Group splits by host and batch them
-      splitsByHost.flatMap { case (host, hostSplits) =>
-        hostSplits.grouped(splitsPerTask).map { batch =>
-          val partition = new IndexTables4SparkMultiSplitSimpleAggregatePartition(
+      val batchesByHost = splitsByHost.map { case (host, hostSplits) =>
+        host -> hostSplits.grouped(splitsPerTask).map { batch =>
+          new IndexTables4SparkMultiSplitSimpleAggregatePartition(
             splits = batch,
             schema = schema,
             pushedFilters = pushedFilters,
@@ -301,10 +300,9 @@ class IndexTables4SparkSimpleAggregateBatch(
             indexQueryFilters = indexQueryFilters,
             preferredHost = if (host == "unknown") None else Some(host)
           )
-          partitionIndex += 1
-          partition
-        }
-      }.toSeq
+        }.toSeq
+      }
+      PartitionUtils.interleaveByHost(batchesByHost)
     }
 
     logger.info(s"SIMPLE AGGREGATE BATCH: Planned ${partitions.length} partitions (${filteredSplits.length} splits, $splitsPerTask per task)")
@@ -322,6 +320,7 @@ class IndexTables4SparkSimpleAggregateBatch(
       indexQueryFilters
     )
   }
+
 }
 
 /** Input partition for simple aggregation processing. */

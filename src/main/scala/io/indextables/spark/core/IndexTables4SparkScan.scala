@@ -36,7 +36,7 @@ import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.stats.{DataSkippingMetrics, ExpressionSimplifier, FilterExpressionCache}
 import io.indextables.spark.storage.DriverSplitLocalityManager
 import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLog}
-import io.indextables.spark.util.TimestampUtils
+import io.indextables.spark.util.{PartitionUtils, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -290,41 +290,55 @@ class IndexTables4SparkScan(
       .groupBy(a => assignments.getOrElse(a.path, "unknown"))
 
     // Create multi-split partitions (or single-split if splitsPerTask == 1)
+    // Interleave partitions by host for better cluster utilization (h1,h2,h3,h1,h2,h3,... instead of h1,h1,h1,h2,h2,h2,...)
     var partitionIndex = 0
     val partitions = if (splitsPerTask == 1) {
       // Fallback to single-split behavior for backward compatibility
-      filteredActions.zipWithIndex.map {
-        case (addAction, index) =>
-          val preferredHost = assignments.get(addAction.path)
+      // Still interleave by host for better distribution
+      val batchesByHost: Map[String, Seq[IndexTables4SparkInputPartition]] = splitsByHost.map { case (host, hostSplits) =>
+        host -> hostSplits.map { addAction =>
           new IndexTables4SparkInputPartition(
             addAction,
             readSchema,
             fullTableSchema,
             pushedFilters,
-            index,
+            0, // Will be reassigned after interleaving
             limit,
             indexQueryFilters,
-            preferredHost
+            if (host == "unknown") None else Some(host)
           )
+        }
+      }
+      // Interleave: take one partition from each host in round-robin order
+      PartitionUtils.interleaveByHost(batchesByHost).zipWithIndex.map { case (p, idx) =>
+        new IndexTables4SparkInputPartition(
+          p.addAction, p.readSchema, p.fullTableSchema, p.filters,
+          idx, p.limit, p.indexQueryFilters, p.preferredHost
+        )
       }
     } else {
       // Group splits by host and batch them
-      splitsByHost.flatMap { case (host, hostSplits) =>
-        hostSplits.grouped(splitsPerTask).map { batch =>
-          val partition = new IndexTables4SparkMultiSplitInputPartition(
+      val batchesByHost: Map[String, Seq[IndexTables4SparkMultiSplitInputPartition]] = splitsByHost.map { case (host, hostSplits) =>
+        host -> hostSplits.grouped(splitsPerTask).map { batch =>
+          new IndexTables4SparkMultiSplitInputPartition(
             addActions = batch,
             readSchema = readSchema,
             fullTableSchema = fullTableSchema,
             filters = pushedFilters,
-            partitionId = partitionIndex,
+            partitionId = 0, // Will be reassigned after interleaving
             limit = limit,
             indexQueryFilters = indexQueryFilters,
             preferredHost = if (host == "unknown") None else Some(host)
           )
-          partitionIndex += 1
-          partition
-        }
-      }.toSeq
+        }.toSeq
+      }
+      // Interleave: take one partition from each host in round-robin order
+      PartitionUtils.interleaveByHost(batchesByHost).zipWithIndex.map { case (p, idx) =>
+        new IndexTables4SparkMultiSplitInputPartition(
+          p.addActions, p.readSchema, p.fullTableSchema, p.filters,
+          idx, p.limit, p.indexQueryFilters, p.preferredHost
+        )
+      }
     }
 
     // Log summary at info level, details at debug level
