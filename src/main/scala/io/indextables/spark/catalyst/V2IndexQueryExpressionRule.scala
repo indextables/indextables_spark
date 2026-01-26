@@ -92,7 +92,25 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         // Filter(indexquery) -> SubqueryAlias -> Filter(other) -> DataSourceV2Relation
         val v2RelationOpt = child.collectFirst { case r: DataSourceV2Relation => r }
 
-        v2RelationOpt match {
+        // CRITICAL FIX: For CTE references, the SubqueryAlias child might not directly contain
+        // the DataSourceV2Relation (it uses CTERelationRef instead). In this case, if we have
+        // an IndexQuery condition, we should use the relation already in ThreadLocal that was
+        // set when processing the underlying temp view earlier in this same query.
+        val effectiveRelationOpt = v2RelationOpt.orElse {
+          // Only fall back to ThreadLocal if we have an IndexQuery to process
+          if (containsIndexQueryExpression(condition)) {
+            IndexTables4SparkScanBuilder.getCurrentRelation().flatMap {
+              case r: DataSourceV2Relation if isCompatibleV2DataSource(r) =>
+                logger.debug(s"V2IndexQueryExpressionRule: Using relation from ThreadLocal for CTE reference: id=${System.identityHashCode(r)}")
+                Some(r)
+              case _ => None
+            }
+          } else {
+            None
+          }
+        }
+
+        effectiveRelationOpt match {
           case Some(v2Relation) =>
             logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias containing DataSourceV2Relation")
             logger.debug(s"V2IndexQueryExpressionRule: Condition: $condition")
