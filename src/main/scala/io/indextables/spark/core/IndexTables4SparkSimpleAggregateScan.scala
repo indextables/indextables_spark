@@ -344,6 +344,9 @@ class IndexTables4SparkSimpleAggregateReader(
         logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: First result contains ${results.head.numFields} fields")
       }
     } catch {
+      case e: IllegalArgumentException =>
+        // Rethrow field validation errors - these should propagate to the user
+        throw e
       case e: Exception =>
         logger.error(s"SIMPLE AGGREGATE READER INITIALIZE: Failed to execute simple aggregation", e)
         // Return empty results on failure
@@ -816,6 +819,13 @@ class IndexTables4SparkSimpleAggregateReader(
       }
 
     } catch {
+      case e: IllegalArgumentException =>
+        // Rethrow field validation errors - these should propagate to the user
+        logger.error(
+          s"SIMPLE AGGREGATE EXECUTION: Field validation error for split ${partition.split.path}",
+          e
+        )
+        throw e
       case e: Exception =>
         logger.error(
           s"SIMPLE AGGREGATE EXECUTION: Failed to execute simple aggregation for split ${partition.split.path}",
