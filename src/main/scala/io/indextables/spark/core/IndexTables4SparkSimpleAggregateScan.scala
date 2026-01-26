@@ -58,6 +58,12 @@ class IndexTables4SparkSimpleAggregateScan(
   pushedFilters.foreach(f => logger.debug(s"SIMPLE AGGREGATE SCAN: Filter: $f"))
   indexQueryFilters.foreach(f => logger.debug(s"SIMPLE AGGREGATE SCAN: IndexQuery Filter: $f"))
 
+  // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
+  private lazy val resolvedConfig: Map[String, String] = {
+    val tablePath = transactionLog.getTablePath()
+    resolveCredentialsOnDriver(config, tablePath)
+  }
+
   override def readSchema(): StructType =
     createSimpleAggregateSchema(aggregation)
 
@@ -73,10 +79,52 @@ class IndexTables4SparkSimpleAggregateScan(
       schema,
       pushedFilters,
       options,
-      config,
+      resolvedConfig,  // Use resolved config with driver-side credentials
       aggregation,
       indexQueryFilters
     )
+  }
+
+  /**
+   * Resolve AWS credentials on the driver and return a modified config.
+   * See IndexTables4SparkScan.resolveCredentialsOnDriver for detailed documentation.
+   */
+  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path): Map[String, String] = {
+    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+      .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
+
+    providerClass match {
+      case Some(className) if className.nonEmpty =>
+        try {
+          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath.toString)
+          val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
+            config, normalizedPath
+          )
+
+          credentials match {
+            case Some(creds) =>
+              logger.info(s"[DRIVER] Resolved AWS credentials from provider: $className")
+              var newConfig = config -
+                "spark.indextables.aws.credentialsProviderClass" -
+                "spark.indextables.aws.credentialsproviderclass" +
+                ("spark.indextables.aws.accessKey" -> creds.accessKey) +
+                ("spark.indextables.aws.secretKey" -> creds.secretKey)
+
+              creds.sessionToken.foreach(token => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token))
+              newConfig
+
+            case None =>
+              logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
+              config
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
+            config
+        }
+
+      case None => config
+    }
   }
 
   override def description(): String = {
@@ -393,18 +441,10 @@ class IndexTables4SparkSimpleAggregateReader(
       logger.debug(s"PATH DEBUG: resolvedPath = '$resolvedPath'")
 
       // Normalize path for tantivy4java compatibility (handles S3, Azure, etc.)
-      val optionsMap = {
-        import scala.jdk.CollectionConverters._
-        new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
-      }
-      // IMPORTANT: Populate Hadoop config from partition.config so credential providers
-      // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
-      // This matches the fix in IndexTables4SparkPartitionReader (PR #100 follow-up).
-      val hadoopConf = io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(partition.config)
+      // Uses Map-based fast path - no Hadoop Configuration creation needed
       val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
         resolvedPath,
-        optionsMap,
-        hadoopConf
+        partition.config
       )
 
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Resolved split path: $splitPath")

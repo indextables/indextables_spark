@@ -19,6 +19,7 @@ package io.indextables.spark.util
 
 import org.apache.spark.broadcast.Broadcast
 
+import com.google.common.cache.{Cache, CacheBuilder}
 import io.indextables.spark.storage.SplitCacheConfig
 import org.slf4j.LoggerFactory
 
@@ -307,4 +308,73 @@ object ConfigUtils {
     conf
   }
 
+  /**
+   * JVM-wide cache for Hadoop Configuration objects to avoid repeated creation.
+   *
+   * PERFORMANCE OPTIMIZATION: Creating Hadoop Configuration is expensive due to XML parsing
+   * and class loading. This cache reduces overhead for non-UC providers that still need
+   * Hadoop Configuration by reusing instances with the same config map content.
+   *
+   * Cache characteristics:
+   *   - Maximum 50 entries (typical cluster has few distinct config combinations)
+   *   - 1 hour expiration (configurations rarely change during a session)
+   *   - Keyed by hash of relevant spark.indextables.* config values
+   */
+  private val hadoopConfigCache: Cache[Integer, org.apache.hadoop.conf.Configuration] = CacheBuilder
+    .newBuilder()
+    .maximumSize(50)
+    .expireAfterAccess(60, java.util.concurrent.TimeUnit.MINUTES)
+    .build[Integer, org.apache.hadoop.conf.Configuration]()
+
+  /**
+   * Get or create a Hadoop Configuration from a config map with caching.
+   *
+   * This method is the preferred way to obtain Hadoop Configuration objects when working
+   * with config maps, as it reuses cached configurations to avoid the expensive creation
+   * of new Configuration objects.
+   *
+   * IMPORTANT: For UnityCatalogAWSCredentialProvider, prefer using the Map-based factory
+   * method directly to avoid Hadoop Configuration entirely. This cached method is for
+   * other credential providers that require Hadoop Configuration.
+   *
+   * @param config Configuration map containing spark.indextables.* keys
+   * @return Cached or newly created Hadoop Configuration
+   */
+  def getOrCreateHadoopConfiguration(config: Map[String, String]): org.apache.hadoop.conf.Configuration = {
+    // Extract only relevant keys for the cache key computation
+    // This ensures that unrelated config changes don't invalidate the cache
+    val relevantConfig = config.filter(_._1.startsWith("spark.indextables."))
+    val cacheKey = relevantConfig.hashCode()
+
+    // Try to get from cache first
+    var cached = hadoopConfigCache.getIfPresent(cacheKey)
+    if (cached != null) {
+      logger.debug(s"Reusing cached Hadoop Configuration (cache key: $cacheKey)")
+      return cached
+    }
+
+    // Create new configuration
+    val newConf = createHadoopConfiguration(config)
+
+    // Try to put in cache (another thread might have created one already)
+    synchronized {
+      cached = hadoopConfigCache.getIfPresent(cacheKey)
+      if (cached != null) {
+        // Another thread beat us to it
+        return cached
+      }
+      hadoopConfigCache.put(cacheKey, newConf)
+    }
+
+    logger.debug(s"Created and cached new Hadoop Configuration (cache key: $cacheKey)")
+    newConf
+  }
+
+  /**
+   * Clear the Hadoop Configuration cache. Useful for testing.
+   */
+  def clearHadoopConfigCache(): Unit = {
+    hadoopConfigCache.invalidateAll()
+    logger.debug("Cleared Hadoop Configuration cache")
+  }
 }

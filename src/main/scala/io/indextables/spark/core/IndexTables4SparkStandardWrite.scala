@@ -107,16 +107,17 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
     }
 
-    // Combine serialized hadoop config with indextables options from DataFrame options
+    // Combine serialized options with normalized indextables options
+    // Map-based config - no HadoopConf needed (fast path)
     val normalizedTantivyOptions =
       io.indextables.spark.util.ConfigNormalization.filterAndNormalizeTantivyConfigs(serializedOptions)
-    val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
+    val combinedConfig = serializedHadoopConf ++ normalizedTantivyOptions ++ serializedOptions
 
     // Log the options being passed
     normalizedTantivyOptions.foreach {
       case (key, value) =>
         logger.info(
-          s"Will copy DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction
+          s"DataFrame option: $key = ${io.indextables.spark.util.CredentialRedaction
               .redactValue(key, value)}"
         )
     }
@@ -124,8 +125,7 @@ class IndexTables4SparkStandardWrite(
     new IndexTables4SparkWriterFactory(
       tablePath,
       writeSchema,
-      serializedOptions,
-      combinedHadoopConfig,
+      combinedConfig,
       partitionColumns
     )
   }

@@ -237,4 +237,59 @@ class ConfigurationResolverTest extends AnyFunSuite with Matchers {
     sources(1) shouldBe HadoopConfigSource(hadoopConf, "spark.indextables")
     sources(2) shouldBe HadoopConfigSource(hadoopConf, "")
   }
+
+  // MapConfigSource tests
+
+  test("MapConfigSource should get values from Map") {
+    val config = Map("key" -> "value")
+    val source = MapConfigSource(config)
+
+    source.get("key") shouldBe Some("value")
+    source.get("missing") shouldBe None
+  }
+
+  test("MapConfigSource with prefix should prepend prefix to keys") {
+    val config = Map("prefix.key" -> "value", "other" -> "other_value")
+    val source = MapConfigSource(config, "prefix")
+
+    source.get("key") shouldBe Some("value")
+    source.get("other") shouldBe None  // other is not prefixed with "prefix"
+  }
+
+  test("MapConfigSource should find key with exact case match") {
+    val config = Map("spark.indextables.aws.accessKey" -> "AKIATEST")
+    val source = MapConfigSource(config)
+
+    // Should find with exact case match
+    source.get("spark.indextables.aws.accessKey") shouldBe Some("AKIATEST")
+  }
+
+  test("MapConfigSource should find lowercase key when Map contains lowercase") {
+    // When config has lowercase keys (e.g., from CaseInsensitiveStringMap)
+    val config = Map("spark.indextables.aws.accesskey" -> "AKIATEST")
+    val source = MapConfigSource(config)
+
+    // Should find via lowercase fallback
+    source.get("spark.indextables.aws.accessKey") shouldBe Some("AKIATEST")
+  }
+
+  test("MapConfigSource should work with ConfigurationResolver") {
+    val config = Map(
+      "spark.indextables.databricks.workspaceUrl" -> "https://example.databricks.com",
+      "spark.indextables.databricks.apiToken" -> "dapi12345"
+    )
+
+    val sources = Seq(
+      MapConfigSource(config, "spark.indextables.databricks"),
+      MapConfigSource(config)
+    )
+
+    ConfigurationResolver.resolveString("workspaceUrl", sources) shouldBe Some("https://example.databricks.com")
+    ConfigurationResolver.resolveString("apiToken", sources) shouldBe Some("dapi12345")
+  }
+
+  test("MapConfigSource should have descriptive name") {
+    MapConfigSource(Map.empty).name shouldBe "Map config"
+    MapConfigSource(Map.empty, "prefix").name shouldBe "Map config (prefix)"
+  }
 }

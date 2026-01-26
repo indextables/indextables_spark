@@ -193,13 +193,8 @@ class IndexTables4SparkPartitionReader(
       io.indextables.spark.storage.BatchOptMetrics.empty
     }
 
-  // Lazy cached Hadoop Configuration and options map to avoid repeated creation
-  // IMPORTANT: cachedHadoopConf must be populated from the config map so that credential providers
-  // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
-  // This was fixed in response to PR #100 which removed driver-side credential resolution.
-  // See regression tests in UnityCatalogConfigPropagationEndToEndTest for documentation.
-  private lazy val cachedHadoopConf =
-    io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(config)
+  // Cached options map for legacy methods that require CaseInsensitiveStringMap
+  // NOTE: HadoopConf creation eliminated - Map-based fast path used instead
   private lazy val cachedOptionsMap = {
     import scala.jdk.CollectionConverters._
     new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)
@@ -239,12 +234,10 @@ class IndexTables4SparkPartitionReader(
         val actualPath = if (filePath.toString.startsWith("file:")) {
           filePath.toString // Keep file URIs as-is for tantivy4java
         } else {
-          // Use CloudStorageProviderFactory's static normalization method
-          // Use cached Configuration and options map to avoid repeated creation
+          // Use CloudStorageProviderFactory's Map-based normalization (FAST PATH - no HadoopConf)
           io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
             filePath.toString,
-            cachedOptionsMap,
-            cachedHadoopConf
+            config
           )
         }
 
@@ -670,7 +663,6 @@ class IndexTables4SparkWriterFactory(
   tablePath: Path,
   writeSchema: StructType,
   serializedOptions: Map[String, String],
-  serializedHadoopConfig: Map[String, String], // Use serializable Map instead of Configuration
   partitionColumns: Seq[String] = Seq.empty)
     extends DataWriterFactory {
 
@@ -682,20 +674,13 @@ class IndexTables4SparkWriterFactory(
       logger.info(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
     }
 
-    // Reconstruct Hadoop Configuration from serialized properties
-    val reconstructedHadoopConf = new org.apache.hadoop.conf.Configuration()
-    serializedHadoopConfig.foreach {
-      case (key, value) =>
-        reconstructedHadoopConf.set(key, value)
-    }
-
+    // Use Map-based config directly - no HadoopConf reconstruction needed (fast path)
     new IndexTables4SparkDataWriter(
       tablePath,
       writeSchema,
       partitionId,
       taskId,
       serializedOptions,
-      reconstructedHadoopConf,
       partitionColumns
     )
   }
@@ -707,7 +692,6 @@ class IndexTables4SparkDataWriter(
   partitionId: Int,
   taskId: Long,
   serializedOptions: Map[String, String],
-  hadoopConf: org.apache.hadoop.conf.Configuration,
   partitionColumns: Seq[String] = Seq.empty // Partition columns from metadata
 ) extends DataWriter[InternalRow] {
 
@@ -744,15 +728,10 @@ class IndexTables4SparkDataWriter(
     new Path(normalizedStr)
   }
 
-  // Debug: Log options and hadoop config available in executor
+  // Debug: Log options available in executor (Map-based config - no HadoopConf)
   if (logger.isDebugEnabled) {
     logger.debug("IndexTables4SparkDataWriter executor options:")
     options.entrySet().asScala.foreach { entry =>
-      val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
-      logger.debug(s"  ${entry.getKey} = $value")
-    }
-    logger.debug("IndexTables4SparkDataWriter hadoop config keys containing 'tantivy4spark':")
-    hadoopConf.iterator().asScala.filter(_.getKey.contains("tantivy4spark")).foreach { entry =>
       val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
       logger.debug(s"  ${entry.getKey} = $value")
     }
@@ -764,11 +743,12 @@ class IndexTables4SparkDataWriter(
     scala.collection.mutable.Map[String, (TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)]()
 
   // For non-partitioned tables, use a single writer
+  // Uses Map-based TantivySearchEngine constructor (fast path - no HadoopConf)
   private var singleWriter: Option[(TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)] =
     if (partitionColumns.isEmpty)
       Some(
         (
-          new TantivySearchEngine(writeSchema, options, hadoopConf),
+          new TantivySearchEngine(writeSchema, options, serializedOptions),
           new StatisticsCalculator.DatasetStatistics(writeSchema, serializedOptions),
           0L
         )
@@ -798,11 +778,12 @@ class IndexTables4SparkDataWriter(
       val partitionKey    = PartitionUtils.createPartitionPath(partitionValues, partitionColumns)
 
       // Get or create writer for this partition value combination
+      // Uses Map-based TantivySearchEngine constructor (fast path - no HadoopConf)
       val (engine, stats, count) = partitionWriters.getOrElseUpdate(
         partitionKey, {
           logger.info(s"Creating new writer for partition values: $partitionValues")
           (
-            new TantivySearchEngine(writeSchema, options, hadoopConf),
+            new TantivySearchEngine(writeSchema, options, serializedOptions),
             new StatisticsCalculator.DatasetStatistics(writeSchema, serializedOptions),
             0L
           )
@@ -904,7 +885,8 @@ class IndexTables4SparkDataWriter(
       new java.io.File(filePath.toUri).getAbsolutePath
     } else {
       // For cloud paths (S3), normalize the path for storage compatibility
-      val normalized = CloudStorageProviderFactory.normalizePathForTantivy(filePath.toString, options, hadoopConf)
+      // Uses Map-based normalization (fast path - no HadoopConf)
+      val normalized = CloudStorageProviderFactory.normalizePathForTantivy(filePath.toString, serializedOptions)
       normalized
     }
 
@@ -915,9 +897,9 @@ class IndexTables4SparkDataWriter(
     // Create split from the index using the search engine
     val (splitPath, splitMetadata) = searchEngine.commitAndCreateSplit(outputPath, partitionId.toLong, nodeId)
 
-    // Get split file size using cloud storage provider
+    // Get split file size using cloud storage provider (Map-based fast path)
     val splitSize = {
-      val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
+      val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, serializedOptions)
       try {
         val fileInfo = cloudProvider.getFileInfo(outputPath)
         fileInfo.map(_.size).getOrElse {
@@ -930,7 +912,7 @@ class IndexTables4SparkDataWriter(
 
     // Normalize the splitPath for tantivy4java compatibility (convert s3a:// to s3://)
     val _ = {
-      val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
+      val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, serializedOptions)
       try
         cloudProvider.normalizePathForTantivy(splitPath)
       finally

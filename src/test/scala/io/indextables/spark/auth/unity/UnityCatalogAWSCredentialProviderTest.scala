@@ -22,8 +22,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.ArrayBuffer
 
-import org.apache.hadoop.conf.Configuration
-
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
@@ -41,7 +39,7 @@ class UnityCatalogAWSCredentialProviderTest
 
   private var mockServer: HttpServer               = _
   private var serverPort: Int                      = _
-  private var hadoopConf: Configuration            = _
+  private var configMap: Map[String, String]       = _
   private val requestLog: ArrayBuffer[MockRequest] = ArrayBuffer.empty
 
   case class MockRequest(
@@ -68,9 +66,10 @@ class UnityCatalogAWSCredentialProviderTest
 
   override def beforeEach(): Unit = {
     super.beforeEach()
-    hadoopConf = new Configuration()
-    hadoopConf.set("spark.indextables.databricks.workspaceUrl", s"http://localhost:$serverPort")
-    hadoopConf.set("spark.indextables.databricks.apiToken", "test-token-12345")
+    configMap = Map(
+      "spark.indextables.databricks.workspaceUrl" -> s"http://localhost:$serverPort",
+      "spark.indextables.databricks.apiToken" -> "test-token-12345"
+    )
     requestLog.clear()
     UnityCatalogAWSCredentialProvider.clearCache()
     // Remove any existing handlers (ignore errors if not present)
@@ -168,9 +167,9 @@ class UnityCatalogAWSCredentialProviderTest
   test("successfully fetches credentials from mock API") {
     setupMockHandler(200, successResponse())
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMap
     )
 
     val credentials = provider.getCredentials()
@@ -190,9 +189,9 @@ class UnityCatalogAWSCredentialProviderTest
   test("returns session credentials when session token is provided") {
     setupMockHandler(200, successResponse())
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMap
     )
 
     val credentials = provider.getCredentials()
@@ -207,9 +206,9 @@ class UnityCatalogAWSCredentialProviderTest
   test("caches credentials and does not make duplicate API calls") {
     setupMockHandler(200, successResponse())
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMap
     )
 
     // First call - should hit API
@@ -229,21 +228,21 @@ class UnityCatalogAWSCredentialProviderTest
     setupMockHandler(200, successResponse(accessKeyId = "KEY_FOR_TOKEN_A"))
 
     // Provider with token A
-    val provider1 = new UnityCatalogAWSCredentialProvider(
+    val provider1 = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMap
     )
     val creds1 = provider1.getCredentials()
     assert(creds1.getAWSAccessKeyId == "KEY_FOR_TOKEN_A")
     assert(requestLog.size == 1)
 
     // Change to token B with different response
-    hadoopConf.set("spark.indextables.databricks.apiToken", "different-token-67890")
+    val configMapB = configMap + ("spark.indextables.databricks.apiToken" -> "different-token-67890")
     setupMockHandler(200, successResponse(accessKeyId = "KEY_FOR_TOKEN_B"))
 
-    val provider2 = new UnityCatalogAWSCredentialProvider(
+    val provider2 = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMapB
     )
     val creds2 = provider2.getCredentials()
 
@@ -260,16 +259,16 @@ class UnityCatalogAWSCredentialProviderTest
       (200, successResponse(accessKeyId = s"KEY_FOR_PATH_$pathNum"))
     }
 
-    val provider1 = new UnityCatalogAWSCredentialProvider(
+    val provider1 = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://bucket/path1"),
-      hadoopConf
+      configMap
     )
     val creds1 = provider1.getCredentials()
     assert(creds1.getAWSAccessKeyId == "KEY_FOR_PATH_1")
 
-    val provider2 = new UnityCatalogAWSCredentialProvider(
+    val provider2 = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://bucket/path2"),
-      hadoopConf
+      configMap
     )
     val creds2 = provider2.getCredentials()
     assert(creds2.getAWSAccessKeyId == "KEY_FOR_PATH_2")
@@ -282,7 +281,7 @@ class UnityCatalogAWSCredentialProviderTest
 
   test("refreshes credentials when near expiration") {
     // Set short refresh buffer for testing
-    hadoopConf.setInt("spark.indextables.databricks.credential.refreshBuffer.minutes", 60) // 60 min buffer
+    val testConfig = configMap + ("spark.indextables.databricks.credential.refreshBuffer.minutes" -> "60") // 60 min buffer
 
     val callCount = new AtomicInteger(0)
     setupMockHandlerWithCallback { _ =>
@@ -297,9 +296,9 @@ class UnityCatalogAWSCredentialProviderTest
       (200, successResponse(accessKeyId = s"KEY_$num", expirationTime = expirationTime))
     }
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      testConfig
     )
 
     // First call
@@ -317,7 +316,7 @@ class UnityCatalogAWSCredentialProviderTest
 
   test("falls back to READ when READ_WRITE fails with 403") {
     // Disable retries for this test to focus on fallback behavior
-    hadoopConf.setInt("spark.indextables.databricks.retry.attempts", 1)
+    val testConfig = configMap + ("spark.indextables.databricks.retry.attempts" -> "1")
 
     setupMockHandlerWithCallback { request =>
       if (request.body.contains("PATH_READ_WRITE")) {
@@ -329,9 +328,9 @@ class UnityCatalogAWSCredentialProviderTest
       }
     }
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      testConfig
     )
 
     val credentials = provider.getCredentials()
@@ -345,9 +344,9 @@ class UnityCatalogAWSCredentialProviderTest
   test("throws exception when both READ_WRITE and READ fail") {
     setupMockHandler(403, """{"error": "Permission denied"}""")
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMap
     )
 
     val exception = intercept[RuntimeException] {
@@ -361,13 +360,13 @@ class UnityCatalogAWSCredentialProviderTest
   }
 
   test("fallback disabled throws on first failure") {
-    hadoopConf.setBoolean("spark.indextables.databricks.fallback.enabled", false)
+    val testConfig = configMap + ("spark.indextables.databricks.fallback.enabled" -> "false")
 
     setupMockHandler(403, """{"error": "Permission denied for READ_WRITE"}""")
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      testConfig
     )
 
     val exception = intercept[RuntimeException] {
@@ -393,11 +392,11 @@ class UnityCatalogAWSCredentialProviderTest
       }
     }
 
-    hadoopConf.setInt("spark.indextables.databricks.retry.attempts", 3)
+    val testConfig = configMap + ("spark.indextables.databricks.retry.attempts" -> "3")
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      testConfig
     )
 
     val credentials = provider.getCredentials()
@@ -410,13 +409,12 @@ class UnityCatalogAWSCredentialProviderTest
   // ==================== Configuration Tests ====================
 
   test("fails with clear error when workspace URL not configured") {
-    val emptyConf = new Configuration()
-    emptyConf.set("spark.indextables.databricks.apiToken", "some-token")
+    val incompleteConfig = Map("spark.indextables.databricks.apiToken" -> "some-token")
 
     val exception = intercept[IllegalStateException] {
-      new UnityCatalogAWSCredentialProvider(
+      UnityCatalogAWSCredentialProvider.fromConfig(
         new URI("s3://test-bucket/path"),
-        emptyConf
+        incompleteConfig
       )
     }
 
@@ -424,13 +422,12 @@ class UnityCatalogAWSCredentialProviderTest
   }
 
   test("fails with clear error when token not configured") {
-    val emptyConf = new Configuration()
-    emptyConf.set("spark.indextables.databricks.workspaceUrl", "https://example.com")
+    val incompleteConfig = Map("spark.indextables.databricks.workspaceUrl" -> "https://example.com")
 
     val exception = intercept[IllegalStateException] {
-      new UnityCatalogAWSCredentialProvider(
+      UnityCatalogAWSCredentialProvider.fromConfig(
         new URI("s3://test-bucket/path"),
-        emptyConf
+        incompleteConfig
       )
     }
 
@@ -453,9 +450,9 @@ class UnityCatalogAWSCredentialProviderTest
       requestLog.clear()
       UnityCatalogAWSCredentialProvider.clearCache()
 
-      val provider = new UnityCatalogAWSCredentialProvider(
+      val provider = UnityCatalogAWSCredentialProvider.fromConfig(
         new URI(uriStr),
-        hadoopConf
+        configMap
       )
 
       val credentials = provider.getCredentials()
@@ -467,9 +464,9 @@ class UnityCatalogAWSCredentialProviderTest
   test("strips trailing slash from path") {
     setupMockHandler(200, successResponse())
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://bucket/path/"),
-      hadoopConf
+      configMap
     )
 
     provider.getCredentials()
@@ -484,9 +481,9 @@ class UnityCatalogAWSCredentialProviderTest
   test("refresh() forces new API call bypassing cache") {
     setupMockHandler(200, successResponse())
 
-    val provider = new UnityCatalogAWSCredentialProvider(
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      hadoopConf
+      configMap
     )
 
     // First call
