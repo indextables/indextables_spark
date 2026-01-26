@@ -627,7 +627,13 @@ class PurgeOrphanedSplitsExecutor(
             logger.debug(s"Preserving latest state directory: state-v$version")
           } else {
             // Check if the state directory is old enough to delete
-            val fileAge = currentTime - stateDir.modificationTime
+            // CRITICAL FIX: S3 "directories" return modificationTime = 0 because they're just prefixes.
+            // We need to get the actual modification time from a file inside the directory.
+            val effectiveModTime = getStateDirectoryModificationTime(provider, stateDir)
+            val fileAge = currentTime - effectiveModTime
+
+            logger.debug(s"State directory state-v$version: reportedModTime=${stateDir.modificationTime}, " +
+              s"effectiveModTime=$effectiveModTime, fileAge=${fileAge}ms, retention=${logRetentionDuration}ms")
 
             if (fileAge > logRetentionDuration) {
               foundCount += 1
@@ -682,6 +688,80 @@ class PurgeOrphanedSplitsExecutor(
         logger.warn(s"Failed to clean up old state directories: ${e.getMessage}", e)
         StateCleanupResult(0L, 0L)
     }
+
+  /**
+   * Get the effective modification time for a state directory.
+   *
+   * CRITICAL FIX for S3: S3 doesn't have real directories - they're just prefixes.
+   * When listing, S3 "directories" return modificationTime = 0L which would make
+   * ALL state directories appear infinitely old, bypassing retention checks.
+   *
+   * This method:
+   *   1. If the directory has a valid modification time (> 0), uses it directly
+   *   2. Otherwise, looks inside the directory for _manifest.avro or any .avro file
+   *      and uses that file's modification time as a proxy for the directory's age
+   *
+   * @param provider
+   *   Cloud storage provider
+   * @param stateDir
+   *   The state directory's CloudFileInfo
+   * @return
+   *   The effective modification time (epoch millis)
+   */
+  private def getStateDirectoryModificationTime(
+    provider: CloudStorageProvider,
+    stateDir: CloudFileInfo
+  ): Long = {
+    // If the directory has a valid modification time, use it directly
+    // (this works correctly on local filesystem and some cloud providers)
+    if (stateDir.modificationTime > 0) {
+      return stateDir.modificationTime
+    }
+
+    // S3 case: directory modificationTime is 0, need to look at files inside
+    try {
+      // CRITICAL: For S3, the prefix must end with "/" to list files inside a directory
+      // Without the trailing slash, S3 uses delimiter-based grouping which won't return
+      // the files directly inside the directory
+      val stateDirPath = stateDir.path.stripSuffix("/") + "/"
+      val filesInDir = provider.listFiles(stateDirPath, recursive = false)
+
+      // Try to find _manifest.avro first (most authoritative for state directory age)
+      // Note: Avro state directories only contain _manifest.avro, not _manifest.json
+      val manifestFile = filesInDir.find { f =>
+        val name = new Path(f.path).getName
+        name == "_manifest.avro"
+      }
+
+      manifestFile match {
+        case Some(manifest) =>
+          logger.debug(s"Using manifest file modification time for ${new Path(stateDir.path).getName}: ${manifest.modificationTime}")
+          manifest.modificationTime
+        case None =>
+          // Fall back to the newest file in the directory
+          val validFiles = filesInDir
+            .filterNot(_.isDirectory)
+            .filter(_.modificationTime > 0)
+
+          if (validFiles.nonEmpty) {
+            val newestFile = validFiles.maxBy(_.modificationTime)
+            logger.debug(s"Using newest file modification time for ${new Path(stateDir.path).getName}: ${newestFile.modificationTime}")
+            newestFile.modificationTime
+          } else {
+            // No files with valid modification times - directory is effectively empty or very old
+            // Use 0 which will cause it to be marked as expired (safe default for orphaned state dirs)
+            logger.warn(s"Could not determine modification time for ${new Path(stateDir.path).getName}, treating as expired")
+            0L
+          }
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Error getting modification time for ${stateDir.path}: ${e.getMessage}")
+        // On error, preserve the directory by using current time
+        // This errs on the side of caution to avoid accidentally deleting data
+        System.currentTimeMillis()
+    }
+  }
 
   /**
    * Clean up orphaned manifests from the shared manifest directory.
