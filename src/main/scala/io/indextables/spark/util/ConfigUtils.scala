@@ -17,8 +17,6 @@
 
 package io.indextables.spark.util
 
-import java.time.Duration
-
 import org.apache.spark.broadcast.Broadcast
 
 import com.google.common.cache.{Cache, CacheBuilder}
@@ -325,7 +323,7 @@ object ConfigUtils {
   private val hadoopConfigCache: Cache[Integer, org.apache.hadoop.conf.Configuration] = CacheBuilder
     .newBuilder()
     .maximumSize(50)
-    .expireAfterAccess(Duration.ofHours(1))
+    .expireAfterAccess(60, java.util.concurrent.TimeUnit.MINUTES)
     .build[Integer, org.apache.hadoop.conf.Configuration]()
 
   /**
