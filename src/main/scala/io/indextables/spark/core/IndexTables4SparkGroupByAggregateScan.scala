@@ -356,6 +356,15 @@ class IndexTables4SparkGroupByAggregateBatch(
   override def planInputPartitions(): Array[InputPartition] = {
     logger.debug(s"GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
 
+    // Get splitsPerTask from config - aggregate scans can have separate configuration
+    // Uses spark.indextables.read.aggregate.splitsPerTask if set, otherwise falls back to read.splitsPerTask
+    val splitsPerTask = config
+      .get("spark.indextables.read.aggregate.splitsPerTask")
+      .orElse(config.get("spark.indextables.read.splitsPerTask"))
+      .flatMap(s => scala.util.Try(s.toInt).toOption)
+      .getOrElse(2)
+      .max(1)
+
     // Get available hosts for driver-based locality assignment
     val sparkContext   = sparkSession.sparkContext
     val availableHosts = io.indextables.spark.storage.DriverSplitLocalityManager.getAvailableHosts(sparkContext)
@@ -386,26 +395,57 @@ class IndexTables4SparkGroupByAggregateBatch(
       io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
     logger.debug(s"GROUP BY BATCH: Assigned ${assignments.size} splits to hosts")
 
-    // Create one partition per filtered split for distributed GROUP BY processing
-    filteredSplits.map { split =>
-      val preferredHost = assignments.get(split.path)
-      // Extract partition values from split's partitionValues field
-      val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
-      new IndexTables4SparkGroupByAggregatePartition(
-        split,
-        pushedFilters,
-        config,
-        aggregation,
-        groupByColumns,
-        transactionLog.getTablePath(),
-        schema,
-        indexQueryFilters,
-        preferredHost,
-        bucketConfig,
-        partitionColumns,
-        splitPartitionValues
-      )
-    }.toArray
+    // Group splits by host for locality-aware batching
+    val splitsByHost: Map[String, Seq[io.indextables.spark.transaction.AddAction]] = filteredSplits
+      .groupBy(a => assignments.getOrElse(a.path, "unknown"))
+
+    // Create multi-split partitions (or single-split if splitsPerTask == 1)
+    var partitionIndex = 0
+    val partitions = if (splitsPerTask == 1) {
+      // Fallback to single-split behavior for backward compatibility
+      filteredSplits.map { split =>
+        val preferredHost = assignments.get(split.path)
+        val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
+        new IndexTables4SparkGroupByAggregatePartition(
+          split,
+          pushedFilters,
+          config,
+          aggregation,
+          groupByColumns,
+          transactionLog.getTablePath(),
+          schema,
+          indexQueryFilters,
+          preferredHost,
+          bucketConfig,
+          partitionColumns,
+          splitPartitionValues
+        )
+      }
+    } else {
+      // Group splits by host and batch them
+      splitsByHost.flatMap { case (host, hostSplits) =>
+        hostSplits.grouped(splitsPerTask).map { batch =>
+          val partition = new IndexTables4SparkMultiSplitGroupByAggregatePartition(
+            splits = batch,
+            pushedFilters = pushedFilters,
+            config = config,
+            aggregation = aggregation,
+            groupByColumns = groupByColumns,
+            tablePath = transactionLog.getTablePath(),
+            schema = schema,
+            indexQueryFilters = indexQueryFilters,
+            preferredHost = if (host == "unknown") None else Some(host),
+            bucketConfig = bucketConfig,
+            partitionColumns = partitionColumns
+          )
+          partitionIndex += 1
+          partition
+        }
+      }.toSeq
+    }
+
+    logger.info(s"GROUP BY BATCH: Planned ${partitions.length} partitions (${filteredSplits.length} splits, $splitsPerTask per task)")
+    partitions.toArray
   }
 
   override def createReaderFactory(): org.apache.spark.sql.connector.read.PartitionReaderFactory = {
@@ -459,6 +499,36 @@ class IndexTables4SparkGroupByAggregatePartition(
     preferredHost.toArray
 }
 
+/**
+ * Input partition holding multiple splits for batch GROUP BY aggregation processing.
+ * All splits share the same preferredHost for cache locality.
+ * The reader will execute GROUP BY aggregations on each split and merge results by group key.
+ */
+class IndexTables4SparkMultiSplitGroupByAggregatePartition(
+  val splits: Seq[io.indextables.spark.transaction.AddAction],
+  val pushedFilters: Array[Filter],
+  val config: Map[String, String],
+  val aggregation: Aggregation,
+  val groupByColumns: Array[String],
+  val tablePath: org.apache.hadoop.fs.Path,
+  val schema: StructType,
+  val indexQueryFilters: Array[Any] = Array.empty,
+  val preferredHost: Option[String] = None,
+  val bucketConfig: Option[BucketAggregationConfig] = None,
+  val partitionColumns: Set[String] = Set.empty)
+    extends InputPartition {
+
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitGroupByAggregatePartition])
+
+  logger.debug(s"MULTI-SPLIT GROUP BY PARTITION: Created partition with ${splits.length} splits")
+  logger.debug(s"MULTI-SPLIT GROUP BY PARTITION: GROUP BY columns: ${groupByColumns.mkString(", ")}")
+  logger.info(
+    s"MULTI-SPLIT GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}"
+  )
+
+  override def preferredLocations(): Array[String] = preferredHost.toArray
+}
+
 /** Reader factory for GROUP BY aggregation partitions. */
 class IndexTables4SparkGroupByAggregateReaderFactory(
   sparkSession: SparkSession,
@@ -478,6 +548,15 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
+      case multiSplitPartition: IndexTables4SparkMultiSplitGroupByAggregatePartition =>
+        logger.debug(s"GROUP BY READER FACTORY: Creating multi-split reader with ${multiSplitPartition.splits.length} splits")
+
+        new IndexTables4SparkMultiSplitGroupByAggregateReader(
+          multiSplitPartition,
+          sparkSession,
+          schema
+        )
+
       case groupByPartition: IndexTables4SparkGroupByAggregatePartition =>
         logger.debug(s"GROUP BY READER FACTORY: Creating reader for GROUP BY partition")
 
@@ -486,6 +565,7 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
           sparkSession,
           schema
         )
+
       case other =>
         throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
     }
@@ -2362,5 +2442,220 @@ class IndexTables4SparkGroupByAggregateReader(
 
     // Return single row with partition values and aggregation results
     Array(InternalRow.fromSeq(groupByValues ++ aggregationValues))
+  }
+}
+
+/**
+ * Reader for multi-split GROUP BY aggregation partitions.
+ * Executes GROUP BY aggregations on each split and merges results by group key:
+ * - Rows with same group key(s) are combined
+ * - COUNT/SUM: adds values together
+ * - MIN: takes the minimum across all splits
+ * - MAX: takes the maximum across all splits
+ */
+class IndexTables4SparkMultiSplitGroupByAggregateReader(
+  partition: IndexTables4SparkMultiSplitGroupByAggregatePartition,
+  sparkSession: SparkSession,
+  schema: StructType)
+    extends org.apache.spark.sql.connector.read.PartitionReader[InternalRow] {
+
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitGroupByAggregateReader])
+  private var aggregateResults: Iterator[InternalRow] = _
+  private var isInitialized = false
+
+  override def next(): Boolean = {
+    if (!isInitialized) {
+      initialize()
+      isInitialized = true
+    }
+    aggregateResults.hasNext
+  }
+
+  override def get(): InternalRow =
+    aggregateResults.next()
+
+  override def close(): Unit = {
+    logger.debug(s"MULTI-SPLIT GROUP BY READER: Closing reader for ${partition.splits.length} splits")
+
+    // Report bytesRead to Spark UI
+    val totalBytesRead = partition.splits.map(_.size).sum
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(totalBytesRead, 0)) {
+      logger.debug(s"Reported input metrics: $totalBytesRead bytes from ${partition.splits.length} splits")
+    }
+  }
+
+  /** Initialize by executing GROUP BY aggregations on all splits and merging results by group key. */
+  private def initialize(): Unit = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    logger.debug(s"MULTI-SPLIT GROUP BY READER: Initializing with ${partition.splits.length} splits")
+
+    try {
+      // Execute GROUP BY on each split and collect all results
+      val allSplitResults = partition.splits.flatMap { split =>
+        // Create a temporary single-split partition for each split
+        val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
+        val singlePartition = new IndexTables4SparkGroupByAggregatePartition(
+          split,
+          partition.pushedFilters,
+          partition.config,
+          partition.aggregation,
+          partition.groupByColumns,
+          partition.tablePath,
+          partition.schema,
+          partition.indexQueryFilters,
+          None,
+          partition.bucketConfig,
+          partition.partitionColumns,
+          splitPartitionValues
+        )
+
+        // Create a reader for this single split
+        val singleReader = new IndexTables4SparkGroupByAggregateReader(singlePartition, sparkSession, schema)
+
+        // Collect all results from this split
+        val results = scala.collection.mutable.ArrayBuffer[InternalRow]()
+        try {
+          while (singleReader.next()) {
+            results += singleReader.get().copy()
+          }
+        } finally {
+          singleReader.close()
+        }
+        results
+      }
+
+      if (allSplitResults.isEmpty) {
+        logger.debug(s"MULTI-SPLIT GROUP BY READER: No results from any split")
+        aggregateResults = Iterator.empty
+        return
+      }
+
+      // Merge results by group key
+      val mergedResults = mergeGroupByResults(allSplitResults, partition.aggregation, partition.groupByColumns.length)
+      aggregateResults = mergedResults.iterator
+
+      logger.debug(s"MULTI-SPLIT GROUP BY READER: Merged ${allSplitResults.length} rows into ${mergedResults.length} grouped rows from ${partition.splits.length} splits")
+
+    } catch {
+      case e: IllegalArgumentException =>
+        throw e
+      case e: Exception =>
+        logger.error(s"MULTI-SPLIT GROUP BY READER: Failed to execute GROUP BY aggregation", e)
+        aggregateResults = Iterator.empty
+    }
+  }
+
+  /**
+   * Merge GROUP BY results from multiple splits by group key.
+   * Rows with the same group key(s) are combined:
+   * - COUNT/SUM: adds values together
+   * - MIN: takes the minimum across all splits
+   * - MAX: takes the maximum across all splits
+   */
+  private def mergeGroupByResults(
+    results: Seq[InternalRow],
+    aggregation: Aggregation,
+    numGroupByCols: Int
+  ): Array[InternalRow] = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    // Group rows by their group key(s)
+    // Group key is the first numGroupByCols columns
+    val groupedByKey = results.groupBy { row =>
+      (0 until numGroupByCols).map { i =>
+        if (row.isNullAt(i)) null else row.get(i, null)
+      }
+    }
+
+    // Merge each group
+    val numAggCols = aggregation.aggregateExpressions.length
+    groupedByKey.map { case (groupKey, groupRows) =>
+      // Start with group key values
+      val mergedValues = new Array[Any](numGroupByCols + numAggCols)
+
+      // Copy group key values from first row
+      for (i <- 0 until numGroupByCols) {
+        mergedValues(i) = if (groupRows.head.isNullAt(i)) null else groupRows.head.get(i, null)
+      }
+
+      // Merge aggregation values
+      aggregation.aggregateExpressions.zipWithIndex.foreach { case (aggExpr, aggIdx) =>
+        val colIdx = numGroupByCols + aggIdx
+
+        aggExpr match {
+          case _: Count | _: CountStar =>
+            // COUNT: sum all counts
+            val totalCount = groupRows.filter(!_.isNullAt(colIdx)).map(_.getLong(colIdx)).sum
+            mergedValues(colIdx) = java.lang.Long.valueOf(totalCount)
+
+          case _: Sum =>
+            // SUM: sum all values
+            val firstValue = groupRows.find(r => !r.isNullAt(colIdx)).map(_.get(colIdx, null))
+            firstValue match {
+              case Some(_: java.lang.Long) =>
+                val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(_.getLong(colIdx)).sum
+                mergedValues(colIdx) = java.lang.Long.valueOf(totalSum)
+              case Some(_: java.lang.Double) =>
+                val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(_.getDouble(colIdx)).sum
+                mergedValues(colIdx) = java.lang.Double.valueOf(totalSum)
+              case _ =>
+                val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(row => {
+                  try { row.getLong(colIdx) }
+                  catch { case _: ClassCastException => row.getDouble(colIdx).toLong }
+                }).sum
+                mergedValues(colIdx) = java.lang.Long.valueOf(totalSum)
+            }
+
+          case _: Min =>
+            // MIN: take the minimum
+            val validRows = groupRows.filter(!_.isNullAt(colIdx))
+            if (validRows.isEmpty) {
+              mergedValues(colIdx) = null
+            } else {
+              val firstValue = validRows.head.get(colIdx, null)
+              firstValue match {
+                case _: java.lang.Integer =>
+                  mergedValues(colIdx) = java.lang.Integer.valueOf(validRows.map(_.getInt(colIdx)).min)
+                case _: java.lang.Long =>
+                  mergedValues(colIdx) = java.lang.Long.valueOf(validRows.map(_.getLong(colIdx)).min)
+                case _: java.lang.Float =>
+                  mergedValues(colIdx) = java.lang.Float.valueOf(validRows.map(_.getFloat(colIdx)).min)
+                case _: java.lang.Double =>
+                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).min)
+                case _ =>
+                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).min)
+              }
+            }
+
+          case _: Max =>
+            // MAX: take the maximum
+            val validRows = groupRows.filter(!_.isNullAt(colIdx))
+            if (validRows.isEmpty) {
+              mergedValues(colIdx) = null
+            } else {
+              val firstValue = validRows.head.get(colIdx, null)
+              firstValue match {
+                case _: java.lang.Integer =>
+                  mergedValues(colIdx) = java.lang.Integer.valueOf(validRows.map(_.getInt(colIdx)).max)
+                case _: java.lang.Long =>
+                  mergedValues(colIdx) = java.lang.Long.valueOf(validRows.map(_.getLong(colIdx)).max)
+                case _: java.lang.Float =>
+                  mergedValues(colIdx) = java.lang.Float.valueOf(validRows.map(_.getFloat(colIdx)).max)
+                case _: java.lang.Double =>
+                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).max)
+                case _ =>
+                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).max)
+              }
+            }
+
+          case _ =>
+            // Default: take from first row
+            mergedValues(colIdx) = if (groupRows.head.isNullAt(colIdx)) null else groupRows.head.get(colIdx, null)
+        }
+      }
+
+      InternalRow.fromSeq(mergedValues.toSeq)
+    }.toArray
   }
 }

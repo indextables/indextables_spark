@@ -273,24 +273,58 @@ class IndexTables4SparkScan(
 
     logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions")
 
+    // Get splitsPerTask from config (default: 2)
+    val splitsPerTask = config
+      .get("spark.indextables.read.splitsPerTask")
+      .flatMap(s => scala.util.Try(s.toInt).toOption)
+      .getOrElse(2)
+      .max(1)
+
     // Batch-assign all splits for this query using per-query load balancing
     val splitPaths  = filteredActions.map(_.path)
     val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
     logger.debug(s"Assigned ${assignments.size} splits to hosts")
 
-    val partitions = filteredActions.zipWithIndex.map {
-      case (addAction, index) =>
-        val preferredHost = assignments.get(addAction.path)
-        new IndexTables4SparkInputPartition(
-          addAction,
-          readSchema,
-          fullTableSchema,
-          pushedFilters,
-          index,
-          limit,
-          indexQueryFilters,
-          preferredHost
-        )
+    // Group splits by assigned host for locality-aware batching
+    val splitsByHost: Map[String, Seq[AddAction]] = filteredActions
+      .groupBy(a => assignments.getOrElse(a.path, "unknown"))
+
+    // Create multi-split partitions (or single-split if splitsPerTask == 1)
+    var partitionIndex = 0
+    val partitions = if (splitsPerTask == 1) {
+      // Fallback to single-split behavior for backward compatibility
+      filteredActions.zipWithIndex.map {
+        case (addAction, index) =>
+          val preferredHost = assignments.get(addAction.path)
+          new IndexTables4SparkInputPartition(
+            addAction,
+            readSchema,
+            fullTableSchema,
+            pushedFilters,
+            index,
+            limit,
+            indexQueryFilters,
+            preferredHost
+          )
+      }
+    } else {
+      // Group splits by host and batch them
+      splitsByHost.flatMap { case (host, hostSplits) =>
+        hostSplits.grouped(splitsPerTask).map { batch =>
+          val partition = new IndexTables4SparkMultiSplitInputPartition(
+            addActions = batch,
+            readSchema = readSchema,
+            fullTableSchema = fullTableSchema,
+            filters = pushedFilters,
+            partitionId = partitionIndex,
+            limit = limit,
+            indexQueryFilters = indexQueryFilters,
+            preferredHost = if (host == "unknown") None else Some(host)
+          )
+          partitionIndex += 1
+          partition
+        }
+      }.toSeq
     }
 
     // Log summary at info level, details at debug level
@@ -299,7 +333,7 @@ class IndexTables4SparkScan(
       val hostDistribution = assignments.values.groupBy(identity).map { case (h, s) => s"$h=${s.size}" }.mkString(", ")
       logger.debug(s"Partition host distribution: $hostDistribution")
     }
-    logger.info(s"Planned ${partitions.length} partitions ($totalPreferred with locality hints)")
+    logger.info(s"Planned ${partitions.length} multi-split partitions (${filteredActions.length} splits, $splitsPerTask per task, $totalPreferred with locality hints)")
 
     partitions.toArray[InputPartition]
   }

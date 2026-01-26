@@ -229,6 +229,9 @@ class OutputMetricsTest extends TestBase {
       // Enable capture only for read operation
       captureEnabled = true
 
+      // Set limit high enough to read all rows (default limit is 250)
+      spark.conf.set("spark.indextables.read.defaultLimit", "1000")
+
       // Read the data
       val _result = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -252,8 +255,10 @@ class OutputMetricsTest extends TestBase {
 
       info(s"✅ Input metrics correctly reported: $bytesRead bytes, $recordsRead records")
 
-    } finally
+    } finally {
       spark.sparkContext.removeSparkListener(listener)
+      spark.conf.unset("spark.indextables.read.defaultLimit")
+    }
   }
 
   test("should report input metrics for filtered reads") {

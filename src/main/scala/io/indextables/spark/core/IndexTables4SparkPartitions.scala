@@ -123,6 +123,36 @@ class IndexTables4SparkInputPartition(
     preferredHost.toArray
 }
 
+/**
+ * InputPartition holding multiple splits for batch processing.
+ * All splits share the same preferredHost for cache locality.
+ *
+ * This reduces Spark scheduler overhead by processing multiple splits in a single task
+ * while honoring cache locality assignments from DriverSplitLocalityManager.
+ *
+ * @param addActions Multiple splits to process in this partition
+ * @param readSchema Schema for reading data
+ * @param fullTableSchema Full table schema for type lookup (filters may reference non-projected columns)
+ * @param filters Pushed-down filters to apply
+ * @param partitionId Partition index for logging/debugging
+ * @param limit Optional pushed-down limit
+ * @param indexQueryFilters IndexQuery filters for full-text search
+ * @param preferredHost Preferred host for all splits in this partition
+ */
+class IndexTables4SparkMultiSplitInputPartition(
+  val addActions: Seq[AddAction],
+  val readSchema: StructType,
+  val fullTableSchema: StructType,
+  val filters: Array[Filter],
+  val partitionId: Int,
+  val limit: Option[Int] = None,
+  val indexQueryFilters: Array[Any] = Array.empty,
+  val preferredHost: Option[String] = None)
+    extends InputPartition {
+
+  override def preferredLocations(): Array[String] = preferredHost.toArray
+}
+
 class IndexTables4SparkReaderFactory(
   readSchema: StructType,
   limit: Option[Int] = None,
@@ -133,22 +163,39 @@ class IndexTables4SparkReaderFactory(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkReaderFactory])
 
-  override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
-    val tantivyPartition = partition.asInstanceOf[IndexTables4SparkInputPartition]
-    logger.info(s"Creating reader for partition ${tantivyPartition.partitionId}")
+  override def createReader(partition: InputPartition): PartitionReader[InternalRow] =
+    partition match {
+      case multi: IndexTables4SparkMultiSplitInputPartition =>
+        logger.info(s"Creating multi-split reader for partition ${multi.partitionId} with ${multi.addActions.length} splits")
+        new IndexTables4SparkMultiSplitPartitionReader(
+          multi.addActions,
+          readSchema,
+          multi.fullTableSchema,
+          multi.filters,
+          multi.limit.orElse(limit),
+          config,
+          tablePath,
+          multi.indexQueryFilters,
+          metricsAccumulator
+        )
 
-    new IndexTables4SparkPartitionReader(
-      tantivyPartition.addAction,
-      readSchema,
-      tantivyPartition.fullTableSchema,
-      tantivyPartition.filters,
-      tantivyPartition.limit.orElse(limit),
-      config,
-      tablePath,
-      tantivyPartition.indexQueryFilters,
-      metricsAccumulator
-    )
-  }
+      case single: IndexTables4SparkInputPartition =>
+        logger.info(s"Creating reader for partition ${single.partitionId}")
+        new IndexTables4SparkPartitionReader(
+          single.addAction,
+          readSchema,
+          single.fullTableSchema,
+          single.filters,
+          single.limit.orElse(limit),
+          config,
+          tablePath,
+          single.indexQueryFilters,
+          metricsAccumulator
+        )
+
+      case other =>
+        throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
+    }
 }
 
 class IndexTables4SparkPartitionReader(
@@ -656,6 +703,179 @@ class IndexTables4SparkPartitionReader(
 
       case _ => false
     }
+  }
+}
+
+/**
+ * PartitionReader that processes multiple splits sequentially.
+ * Stops early if pushed limit is satisfied before querying all splits.
+ *
+ * This reader iterates through multiple splits, maintaining running state to:
+ * - Track total rows returned across all splits
+ * - Apply remaining limit to each subsequent split
+ * - Skip remaining splits once limit is satisfied (early termination)
+ * - Close each split's search engine before moving to the next
+ *
+ * @param addActions Multiple splits to process
+ * @param readSchema Schema for reading data
+ * @param fullTableSchema Full table schema for type lookup
+ * @param filters Pushed-down filters to apply
+ * @param limit Optional pushed-down limit
+ * @param config Configuration options
+ * @param tablePath Base table path for resolving relative paths
+ * @param indexQueryFilters IndexQuery filters for full-text search
+ * @param metricsAccumulator Optional accumulator for batch optimization metrics
+ */
+class IndexTables4SparkMultiSplitPartitionReader(
+  addActions: Seq[AddAction],
+  readSchema: StructType,
+  fullTableSchema: StructType,
+  filters: Array[Filter],
+  limit: Option[Int] = None,
+  config: Map[String, String],
+  tablePath: Path,
+  indexQueryFilters: Array[Any] = Array.empty,
+  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
+    extends PartitionReader[InternalRow] {
+
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitPartitionReader])
+
+  // Calculate effective limit: use pushed limit, then configurable default, then hardcoded fallback
+  private val configuredDefaultLimit: Int = config
+    .get("spark.indextables.read.defaultLimit")
+    .flatMap(s => scala.util.Try(s.toInt).toOption)
+    .getOrElse(250)
+  private val effectiveLimit: Int = limit.getOrElse(configuredDefaultLimit)
+
+  // Multi-split iteration state
+  private var currentSplitIndex = 0
+  private var currentReader: Option[IndexTables4SparkPartitionReader] = None
+  private var totalRowsReturned = 0L
+  private var initialized = false
+
+  // Capture baseline metrics at partition reader creation for delta computation
+  private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =
+    if (metricsAccumulator.isDefined) {
+      io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
+    } else {
+      io.indextables.spark.storage.BatchOptMetrics.empty
+    }
+
+  logger.info(s"MultiSplitPartitionReader created with ${addActions.length} splits, effectiveLimit=$effectiveLimit")
+
+  override def next(): Boolean = {
+    if (!initialized) {
+      initialized = true
+      logger.debug(s"MultiSplitPartitionReader: initializing with ${addActions.length} splits")
+    }
+
+    // Check if current reader has more rows
+    if (currentReader.exists(_.next())) {
+      return true
+    }
+
+    // Close current reader before moving to next
+    closeCurrentReader()
+
+    // Check if we've satisfied the limit
+    val remainingLimit = effectiveLimit - totalRowsReturned.toInt
+    if (remainingLimit <= 0) {
+      logger.debug(s"MultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), skipping remaining ${addActions.length - currentSplitIndex} splits")
+      return false
+    }
+
+    // Move to next split
+    while (currentSplitIndex < addActions.length) {
+      val addAction = addActions(currentSplitIndex)
+      currentSplitIndex += 1
+
+      logger.debug(s"MultiSplitPartitionReader: initializing split ${currentSplitIndex}/${addActions.length}: ${addAction.path}")
+
+      // Create a new single-split reader with the remaining limit
+      val singleSplitReader = new IndexTables4SparkPartitionReader(
+        addAction,
+        readSchema,
+        fullTableSchema,
+        filters,
+        Some(remainingLimit),
+        config,
+        tablePath,
+        indexQueryFilters,
+        metricsAccumulator
+      )
+
+      currentReader = Some(singleSplitReader)
+
+      if (singleSplitReader.next()) {
+        return true
+      }
+
+      // This split had no results, close and try next
+      closeCurrentReader()
+    }
+
+    false
+  }
+
+  override def get(): InternalRow = {
+    currentReader match {
+      case Some(reader) =>
+        val row = reader.get()
+        totalRowsReturned += 1
+        row
+      case None =>
+        throw new IllegalStateException("get() called without successful next()")
+    }
+  }
+
+  private def closeCurrentReader(): Unit = {
+    currentReader.foreach { reader =>
+      try {
+        reader.close()
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Error closing split reader: ${ex.getMessage}")
+      }
+    }
+    currentReader = None
+  }
+
+  override def close(): Unit = {
+    closeCurrentReader()
+
+    // Collect batch optimization metrics delta for this partition (all splits combined)
+    metricsAccumulator.foreach { acc =>
+      try {
+        val currentMetrics = io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
+        val delta = io.indextables.spark.storage.BatchOptMetrics(
+          totalOperations = currentMetrics.totalOperations - baselineMetrics.totalOperations,
+          totalDocuments = currentMetrics.totalDocuments - baselineMetrics.totalDocuments,
+          totalRequests = currentMetrics.totalRequests - baselineMetrics.totalRequests,
+          consolidatedRequests = currentMetrics.consolidatedRequests - baselineMetrics.consolidatedRequests,
+          bytesTransferred = currentMetrics.bytesTransferred - baselineMetrics.bytesTransferred,
+          bytesWasted = currentMetrics.bytesWasted - baselineMetrics.bytesWasted,
+          totalPrefetchDurationMs = currentMetrics.totalPrefetchDurationMs - baselineMetrics.totalPrefetchDurationMs,
+          segmentsProcessed = currentMetrics.segmentsProcessed - baselineMetrics.segmentsProcessed
+        )
+        if (delta.totalOperations > 0 || delta.totalDocuments > 0) {
+          acc.add(delta)
+          logger.debug(s"Added batch metrics delta for multi-split partition: ops=${delta.totalOperations}, docs=${delta.totalDocuments}")
+        }
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Error collecting batch optimization metrics for multi-split partition", ex)
+      }
+    }
+
+    // Report bytesRead to Spark UI for all processed splits
+    // Note: recordsRead is automatically tracked by Spark's V2 DataSourceRDD (MetricsHandler)
+    // We only report bytesRead since Spark's Hadoop filesystem callbacks don't work for our direct file reading
+    val bytesRead = addActions.take(currentSplitIndex).map(_.size).sum
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
+      logger.debug(s"Reported input metrics for multi-split partition: $bytesRead bytes from $currentSplitIndex splits")
+    }
+
+    logger.info(s"MultiSplitPartitionReader closed: processed ${currentSplitIndex}/${addActions.length} splits, returned $totalRowsReturned rows")
   }
 }
 
