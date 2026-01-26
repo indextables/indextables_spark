@@ -1677,24 +1677,27 @@ class PurgeOrphanedSplitsExecutor(
         val retries      = maxRetries
 
         // Create CloudStorageProvider for this partition WITH credentials
-        val optionsMap = new java.util.HashMap[String, String]()
-        configs.foreach { case (k, v) => optionsMap.put(k, v) }
-        val configOptions                  = new CaseInsensitiveStringMap(optionsMap)
-        var provider: CloudStorageProvider = null
-
-        // IMPORTANT: Populate Hadoop config from broadcast configs so credential providers
-        // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
-        // This matches the fix in IndexTables4SparkPartitionReader (PR #100 follow-up).
-        val enrichedHadoopConf = io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(configs)
-        // Also copy any existing Hadoop config settings (e.g., fs.s3a.* from cluster config)
-        val baseConf = conf
-        val iter = baseConf.iterator()
-        while (iter.hasNext) {
-          val entry = iter.next()
-          if (enrichedHadoopConf.get(entry.getKey) == null) {
-            enrichedHadoopConf.set(entry.getKey, entry.getValue)
+        // Merge broadcast Hadoop config settings (e.g., fs.s3a.* from cluster config) into configs map
+        // Use Map-based fast path - no Hadoop Configuration creation needed for S3/Azure
+        val mergedConfigs = {
+          val result = scala.collection.mutable.Map[String, String]()
+          // First add broadcast Hadoop config settings (lower priority)
+          val baseConf = conf
+          val iter = baseConf.iterator()
+          while (iter.hasNext) {
+            val entry = iter.next()
+            val key = entry.getKey
+            // Only include relevant config keys (spark.indextables.* and fs.s3a.*)
+            if (key.startsWith("spark.indextables.") || key.startsWith("fs.s3a.") ||
+                key.startsWith("spark.hadoop.fs.s3a.")) {
+              result.put(key, entry.getValue)
+            }
           }
+          // Then add broadcast configs (higher priority - will overwrite)
+          configs.foreach { case (k, v) => result.put(k, v) }
+          result.toMap
         }
+        var provider: CloudStorageProvider = null
 
         try
           fileIter.foreach { fileInfo =>
@@ -1702,7 +1705,8 @@ class PurgeOrphanedSplitsExecutor(
             if (provider == null) {
               // Extract base path from file path (everything before the filename)
               val basePath = fileInfo.path.substring(0, fileInfo.path.lastIndexOf('/'))
-              provider = CloudStorageProviderFactory.createProvider(basePath, configOptions, enrichedHadoopConf)
+              // Use Map-based provider creation (fast path - no Hadoop Configuration)
+              provider = CloudStorageProviderFactory.createProvider(basePath, mergedConfigs)
             }
 
             // Inline retry logic to avoid serialization issues

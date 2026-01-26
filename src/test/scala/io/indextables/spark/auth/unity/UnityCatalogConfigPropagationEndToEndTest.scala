@@ -210,10 +210,8 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
         val directException = intercept[Exception] {
           import io.indextables.spark.util.ConfigNormalization
           val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-          val hadoopConf   = new org.apache.hadoop.conf.Configuration()
-          sparkConfigs.foreach { case (key, value) => hadoopConf.set(key, value) }
           val uri      = new java.net.URI(testS3Path)
-          val provider = new UnityCatalogAWSCredentialProvider(uri, hadoopConf)
+          val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
           provider.getCredentials()
         }
         // This proves the configs are properly set up for the provider
@@ -279,10 +277,8 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
         val directException = intercept[Exception] {
           import io.indextables.spark.util.ConfigNormalization
           val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-          val hadoopConf   = new org.apache.hadoop.conf.Configuration()
-          sparkConfigs.foreach { case (key, value) => hadoopConf.set(key, value) }
           val uri      = new java.net.URI(testS3Path)
-          val provider = new UnityCatalogAWSCredentialProvider(uri, hadoopConf)
+          val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
           provider.getCredentials()
         }
         // This proves the configs are properly set up for the provider
@@ -327,23 +323,15 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
   test("Direct credential provider instantiation should receive databricks configs") {
     import io.indextables.spark.util.ConfigNormalization
-    import org.apache.hadoop.conf.Configuration
 
     // Extract all configs
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
 
-    // Create Hadoop config with all extracted configs (simulating enrichHadoopConfWithSparkConf)
-    val hadoopConf = new Configuration()
-    sparkConfigs.foreach {
-      case (key, value) =>
-        hadoopConf.set(key, value)
-    }
-
-    // Instantiate the provider directly
+    // Instantiate the provider directly using Map-based factory
     val uri = new java.net.URI("s3://test-bucket/test-path")
 
     val exception = intercept[Exception] {
-      val provider = new UnityCatalogAWSCredentialProvider(uri, hadoopConf)
+      val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
       provider.getCredentials()
     }
 
@@ -464,56 +452,32 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   }
 
   /**
-   * REGRESSION TEST for PR #100: Demonstrates the BROKEN behavior when cachedHadoopConf is empty.
+   * REGRESSION TEST for PR #100: Demonstrates the BROKEN behavior when config map is empty.
    *
-   * This test simulates EXACTLY what IndexTables4SparkPartitionReader does BEFORE the fix:
-   * - cachedHadoopConf = new Configuration() (EMPTY)
-   * - cachedOptionsMap = new CaseInsensitiveStringMap(config.asJava) (has credentials)
+   * This test simulates what happens when the provider is instantiated without the required
+   * Databricks configuration - it should fail with a "not configured" error.
    *
-   * The credential provider is instantiated with the Hadoop config, NOT the options map,
-   * so with an empty Hadoop config, the provider fails with "not configured" error.
-   *
-   * This test MUST FAIL before the fix is applied and PASS after.
+   * This test verifies that empty config causes proper error handling.
    */
-  test("REGRESSION: Partition reader BROKEN pattern - empty Hadoop config causes credential failure") {
-    import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
-    import io.indextables.spark.util.ConfigNormalization
-    import org.apache.hadoop.conf.Configuration
-    import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import scala.jdk.CollectionConverters._
+  test("REGRESSION: Empty config map causes credential failure with clear error") {
+    logger.info("=== REGRESSION TEST: BROKEN Pattern (empty config map) ===")
 
-    logger.info("=== REGRESSION TEST: BROKEN Pattern (empty Hadoop config) ===")
+    // Empty config - missing required Databricks settings
+    val emptyConfigMap = Map.empty[String, String]
 
-    // Step 1: Build config map as driver does (this has all credentials)
-    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
-    val configMap     = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    logger.info("BROKEN: config map is EMPTY (no spark.indextables.databricks.* keys)")
 
-    logger.info(s"Config map has ${configMap.size} keys including credentials")
-
-    // Step 2: Simulate the BROKEN IndexTables4SparkPartitionReader pattern:
-    // - cachedOptionsMap gets the config (correct)
-    // - cachedHadoopConf is EMPTY (BROKEN!)
-    val cachedOptionsMap = new CaseInsensitiveStringMap(configMap.asJava)
-    val brokenCachedHadoopConf = new Configuration() // EMPTY - this is the bug!
-
-    logger.info(s"BROKEN: cachedOptionsMap has ${cachedOptionsMap.size()} entries")
-    logger.info(s"BROKEN: cachedHadoopConf is EMPTY (0 spark.indextables.* keys)")
-
-    // Step 3: Try to create credential provider with the BROKEN pattern
-    // CloudStorageProviderFactory.extractCloudConfig uses BOTH options AND hadoop config
-    // but S3CloudStorageProvider passes ONLY hadoop config to credential provider
     val uri = new java.net.URI(testS3Path)
 
     val exception = intercept[Exception] {
-      val provider = new UnityCatalogAWSCredentialProvider(uri, brokenCachedHadoopConf)
+      val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, emptyConfigMap)
       provider.getCredentials()
     }
 
     val fullMessage = getFullExceptionMessage(exception)
     logger.info(s"BROKEN pattern exception: ${fullMessage.take(300)}")
 
-    // With BROKEN pattern (empty Hadoop config), provider should fail with "not configured"
+    // With BROKEN pattern (empty config), provider should fail with "not configured"
     val configMissingError =
       fullMessage.contains("workspaceUrl not configured") ||
         fullMessage.contains("Databricks workspace URL not configured") ||
@@ -521,33 +485,29 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     withClue(
       s"BROKEN pattern should cause 'not configured' error. " +
-        s"If this PASSES, the bug still exists. Full message: $fullMessage"
+        s"Full message: $fullMessage"
     ) {
       configMissingError shouldBe true
     }
 
-    logger.info("CONFIRMED: BROKEN pattern (empty Hadoop config) causes 'not configured' error")
+    logger.info("CONFIRMED: Empty config map causes 'not configured' error")
   }
 
   /**
-   * REGRESSION TEST for PR #100: Demonstrates the FIXED behavior when cachedHadoopConf is populated.
+   * REGRESSION TEST for PR #100: Demonstrates the FIXED behavior when config map is populated.
    *
-   * This test simulates what IndexTables4SparkPartitionReader SHOULD do AFTER the fix:
-   * - cachedHadoopConf is populated from the config map
-   * - cachedOptionsMap = new CaseInsensitiveStringMap(config.asJava)
+   * This test simulates what IndexTables4SparkPartitionReader does with proper config propagation:
+   * - Config map has all the Databricks credentials
    *
-   * With a properly populated Hadoop config, the credential provider receives the Databricks config
+   * With a properly populated config map, the credential provider receives the Databricks config
    * and fails with "Connection refused" (proving config was received) instead of "not configured".
    *
    * This test MUST PASS after the fix is applied.
    */
-  test("REGRESSION: Partition reader FIXED pattern - populated Hadoop config propagates credentials") {
+  test("REGRESSION: Populated config map propagates credentials correctly") {
     import io.indextables.spark.util.ConfigNormalization
-    import org.apache.hadoop.conf.Configuration
-    import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import scala.jdk.CollectionConverters._
 
-    logger.info("=== REGRESSION TEST: FIXED Pattern (populated Hadoop config) ===")
+    logger.info("=== REGRESSION TEST: FIXED Pattern (populated config map) ===")
 
     // Step 1: Build config map as driver does
     val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
@@ -559,25 +519,13 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     configMap should contain key "spark.indextables.databricks.apiToken"
     configMap should contain key "spark.indextables.aws.credentialsProviderClass"
 
-    // Step 2: Simulate the FIXED IndexTables4SparkPartitionReader pattern:
-    // - cachedOptionsMap gets the config (same as before)
-    // - cachedHadoopConf is POPULATED from config map (THE FIX!)
-    val cachedOptionsMap = new CaseInsensitiveStringMap(configMap.asJava)
-    val fixedCachedHadoopConf = new Configuration()
-    configMap.foreach {
-      case (key, value) if key.startsWith("spark.indextables.") =>
-        fixedCachedHadoopConf.set(key, value)
-      case _ =>
-    }
+    logger.info(s"FIXED: config map has ${configMap.count(_._1.startsWith("spark.indextables."))} spark.indextables.* keys")
 
-    logger.info(s"FIXED: cachedOptionsMap has ${cachedOptionsMap.size()} entries")
-    logger.info(s"FIXED: cachedHadoopConf has ${configMap.count(_._1.startsWith("spark.indextables."))} spark.indextables.* keys")
-
-    // Step 3: Try to create credential provider with the FIXED pattern
+    // Step 2: Try to create credential provider with the populated config map
     val uri = new java.net.URI(testS3Path)
 
     val exception = intercept[Exception] {
-      val provider = new UnityCatalogAWSCredentialProvider(uri, fixedCachedHadoopConf)
+      val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, configMap)
       provider.getCredentials()
     }
 
@@ -602,7 +550,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     // Verify the error indicates the provider tried to connect (config was received)
     assertUnityProviderInvoked(exception)
 
-    logger.info("SUCCESS: FIXED pattern propagates credentials correctly")
+    logger.info("SUCCESS: Populated config map propagates credentials correctly")
   }
 
 }

@@ -80,6 +80,48 @@ case class PrewarmCacheCommand(
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
 
+  /**
+   * Resolve AWS credentials on the driver and return a modified config.
+   * This eliminates executor-side HTTP calls for credential providers like UnityCatalogAWSCredentialProvider.
+   */
+  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: String): Map[String, String] = {
+    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+      .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
+
+    providerClass match {
+      case Some(className) if className.nonEmpty =>
+        try {
+          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
+          val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
+            config, normalizedPath
+          )
+
+          credentials match {
+            case Some(creds) =>
+              logger.info(s"[DRIVER] Resolved AWS credentials from provider: $className")
+              var newConfig = config -
+                "spark.indextables.aws.credentialsProviderClass" -
+                "spark.indextables.aws.credentialsproviderclass" +
+                ("spark.indextables.aws.accessKey" -> creds.accessKey) +
+                ("spark.indextables.aws.secretKey" -> creds.secretKey)
+
+              creds.sessionToken.foreach(token => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token))
+              newConfig
+
+            case None =>
+              logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
+              config
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
+            config
+        }
+
+      case None => config
+    }
+  }
+
   override val output: Seq[Attribute] = Seq(
     AttributeReference("host", StringType, nullable = false)(),
     AttributeReference("assigned_host", StringType, nullable = false)(),
@@ -133,7 +175,10 @@ case class PrewarmCacheCommand(
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs =
       ConfigNormalization.extractTantivyConfigsFromHadoop(sparkSession.sparkContext.hadoopConfiguration)
-    val mergedConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val baseConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
+    val mergedConfig = resolveCredentialsOnDriver(baseConfig, tablePath)
 
     // Create transaction log - CloudStorageProvider will handle credential resolution
     // with proper refresh logic via V1ToV2CredentialsProviderAdapter

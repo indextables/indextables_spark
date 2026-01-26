@@ -77,16 +77,17 @@ class IndexTables4SparkBatchWrite(
       logger.info(s"Added computed split conversion max parallelism to executor config: $maxPar")
     }
 
-    // Serialize hadoop config properties to avoid Configuration serialization issues
+    // Combine hadoop config with serialized options into single Map
+    // Map-based config - no HadoopConf reconstruction needed on executors (fast path)
     val serializedHadoopConfig =
       io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(enrichedHadoopConf)
+    val combinedConfig = serializedHadoopConfig ++ serializedOptions.toMap
 
     // BatchWrite does NOT support merge-on-write - pass empty partition columns
     new IndexTables4SparkWriterFactory(
       tablePath,
       writeInfo.schema(),
-      serializedOptions.toMap,
-      serializedHadoopConfig,
+      combinedConfig,
       Seq.empty
     )
   }

@@ -290,7 +290,7 @@ class TantivyDirectInterface(
   restoredIndexPath: Option[Path] = None,
   options: org.apache.spark.sql.util.CaseInsensitiveStringMap =
     new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-  hadoopConf: org.apache.hadoop.conf.Configuration = new org.apache.hadoop.conf.Configuration(),
+  configMap: Map[String, String] = Map.empty,
   existingDocMappingJson: Option[String] = None,
   workingDirectory: Option[String] = None)
     extends AutoCloseable {
@@ -402,12 +402,12 @@ class TantivyDirectInterface(
       // Don't fail the operation for parsing errors - just log warning
     }
 
-  // Configuration resolution with proper hierarchy: options -> table props -> spark props -> defaults
+  // Configuration resolution with proper hierarchy: options -> configMap -> spark props -> defaults
   private def getConfigValue(key: String, defaultValue: String): String =
     // First try options (highest precedence)
     Option(options.get(key)).filter(_.nonEmpty).getOrElse {
-      // Then try hadoop conf (includes table properties)
-      Option(hadoopConf.get(key)).filter(_.nonEmpty).getOrElse {
+      // Then try configMap (includes table properties, serialized from driver)
+      configMap.get(key).orElse(configMap.get(key.toLowerCase)).filter(_.nonEmpty).getOrElse {
         // Then try spark session config (if available)
         try {
           val sparkSession = org.apache.spark.sql.SparkSession.active

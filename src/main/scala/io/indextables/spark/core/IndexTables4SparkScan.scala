@@ -306,7 +306,83 @@ class IndexTables4SparkScan(
 
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
-    new IndexTables4SparkReaderFactory(readSchema, limit, config, tablePath, metricsAccumulator)
+
+    // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
+    // For UnityCatalogAWSCredentialProvider, this means a single HTTP call on the driver
+    // instead of N calls from N executors
+    val resolvedConfig = resolveCredentialsOnDriver(config, tablePath)
+
+    new IndexTables4SparkReaderFactory(readSchema, limit, resolvedConfig, tablePath, metricsAccumulator)
+  }
+
+  /**
+   * Resolve AWS credentials on the driver and return a modified config.
+   *
+   * This is a key performance optimization for credential providers like UnityCatalogAWSCredentialProvider:
+   *   - BEFORE: Each executor creates a provider instance, making HTTP calls to Databricks API
+   *   - AFTER: Driver resolves credentials once, executors use explicit credentials (no HTTP calls)
+   *
+   * For a scan with 1000 splits across 100 executors:
+   *   - BEFORE: Up to 100 HTTP calls (one per executor)
+   *   - AFTER: 1 HTTP call (on driver only)
+   *
+   * If credential resolution fails, the original config is returned unchanged so that
+   * executors can attempt their own resolution (preserves backward compatibility).
+   *
+   * @param config Original configuration map
+   * @param tablePath Table path for credential resolution
+   * @return Modified config with explicit credentials, or original config if resolution fails
+   */
+  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path): Map[String, String] = {
+    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+      .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
+
+    providerClass match {
+      case Some(className) if className.nonEmpty =>
+        try {
+          // Normalize table path for consistent cache keys
+          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath.toString)
+
+          // Resolve credentials on driver (single HTTP call for UC provider)
+          val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
+            config, normalizedPath
+          )
+
+          credentials match {
+            case Some(creds) =>
+              logger.info(s"[DRIVER] Resolved AWS credentials from provider: $className (path: $normalizedPath)")
+
+              // Create new config with actual credentials, remove provider class
+              // This ensures executors use static credentials instead of making their own HTTP calls
+              var newConfig = config -
+                "spark.indextables.aws.credentialsProviderClass" -
+                "spark.indextables.aws.credentialsproviderclass" +
+                ("spark.indextables.aws.accessKey" -> creds.accessKey) +
+                ("spark.indextables.aws.secretKey" -> creds.secretKey)
+
+              // Add session token if present (important for temporary credentials)
+              creds.sessionToken match {
+                case Some(token) => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token)
+                case None => // no session token
+              }
+
+              logger.debug(s"[DRIVER] Config modified: removed providerClass, added explicit credentials")
+              newConfig
+
+            case None =>
+              logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
+              config  // Fall back to executor-side resolution
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
+            config  // Fall back to executor-side resolution
+        }
+
+      case None =>
+        // No provider class configured, use config as-is
+        config
+    }
   }
 
   /**

@@ -37,6 +37,25 @@ case class EnvironmentConfigSource() extends ConfigSource {
 }
 
 /**
+ * ConfigSource that reads from a Map[String, String] directly.
+ *
+ * This is the fast path for credential resolution - it avoids creating Hadoop Configuration
+ * objects when we already have the config as a Map. This is critical for performance when
+ * resolving credentials on executors, as Hadoop Configuration creation is expensive.
+ *
+ * @param config Map containing configuration key-value pairs
+ * @param prefix Optional prefix to prepend to keys (e.g., "spark.indextables.databricks")
+ */
+case class MapConfigSource(config: Map[String, String], prefix: String = "") extends ConfigSource {
+  override def get(key: String): Option[String] = {
+    val fullKey = if (prefix.isEmpty) key else s"$prefix.$key"
+    // Try both original key and lowercase version (for CaseInsensitiveStringMap compatibility)
+    config.get(fullKey).orElse(config.get(fullKey.toLowerCase))
+  }
+  override def name: String = if (prefix.isEmpty) "Map config" else s"Map config ($prefix)"
+}
+
+/**
  * Utility for resolving configuration values from multiple sources with priority ordering.
  *
  * Provides consistent credential resolution across AWS, Azure, and other configuration needs.

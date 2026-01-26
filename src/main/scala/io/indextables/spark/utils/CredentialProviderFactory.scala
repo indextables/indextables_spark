@@ -337,6 +337,9 @@ object CredentialProviderFactory {
   /**
    * Resolve AWS credentials from a config map with standard priority. Convenience method that extracts values from
    * config map.
+   *
+   * PERFORMANCE OPTIMIZATION: For UnityCatalogAWSCredentialProvider, this method uses the fast path
+   * that creates the provider directly from the config Map, bypassing expensive Hadoop Configuration creation.
    */
   def resolveAWSCredentialsFromConfig(
     configs: Map[String, String],
@@ -345,16 +348,82 @@ object CredentialProviderFactory {
     def getConfig(key: String): Option[String] =
       configs.get(key).orElse(configs.get(key.toLowerCase))
 
-    val hadoopConf = new Configuration()
-    configs.foreach { case (k, v) => hadoopConf.set(k, v) }
+    // Priority 1: Use explicit credentials if present
+    (getConfig("spark.indextables.aws.accessKey").filter(_.nonEmpty),
+     getConfig("spark.indextables.aws.secretKey").filter(_.nonEmpty)) match {
+      case (Some(key), Some(secret)) =>
+        logger.debug(s"Using explicit credentials: accessKey=${key.take(4)}...")
+        return Some(BasicAWSCredentials(key, secret, getConfig("spark.indextables.aws.sessionToken").filter(_.nonEmpty)))
+      case _ => // continue to provider
+    }
 
-    resolveAWSCredentials(
-      accessKey = getConfig("spark.indextables.aws.accessKey"),
-      secretKey = getConfig("spark.indextables.aws.secretKey"),
-      sessionToken = getConfig("spark.indextables.aws.sessionToken"),
-      providerClassName = getConfig("spark.indextables.aws.credentialsProviderClass"),
-      tablePath = tablePath,
-      hadoopConf = hadoopConf
+    // Priority 2: Use custom provider if configured
+    getConfig("spark.indextables.aws.credentialsProviderClass").filter(_.nonEmpty) match {
+      case Some(className) =>
+        try {
+          // Normalize path to table root for consistent cache keys
+          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
+          val uri = new URI(normalizedPath)
+
+          // FAST PATH: For UnityCatalogAWSCredentialProvider, use Map-based factory
+          // This avoids creating Hadoop Configuration which is expensive
+          val provider = if (className.contains("UnityCatalogAWSCredentialProvider")) {
+            logger.debug(s"Using fast path for UnityCatalogAWSCredentialProvider with normalized path: $normalizedPath")
+            io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider.fromConfig(uri, configs)
+          } else {
+            // SLOW PATH: Other providers need Hadoop Configuration
+            // Use cached Hadoop Configuration to reduce overhead
+            val hadoopConf = io.indextables.spark.util.ConfigUtils.getOrCreateHadoopConfiguration(configs)
+            createCredentialProvider(className, uri, hadoopConf)
+          }
+
+          val creds = extractCredentialsViaReflection(provider)
+          logger.debug(s"Resolved credentials from provider $className: accessKey=${creds.accessKey.take(4)}...")
+          Some(creds)
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"Failed to resolve credentials from provider $className: ${ex.getMessage}")
+            None
+        }
+      case None =>
+        // Priority 3: Return None, let caller use default provider chain
+        None
+    }
+  }
+
+  /**
+   * Create a credential provider using the fast path (Map-based) when possible.
+   *
+   * For UnityCatalogAWSCredentialProvider, this uses the Map-based factory method
+   * that bypasses Hadoop Configuration creation entirely.
+   *
+   * @param providerClassName The fully qualified class name of the provider
+   * @param uri The URI for the table (will be normalized to table root)
+   * @param configMap The configuration map
+   * @return The credential provider instance
+   */
+  def createCredentialProviderFromConfig(
+    providerClassName: String,
+    uri: URI,
+    configMap: Map[String, String]
+  ): AnyRef = {
+    require(
+      providerClassName != null && providerClassName.trim.nonEmpty,
+      "Credential provider class name cannot be null or empty"
     )
+
+    // Normalize path to table root for consistent cache keys
+    val normalizedUri = new URI(io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(uri.toString))
+
+    // FAST PATH: For UnityCatalogAWSCredentialProvider, use Map-based factory
+    if (providerClassName.contains("UnityCatalogAWSCredentialProvider")) {
+      logger.info(s"Creating UnityCatalogAWSCredentialProvider via fast path (Map-based) for: $normalizedUri")
+      return io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider.fromConfig(normalizedUri, configMap)
+    }
+
+    // SLOW PATH: Other providers need Hadoop Configuration (use cached)
+    logger.info(s"Creating credential provider via slow path (Hadoop Configuration): $providerClassName")
+    val hadoopConf = io.indextables.spark.util.ConfigUtils.getOrCreateHadoopConfiguration(configMap)
+    createCredentialProvider(providerClassName, normalizedUri, hadoopConf)
   }
 }

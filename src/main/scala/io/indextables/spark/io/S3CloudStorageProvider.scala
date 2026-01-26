@@ -43,7 +43,8 @@ import software.amazon.awssdk.services.s3.model._
 class S3CloudStorageProvider(
   config: CloudStorageConfig,
   hadoopConf: org.apache.hadoop.conf.Configuration = null,
-  tablePath: String = "s3://dummy")
+  tablePath: String = "s3://dummy",
+  configMap: Option[Map[String, String]] = None)
     extends CloudStorageProvider {
 
   private val logger   = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
@@ -102,64 +103,10 @@ class S3CloudStorageProvider(
 
   /**
    * Normalize a path to table root level by removing filenames and Hive-style partition paths.
-   * This ensures that credential providers are always created with the table root path,
-   * not individual split file paths or partition subdirectories.
-   *
-   * Normalization rules (applied in order):
-   *   1. If path ends with a data file (.split, .avro, .json, .gz), truncate to the last '/'
-   *   2. Strip all trailing Hive-style partition paths (/key=value/)
-   *
-   * Examples:
-   *   - s3://bucket/table/part-00000.split → s3://bucket/table
-   *   - s3://bucket/table/data.avro → s3://bucket/table
-   *   - s3://bucket/table/metadata.json → s3://bucket/table
-   *   - s3://bucket/table/data.json.gz → s3://bucket/table
-   *   - s3://bucket/table/year=2024/month=01/part-00000.split → s3://bucket/table
-   *   - s3://bucket/table/year=2024/month=01 → s3://bucket/table
-   *   - s3://bucket/table/_transaction_log → s3://bucket/table/_transaction_log (unchanged - not a partition)
-   *
-   * IMPORTANT: Preserves the original scheme (s3a://, s3://, etc.) to ensure credential
-   * providers receive the same URI scheme as specified by the user.
+   * Delegates to the shared PathNormalizer utility for consistent behavior across the codebase.
    */
-  private def normalizeToTablePath(path: String): String = {
-    val uri      = new URI(path)
-    var pathPart = uri.getPath
-
-    if (pathPart == null || pathPart.isEmpty) {
-      return path
-    }
-
-    // Step 1: If the path ends with a data file extension, truncate to the last '/'
-    // Supported extensions: .split (IndexTables), .avro (Avro), .json (JSON), .gz (compressed)
-    val dataFileExtensions = Seq(".split", ".avro", ".json", ".gz")
-    if (dataFileExtensions.exists(ext => pathPart.endsWith(ext))) {
-      val lastSlash = pathPart.lastIndexOf('/')
-      if (lastSlash > 0) {
-        pathPart = pathPart.substring(0, lastSlash)
-      }
-    }
-
-    // Step 2: Strip all trailing Hive-style partition paths (/key=value)
-    // Keep stripping while the last path segment contains '=' (Hive partition format)
-    var modified = true
-    while (modified && pathPart.length > 1) {
-      val lastSlash = pathPart.lastIndexOf('/')
-      if (lastSlash > 0) {
-        val lastSegment = pathPart.substring(lastSlash + 1)
-        // Check if this segment is a Hive-style partition (contains '=' but is not empty)
-        if (lastSegment.nonEmpty && lastSegment.contains('=') && !lastSegment.startsWith("=")) {
-          pathPart = pathPart.substring(0, lastSlash)
-        } else {
-          modified = false
-        }
-      } else {
-        modified = false
-      }
-    }
-
-    // Preserve the original scheme, authority, query, and fragment
-    new URI(uri.getScheme, uri.getAuthority, pathPart, uri.getQuery, uri.getFragment).toString
-  }
+  private def normalizeToTablePath(path: String): String =
+    io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(path)
 
   /**
    * Create AWS SDK credentials provider using centralized credential resolution.
@@ -197,11 +144,23 @@ class S3CloudStorageProvider(
       case Some(providerClassName) =>
         try {
           logger.info(s"Creating custom credential provider: $providerClassName")
-          val v1Provider = CredentialProviderFactory.createCredentialProvider(
-            providerClassName,
-            new URI(normalizedTablePath),
-            hadoopConfiguration
-          )
+          // FAST PATH: Use Map-based factory when configMap is available (avoids HadoopConf creation)
+          val v1Provider = configMap match {
+            case Some(cm) =>
+              logger.debug("Using Map-based credential provider factory (fast path)")
+              CredentialProviderFactory.createCredentialProviderFromConfig(
+                providerClassName,
+                new URI(normalizedTablePath),
+                cm
+              )
+            case None =>
+              logger.debug("Using Hadoop-based credential provider factory (slow path)")
+              CredentialProviderFactory.createCredentialProvider(
+                providerClassName,
+                new URI(normalizedTablePath),
+                hadoopConfiguration
+              )
+          }
 
           // Check if it's a v1 provider that can be wrapped
           if (CredentialProviderFactory.isV1Provider(v1Provider)) {

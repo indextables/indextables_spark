@@ -337,6 +337,59 @@ object CloudStorageProviderFactory {
   }
 
   /**
+   * Create appropriate cloud storage provider from a config Map (FAST PATH).
+   *
+   * This overload avoids creating Hadoop Configuration objects, which is expensive.
+   * Use this method on executors when you have the config already serialized as a Map.
+   *
+   * For HDFS/local protocols, this will create a Hadoop Configuration internally since
+   * Hadoop FileSystem API requires it. For S3/Azure, no Hadoop Configuration is created.
+   *
+   * @param path   The storage path (e.g., s3://bucket/path)
+   * @param config Configuration map containing spark.indextables.* keys
+   * @return CloudStorageProvider appropriate for the path protocol
+   */
+  def createProvider(
+    path: String,
+    config: Map[String, String]
+  ): CloudStorageProvider = {
+    val protocol = ProtocolBasedIOFactory.determineProtocol(path)
+
+    logger.info(s"CloudStorageProviderFactory.createProvider (Map-based FAST PATH) called for path: $path")
+    logger.debug(s"Config map has ${config.size} entries")
+
+    // Extract cloud config directly from the Map (no Hadoop Configuration needed for S3/Azure)
+    val cloudConfig = extractCloudConfigFromMap(config, protocol)
+
+    logger.info(s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path (fast path)")
+
+    protocol match {
+      case ProtocolBasedIOFactory.S3Protocol =>
+        logger.info(s"S3 config - endpoint: ${cloudConfig.awsEndpoint}, region: ${cloudConfig.awsRegion}, pathStyle: ${cloudConfig.awsPathStyleAccess}")
+        logger.info(s"S3 credentials - accessKey: ${cloudConfig.awsAccessKey
+            .map(_.take(4) + "...")
+            .getOrElse("None")}, secretKey: ${cloudConfig.awsSecretKey.map(_ => "***").getOrElse("None")}")
+        logger.info(s"S3 custom provider - class: ${cloudConfig.awsCredentialsProviderClass.getOrElse("None")}")
+        // Pass configMap to S3CloudStorageProvider for fast credential provider creation
+        new S3CloudStorageProvider(cloudConfig, null, path, Some(config))
+
+      case ProtocolBasedIOFactory.AzureProtocol =>
+        logger.info(
+          s"Azure config - endpoint: ${cloudConfig.azureEndpoint}, accountName: ${cloudConfig.azureAccountName.getOrElse("None")}"
+        )
+        // Azure currently doesn't have the same custom provider pattern, just create without Map
+        new AzureCloudStorageProvider(cloudConfig, null, path)
+
+      case ProtocolBasedIOFactory.HDFSProtocol | ProtocolBasedIOFactory.FileProtocol |
+          ProtocolBasedIOFactory.LocalProtocol =>
+        // HDFS requires Hadoop Configuration for FileSystem API - create it from the config Map
+        logger.info("HDFS/local path detected - creating Hadoop Configuration (required for FileSystem API)")
+        val hadoopConf = io.indextables.spark.util.ConfigUtils.getOrCreateHadoopConfiguration(config)
+        new HadoopCloudStorageProvider(hadoopConf)
+    }
+  }
+
+  /**
    * Enrich Hadoop configuration with Spark configuration values.
    *
    * Uses ConfigNormalization to dynamically extract ALL spark.indextables.* keys from the Spark session, including
@@ -725,6 +778,134 @@ object CloudStorageProviderFactory {
   }
 
   /**
+   * Extract cloud storage configuration directly from a Map (FAST PATH).
+   *
+   * This avoids creating Hadoop Configuration objects, which is expensive.
+   * Uses MapConfigSource and EnvironmentConfigSource for config resolution.
+   */
+  def extractCloudConfigFromMap(
+    config: Map[String, String],
+    protocol: ProtocolBasedIOFactory.StorageProtocol
+  ): CloudStorageConfig = {
+    import io.indextables.spark.util.{ConfigurationResolver, MapConfigSource, EnvironmentConfigSource}
+
+    logger.debug(s"Extracting cloud config from Map (${config.size} entries) for protocol: $protocol")
+
+    // Helper to get config with case-insensitive fallback
+    def getConfig(key: String): Option[String] =
+      config.get(key).filter(_.nonEmpty).orElse(config.get(key.toLowerCase).filter(_.nonEmpty))
+
+    // Helper to get int config with default
+    def getIntConfig(key: String, default: Int): Int =
+      getConfig(key).map(_.toInt).getOrElse(default)
+
+    // Helper to get long config with default
+    def getLongConfig(key: String, default: Long): Long =
+      getConfig(key).map(_.toLong).getOrElse(default)
+
+    // Helper to get boolean config with default
+    def getBoolConfig(key: String, default: Boolean): Boolean =
+      getConfig(key).map(_.toLowerCase).map(v => v == "true" || v == "1" || v == "yes" || v == "on").getOrElse(default)
+
+    // AWS config sources
+    val awsSources = Seq(
+      MapConfigSource(config, "spark.indextables.aws"),
+      MapConfigSource(config, "spark.hadoop.fs.s3a"),
+      MapConfigSource(config, "fs.s3a"),
+      EnvironmentConfigSource()
+    )
+
+    val finalAccessKey = getConfig("spark.indextables.aws.accessKey")
+      .orElse(ConfigurationResolver.resolveString("accessKey", awsSources, logMask = true))
+
+    val finalSecretKey = getConfig("spark.indextables.aws.secretKey")
+      .orElse(ConfigurationResolver.resolveString("secretKey", awsSources, logMask = true))
+
+    val finalSessionToken = getConfig("spark.indextables.aws.sessionToken")
+      .orElse(ConfigurationResolver.resolveString("sessionToken", awsSources, logMask = true))
+      .orElse(getConfig("fs.s3a.session.token"))
+
+    // Region resolution
+    val finalRegion = getConfig("spark.indextables.aws.region")
+      .orElse(ConfigurationResolver.resolveString("region", awsSources, logMask = false))
+      .orElse(getConfig("fs.s3a.endpoint.region"))
+      .orElse(Option(System.getProperty("aws.region")))
+      .orElse(Option(System.getenv("AWS_DEFAULT_REGION")))
+      .orElse(Option(System.getenv("AWS_REGION")))
+
+    if (finalRegion.isEmpty && protocol == ProtocolBasedIOFactory.S3Protocol) {
+      logger.warn("No AWS region configured! S3CloudStorageProvider will use AWS SDK default region resolution")
+    }
+
+    // S3 endpoint
+    val awsEndpoint = getConfig("spark.indextables.s3.endpoint")
+      .orElse(getConfig("spark.indextables.s3.serviceUrl"))
+      .orElse(getConfig("spark.hadoop.fs.s3a.endpoint"))
+      .orElse(getConfig("fs.s3a.endpoint"))
+
+    // Path style access
+    val isLocalHostEndpoint = awsEndpoint.exists(_.contains("localhost"))
+    val pathStyleAccess = getBoolConfig("spark.indextables.aws.pathStyleAccess", false) ||
+      getBoolConfig("spark.indextables.s3.pathStyleAccess", false) ||
+      getBoolConfig("spark.hadoop.fs.s3a.path.style.access", false) ||
+      getBoolConfig("fs.s3a.path.style.access", false) ||
+      isLocalHostEndpoint
+
+    // Azure config sources
+    val azureSources = Seq(
+      MapConfigSource(config, "spark.indextables.azure"),
+      EnvironmentConfigSource()
+    )
+
+    CloudStorageConfig(
+      // AWS configuration
+      awsAccessKey = finalAccessKey,
+      awsSecretKey = finalSecretKey,
+      awsSessionToken = finalSessionToken,
+      awsCredentialsProviderClass = getConfig("spark.indextables.aws.credentialsProviderClass"),
+      awsRegion = finalRegion,
+      awsEndpoint = awsEndpoint,
+      awsPathStyleAccess = pathStyleAccess,
+
+      // Azure configuration
+      azureAccountName = ConfigurationResolver.resolveString("accountName", azureSources, logMask = false)
+        .orElse(Option(System.getenv("AZURE_STORAGE_ACCOUNT"))),
+      azureAccountKey = ConfigurationResolver.resolveString("accountKey", azureSources, logMask = true)
+        .orElse(Option(System.getenv("AZURE_STORAGE_KEY"))),
+      azureConnectionString = ConfigurationResolver.resolveString("connectionString", azureSources, logMask = true),
+      azureBearerToken = ConfigurationResolver.resolveString("bearerToken", azureSources, logMask = true),
+      azureTenantId = ConfigurationResolver.resolveString("tenantId", azureSources, logMask = false)
+        .orElse(Option(System.getenv("AZURE_TENANT_ID"))),
+      azureClientId = ConfigurationResolver.resolveString("clientId", azureSources, logMask = false)
+        .orElse(Option(System.getenv("AZURE_CLIENT_ID"))),
+      azureClientSecret = ConfigurationResolver.resolveString("clientSecret", azureSources, logMask = true)
+        .orElse(Option(System.getenv("AZURE_CLIENT_SECRET"))),
+      azureEndpoint = ConfigurationResolver.resolveString("endpoint", azureSources, logMask = false),
+      azureContainerName = ConfigurationResolver.resolveString("containerName", azureSources, logMask = false),
+
+      // GCP configuration
+      gcpProjectId = getConfig("spark.indextables.gcp.projectId"),
+      gcpServiceAccountKey = getConfig("spark.indextables.gcp.serviceAccountKey"),
+      gcpCredentialsFile = getConfig("spark.indextables.gcp.credentialsFile"),
+      gcpEndpoint = getConfig("spark.indextables.gcp.endpoint"),
+      gcpBucketName = getConfig("spark.indextables.gcp.bucketName"),
+
+      // Performance configuration
+      maxConnections = getIntConfig("spark.indextables.cloud.maxConnections", 50),
+      connectionTimeout = getIntConfig("spark.indextables.cloud.connectionTimeout", 10000),
+      readTimeout = getIntConfig("spark.indextables.cloud.readTimeout", 30000),
+      maxRetries = getConfig("spark.indextables.cloud.maxRetries").map(_.toInt),
+      bufferSize = getIntConfig("spark.indextables.cloud.bufferSize", 16 * 1024 * 1024),
+
+      // Multipart upload configuration
+      multipartUploadThreshold = getConfig("spark.indextables.s3.multipartThreshold").map(_.toLong),
+      partSize = getConfig("spark.indextables.s3.partSize").map(_.toLong),
+      maxConcurrency = getConfig("spark.indextables.s3.maxConcurrency").map(_.toInt),
+      maxQueueSize = getConfig("spark.indextables.s3.maxQueueSize").map(_.toInt)
+    )
+  }
+
+  /**
    * Static method to normalize a path for tantivy4java compatibility without creating a provider instance. This applies
    * protocol normalization:
    *   - S3: s3a:// and s3n:// -> s3://
@@ -746,6 +927,53 @@ object CloudStorageProviderFactory {
         .orElse(Option(hadoopConf.get("spark.indextables.s3.endpoint")))
         .orElse(Option(hadoopConf.get("spark.indextables.aws.endpoint")))
         .orElse(Option(hadoopConf.get("fs.s3a.endpoint")))
+
+      val isS3Mock = endpointValue.exists(endpoint => endpoint.contains("localhost") || endpoint.contains("127.0.0.1"))
+
+      // Apply S3Mock path flattening if needed
+      if (isS3Mock) {
+        val uri    = java.net.URI.create(protocolNormalized)
+        val bucket = uri.getHost
+        val key    = uri.getPath.stripPrefix("/")
+
+        // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
+        val flattenedKey = if (key.contains("/")) {
+          key.replace("/", "___")
+        } else {
+          key
+        }
+
+        s"s3://$bucket/$flattenedKey"
+      } else {
+        protocolNormalized
+      }
+    } else {
+      protocolNormalized
+    }
+  }
+
+  /**
+   * Static method to normalize a path for tantivy4java compatibility (Map-based FAST PATH).
+   *
+   * This overload avoids creating or using Hadoop Configuration objects.
+   * Use this on executors when you have the config already serialized as a Map.
+   */
+  def normalizePathForTantivy(
+    path: String,
+    config: Map[String, String]
+  ): String = {
+    // First normalize protocol using centralized utility
+    val protocolNormalized = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(path)
+
+    // Check if we're in S3Mock mode by looking at the endpoint (only applies to S3 paths)
+    if (protocolNormalized.startsWith("s3://")) {
+      // Helper to get config with case-insensitive fallback
+      def getConfig(key: String): Option[String] =
+        config.get(key).filter(_.nonEmpty).orElse(config.get(key.toLowerCase).filter(_.nonEmpty))
+
+      val endpointValue = getConfig("spark.indextables.s3.endpoint")
+        .orElse(getConfig("spark.indextables.aws.endpoint"))
+        .orElse(getConfig("fs.s3a.endpoint"))
 
       val isS3Mock = endpointValue.exists(endpoint => endpoint.contains("localhost") || endpoint.contains("127.0.0.1"))
 

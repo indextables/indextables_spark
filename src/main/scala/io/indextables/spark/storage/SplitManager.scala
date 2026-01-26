@@ -246,6 +246,121 @@ object SplitManager {
     }
   }
 
+  /**
+   * Create a split file from a tantivy index directory (Map-based FAST PATH).
+   *
+   * This overload avoids creating Hadoop Configuration objects on executors.
+   * Use this when you have the config already serialized as a Map.
+   *
+   * @param indexPath Local path to the tantivy index directory
+   * @param outputPath Destination path for the split file (local, S3, or Azure)
+   * @param partitionId Spark partition ID
+   * @param nodeId Node identifier
+   * @param configMap Configuration map containing spark.indextables.* keys
+   * @return Metadata about the created split
+   */
+  def createSplit(
+    indexPath: String,
+    outputPath: String,
+    partitionId: Long,
+    nodeId: String,
+    configMap: Map[String, String]
+  ): QuickwitSplit.SplitMetadata = {
+    logger.info(s"Creating split from index (Map-based fast path): $indexPath -> $outputPath")
+
+    // Check if the index directory exists and validate it
+    val indexDir = new java.io.File(indexPath)
+    if (!indexDir.exists()) {
+      logger.error(s"Index directory does not exist: $indexPath")
+      throw new RuntimeException(s"Index directory does not exist: $indexPath")
+    }
+    if (!indexDir.isDirectory()) {
+      logger.error(s"Index path is not a directory: $indexPath")
+      throw new RuntimeException(s"Index path is not a directory: $indexPath")
+    }
+
+    val files = indexDir.listFiles()
+    if (files == null || files.isEmpty) {
+      logger.error(s"Index directory is empty: $indexPath")
+      throw new RuntimeException(s"Index directory is empty: $indexPath")
+    }
+
+    logger.info(s"Index directory $indexPath contains ${files.length} files")
+
+    // Create output directory if needed
+    val outputDir = new java.io.File(outputPath).getParentFile
+    if (outputDir != null && !outputDir.exists()) {
+      logger.info(s"Creating output directory: ${outputDir.getAbsolutePath}")
+      outputDir.mkdirs()
+    }
+
+    // Generate unique identifiers
+    val indexUid = s"tantivy4spark-${UUID.randomUUID().toString}"
+    val config = new QuickwitSplit.SplitConfig(
+      indexUid, "tantivy4spark", nodeId, "default",
+      partitionId, Instant.now(), Instant.now(), null, null
+    )
+
+    // Determine protocol
+    val protocol = ProtocolBasedIOFactory.determineProtocol(outputPath)
+
+    if (protocol == ProtocolBasedIOFactory.S3Protocol || protocol == ProtocolBasedIOFactory.AzureProtocol) {
+      val tempSplitPath = s"/tmp/tantivy4spark-split-${UUID.randomUUID()}.split"
+
+      try {
+        val metadata = SplitConversionThrottle.withThrottle {
+          QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
+        }
+        logger.info(s"Split created locally: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
+
+        // Use Map-based CloudStorageProvider (fast path - no Hadoop Configuration)
+        val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, configMap)
+        try {
+          val splitFile = Paths.get(tempSplitPath)
+          val fileSize = Files.size(splitFile)
+
+          val streamingThreshold = configMap.get("spark.indextables.s3.streamingThreshold")
+            .map(_.toLong).getOrElse(100L * 1024 * 1024)
+
+          if (fileSize > streamingThreshold) {
+            logger.info(s"Using streaming upload for large split: $outputPath (${fileSize / (1024 * 1024)} MB)")
+            val inputStream = Files.newInputStream(splitFile)
+            try {
+              cloudProvider.writeFileFromStream(outputPath, inputStream, Some(fileSize))
+            } finally
+              inputStream.close()
+          } else {
+            val splitContent = Files.readAllBytes(splitFile)
+            cloudProvider.writeFile(outputPath, splitContent)
+          }
+          logger.info(s"Split uploaded to cloud storage: $outputPath")
+        } finally
+          cloudProvider.close()
+
+        Files.deleteIfExists(Paths.get(tempSplitPath))
+        metadata
+      } catch {
+        case e: Exception =>
+          Files.deleteIfExists(Paths.get(tempSplitPath))
+          logger.error(s"Failed to create and upload split from $indexPath to $outputPath", e)
+          throw e
+      }
+    } else {
+      // For non-cloud paths, create directly
+      try {
+        val metadata = SplitConversionThrottle.withThrottle {
+          QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
+        }
+        logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
+        metadata
+      } catch {
+        case e: Exception =>
+          logger.error(s"Failed to create split from $indexPath to $outputPath", e)
+          throw e
+      }
+    }
+  }
+
   /** Validate that a split file is well-formed and readable. */
   def validateSplit(splitPath: String): Boolean =
     try {

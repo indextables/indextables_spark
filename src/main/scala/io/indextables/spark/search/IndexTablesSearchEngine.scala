@@ -21,35 +21,34 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import org.apache.hadoop.conf.Configuration
-
 class TantivySearchEngine private (
   private val directInterface: TantivyDirectInterface,
   private val options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-  private val hadoopConf: Configuration = new Configuration())
+  private val configMap: Map[String, String] = Map.empty)
     extends AutoCloseable {
 
-  // Primary constructor for creating new search engines
+  // Primary constructor for creating new search engines (schema only)
   def this(schema: StructType) = this(new TantivyDirectInterface(schema))
 
-  // Constructor with cloud storage support
+  // Constructor with cloud storage support (Map-based config - fast path, no HadoopConf)
   def this(
     schema: StructType,
     options: CaseInsensitiveStringMap,
-    hadoopConf: Configuration
-  ) =
+    config: Map[String, String]
+  ) = {
     this(
       {
         // Extract working directory from configuration hierarchy with auto-detection
         val workingDirectory = Option(options.get("spark.indextables.indexWriter.tempDirectoryPath"))
-          .orElse(Option(hadoopConf.get("spark.indextables.indexWriter.tempDirectoryPath")))
+          .orElse(config.get("spark.indextables.indexWriter.tempDirectoryPath"))
           .orElse(io.indextables.spark.storage.SplitCacheConfig.getDefaultTempPath())
 
-        new TantivyDirectInterface(schema, None, options, hadoopConf, None, workingDirectory)
+        new TantivyDirectInterface(schema, None, options, config, None, workingDirectory)
       },
       options,
-      hadoopConf
+      config
     )
+  }
 
   def addDocument(row: InternalRow): Unit =
     directInterface.addDocument(row)
@@ -75,9 +74,9 @@ class TantivySearchEngine private (
       // Get temporary directory path from the direct interface
       val tempIndexPath = directInterface.getIndexPath()
 
-      // Use SplitManager to create split from the temporary index with cloud storage support
+      // Use SplitManager to create split from the temporary index with Map-based config (fast path)
       import io.indextables.spark.storage.SplitManager
-      val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId, options, hadoopConf)
+      val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId, configMap)
 
       // Return both the split file path and metadata with footer offsets
       (outputPath, metadata)

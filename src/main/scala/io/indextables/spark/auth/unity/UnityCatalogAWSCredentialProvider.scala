@@ -24,13 +24,11 @@ import java.time.Instant
 
 import scala.util.{Failure, Success, Try}
 
-import org.apache.hadoop.conf.Configuration
-
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicSessionCredentials}
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
 import io.indextables.spark.transaction.EnhancedTransactionLogCache
-import io.indextables.spark.util.{ConfigSource, ConfigurationResolver, HadoopConfigSource}
+import io.indextables.spark.util.{ConfigSource, ConfigurationResolver, MapConfigSource}
 import org.slf4j.LoggerFactory
 
 /**
@@ -38,6 +36,10 @@ import org.slf4j.LoggerFactory
  *
  * This provider fetches temporary AWS credentials from Unity Catalog's temporary path credentials API. It implements
  * intelligent caching with expiration tracking and automatic fallback from READ_WRITE to READ permissions.
+ *
+ * IMPORTANT: This provider MUST be created using the fromConfig() factory method or by passing
+ * a Map[String, String] config. The Hadoop Configuration constructor has been removed to enforce
+ * the fast path that avoids expensive Hadoop Configuration creation.
  *
  * Configuration:
  *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
@@ -49,29 +51,35 @@ import org.slf4j.LoggerFactory
  *
  * Usage:
  * {{{
- * spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://myworkspace.cloud.databricks.com")
- * spark.conf.set("spark.indextables.databricks.apiToken", "<your-token>")
- * spark.conf.set("spark.indextables.aws.credentialsProviderClass",
- *   "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
+ * // Use the factory method (preferred)
+ * val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, configMap)
+ *
+ * // Or use driver-side credential resolution (recommended for scans)
+ * // Resolve credentials on driver, pass actual keys to executors
  * }}}
  */
-class UnityCatalogAWSCredentialProvider(uri: URI, conf: Configuration) extends AWSCredentialsProvider {
+class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[String, String]) extends AWSCredentialsProvider {
   import UnityCatalogAWSCredentialProvider._
 
-  // Resolve configuration
-  private val (workspaceUrl, token) = resolveConfig(conf)
-  private val refreshBufferMinutes  = conf.getInt(RefreshBufferKey, DefaultRefreshBufferMinutes)
-  private val fallbackEnabled       = conf.getBoolean(FallbackEnabledKey, DefaultFallbackEnabled)
-  private val retryAttempts         = conf.getInt(RetryAttemptsKey, DefaultRetryAttempts)
+  // Resolve all configuration from the Map
+  private val (_workspaceUrl, _token, _refreshBufferMinutes, _fallbackEnabled, _retryAttempts) =
+    resolveConfigFromMap(config)
 
+  // Initialize the global cache
+  initializeGlobalCacheFromMap(config)
+
+  // Log initialization
   logger.info(s"Initializing UnityCatalogAWSCredentialProvider for URI: $uri")
-  logger.info(s"  Workspace URL: $workspaceUrl")
-  logger.info(s"  Refresh buffer: $refreshBufferMinutes minutes before expiration")
-
-  // Initialize process-global cache only once
-  initializeGlobalCache(conf)
-
+  logger.info(s"  Workspace URL: ${_workspaceUrl}")
+  logger.info(s"  Refresh buffer: ${_refreshBufferMinutes} minutes before expiration")
   logger.info("UnityCatalogAWSCredentialProvider initialized successfully")
+
+  // Accessors for resolved config (for cleaner code below)
+  private def workspaceUrl: String = _workspaceUrl
+  private def token: String = _token
+  private def refreshBufferMinutes: Int = _refreshBufferMinutes
+  private def fallbackEnabled: Boolean = _fallbackEnabled
+  private def retryAttempts: Int = _retryAttempts
 
   /**
    * Get AWS credentials for the configured URI.
@@ -310,29 +318,38 @@ object UnityCatalogAWSCredentialProvider {
   private val DefaultFallbackEnabled      = true
   private val DefaultRetryAttempts        = 3
 
-  // Process-global HTTP client (thread-safe, reusable)
-  private val httpClient: HttpClient = HttpClient
-    .newBuilder()
-    .connectTimeout(Duration.ofSeconds(30))
-    .build()
+  /**
+   * Fast factory method that creates a provider from a config Map without creating Hadoop Configuration.
+   *
+   * This is the preferred method for creating providers when you already have config as a Map,
+   * as it bypasses the expensive Hadoop Configuration creation that happens tens of thousands
+   * of times during scan operations.
+   *
+   * IMPORTANT: The URI should be normalized to the table root path before calling this method
+   * to ensure consistent cache keys. Use TablePathNormalizer.normalizeToTablePath().
+   *
+   * @param uri The URI for the table (should be normalized to table root)
+   * @param config Map containing spark.indextables.databricks.* configuration
+   * @return A new UnityCatalogAWSCredentialProvider instance
+   */
+  def fromConfig(uri: URI, config: Map[String, String]): UnityCatalogAWSCredentialProvider = {
+    logger.debug(s"Creating UnityCatalogAWSCredentialProvider from config Map for URI: $uri")
+    new UnityCatalogAWSCredentialProvider(uri, config)
+  }
 
-  // Process-global JSON parser
-  private val objectMapper: ObjectMapper = new ObjectMapper()
-
-  // Process-global credentials cache
-  @volatile private var globalCredentialsCache: Cache[String, CachedCredentials] = _
-  private val initLock                                                           = new Object
-
-  /** Resolve Databricks configuration from Hadoop/Spark configuration. */
-  private def resolveConfig(conf: Configuration): (String, String) = {
+  /**
+   * Resolve Databricks configuration from a Map[String, String].
+   * This is the fast path that avoids Hadoop Configuration creation.
+   */
+  private def resolveConfigFromMap(config: Map[String, String]): (String, String, Int, Boolean, Int) = {
     val sources: Seq[ConfigSource] = Seq(
-      HadoopConfigSource(conf, "spark.indextables.databricks"),
-      HadoopConfigSource(conf)
+      MapConfigSource(config, "spark.indextables.databricks"),
+      MapConfigSource(config)
     )
 
     val workspaceUrl = ConfigurationResolver
       .resolveString(WorkspaceUrlKey, sources)
-      .map(url => if (url.endsWith("/")) url.dropRight(1) else url) // Remove trailing slash
+      .map(url => if (url.endsWith("/")) url.dropRight(1) else url)
       .getOrElse(
         throw new IllegalStateException(
           "Databricks workspace URL not configured. Set spark.indextables.databricks.workspaceUrl"
@@ -347,16 +364,39 @@ object UnityCatalogAWSCredentialProvider {
         )
       )
 
-    (workspaceUrl, token)
+    val refreshBuffer = ConfigurationResolver
+      .resolveInt(RefreshBufferKey, sources, DefaultRefreshBufferMinutes)
+
+    val fallbackEnabled = ConfigurationResolver
+      .resolveBoolean(FallbackEnabledKey, sources, DefaultFallbackEnabled)
+
+    val retryAttempts = ConfigurationResolver
+      .resolveInt(RetryAttemptsKey, sources, DefaultRetryAttempts)
+
+    (workspaceUrl, token, refreshBuffer, fallbackEnabled, retryAttempts)
   }
 
-  /** Initialize the process-global credentials cache. Uses double-checked locking for thread safety. */
-  private def initializeGlobalCache(conf: Configuration): Unit =
+  // Process-global HTTP client (thread-safe, reusable)
+  private val httpClient: HttpClient = HttpClient
+    .newBuilder()
+    .connectTimeout(Duration.ofSeconds(30))
+    .build()
+
+  // Process-global JSON parser
+  private val objectMapper: ObjectMapper = new ObjectMapper()
+
+  // Process-global credentials cache
+  @volatile private var globalCredentialsCache: Cache[String, CachedCredentials] = _
+  private val initLock                                                           = new Object
+
+  /** Initialize the process-global credentials cache from Map config. */
+  private def initializeGlobalCacheFromMap(config: Map[String, String]): Unit =
     if (globalCredentialsCache == null) {
       initLock.synchronized {
         if (globalCredentialsCache == null) {
-          val maxSize = conf.getInt(CacheMaxSizeKey, DefaultCacheMaxSize)
-          logger.info(s"Initializing process-global credentials cache: maxSize=$maxSize")
+          val sources = Seq(MapConfigSource(config, "spark.indextables.databricks"), MapConfigSource(config))
+          val maxSize = ConfigurationResolver.resolveInt(CacheMaxSizeKey, sources, DefaultCacheMaxSize)
+          logger.info(s"Initializing process-global credentials cache from Map: maxSize=$maxSize")
 
           globalCredentialsCache = CacheBuilder
             .newBuilder()
