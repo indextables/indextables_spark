@@ -929,7 +929,12 @@ object FiltersToQueryConverter {
     }
   }
 
-  /** Check if a mixed filter (Spark Filter or custom filter) is valid for the schema. */
+  /**
+   * Check if a mixed filter (Spark Filter or custom filter) is valid for the schema.
+   *
+   * For IndexQuery filters, throws IllegalArgumentException if the field doesn't exist.
+   * For other filters, returns false to allow graceful degradation.
+   */
   private def isMixedFilterValidForSchema(filter: Any, fieldNames: Set[String]): Boolean = {
     import org.apache.spark.sql.sources._
     import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
@@ -958,7 +963,10 @@ object FiltersToQueryConverter {
       // Handle custom filters
       case indexQuery: IndexQueryFilter       => Set(indexQuery.columnName)
       case indexQueryAll: IndexQueryAllFilter => Set.empty // No specific field references
-      case _                                  => Set.empty
+      // Handle V2 filters
+      case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter       => Set(indexQueryV2.columnName)
+      case _: io.indextables.spark.filters.IndexQueryAllV2Filter               => Set.empty // No specific field references
+      case _                                                                   => Set.empty
     }
 
     val filterFields = getMixedFilterFieldNames(filter)
@@ -966,7 +974,25 @@ object FiltersToQueryConverter {
 
     if (!isValid) {
       val missingFields = filterFields -- fieldNames
-      queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
+
+      // For IndexQuery filters (including V2 variants), throw an exception with a descriptive error message
+      // This prevents silent failures where queries return incorrect results
+      filter match {
+        case indexQuery: IndexQueryFilter =>
+          val availableFields = fieldNames.toSeq.sorted.mkString(", ")
+          throw new IllegalArgumentException(
+            s"IndexQuery references non-existent field '${indexQuery.columnName}'. " +
+              s"Available fields are: [$availableFields]"
+          )
+        case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter =>
+          val availableFields = fieldNames.toSeq.sorted.mkString(", ")
+          throw new IllegalArgumentException(
+            s"IndexQuery references non-existent field '${indexQueryV2.columnName}'. " +
+              s"Available fields are: [$availableFields]"
+          )
+        case _ =>
+          queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
+      }
     }
 
     isValid
@@ -986,38 +1012,22 @@ object FiltersToQueryConverter {
         convertFilterToQuery(sparkFilter, splitSearchEngine, schema)
 
       // Handle custom IndexQuery filters
+      // Note: Field validation happens earlier in isMixedFilterValidForSchema
       case indexQuery: IndexQueryFilter =>
         queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
 
-        // Validate that the field exists in the schema
-        val fieldExists =
-          try {
-            schema.getFieldInfo(indexQuery.columnName)
-            true
-          } catch {
-            case _: Exception =>
-              logger.warn(s"IndexQuery field '${indexQuery.columnName}' not found in schema, skipping")
-              false
-          }
+        // Use parseQuery with the specified field
+        val fieldNames = List(indexQuery.columnName).asJava
+        queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
 
-        if (!fieldExists) {
-          // Return match-all query if field doesn't exist (graceful degradation)
-          queryLog(s"Field '${indexQuery.columnName}' not found, using match-all query")
-          Query.allQuery()
-        } else {
-          // Use parseQuery with the specified field
-          val fieldNames = List(indexQuery.columnName).asJava
-          queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
-
-          withTemporaryIndex(schema) { index =>
-            try
-              index.parseQuery(indexQuery.queryString, fieldNames)
-            catch {
-              case e: Exception =>
-                logger.warn(s"Failed to parse indexquery '${indexQuery.queryString}': ${e.getMessage}")
-                // Fallback to match-all on parse failure
-                Query.allQuery()
-            }
+        withTemporaryIndex(schema) { index =>
+          try
+            index.parseQuery(indexQuery.queryString, fieldNames)
+          catch {
+            case e: Exception =>
+              logger.warn(s"Failed to parse indexquery '${indexQuery.queryString}': ${e.getMessage}")
+              // Fallback to match-all on parse failure
+              Query.allQuery()
           }
         }
 
@@ -1627,6 +1637,7 @@ object FiltersToQueryConverter {
 
       case IndexQueryFilter(columnName, queryString) =>
         // Parse the custom IndexQuery using the split searcher with field-specific parsing
+        // Note: Field validation happens earlier in isMixedFilterValidForSchema
         queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'")
         try {
           // Use the field-specific parseQuery method that takes field names list
@@ -1650,6 +1661,7 @@ object FiltersToQueryConverter {
 
       case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter =>
         // Handle V2 IndexQuery expressions from temp views
+        // Note: Field validation happens earlier in isMixedFilterValidForSchema
         queryLog(s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'")
         try {
           // Use the field-specific parseQuery method that takes field names list

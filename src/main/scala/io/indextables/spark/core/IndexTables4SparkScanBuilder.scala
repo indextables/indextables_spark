@@ -658,7 +658,16 @@ class IndexTables4SparkScanBuilder(
         return false
       }
       logger.debug(s"AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
+
+      // Validate IndexQuery filter fields exist in schema - throw exception if not
+      // This prevents silent failures where queries with non-existent fields return all data
+      validateIndexQueryFieldsExist()
+      logger.debug(s"AGGREGATE PUSHDOWN: IndexQuery field validation passed")
     } catch {
+      case e: IllegalArgumentException if e.getMessage.contains("IndexQuery references non-existent") =>
+        // Rethrow IndexQuery field validation errors - these should fail the query
+        logger.error(s"AGGREGATE PUSHDOWN: IndexQuery field validation error - ${e.getMessage}")
+        throw e
       case e: IllegalArgumentException =>
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
         return false
@@ -1311,6 +1320,54 @@ class IndexTables4SparkScanBuilder(
 
     true
   }
+
+  /**
+   * Validate that IndexQuery filter fields exist in the schema.
+   * Throws IllegalArgumentException if an IndexQuery references a non-existent field.
+   */
+  private def validateIndexQueryFieldsExist(): Unit = {
+    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    if (indexQueryFilters.isEmpty) return
+
+    // Get available fields from the schema
+    val availableFields = getSchemaFieldNames()
+    if (availableFields.isEmpty) {
+      logger.debug("INDEXQUERY VALIDATION: No schema fields available, skipping validation")
+      return
+    }
+
+    // Validate each IndexQuery filter field
+    indexQueryFilters.foreach {
+      case filter: io.indextables.spark.filters.IndexQueryFilter =>
+        if (!availableFields.contains(filter.columnName)) {
+          val availableFieldsList = availableFields.toSeq.sorted.mkString(", ")
+          throw new IllegalArgumentException(
+            s"IndexQuery references non-existent field '${filter.columnName}'. " +
+              s"Available fields are: [$availableFieldsList]"
+          )
+        }
+      case filter: io.indextables.spark.filters.IndexQueryV2Filter =>
+        if (!availableFields.contains(filter.columnName)) {
+          val availableFieldsList = availableFields.toSeq.sorted.mkString(", ")
+          throw new IllegalArgumentException(
+            s"IndexQuery references non-existent field '${filter.columnName}'. " +
+              s"Available fields are: [$availableFieldsList]"
+          )
+        }
+      case _ => // IndexQueryAllFilter doesn't reference specific fields
+    }
+  }
+
+  /** Get available field names from the schema. */
+  private def getSchemaFieldNames(): Set[String] =
+    try {
+      // Get field names from the Spark schema
+      schema.fieldNames.toSet
+    } catch {
+      case e: Exception =>
+        logger.debug(s"SCHEMA FIELDS: Failed to get schema fields: ${e.getMessage}")
+        Set.empty
+    }
 
   /** Get partition columns from the transaction log metadata. */
   private def getPartitionColumns(): Set[String] =
