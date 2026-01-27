@@ -21,6 +21,7 @@ import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.sources._
 
+import io.indextables.spark.config.IndexTables4SparkSQLConf
 import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import io.indextables.spark.json.{JsonPredicateTranslator, SparkSchemaToTantivyMapper}
 import io.indextables.spark.search.SplitSearchEngine
@@ -324,7 +325,8 @@ object FiltersToQueryConverter {
   def convertToSplitQuery(
     filters: Array[Any],
     splitSearchEngine: SplitSearchEngine,
-    schemaFieldNames: Option[Set[String]]
+    schemaFieldNames: Option[Set[String]],
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): SplitQuery = {
     if (filters.isEmpty) {
       return new SplitMatchAllQuery() // Match-all query using object type
@@ -337,37 +339,55 @@ object FiltersToQueryConverter {
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
     }
 
-    // Filter out filters that reference non-existent fields
-    val validFilters = schemaFieldNames match {
-      case Some(fieldNames) =>
-        queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
-        val valid = filters.filter(filter => isMixedFilterValidForSchema(filter, fieldNames))
-        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
-        valid
-      case None =>
-        queryLog("No schema validation - using all filters")
-        filters // No schema validation if fieldNames not provided
-    }
+    // Separate Spark filters from custom filters
+    // This ensures Spark filters go through the Array[Filter] version which has proper JSON field handling
+    val sparkFilters  = filters.collect { case f: Filter => f }
+    val customFilters = filters.filterNot(_.isInstanceOf[Filter])
 
-    if (validFilters.length < filters.length) {
-      val skippedCount = filters.length - validFilters.length
-      logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
-    }
-
-    // Convert filters to SplitQuery objects
-    val splitQueries = withSchemaCopy(splitSearchEngine) { schema =>
-      validFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine, schema))
-    }
-
-    if (splitQueries.isEmpty) {
-      new SplitMatchAllQuery()
-    } else if (splitQueries.length == 1) {
-      splitQueries.head
+    // Use existing method for Spark filters with options support
+    val sparkQuery = if (sparkFilters.nonEmpty) {
+      convertToSplitQuery(sparkFilters, splitSearchEngine, schemaFieldNames, options)
     } else {
-      // Combine multiple queries with AND logic using SplitBooleanQuery
-      val boolQuery = new SplitBooleanQuery()
-      splitQueries.foreach(query => boolQuery.addMust(query))
-      boolQuery
+      new SplitMatchAllQuery()
+    }
+
+    // Process custom filters (IndexQuery, etc.) through the mixed filter path
+    if (customFilters.nonEmpty) {
+      // Filter out custom filters that reference non-existent fields
+      val validCustomFilters = schemaFieldNames match {
+        case Some(fieldNames) =>
+          customFilters.filter(filter => isMixedFilterValidForSchema(filter, fieldNames))
+        case None =>
+          customFilters
+      }
+
+      if (validCustomFilters.nonEmpty) {
+        val customQueries = withSchemaCopy(splitSearchEngine) { schema =>
+          validCustomFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine, schema, options))
+        }
+
+        // Combine both queries if we have both types
+        if (sparkFilters.nonEmpty && customQueries.nonEmpty) {
+          val combinedQuery = new SplitBooleanQuery()
+          combinedQuery.addMust(sparkQuery)
+          customQueries.foreach(q => combinedQuery.addMust(q))
+          combinedQuery
+        } else if (customQueries.nonEmpty) {
+          if (customQueries.length == 1) {
+            customQueries.head
+          } else {
+            val boolQuery = new SplitBooleanQuery()
+            customQueries.foreach(q => boolQuery.addMust(q))
+            boolQuery
+          }
+        } else {
+          sparkQuery
+        }
+      } else {
+        sparkQuery
+      }
+    } else {
+      sparkQuery
     }
   }
 
@@ -430,46 +450,6 @@ object FiltersToQueryConverter {
       // Combine multiple queries with AND logic
       val occurQueries = queries.map(query => new Query.OccurQuery(Occur.MUST, query)).toList
       Query.booleanQuery(occurQueries.asJava)
-    }
-  }
-
-  /**
-   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java SplitQuery object with schema field
-   * validation and options.
-   */
-  def convertToSplitQuery(
-    filters: Array[Any],
-    splitSearchEngine: SplitSearchEngine,
-    schemaFieldNames: Option[Set[String]],
-    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
-  ): SplitQuery = {
-    // Separate Spark filters from custom filters
-    val sparkFilters  = filters.collect { case f: Filter => f }
-    val customFilters = filters.filterNot(_.isInstanceOf[Filter])
-
-    // Use existing method for Spark filters with options support
-    val sparkQuery = if (sparkFilters.nonEmpty) {
-      convertToSplitQuery(sparkFilters, splitSearchEngine, schemaFieldNames, options)
-    } else {
-      new SplitMatchAllQuery()
-    }
-
-    // For now, process custom filters without options (since existing method doesn't support it)
-    // This can be enhanced later if needed
-    if (customFilters.nonEmpty) {
-      val customQuery = convertToSplitQuery(customFilters.toArray, splitSearchEngine, schemaFieldNames)
-
-      // Combine both queries if we have both types
-      if (sparkFilters.nonEmpty) {
-        val combinedQuery = new SplitBooleanQuery()
-        combinedQuery.addMust(sparkQuery)
-        combinedQuery.addMust(customQuery)
-        combinedQuery
-      } else {
-        customQuery
-      }
-    } else {
-      sparkQuery
     }
   }
 
@@ -629,6 +609,97 @@ object FiltersToQueryConverter {
 
   private def queryLog(msg: String): Unit =
     logger.debug(msg)
+
+  /**
+   * Detect if a Tantivy query contains unqualified terms (terms without field: prefix).
+   * Unqualified terms search ALL fields, which can be expensive on wide tables.
+   *
+   * @param queryString The Tantivy query string to analyze
+   * @return true if the query contains terms that would search all fields
+   */
+  def containsUnqualifiedTerms(queryString: String): Boolean = {
+    // First, remove qualified phrases (field:"phrase") to not confuse them with unqualified ones
+    // The pattern matches: fieldname:"quoted content" where fieldname can contain dots for nested fields
+    val withoutQualifiedPhrases = queryString.replaceAll("""[\w.]+:"[^"]*"""", " ")
+
+    // Check if there are any unqualified phrases (quotes without a field: prefix)
+    // An unqualified phrase means it searches all fields
+    val hasUnqualifiedPhrases = withoutQualifiedPhrases.contains("\"")
+
+    if (hasUnqualifiedPhrases) {
+      return true
+    }
+
+    // Now remove all remaining quoted content (shouldn't be any, but just in case)
+    val withoutQuotes = withoutQualifiedPhrases.replaceAll("\"[^\"]*\"", " ")
+
+    // Remove field:term patterns (including field names with dots for nested fields)
+    // Also handle field:(term1 term2) and field:[range] patterns
+    val withoutQualified = withoutQuotes
+      .replaceAll("""[\w.]+:\[[^\]]*\]""", " ")    // field:[range]
+      .replaceAll("""[\w.]+:\([^)]*\)""", " ")     // field:(grouped terms)
+      .replaceAll("""[\w.]+:[^\s()]+""", " ")      // field:term
+
+    // Tokenize remaining content
+    val tokens = withoutQualified.split("""[\s()\[\]]+""").filter(_.nonEmpty)
+
+    // Filter out Tantivy query syntax keywords (verified complete per Tantivy/Quickwit docs):
+    // - AND, OR, NOT: Boolean operators
+    // - TO: Range query operator (e.g., field:[value1 TO value2])
+    // - IN: Set membership operator (e.g., field IN [value1 value2])
+    // Note: +, -, *, ~, ^ are prefix/suffix modifiers, not standalone keywords
+    val keywords = Set("AND", "OR", "NOT", "TO", "IN")
+    val remainingTerms = tokens.filterNot { t =>
+      keywords.contains(t.toUpperCase) ||
+      t.matches("""^[\d.+\-*]+$""") ||    // Numbers and wildcards
+      t.matches("""^[*?~^]+$""") ||       // Special query characters
+      t.matches("""^\{[^}]*\}$""")        // Boost/fuzzy syntax
+    }
+
+    remainingTerms.nonEmpty
+  }
+
+  /**
+   * Validate that an _indexall query is safe to execute on the given schema.
+   * Throws IllegalArgumentException with a helpful error message if the query
+   * contains unqualified terms and the schema has more fields than allowed.
+   *
+   * @param queryString The query string from the IndexQueryAll filter
+   * @param schema The Tantivy schema with field information
+   * @param options Optional configuration options containing the maxUnqualifiedFields setting
+   */
+  private def validateIndexQueryAllSafety(
+    queryString: String,
+    schema: Schema,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
+  ): Unit = {
+    val fieldCount = schema.getFieldNames.size()
+    val maxFields = options
+      .map(_.getInt(
+        IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS,
+        IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT))
+      .getOrElse(IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT)
+
+    if (maxFields > 0 && containsUnqualifiedTerms(queryString) && fieldCount > maxFields) {
+      val fieldSample = schema.getFieldNames.asScala.take(10).mkString(", ")
+      val moreFields = if (fieldCount > 10) s" ... and ${fieldCount - 10} more" else ""
+
+      throw new IllegalArgumentException(
+        s"""Unqualified _indexall query would search $fieldCount fields (limit: $maxFields).
+           |
+           |Query: _indexall indexquery '$queryString'
+           |
+           |To fix, qualify your search with field names:
+           |  _indexall indexquery '$fieldSample:$queryString'
+           |  _indexall indexquery 'field1:term OR field2:term'
+           |  _indexall indexquery 'title:"exact phrase"'
+           |
+           |Or increase the limit (if searching all fields is intentional):
+           |  spark.conf.set("${IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS}", "$fieldCount")
+           |
+           |Available fields: $fieldSample$moreFields""".stripMargin)
+    }
+  }
 
   /**
    * Thread-local cache for temporary index directory to avoid repeated directory creation. Each thread gets its own
@@ -1050,6 +1121,9 @@ object FiltersToQueryConverter {
 
       // Handle custom IndexQueryAll filters
       case indexQueryAll: IndexQueryAllFilter =>
+        // Safety check for unqualified queries on wide tables
+        validateIndexQueryAllSafety(indexQueryAll.queryString, schema, None)
+
         queryLog(s"Converting custom IndexQueryAllFilter: indexqueryall('${indexQueryAll.queryString}')")
 
         // Use single-argument parseQuery for all-fields search
@@ -1068,7 +1142,7 @@ object FiltersToQueryConverter {
 
       // Handle MixedBooleanFilter types - preserves OR/AND/NOT structure from IndexQuery expressions
       case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
-        convertMixedBooleanFilterToQuery(mixedFilter, splitSearchEngine, schema)
+        convertMixedBooleanFilterToQuery(mixedFilter, splitSearchEngine, schema, None)
 
       case _ =>
         logger.warn(s"Unsupported mixed filter: $filter (${filter.getClass.getSimpleName}), falling back to match-all")
@@ -1084,7 +1158,8 @@ object FiltersToQueryConverter {
   private def convertMixedBooleanFilterToQuery(
     filter: io.indextables.spark.filters.MixedBooleanFilter,
     splitSearchEngine: SplitSearchEngine,
-    schema: Schema
+    schema: Schema,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): Query = {
     import io.indextables.spark.filters._
 
@@ -1103,6 +1178,9 @@ object FiltersToQueryConverter {
         }
 
       case MixedIndexQueryAll(indexQueryAllFilter) =>
+        // Safety check for unqualified queries on wide tables
+        validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
+
         queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}'")
         withTemporaryIndex(schema) { index =>
           try
@@ -1120,8 +1198,8 @@ object FiltersToQueryConverter {
 
       case MixedOrFilter(left, right) =>
         queryLog(s"MixedBooleanFilter->Query: Converting MixedOrFilter - combining with SHOULD (OR)")
-        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema)
-        val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema)
+        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema, options)
+        val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema, options)
         val occurQueries = List(
           new Query.OccurQuery(Occur.SHOULD, leftQuery),
           new Query.OccurQuery(Occur.SHOULD, rightQuery)
@@ -1130,8 +1208,8 @@ object FiltersToQueryConverter {
 
       case MixedAndFilter(left, right) =>
         queryLog(s"MixedBooleanFilter->Query: Converting MixedAndFilter - combining with MUST (AND)")
-        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema)
-        val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema)
+        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema, options)
+        val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema, options)
         val occurQueries = List(
           new Query.OccurQuery(Occur.MUST, leftQuery),
           new Query.OccurQuery(Occur.MUST, rightQuery)
@@ -1140,7 +1218,7 @@ object FiltersToQueryConverter {
 
       case MixedNotFilter(child) =>
         queryLog(s"MixedBooleanFilter->Query: Converting MixedNotFilter - using MUST_NOT")
-        val childQuery = convertMixedBooleanFilterToQuery(child, splitSearchEngine, schema)
+        val childQuery = convertMixedBooleanFilterToQuery(child, splitSearchEngine, schema, options)
         // For NOT queries, we need both MUST (match all) and MUST_NOT (exclude) clauses
         val allQuery = Query.allQuery()
         val occurQueries = java.util.Arrays.asList(
@@ -1730,11 +1808,12 @@ object FiltersToQueryConverter {
   private def convertMixedFilterToSplitQuery(
     filter: Any,
     splitSearchEngine: SplitSearchEngine,
-    schema: Schema
+    schema: Schema,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = None
   ): Option[SplitQuery] =
     filter match {
       case sparkFilter: Filter =>
-        convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine)
+        convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine, options)
 
       case IndexQueryFilter(columnName, queryString) =>
         // Parse the custom IndexQuery using the split searcher with field-specific parsing
@@ -1753,6 +1832,9 @@ object FiltersToQueryConverter {
         }
 
       case IndexQueryAllFilter(queryString) =>
+        // Safety check for unqualified queries on wide tables
+        validateIndexQueryAllSafety(queryString, schema, options)
+
         // Parse the custom IndexQueryAll using the split searcher with ALL fields
         // Get all field names from the schema to search across all fields
         import scala.collection.JavaConverters._
@@ -1777,6 +1859,9 @@ object FiltersToQueryConverter {
         }
 
       case indexQueryAllV2: io.indextables.spark.filters.IndexQueryAllV2Filter =>
+        // Safety check for unqualified queries on wide tables
+        validateIndexQueryAllSafety(indexQueryAllV2.queryString, schema, options)
+
         // Handle V2 IndexQueryAll expressions from temp views
         queryLog(s"Converting IndexQueryAllV2Filter to SplitQuery: query='${indexQueryAllV2.queryString}'")
         try {
@@ -1791,7 +1876,7 @@ object FiltersToQueryConverter {
 
       // Handle MixedBooleanFilter types - preserves OR/AND/NOT structure from IndexQuery expressions
       case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
-        convertMixedBooleanFilterToSplitQuery(mixedFilter, splitSearchEngine, schema)
+        convertMixedBooleanFilterToSplitQuery(mixedFilter, splitSearchEngine, schema, options)
 
       case _ =>
         queryLog(s"Unsupported mixed filter type for SplitQuery conversion: $filter")
@@ -1806,7 +1891,8 @@ object FiltersToQueryConverter {
   private def convertMixedBooleanFilterToSplitQuery(
     filter: io.indextables.spark.filters.MixedBooleanFilter,
     splitSearchEngine: SplitSearchEngine,
-    schema: Schema
+    schema: Schema,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = None
   ): Option[SplitQuery] = {
     import io.indextables.spark.filters._
 
@@ -1825,6 +1911,9 @@ object FiltersToQueryConverter {
         }
 
       case MixedIndexQueryAll(indexQueryAllFilter) =>
+        // Safety check for unqualified queries on wide tables
+        validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
+
         // Delegate to existing IndexQueryAllFilter handling - search across ALL fields
         import scala.collection.JavaConverters._
         val allFieldNames = schema.getFieldNames
@@ -1842,12 +1931,12 @@ object FiltersToQueryConverter {
       case MixedSparkFilter(sparkFilter) =>
         // Delegate to existing Spark Filter handling
         queryLog(s"MixedBooleanFilter: Converting MixedSparkFilter: $sparkFilter")
-        convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine)
+        convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine, options)
 
       case MixedOrFilter(left, right) =>
         queryLog(s"MixedBooleanFilter: Converting MixedOrFilter - combining with SHOULD (OR)")
-        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema)
-        val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema)
+        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema, options)
+        val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema, options)
 
         (leftQuery, rightQuery) match {
           case (Some(lq), Some(rq)) =>
@@ -1869,8 +1958,8 @@ object FiltersToQueryConverter {
 
       case MixedAndFilter(left, right) =>
         queryLog(s"MixedBooleanFilter: Converting MixedAndFilter - combining with MUST (AND)")
-        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema)
-        val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema)
+        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema, options)
+        val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema, options)
 
         (leftQuery, rightQuery) match {
           case (Some(lq), Some(rq)) =>
@@ -1892,7 +1981,7 @@ object FiltersToQueryConverter {
 
       case MixedNotFilter(child) =>
         queryLog(s"MixedBooleanFilter: Converting MixedNotFilter - using MUST_NOT")
-        convertMixedBooleanFilterToSplitQuery(child, splitSearchEngine, schema) match {
+        convertMixedBooleanFilterToSplitQuery(child, splitSearchEngine, schema, options) match {
           case Some(childQuery) =>
             val boolQuery = new SplitBooleanQuery()
             boolQuery.addMustNot(childQuery)  // NOT = MUST_NOT

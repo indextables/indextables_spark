@@ -163,4 +163,12 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_DISK_CACHE_COMPRESSION            = "spark.indextables.cache.disk.compression"
   val TANTIVY4SPARK_DISK_CACHE_MIN_COMPRESS_SIZE      = "spark.indextables.cache.disk.minCompressSize"
   val TANTIVY4SPARK_DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
+
+  /////////////////////
+  // IndexQuery Safety Configuration
+  /////////////////////
+
+  /** Maximum fields for unqualified _indexall queries (default: 10, 0 = disabled) */
+  val TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS         = "spark.indextables.indexquery.indexall.maxUnqualifiedFields"
+  val TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT = 10
 }
