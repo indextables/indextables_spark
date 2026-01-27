@@ -47,7 +47,7 @@ import io.indextables.spark.expressions.{
   RangeConfig
 }
 import io.indextables.spark.transaction.TransactionLog
-import io.indextables.spark.util.PartitionUtils
+import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
 import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
@@ -357,14 +357,19 @@ class IndexTables4SparkGroupByAggregateBatch(
   override def planInputPartitions(): Array[InputPartition] = {
     logger.debug(s"GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
 
-    // Get splitsPerTask from config - aggregate scans can have separate configuration
+    // Get splitsPerTask configuration - aggregate scans can have separate configuration
     // Uses spark.indextables.read.aggregate.splitsPerTask if set, otherwise falls back to read.splitsPerTask
-    val splitsPerTask = config
+    // - "auto" or absent: auto-select based on cluster size and split count
+    // - numeric value: use explicit value
+    val configuredSplitsPerTask = config
       .get("spark.indextables.read.aggregate.splitsPerTask")
       .orElse(config.get("spark.indextables.read.splitsPerTask"))
+
+    val maxSplitsPerTask = config
+      .get("spark.indextables.read.aggregate.maxSplitsPerTask")
+      .orElse(config.get("spark.indextables.read.maxSplitsPerTask"))
       .flatMap(s => scala.util.Try(s.toInt).toOption)
-      .getOrElse(2)
-      .max(1)
+      .getOrElse(SplitsPerTaskCalculator.DefaultMaxSplitsPerTask)
 
     // Get available hosts for driver-based locality assignment
     val sparkContext   = sparkSession.sparkContext
@@ -389,6 +394,14 @@ class IndexTables4SparkGroupByAggregateBatch(
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.debug(s"GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
+
+    // Calculate optimal splitsPerTask now that we know the split count
+    val splitsPerTask = SplitsPerTaskCalculator.calculate(
+      totalSplits = filteredSplits.length,
+      defaultParallelism = sparkContext.defaultParallelism,
+      configuredValue = configuredSplitsPerTask,
+      maxSplitsPerTask = maxSplitsPerTask
+    )
 
     // Batch-assign all splits for this query using per-query load balancing
     val splitPaths = filteredSplits.map(_.path)

@@ -141,6 +141,13 @@ spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
 // Read Limits (controls default result set size when no explicit LIMIT is specified)
 spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
 
+// Splits Per Task (controls batching of splits into Spark tasks)
+// Auto-selection: 1 split/task for small tables (≤2×parallelism), batched for larger tables
+spark.indextables.read.splitsPerTask: "auto" (default: auto, or numeric value to override)
+spark.indextables.read.maxSplitsPerTask: 8 (default: 8, cap for auto-selection)
+spark.indextables.read.aggregate.splitsPerTask: (falls back to read.splitsPerTask)
+spark.indextables.read.aggregate.maxSplitsPerTask: (falls back to read.maxSplitsPerTask)
+
 // Partition Pruning Optimization (reduces complexity from O(n*f) to O(p*f) where n=files, p=partitions, f=filters)
 spark.indextables.partitionPruning.filterCacheEnabled: true (default: true, LRU cache for filter evaluations)
 spark.indextables.partitionPruning.indexEnabled: true (default: true, O(1) index lookup for equality/IN filters)
