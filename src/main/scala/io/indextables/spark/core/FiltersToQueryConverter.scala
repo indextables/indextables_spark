@@ -625,7 +625,11 @@ object FiltersToQueryConverter {
     // Tokenize remaining content
     val tokens = withoutQualified.split("""[\s()\[\]]+""").filter(_.nonEmpty)
 
-    // Filter out Tantivy keywords and special characters
+    // Filter out Tantivy query syntax keywords (verified complete per Tantivy/Quickwit docs):
+    // - AND, OR, NOT: Boolean operators
+    // - TO: Range query operator (e.g., field:[value1 TO value2])
+    // - IN: Set membership operator (e.g., field IN [value1 value2])
+    // Note: +, -, *, ~, ^ are prefix/suffix modifiers, not standalone keywords
     val keywords = Set("AND", "OR", "NOT", "TO", "IN")
     val remainingTerms = tokens.filterNot { t =>
       keywords.contains(t.toUpperCase) ||
