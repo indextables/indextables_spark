@@ -966,6 +966,8 @@ object FiltersToQueryConverter {
       // Handle V2 filters
       case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter       => Set(indexQueryV2.columnName)
       case _: io.indextables.spark.filters.IndexQueryAllV2Filter               => Set.empty // No specific field references
+      // Handle MixedBooleanFilter types
+      case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter        => mixedFilter.references().toSet
       case _                                                                   => Set.empty
     }
 
@@ -1049,9 +1051,88 @@ object FiltersToQueryConverter {
           }
         }
 
+      // Handle MixedBooleanFilter types - preserves OR/AND/NOT structure from IndexQuery expressions
+      case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
+        convertMixedBooleanFilterToQuery(mixedFilter, splitSearchEngine, schema)
+
       case _ =>
         logger.warn(s"Unsupported mixed filter: $filter (${filter.getClass.getSimpleName}), falling back to match-all")
         Query.allQuery()
+    }
+  }
+
+  /**
+   * Convert a MixedBooleanFilter tree to a Query.
+   * Recursively handles Or, And, Not combinations of IndexQuery and Spark filters.
+   * This preserves the original boolean structure instead of flattening to AND.
+   */
+  private def convertMixedBooleanFilterToQuery(
+    filter: io.indextables.spark.filters.MixedBooleanFilter,
+    splitSearchEngine: SplitSearchEngine,
+    schema: Schema
+  ): Query = {
+    import io.indextables.spark.filters._
+
+    filter match {
+      case MixedIndexQuery(indexQueryFilter) =>
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'")
+        val fieldNames = List(indexQueryFilter.columnName).asJava
+        withTemporaryIndex(schema) { index =>
+          try
+            index.parseQuery(indexQueryFilter.queryString, fieldNames)
+          catch {
+            case e: Exception =>
+              logger.warn(s"Failed to parse indexquery '${indexQueryFilter.queryString}': ${e.getMessage}")
+              Query.allQuery()
+          }
+        }
+
+      case MixedIndexQueryAll(indexQueryAllFilter) =>
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}'")
+        withTemporaryIndex(schema) { index =>
+          try
+            index.parseQuery(indexQueryAllFilter.queryString)
+          catch {
+            case e: Exception =>
+              logger.warn(s"Failed to parse indexqueryall '${indexQueryAllFilter.queryString}': ${e.getMessage}")
+              Query.allQuery()
+          }
+        }
+
+      case MixedSparkFilter(sparkFilter) =>
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedSparkFilter: $sparkFilter")
+        convertFilterToQuery(sparkFilter, splitSearchEngine, schema)
+
+      case MixedOrFilter(left, right) =>
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedOrFilter - combining with SHOULD (OR)")
+        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema)
+        val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema)
+        val occurQueries = List(
+          new Query.OccurQuery(Occur.SHOULD, leftQuery),
+          new Query.OccurQuery(Occur.SHOULD, rightQuery)
+        )
+        Query.booleanQuery(occurQueries.asJava)
+
+      case MixedAndFilter(left, right) =>
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedAndFilter - combining with MUST (AND)")
+        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema)
+        val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema)
+        val occurQueries = List(
+          new Query.OccurQuery(Occur.MUST, leftQuery),
+          new Query.OccurQuery(Occur.MUST, rightQuery)
+        )
+        Query.booleanQuery(occurQueries.asJava)
+
+      case MixedNotFilter(child) =>
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedNotFilter - using MUST_NOT")
+        val childQuery = convertMixedBooleanFilterToQuery(child, splitSearchEngine, schema)
+        // For NOT queries, we need both MUST (match all) and MUST_NOT (exclude) clauses
+        val allQuery = Query.allQuery()
+        val occurQueries = java.util.Arrays.asList(
+          new Query.OccurQuery(Occur.MUST, allQuery),
+          new Query.OccurQuery(Occur.MUST_NOT, childQuery)
+        )
+        Query.booleanQuery(occurQueries)
     }
   }
 
@@ -1176,25 +1257,30 @@ object FiltersToQueryConverter {
 
     // Check if this is a nested field filter (JSON field) first
     // Use cached JSON predicate translator to avoid repeated object creation
-    val sparkSchema    = splitSearchEngine.getSparkSchema()
-    val jsonTranslator = getJsonTranslator(sparkSchema, options)
+    // Note: sparkSchema may be null in some contexts (e.g., MixedBooleanFilter conversion)
+    val sparkSchema = splitSearchEngine.getSparkSchema()
+    if (sparkSchema != null) {
+      val jsonTranslator = getJsonTranslator(sparkSchema, options)
 
-    // Try to translate as JSON field filter using parseQuery syntax
-    jsonTranslator.translateFilterToParseQuery(filter) match {
-      case Some(queryString) =>
-        logger.debug(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
-        try {
-          val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          logger.debug(s"JSON FILTER: Successfully parsed query: $queryString")
-          return Some(parsedQuery)
-        } catch {
-          case e: Exception =>
-            logger.warn(s"JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
-          // Fall through to regular filter handling
-        }
-      case None =>
-        logger.debug(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
-      // Not a nested field filter, continue with regular filter handling
+      // Try to translate as JSON field filter using parseQuery syntax
+      jsonTranslator.translateFilterToParseQuery(filter) match {
+        case Some(queryString) =>
+          logger.debug(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
+          try {
+            val parsedQuery = splitSearchEngine.parseQuery(queryString)
+            logger.debug(s"JSON FILTER: Successfully parsed query: $queryString")
+            return Some(parsedQuery)
+          } catch {
+            case e: Exception =>
+              logger.warn(s"JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
+            // Fall through to regular filter handling
+          }
+        case None =>
+          logger.debug(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
+        // Not a nested field filter, continue with regular filter handling
+      }
+    } else {
+      logger.debug(s"JSON FILTER: Spark schema not available, skipping JSON field translation for filter: $filter")
     }
 
     filter match {
@@ -1688,10 +1774,119 @@ object FiltersToQueryConverter {
             None
         }
 
+      // Handle MixedBooleanFilter types - preserves OR/AND/NOT structure from IndexQuery expressions
+      case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
+        convertMixedBooleanFilterToSplitQuery(mixedFilter, splitSearchEngine, schema)
+
       case _ =>
         queryLog(s"Unsupported mixed filter type for SplitQuery conversion: $filter")
         None
     }
+
+  /**
+   * Convert a MixedBooleanFilter tree to a SplitQuery.
+   * Recursively handles Or, And, Not combinations of IndexQuery and Spark filters.
+   * This preserves the original boolean structure instead of flattening to AND.
+   */
+  private def convertMixedBooleanFilterToSplitQuery(
+    filter: io.indextables.spark.filters.MixedBooleanFilter,
+    splitSearchEngine: SplitSearchEngine,
+    schema: Schema
+  ): Option[SplitQuery] = {
+    import io.indextables.spark.filters._
+
+    filter match {
+      case MixedIndexQuery(indexQueryFilter) =>
+        // Delegate to existing IndexQueryFilter handling
+        queryLog(s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'")
+        try {
+          val parsedQuery = splitSearchEngine.parseQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
+          queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"MixedBooleanFilter: SplitQuery parsing failed: ${e.getMessage}")
+            None
+        }
+
+      case MixedIndexQueryAll(indexQueryAllFilter) =>
+        // Delegate to existing IndexQueryAllFilter handling
+        queryLog(s"MixedBooleanFilter: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}'")
+        try {
+          val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllFilter.queryString)
+          queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"MixedBooleanFilter: SplitQuery parsing failed: ${e.getMessage}")
+            None
+        }
+
+      case MixedSparkFilter(sparkFilter) =>
+        // Delegate to existing Spark Filter handling
+        queryLog(s"MixedBooleanFilter: Converting MixedSparkFilter: $sparkFilter")
+        convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine)
+
+      case MixedOrFilter(left, right) =>
+        queryLog(s"MixedBooleanFilter: Converting MixedOrFilter - combining with SHOULD (OR)")
+        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema)
+        val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema)
+
+        (leftQuery, rightQuery) match {
+          case (Some(lq), Some(rq)) =>
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addShould(lq)  // OR = SHOULD
+            boolQuery.addShould(rq)
+            queryLog(s"MixedBooleanFilter: Created OR boolean query with left=${lq.getClass.getSimpleName}, right=${rq.getClass.getSimpleName}")
+            Some(boolQuery)
+          case (Some(q), None) =>
+            queryLog(s"MixedBooleanFilter: OR - only left side converted, using single query")
+            Some(q)
+          case (None, Some(q)) =>
+            queryLog(s"MixedBooleanFilter: OR - only right side converted, using single query")
+            Some(q)
+          case (None, None) =>
+            queryLog(s"MixedBooleanFilter: OR - neither side could be converted")
+            None
+        }
+
+      case MixedAndFilter(left, right) =>
+        queryLog(s"MixedBooleanFilter: Converting MixedAndFilter - combining with MUST (AND)")
+        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema)
+        val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema)
+
+        (leftQuery, rightQuery) match {
+          case (Some(lq), Some(rq)) =>
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addMust(lq)  // AND = MUST
+            boolQuery.addMust(rq)
+            queryLog(s"MixedBooleanFilter: Created AND boolean query with left=${lq.getClass.getSimpleName}, right=${rq.getClass.getSimpleName}")
+            Some(boolQuery)
+          case (Some(q), None) =>
+            queryLog(s"MixedBooleanFilter: AND - only left side converted, using single query")
+            Some(q)
+          case (None, Some(q)) =>
+            queryLog(s"MixedBooleanFilter: AND - only right side converted, using single query")
+            Some(q)
+          case (None, None) =>
+            queryLog(s"MixedBooleanFilter: AND - neither side could be converted")
+            None
+        }
+
+      case MixedNotFilter(child) =>
+        queryLog(s"MixedBooleanFilter: Converting MixedNotFilter - using MUST_NOT")
+        convertMixedBooleanFilterToSplitQuery(child, splitSearchEngine, schema) match {
+          case Some(childQuery) =>
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addMustNot(childQuery)  // NOT = MUST_NOT
+            queryLog(s"MixedBooleanFilter: Created NOT boolean query with child=${childQuery.getClass.getSimpleName}")
+            Some(boolQuery)
+          case None =>
+            queryLog(s"MixedBooleanFilter: NOT - child could not be converted")
+            None
+        }
+    }
+  }
 
   /**
    * Determine whether a field should use tokenized queries based on its indexing configuration. Uses the field type

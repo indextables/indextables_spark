@@ -34,7 +34,9 @@ import org.slf4j.LoggerFactory
 class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  private val fieldTypeMapping = options.getFieldTypeMapping
+  // Handle null options gracefully (can happen during MixedBooleanFilter conversion)
+  private val fieldTypeMapping: Map[String, String] =
+    if (options != null) options.getFieldTypeMapping else Map.empty[String, String]
 
   /**
    * Determines if a Spark field should be mapped to a JSON field in tantivy4java.
