@@ -52,3 +52,98 @@ case class IndexQueryFilter(
   /** Get a normalized version of the query string (trimmed). */
   def normalizedQuery: String = queryString.trim
 }
+
+/**
+ * Sealed trait for mixed boolean filter trees that can contain both
+ * IndexQuery filters and regular Spark predicates with preserved boolean structure.
+ *
+ * This enables queries like:
+ *   (urgency = 'CRITICAL' AND url indexquery 'one') OR (urgency <> 'CLASS2' AND url indexquery 'two')
+ *
+ * To be correctly converted to Tantivy boolean queries preserving OR/AND semantics.
+ */
+sealed trait MixedBooleanFilter {
+  def references(): Array[String]
+}
+
+/** Wrapper for a simple IndexQuery filter within a boolean tree. */
+case class MixedIndexQuery(filter: IndexQueryFilter) extends MixedBooleanFilter {
+  override def references(): Array[String] = filter.references
+}
+
+/** Wrapper for a simple IndexQueryAll filter within a boolean tree. */
+case class MixedIndexQueryAll(filter: IndexQueryAllFilter) extends MixedBooleanFilter {
+  override def references(): Array[String] = Array.empty
+}
+
+/** Wrapper for a Spark Filter (EqualTo, GreaterThan, etc.) within a boolean tree. */
+case class MixedSparkFilter(filter: org.apache.spark.sql.sources.Filter) extends MixedBooleanFilter {
+  override def references(): Array[String] = MixedSparkFilter.extractReferences(filter)
+}
+
+object MixedSparkFilter {
+  def extractReferences(f: org.apache.spark.sql.sources.Filter): Array[String] = {
+    import org.apache.spark.sql.sources._
+    f match {
+      case EqualTo(attr, _)            => Array(attr)
+      case EqualNullSafe(attr, _)      => Array(attr)
+      case GreaterThan(attr, _)        => Array(attr)
+      case GreaterThanOrEqual(attr, _) => Array(attr)
+      case LessThan(attr, _)           => Array(attr)
+      case LessThanOrEqual(attr, _)    => Array(attr)
+      case In(attr, _)                 => Array(attr)
+      case IsNull(attr)                => Array(attr)
+      case IsNotNull(attr)             => Array(attr)
+      case StringStartsWith(attr, _)   => Array(attr)
+      case StringEndsWith(attr, _)     => Array(attr)
+      case StringContains(attr, _)     => Array(attr)
+      case And(l, r)                   => extractReferences(l) ++ extractReferences(r)
+      case Or(l, r)                    => extractReferences(l) ++ extractReferences(r)
+      case Not(c)                      => extractReferences(c)
+      case _                           => Array.empty
+    }
+  }
+}
+
+/** OR combination of mixed filters - uses SHOULD in Tantivy. */
+case class MixedOrFilter(left: MixedBooleanFilter, right: MixedBooleanFilter) extends MixedBooleanFilter {
+  override def references(): Array[String] = left.references() ++ right.references()
+}
+
+/** AND combination of mixed filters - uses MUST in Tantivy. */
+case class MixedAndFilter(left: MixedBooleanFilter, right: MixedBooleanFilter) extends MixedBooleanFilter {
+  override def references(): Array[String] = left.references() ++ right.references()
+}
+
+/** NOT of a mixed filter - uses MUST_NOT in Tantivy. */
+case class MixedNotFilter(child: MixedBooleanFilter) extends MixedBooleanFilter {
+  override def references(): Array[String] = child.references()
+}
+
+/** Companion object with utility methods for MixedBooleanFilter trees. */
+object MixedBooleanFilter {
+  /**
+   * Recursively extract all IndexQueryFilter instances from a MixedBooleanFilter tree.
+   * Used for field validation and other operations that need direct access to IndexQuery filters.
+   */
+  def extractIndexQueryFilters(filter: MixedBooleanFilter): Seq[IndexQueryFilter] = filter match {
+    case MixedIndexQuery(f) => Seq(f)
+    case MixedIndexQueryAll(_) => Seq.empty  // IndexQueryAll doesn't have field references
+    case MixedSparkFilter(_) => Seq.empty    // Spark filters are not IndexQuery filters
+    case MixedOrFilter(left, right) => extractIndexQueryFilters(left) ++ extractIndexQueryFilters(right)
+    case MixedAndFilter(left, right) => extractIndexQueryFilters(left) ++ extractIndexQueryFilters(right)
+    case MixedNotFilter(child) => extractIndexQueryFilters(child)
+  }
+
+  /**
+   * Recursively extract all IndexQueryAllFilter instances from a MixedBooleanFilter tree.
+   */
+  def extractIndexQueryAllFilters(filter: MixedBooleanFilter): Seq[IndexQueryAllFilter] = filter match {
+    case MixedIndexQuery(_) => Seq.empty
+    case MixedIndexQueryAll(f) => Seq(f)
+    case MixedSparkFilter(_) => Seq.empty
+    case MixedOrFilter(left, right) => extractIndexQueryAllFilters(left) ++ extractIndexQueryAllFilters(right)
+    case MixedAndFilter(left, right) => extractIndexQueryAllFilters(left) ++ extractIndexQueryAllFilters(right)
+    case MixedNotFilter(child) => extractIndexQueryAllFilters(child)
+  }
+}

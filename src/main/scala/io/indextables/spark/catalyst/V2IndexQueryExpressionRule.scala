@@ -23,6 +23,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.filters._
 import org.slf4j.LoggerFactory
 
 /**
@@ -191,6 +192,30 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
       case _                          => expr.children.exists(containsIndexQueryExpression)
     }
 
+  /**
+   * Check if an expression is ONLY IndexQuery expressions (no Spark predicates).
+   * Used to identify NOT(IndexQuery) patterns that should be replaced with Literal(true).
+   *
+   * Returns true for:
+   *   - IndexQueryExpression
+   *   - IndexQueryAllExpression
+   *   - NOT(IndexQueryExpression)
+   *   - AND/OR combinations of only IndexQuery expressions
+   *
+   * Returns false if the expression contains any non-IndexQuery predicates.
+   */
+  private def isOnlyIndexQueryExpression(expr: Expression): Boolean = {
+    import org.apache.spark.sql.catalyst.expressions.{And, Or, Not}
+    expr match {
+      case _: IndexQueryExpression    => true
+      case _: IndexQueryAllExpression => true
+      case Not(child)                 => isOnlyIndexQueryExpression(child)
+      case And(left, right)           => isOnlyIndexQueryExpression(left) && isOnlyIndexQueryExpression(right)
+      case Or(left, right)            => isOnlyIndexQueryExpression(left) && isOnlyIndexQueryExpression(right)
+      case _                          => false
+    }
+  }
+
   /** Check if this is a compatible V2 DataSource (IndexTables4Spark) */
   private def isCompatibleV2DataSource(relation: DataSourceV2Relation): Boolean =
     // Check if this is a IndexTables4Spark V2 table (support both old and new package names)
@@ -200,63 +225,21 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
       relation.table.name().contains("tantivy4spark")
 
   /**
-   * Convert IndexQuery expressions and store them for the ScanBuilder to retrieve. This eliminates the fake filter
-   * mechanism in favor of direct storage.
+   * Convert IndexQuery expressions and store them for the ScanBuilder to retrieve.
+   *
+   * This method now builds a mixed boolean filter tree that preserves the full OR/AND
+   * structure when IndexQuery expressions are combined with boolean operators. This fixes
+   * the bug where:
+   *   (url indexquery 'community') OR (url indexquery 'curl')
+   * Was incorrectly converted to AND semantics instead of OR.
    */
   private def convertIndexQueryExpressions(
     expr: Expression,
     relation: DataSourceV2Relation
   ): Expression = {
-
-    val indexQueries = scala.collection.mutable.Buffer[Any]()
-
-    val transformedExpr = expr.transformUp {
-      case indexQuery: IndexQueryExpression =>
-        logger.debug(s"V2IndexQueryExpressionRule: Found IndexQueryExpression: $indexQuery")
-
-        (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
-          case (Some(columnName), Some(queryString)) =>
-            import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
-
-            if (columnName == "_indexall") {
-              logger.debug(s"V2IndexQueryExpressionRule: Storing _indexall IndexQuery")
-              indexQueries += IndexQueryAllFilter(queryString)
-            } else {
-              logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQuery")
-              indexQueries += IndexQueryFilter(columnName, queryString)
-            }
-
-            // Return Literal(true) so the condition is always satisfied at expression level
-            import org.apache.spark.sql.catalyst.expressions.Literal
-            Literal(true)
-          case _ =>
-            logger.debug(
-              s"V2IndexQueryExpressionRule: Unable to extract column/query from IndexQuery, using Literal(true)"
-            )
-            import org.apache.spark.sql.catalyst.expressions.Literal
-            Literal(true)
-        }
-
-      case indexQueryAll: IndexQueryAllExpression =>
-        logger.debug(s"V2IndexQueryExpressionRule: Found IndexQueryAllExpression: $indexQueryAll")
-
-        indexQueryAll.getQueryString match {
-          case Some(queryString) =>
-            logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQueryAll")
-            import io.indextables.spark.filters.IndexQueryAllFilter
-            indexQueries += IndexQueryAllFilter(queryString)
-
-            // Return Literal(true) so the condition is always satisfied at expression level
-            import org.apache.spark.sql.catalyst.expressions.Literal
-            Literal(true)
-          case _ =>
-            logger.debug(s"V2IndexQueryExpressionRule: Unable to extract query from IndexQueryAll, using Literal(true)")
-            import org.apache.spark.sql.catalyst.expressions.Literal
-            Literal(true)
-        }
-    }
-
+    import org.apache.spark.sql.catalyst.expressions.{And, Or, Not, Literal}
     import io.indextables.spark.core.IndexTables4SparkScanBuilder
+    import io.indextables.spark.filters._
 
     // CRITICAL: ALWAYS set ThreadLocal with relation object so ScanBuilder can retrieve it
     // This is needed for BOTH IndexQuery expressions AND regular filter pushdown
@@ -265,16 +248,230 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     logger.debug(s"V2IndexQueryExpressionRule: Setting current relation: ${System.identityHashCode(relation)}")
     IndexTables4SparkScanBuilder.setCurrentRelation(relation)
 
-    // Store the collected IndexQueries for this relation object (if any)
-    if (indexQueries.nonEmpty) {
-      // Store IndexQueries in WeakHashMap keyed by the relation object itself
-      IndexTables4SparkScanBuilder.storeIndexQueries(relation, indexQueries.toSeq)
-      logger.debug(
-        s"V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for relation ${System.identityHashCode(relation)}"
-      )
+    // Check if expression contains any IndexQuery expressions
+    if (!containsIndexQueryExpression(expr)) {
+      return expr  // No IndexQuery, nothing to do
     }
 
-    transformedExpr
+    // Try to build a mixed boolean filter tree that preserves the full structure
+    val mixedFilter = buildMixedBooleanFilter(expr)
+
+    mixedFilter match {
+      case Some(filter) =>
+        // Store the mixed boolean filter
+        IndexTables4SparkScanBuilder.storeIndexQueries(relation, Seq(filter))
+        logger.debug(s"V2IndexQueryExpressionRule: Stored mixed boolean filter: $filter for relation ${System.identityHashCode(relation)}")
+        // CRITICAL FIX: Do NOT return Literal(true) for the whole expression!
+        // We must preserve non-IndexQuery predicates (like partition filters) for Spark's
+        // partition pruning. Only replace IndexQuery expressions with Literal(true).
+        // Example: "load_date = '2024-01-01' AND message indexquery 'error'" should become
+        //          "load_date = '2024-01-01' AND true" so Spark can still prune partitions.
+        //
+        // IMPORTANT: We use transformDown to handle NOT(anything with IndexQuery) BEFORE
+        // transforming the IndexQuery itself. This prevents incorrect semantics:
+        //
+        // Example: NOT (col indexquery 'value' AND id='12345')
+        // Without special handling: NOT(true AND id='12345') = NOT(id='12345') ← WRONG!
+        // With special handling: NOT(...) → true (Tantivy handles full NOT via MixedBooleanFilter)
+        //
+        // This is safe because:
+        // 1. Tantivy evaluates the full NOT expression via MixedBooleanFilter
+        // 2. Spark sees 'true' for the NOT part, so it doesn't incorrectly filter
+        // 3. Other predicates outside the NOT are preserved for partition pruning
+        val transformedExpr = expr.transformDown {
+          // If NOT contains ANY IndexQuery, replace entire NOT with true
+          // (Tantivy handles the full NOT via MixedBooleanFilter)
+          case Not(child) if containsIndexQueryExpression(child) => Literal(true)
+          case _: IndexQueryExpression => Literal(true)
+          case _: IndexQueryAllExpression => Literal(true)
+        }
+        transformedExpr
+
+      case None =>
+        // Fall back to original approach for complex cases
+        // This handles cases we can't fully represent in the mixed tree
+        logger.debug(s"V2IndexQueryExpressionRule: Falling back to flat IndexQuery extraction")
+        val indexQueries = scala.collection.mutable.Buffer[Any]()
+
+        val transformedExpr = expr.transformUp {
+          case indexQuery: IndexQueryExpression =>
+            logger.debug(s"V2IndexQueryExpressionRule: Found IndexQueryExpression: $indexQuery")
+
+            (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
+              case (Some(columnName), Some(queryString)) =>
+                if (columnName == "_indexall") {
+                  logger.debug(s"V2IndexQueryExpressionRule: Storing _indexall IndexQuery")
+                  indexQueries += IndexQueryAllFilter(queryString)
+                } else {
+                  logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQuery")
+                  indexQueries += IndexQueryFilter(columnName, queryString)
+                }
+                Literal(true)
+              case _ =>
+                logger.debug(
+                  s"V2IndexQueryExpressionRule: Unable to extract column/query from IndexQuery, using Literal(true)"
+                )
+                Literal(true)
+            }
+
+          case indexQueryAll: IndexQueryAllExpression =>
+            logger.debug(s"V2IndexQueryExpressionRule: Found IndexQueryAllExpression: $indexQueryAll")
+
+            indexQueryAll.getQueryString match {
+              case Some(queryString) =>
+                logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQueryAll")
+                indexQueries += IndexQueryAllFilter(queryString)
+                Literal(true)
+              case _ =>
+                logger.debug(s"V2IndexQueryExpressionRule: Unable to extract query from IndexQueryAll, using Literal(true)")
+                Literal(true)
+            }
+        }
+
+        // Store the collected IndexQueries for this relation object (if any)
+        if (indexQueries.nonEmpty) {
+          IndexTables4SparkScanBuilder.storeIndexQueries(relation, indexQueries.toSeq)
+          logger.debug(
+            s"V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for relation ${System.identityHashCode(relation)}"
+          )
+        }
+
+        transformedExpr
+    }
+  }
+
+  /**
+   * Build a mixed boolean filter tree from a Catalyst expression.
+   * Returns Some(filter) if successful, None if the expression structure
+   * can't be represented (e.g., complex expressions we don't support).
+   */
+  private def buildMixedBooleanFilter(expr: Expression): Option[MixedBooleanFilter] = {
+    import org.apache.spark.sql.catalyst.expressions.{And, Or, Not, Literal => CatLiteral}
+    import io.indextables.spark.filters._
+
+    expr match {
+      // IndexQuery expressions
+      case indexQuery: IndexQueryExpression =>
+        (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
+          case (Some(columnName), Some(queryString)) =>
+            if (columnName == "_indexall") {
+              Some(MixedIndexQueryAll(IndexQueryAllFilter(queryString)))
+            } else {
+              Some(MixedIndexQuery(IndexQueryFilter(columnName, queryString)))
+            }
+          case _ => None
+        }
+
+      case indexQueryAll: IndexQueryAllExpression =>
+        indexQueryAll.getQueryString.map(qs => MixedIndexQueryAll(IndexQueryAllFilter(qs)))
+
+      // Boolean combinations
+      case Or(left, right) =>
+        for {
+          leftFilter <- buildMixedBooleanFilter(left)
+          rightFilter <- buildMixedBooleanFilter(right)
+        } yield MixedOrFilter(leftFilter, rightFilter)
+
+      case And(left, right) =>
+        for {
+          leftFilter <- buildMixedBooleanFilter(left)
+          rightFilter <- buildMixedBooleanFilter(right)
+        } yield MixedAndFilter(leftFilter, rightFilter)
+
+      case Not(child) =>
+        buildMixedBooleanFilter(child).map(MixedNotFilter)
+
+      // Convert supported Catalyst expressions to Spark Filters
+      case _ =>
+        catalystExprToSparkFilter(expr).map(f => MixedSparkFilter(f))
+    }
+  }
+
+  /**
+   * Convert a Catalyst expression to a Spark Filter.
+   * Returns None if the expression type is not supported.
+   */
+  private def catalystExprToSparkFilter(expr: Expression): Option[org.apache.spark.sql.sources.Filter] = {
+    import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal, EqualTo => CatEqualTo,
+      GreaterThan => CatGreaterThan, GreaterThanOrEqual => CatGreaterThanOrEqual,
+      LessThan => CatLessThan, LessThanOrEqual => CatLessThanOrEqual,
+      In => CatIn, IsNull => CatIsNull, IsNotNull => CatIsNotNull,
+      And => CatAnd, Or => CatOr, Not => CatNot}
+    import org.apache.spark.sql.sources
+
+    expr match {
+      case CatEqualTo(AttributeReference(name, _, _, _), Literal(value, _)) =>
+        Some(sources.EqualTo(name, unwrapValue(value)))
+
+      case CatEqualTo(Literal(value, _), AttributeReference(name, _, _, _)) =>
+        Some(sources.EqualTo(name, unwrapValue(value)))
+
+      case CatGreaterThan(AttributeReference(name, _, _, _), Literal(value, _)) =>
+        Some(sources.GreaterThan(name, unwrapValue(value)))
+
+      case CatGreaterThan(Literal(value, _), AttributeReference(name, _, _, _)) =>
+        Some(sources.LessThan(name, unwrapValue(value)))
+
+      case CatGreaterThanOrEqual(AttributeReference(name, _, _, _), Literal(value, _)) =>
+        Some(sources.GreaterThanOrEqual(name, unwrapValue(value)))
+
+      case CatGreaterThanOrEqual(Literal(value, _), AttributeReference(name, _, _, _)) =>
+        Some(sources.LessThanOrEqual(name, unwrapValue(value)))
+
+      case CatLessThan(AttributeReference(name, _, _, _), Literal(value, _)) =>
+        Some(sources.LessThan(name, unwrapValue(value)))
+
+      case CatLessThan(Literal(value, _), AttributeReference(name, _, _, _)) =>
+        Some(sources.GreaterThan(name, unwrapValue(value)))
+
+      case CatLessThanOrEqual(AttributeReference(name, _, _, _), Literal(value, _)) =>
+        Some(sources.LessThanOrEqual(name, unwrapValue(value)))
+
+      case CatLessThanOrEqual(Literal(value, _), AttributeReference(name, _, _, _)) =>
+        Some(sources.GreaterThanOrEqual(name, unwrapValue(value)))
+
+      case CatIn(AttributeReference(name, _, _, _), values) =>
+        val extractedValues = values.collect { case Literal(v, _) => unwrapValue(v) }
+        if (extractedValues.length == values.length) {
+          Some(sources.In(name, extractedValues.toArray))
+        } else None
+
+      case CatIsNull(AttributeReference(name, _, _, _)) =>
+        Some(sources.IsNull(name))
+
+      case CatIsNotNull(AttributeReference(name, _, _, _)) =>
+        Some(sources.IsNotNull(name))
+
+      // Handle <> as Not(EqualTo)
+      case CatNot(CatEqualTo(AttributeReference(name, _, _, _), Literal(value, _))) =>
+        Some(sources.Not(sources.EqualTo(name, unwrapValue(value))))
+
+      case CatNot(CatEqualTo(Literal(value, _), AttributeReference(name, _, _, _))) =>
+        Some(sources.Not(sources.EqualTo(name, unwrapValue(value))))
+
+      case CatAnd(left, right) =>
+        for {
+          leftFilter <- catalystExprToSparkFilter(left)
+          rightFilter <- catalystExprToSparkFilter(right)
+        } yield sources.And(leftFilter, rightFilter)
+
+      case CatOr(left, right) =>
+        for {
+          leftFilter <- catalystExprToSparkFilter(left)
+          rightFilter <- catalystExprToSparkFilter(right)
+        } yield sources.Or(leftFilter, rightFilter)
+
+      case CatNot(child) =>
+        catalystExprToSparkFilter(child).map(sources.Not)
+
+      case _ => None  // Unsupported expression type
+    }
+  }
+
+  /** Unwrap Spark internal types to Java types for Filter compatibility. */
+  private def unwrapValue(value: Any): Any = value match {
+    case utf8: org.apache.spark.unsafe.types.UTF8String => utf8.toString
+    case other => other
   }
 
   /**

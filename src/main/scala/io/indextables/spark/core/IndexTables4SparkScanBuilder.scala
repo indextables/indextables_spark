@@ -1336,25 +1336,31 @@ class IndexTables4SparkScanBuilder(
       return
     }
 
+    // Helper to validate a single field name
+    def validateField(columnName: String): Unit = {
+      if (!availableFields.contains(columnName)) {
+        val availableFieldsList = availableFields.toSeq.sorted.mkString(", ")
+        throw new IllegalArgumentException(
+          s"IndexQuery references non-existent field '$columnName'. " +
+            s"Available fields are: [$availableFieldsList]"
+        )
+      }
+    }
+
     // Validate each IndexQuery filter field
     indexQueryFilters.foreach {
       case filter: io.indextables.spark.filters.IndexQueryFilter =>
-        if (!availableFields.contains(filter.columnName)) {
-          val availableFieldsList = availableFields.toSeq.sorted.mkString(", ")
-          throw new IllegalArgumentException(
-            s"IndexQuery references non-existent field '${filter.columnName}'. " +
-              s"Available fields are: [$availableFieldsList]"
-          )
-        }
+        validateField(filter.columnName)
+
       case filter: io.indextables.spark.filters.IndexQueryV2Filter =>
-        if (!availableFields.contains(filter.columnName)) {
-          val availableFieldsList = availableFields.toSeq.sorted.mkString(", ")
-          throw new IllegalArgumentException(
-            s"IndexQuery references non-existent field '${filter.columnName}'. " +
-              s"Available fields are: [$availableFieldsList]"
-          )
-        }
-      case _ => // IndexQueryAllFilter doesn't reference specific fields
+        validateField(filter.columnName)
+
+      case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
+        // Extract all IndexQueryFilter instances from the MixedBooleanFilter tree and validate
+        val extractedFilters = io.indextables.spark.filters.MixedBooleanFilter.extractIndexQueryFilters(mixedFilter)
+        extractedFilters.foreach(f => validateField(f.columnName))
+
+      case _ => // IndexQueryAllFilter and other types don't reference specific fields
     }
   }
 
