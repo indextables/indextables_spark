@@ -57,3 +57,73 @@ object PartitionUtils {
     result.toSeq
   }
 }
+
+/**
+ * Calculates optimal splitsPerTask based on cluster size and split count.
+ *
+ * Auto-selection algorithm:
+ * - If totalSplits <= defaultParallelism × 2: use 1 split per task (maximize parallelism)
+ * - Otherwise: ensure at least 4 × defaultParallelism groups, capped at maxSplitsPerTask
+ */
+object SplitsPerTaskCalculator {
+
+  /** Default maximum splits per task when using auto-selection */
+  val DefaultMaxSplitsPerTask: Int = 8
+
+  /**
+   * Calculate optimal splitsPerTask based on cluster size and split count.
+   *
+   * @param totalSplits        Total number of splits to process
+   * @param defaultParallelism spark.sparkContext.defaultParallelism
+   * @param configuredValue    User-configured value ("auto", numeric string, or None)
+   * @param maxSplitsPerTask   Maximum splits per task (cap for auto-selection)
+   * @return Optimal splitsPerTask value (always >= 1)
+   */
+  def calculate(
+      totalSplits: Int,
+      defaultParallelism: Int,
+      configuredValue: Option[String],
+      maxSplitsPerTask: Int = DefaultMaxSplitsPerTask
+  ): Int = {
+    // Check if user explicitly set a numeric value
+    configuredValue.flatMap(v => scala.util.Try(v.toInt).toOption) match {
+      case Some(explicit) =>
+        // User explicitly configured a numeric value - use it
+        explicit.max(1)
+      case None =>
+        // Auto-selection: "auto", empty, or invalid value
+        autoSelect(totalSplits, defaultParallelism, maxSplitsPerTask)
+    }
+  }
+
+  /**
+   * Auto-select optimal splitsPerTask based on cluster size and split count.
+   *
+   * Algorithm:
+   * - Small tables (splits <= parallelism × 2): 1 split per task for max parallelism
+   * - Large tables: batch to ensure >= 4 × parallelism groups, capped at maxSplitsPerTask
+   *
+   * @param totalSplits        Total number of splits to process
+   * @param defaultParallelism spark.sparkContext.defaultParallelism
+   * @param maxSplitsPerTask   Maximum splits per task (cap)
+   * @return Optimal splitsPerTask value (always >= 1)
+   */
+  private def autoSelect(
+      totalSplits: Int,
+      defaultParallelism: Int,
+      maxSplitsPerTask: Int
+  ): Int = {
+    val parallelism = math.max(1, defaultParallelism) // Guard against 0
+    val threshold   = parallelism * 2
+
+    if (totalSplits <= threshold) {
+      // Small table: maximize parallelism with 1 split per task
+      1
+    } else {
+      // Large table: ensure at least 4 × defaultParallelism groups
+      val minTargetGroups = parallelism * 4
+      val calculated      = math.ceil(totalSplits.toDouble / minTargetGroups).toInt
+      math.max(1, math.min(maxSplitsPerTask, calculated))
+    }
+  }
+}

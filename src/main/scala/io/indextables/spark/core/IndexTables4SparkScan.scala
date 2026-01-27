@@ -36,7 +36,7 @@ import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.stats.{DataSkippingMetrics, ExpressionSimplifier, FilterExpressionCache}
 import io.indextables.spark.storage.DriverSplitLocalityManager
 import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLog}
-import io.indextables.spark.util.{PartitionUtils, TimestampUtils}
+import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -273,12 +273,21 @@ class IndexTables4SparkScan(
 
     logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions")
 
-    // Get splitsPerTask from config (default: 2)
-    val splitsPerTask = config
-      .get("spark.indextables.read.splitsPerTask")
+    // Get splitsPerTask configuration
+    // - "auto" or absent: auto-select based on cluster size and split count
+    // - numeric value: use explicit value
+    val configuredSplitsPerTask = config.get("spark.indextables.read.splitsPerTask")
+    val maxSplitsPerTask = config
+      .get("spark.indextables.read.maxSplitsPerTask")
       .flatMap(s => scala.util.Try(s.toInt).toOption)
-      .getOrElse(2)
-      .max(1)
+      .getOrElse(SplitsPerTaskCalculator.DefaultMaxSplitsPerTask)
+
+    val splitsPerTask = SplitsPerTaskCalculator.calculate(
+      totalSplits = filteredActions.length,
+      defaultParallelism = sparkSession.sparkContext.defaultParallelism,
+      configuredValue = configuredSplitsPerTask,
+      maxSplitsPerTask = maxSplitsPerTask
+    )
 
     // Batch-assign all splits for this query using per-query load balancing
     val splitPaths  = filteredActions.map(_.path)
