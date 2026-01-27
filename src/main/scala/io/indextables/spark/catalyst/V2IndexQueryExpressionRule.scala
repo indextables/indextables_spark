@@ -192,6 +192,30 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
       case _                          => expr.children.exists(containsIndexQueryExpression)
     }
 
+  /**
+   * Check if an expression is ONLY IndexQuery expressions (no Spark predicates).
+   * Used to identify NOT(IndexQuery) patterns that should be replaced with Literal(true).
+   *
+   * Returns true for:
+   *   - IndexQueryExpression
+   *   - IndexQueryAllExpression
+   *   - NOT(IndexQueryExpression)
+   *   - AND/OR combinations of only IndexQuery expressions
+   *
+   * Returns false if the expression contains any non-IndexQuery predicates.
+   */
+  private def isOnlyIndexQueryExpression(expr: Expression): Boolean = {
+    import org.apache.spark.sql.catalyst.expressions.{And, Or, Not}
+    expr match {
+      case _: IndexQueryExpression    => true
+      case _: IndexQueryAllExpression => true
+      case Not(child)                 => isOnlyIndexQueryExpression(child)
+      case And(left, right)           => isOnlyIndexQueryExpression(left) && isOnlyIndexQueryExpression(right)
+      case Or(left, right)            => isOnlyIndexQueryExpression(left) && isOnlyIndexQueryExpression(right)
+      case _                          => false
+    }
+  }
+
   /** Check if this is a compatible V2 DataSource (IndexTables4Spark) */
   private def isCompatibleV2DataSource(relation: DataSourceV2Relation): Boolean =
     // Check if this is a IndexTables4Spark V2 table (support both old and new package names)
@@ -237,8 +261,31 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         // Store the mixed boolean filter
         IndexTables4SparkScanBuilder.storeIndexQueries(relation, Seq(filter))
         logger.debug(s"V2IndexQueryExpressionRule: Stored mixed boolean filter: $filter for relation ${System.identityHashCode(relation)}")
-        // Return Literal(true) - the filter is now stored for query conversion
-        Literal(true)
+        // CRITICAL FIX: Do NOT return Literal(true) for the whole expression!
+        // We must preserve non-IndexQuery predicates (like partition filters) for Spark's
+        // partition pruning. Only replace IndexQuery expressions with Literal(true).
+        // Example: "load_date = '2024-01-01' AND message indexquery 'error'" should become
+        //          "load_date = '2024-01-01' AND true" so Spark can still prune partitions.
+        //
+        // IMPORTANT: We use transformDown to handle NOT(anything with IndexQuery) BEFORE
+        // transforming the IndexQuery itself. This prevents incorrect semantics:
+        //
+        // Example: NOT (col indexquery 'value' AND id='12345')
+        // Without special handling: NOT(true AND id='12345') = NOT(id='12345') ← WRONG!
+        // With special handling: NOT(...) → true (Tantivy handles full NOT via MixedBooleanFilter)
+        //
+        // This is safe because:
+        // 1. Tantivy evaluates the full NOT expression via MixedBooleanFilter
+        // 2. Spark sees 'true' for the NOT part, so it doesn't incorrectly filter
+        // 3. Other predicates outside the NOT are preserved for partition pruning
+        val transformedExpr = expr.transformDown {
+          // If NOT contains ANY IndexQuery, replace entire NOT with true
+          // (Tantivy handles the full NOT via MixedBooleanFilter)
+          case Not(child) if containsIndexQueryExpression(child) => Literal(true)
+          case _: IndexQueryExpression => Literal(true)
+          case _: IndexQueryAllExpression => Literal(true)
+        }
+        transformedExpr
 
       case None =>
         // Fall back to original approach for complex cases
