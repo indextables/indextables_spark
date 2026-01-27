@@ -977,7 +977,7 @@ object FiltersToQueryConverter {
     if (!isValid) {
       val missingFields = filterFields -- fieldNames
 
-      // For IndexQuery filters (including V2 variants), throw an exception with a descriptive error message
+      // For IndexQuery filters (including V2 variants and MixedBooleanFilter), throw an exception with a descriptive error message
       // This prevents silent failures where queries return incorrect results
       filter match {
         case indexQuery: IndexQueryFilter =>
@@ -992,6 +992,21 @@ object FiltersToQueryConverter {
             s"IndexQuery references non-existent field '${indexQueryV2.columnName}'. " +
               s"Available fields are: [$availableFields]"
           )
+        case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
+          // Extract IndexQueryFilter instances from the tree and find the ones with invalid fields
+          val invalidFilters = io.indextables.spark.filters.MixedBooleanFilter.extractIndexQueryFilters(mixedFilter)
+            .filter(f => !fieldNames.contains(f.columnName))
+          if (invalidFilters.nonEmpty) {
+            val invalidField = invalidFilters.head.columnName
+            val availableFields = fieldNames.toSeq.sorted.mkString(", ")
+            throw new IllegalArgumentException(
+              s"IndexQuery references non-existent field '$invalidField'. " +
+                s"Available fields are: [$availableFields]"
+            )
+          } else {
+            // The invalid fields are from Spark filters, not IndexQuery - just log
+            queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
+          }
         case _ =>
           queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
       }
@@ -1810,10 +1825,12 @@ object FiltersToQueryConverter {
         }
 
       case MixedIndexQueryAll(indexQueryAllFilter) =>
-        // Delegate to existing IndexQueryAllFilter handling
-        queryLog(s"MixedBooleanFilter: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}'")
+        // Delegate to existing IndexQueryAllFilter handling - search across ALL fields
+        import scala.collection.JavaConverters._
+        val allFieldNames = schema.getFieldNames
+        queryLog(s"MixedBooleanFilter: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}' across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllFilter.queryString)
+          val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllFilter.queryString, allFieldNames)
           queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {

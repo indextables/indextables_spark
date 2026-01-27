@@ -372,4 +372,93 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       assert(!resultIds.contains(3), "Should NOT include id=3")
     }
   }
+
+  test("IndexQueryAll should search across all text fields") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Create test data with multiple text fields
+      val testData = Seq(
+        ("doc1", "apache spark", "distributed"),
+        ("doc2", "machine learning", "spark"),
+        ("doc3", "data engineering", "pipelines"),
+        ("doc4", "streaming", "spark applications")
+      ).toDF("id", "content", "tags")
+
+      // Write test data with both content and tags as text fields
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.tags", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Read back
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      df.createOrReplaceTempView("test_indexall")
+
+      // Test IndexQueryAll - should search across all text fields (content AND tags)
+      val result = spark.sql("""
+        SELECT id, content, tags FROM test_indexall
+        WHERE _indexall indexquery 'spark'
+        ORDER BY id
+      """).collect()
+
+      println(s"IndexQueryAll result count: ${result.length}")
+      result.foreach(r => println(s"  id='${r.getString(0)}', content='${r.getString(1)}', tags='${r.getString(2)}'"))
+
+      // Should find 3 documents containing "spark" in any text field:
+      // - doc1: content="apache spark" -> matches
+      // - doc2: tags="spark" -> matches
+      // - doc4: tags="spark applications" -> matches
+      assert(result.length == 3, s"Expected 3 documents with 'spark' in any field, got ${result.length}")
+      val resultIds = result.map(_.getString(0)).toSet
+      assert(resultIds.contains("doc1"), "Should include doc1 (spark in content)")
+      assert(resultIds.contains("doc2"), "Should include doc2 (spark in tags)")
+      assert(resultIds.contains("doc4"), "Should include doc4 (spark in tags)")
+      assert(!resultIds.contains("doc3"), "Should NOT include doc3 (no spark)")
+    }
+  }
+
+  test("IndexQuery on non-existent field should throw error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Create test data
+      val testData = Seq(
+        (1, "test content", "active")
+      ).toDF("id", "content", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      df.createOrReplaceTempView("test_nonexistent")
+
+      // Test: IndexQuery with a field that doesn't exist should throw an error
+      val exception = intercept[Exception] {
+        spark.sql("""
+          SELECT id, content FROM test_nonexistent
+          WHERE fake_field indexquery 'something'
+        """).collect()
+      }
+
+      val errorMessage = exception.getMessage + Option(exception.getCause).map(_.getMessage).getOrElse("")
+      assert(
+        errorMessage.contains("fake_field") || errorMessage.contains("non-existent"),
+        s"Error message should mention the non-existent field. Actual message: $errorMessage"
+      )
+    }
+  }
 }

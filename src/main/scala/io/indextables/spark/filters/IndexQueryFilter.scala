@@ -119,3 +119,31 @@ case class MixedAndFilter(left: MixedBooleanFilter, right: MixedBooleanFilter) e
 case class MixedNotFilter(child: MixedBooleanFilter) extends MixedBooleanFilter {
   override def references(): Array[String] = child.references()
 }
+
+/** Companion object with utility methods for MixedBooleanFilter trees. */
+object MixedBooleanFilter {
+  /**
+   * Recursively extract all IndexQueryFilter instances from a MixedBooleanFilter tree.
+   * Used for field validation and other operations that need direct access to IndexQuery filters.
+   */
+  def extractIndexQueryFilters(filter: MixedBooleanFilter): Seq[IndexQueryFilter] = filter match {
+    case MixedIndexQuery(f) => Seq(f)
+    case MixedIndexQueryAll(_) => Seq.empty  // IndexQueryAll doesn't have field references
+    case MixedSparkFilter(_) => Seq.empty    // Spark filters are not IndexQuery filters
+    case MixedOrFilter(left, right) => extractIndexQueryFilters(left) ++ extractIndexQueryFilters(right)
+    case MixedAndFilter(left, right) => extractIndexQueryFilters(left) ++ extractIndexQueryFilters(right)
+    case MixedNotFilter(child) => extractIndexQueryFilters(child)
+  }
+
+  /**
+   * Recursively extract all IndexQueryAllFilter instances from a MixedBooleanFilter tree.
+   */
+  def extractIndexQueryAllFilters(filter: MixedBooleanFilter): Seq[IndexQueryAllFilter] = filter match {
+    case MixedIndexQuery(_) => Seq.empty
+    case MixedIndexQueryAll(f) => Seq(f)
+    case MixedSparkFilter(_) => Seq.empty
+    case MixedOrFilter(left, right) => extractIndexQueryAllFilters(left) ++ extractIndexQueryAllFilters(right)
+    case MixedAndFilter(left, right) => extractIndexQueryAllFilters(left) ++ extractIndexQueryAllFilters(right)
+    case MixedNotFilter(child) => extractIndexQueryAllFilters(child)
+  }
+}
