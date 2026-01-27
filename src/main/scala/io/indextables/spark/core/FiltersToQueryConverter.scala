@@ -339,37 +339,55 @@ object FiltersToQueryConverter {
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
     }
 
-    // Filter out filters that reference non-existent fields
-    val validFilters = schemaFieldNames match {
-      case Some(fieldNames) =>
-        queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
-        val valid = filters.filter(filter => isMixedFilterValidForSchema(filter, fieldNames))
-        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
-        valid
-      case None =>
-        queryLog("No schema validation - using all filters")
-        filters // No schema validation if fieldNames not provided
-    }
+    // Separate Spark filters from custom filters
+    // This ensures Spark filters go through the Array[Filter] version which has proper JSON field handling
+    val sparkFilters  = filters.collect { case f: Filter => f }
+    val customFilters = filters.filterNot(_.isInstanceOf[Filter])
 
-    if (validFilters.length < filters.length) {
-      val skippedCount = filters.length - validFilters.length
-      logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
-    }
-
-    // Convert filters to SplitQuery objects
-    val splitQueries = withSchemaCopy(splitSearchEngine) { schema =>
-      validFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine, schema, options))
-    }
-
-    if (splitQueries.isEmpty) {
-      new SplitMatchAllQuery()
-    } else if (splitQueries.length == 1) {
-      splitQueries.head
+    // Use existing method for Spark filters with options support
+    val sparkQuery = if (sparkFilters.nonEmpty) {
+      convertToSplitQuery(sparkFilters, splitSearchEngine, schemaFieldNames, options)
     } else {
-      // Combine multiple queries with AND logic using SplitBooleanQuery
-      val boolQuery = new SplitBooleanQuery()
-      splitQueries.foreach(query => boolQuery.addMust(query))
-      boolQuery
+      new SplitMatchAllQuery()
+    }
+
+    // Process custom filters (IndexQuery, etc.) through the mixed filter path
+    if (customFilters.nonEmpty) {
+      // Filter out custom filters that reference non-existent fields
+      val validCustomFilters = schemaFieldNames match {
+        case Some(fieldNames) =>
+          customFilters.filter(filter => isMixedFilterValidForSchema(filter, fieldNames))
+        case None =>
+          customFilters
+      }
+
+      if (validCustomFilters.nonEmpty) {
+        val customQueries = withSchemaCopy(splitSearchEngine) { schema =>
+          validCustomFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine, schema, options))
+        }
+
+        // Combine both queries if we have both types
+        if (sparkFilters.nonEmpty && customQueries.nonEmpty) {
+          val combinedQuery = new SplitBooleanQuery()
+          combinedQuery.addMust(sparkQuery)
+          customQueries.foreach(q => combinedQuery.addMust(q))
+          combinedQuery
+        } else if (customQueries.nonEmpty) {
+          if (customQueries.length == 1) {
+            customQueries.head
+          } else {
+            val boolQuery = new SplitBooleanQuery()
+            customQueries.foreach(q => boolQuery.addMust(q))
+            boolQuery
+          }
+        } else {
+          sparkQuery
+        }
+      } else {
+        sparkQuery
+      }
+    } else {
+      sparkQuery
     }
   }
 
