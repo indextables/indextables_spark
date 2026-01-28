@@ -22,6 +22,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.sources._
 
 import io.indextables.spark.config.IndexTables4SparkSQLConf
+import io.indextables.spark.exceptions.IndexQueryParseException
 import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import io.indextables.spark.json.{JsonPredicateTranslator, SparkSchemaToTantivyMapper}
 import io.indextables.spark.search.SplitSearchEngine
@@ -611,58 +612,30 @@ object FiltersToQueryConverter {
     logger.debug(msg)
 
   /**
-   * Detect if a Tantivy query contains unqualified terms (terms without field: prefix).
-   * Unqualified terms search ALL fields, which can be expensive on wide tables.
+   * Count the number of unique fields that would be searched by a query.
+   * Uses tantivy4java's SplitQuery.countQueryFields() for accurate AST-based analysis.
    *
    * @param queryString The Tantivy query string to analyze
-   * @return true if the query contains terms that would search all fields
+   * @param schema The Tantivy schema for field resolution
+   * @return The number of unique fields the query would search
    */
-  def containsUnqualifiedTerms(queryString: String): Boolean = {
-    // First, remove qualified phrases (field:"phrase") to not confuse them with unqualified ones
-    // The pattern matches: fieldname:"quoted content" where fieldname can contain dots for nested fields
-    val withoutQualifiedPhrases = queryString.replaceAll("""[\w.]+:"[^"]*"""", " ")
-
-    // Check if there are any unqualified phrases (quotes without a field: prefix)
-    // An unqualified phrase means it searches all fields
-    val hasUnqualifiedPhrases = withoutQualifiedPhrases.contains("\"")
-
-    if (hasUnqualifiedPhrases) {
-      return true
+  def countQueryFields(queryString: String, schema: Schema): Int = {
+    import io.indextables.tantivy4java.split.SplitQuery
+    try {
+      SplitQuery.countQueryFields(queryString, schema)
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to count query fields for '$queryString': ${e.getMessage}")
+        // On error, return schema field count as conservative estimate (assumes all fields searched)
+        schema.getFieldNames.size()
     }
-
-    // Now remove all remaining quoted content (shouldn't be any, but just in case)
-    val withoutQuotes = withoutQualifiedPhrases.replaceAll("\"[^\"]*\"", " ")
-
-    // Remove field:term patterns (including field names with dots for nested fields)
-    // Also handle field:(term1 term2) and field:[range] patterns
-    val withoutQualified = withoutQuotes
-      .replaceAll("""[\w.]+:\[[^\]]*\]""", " ")    // field:[range]
-      .replaceAll("""[\w.]+:\([^)]*\)""", " ")     // field:(grouped terms)
-      .replaceAll("""[\w.]+:[^\s()]+""", " ")      // field:term
-
-    // Tokenize remaining content
-    val tokens = withoutQualified.split("""[\s()\[\]]+""").filter(_.nonEmpty)
-
-    // Filter out Tantivy query syntax keywords (verified complete per Tantivy/Quickwit docs):
-    // - AND, OR, NOT: Boolean operators
-    // - TO: Range query operator (e.g., field:[value1 TO value2])
-    // - IN: Set membership operator (e.g., field IN [value1 value2])
-    // Note: +, -, *, ~, ^ are prefix/suffix modifiers, not standalone keywords
-    val keywords = Set("AND", "OR", "NOT", "TO", "IN")
-    val remainingTerms = tokens.filterNot { t =>
-      keywords.contains(t.toUpperCase) ||
-      t.matches("""^[\d.+\-*]+$""") ||    // Numbers and wildcards
-      t.matches("""^[*?~^]+$""") ||       // Special query characters
-      t.matches("""^\{[^}]*\}$""")        // Boost/fuzzy syntax
-    }
-
-    remainingTerms.nonEmpty
   }
 
   /**
    * Validate that an _indexall query is safe to execute on the given schema.
-   * Throws IllegalArgumentException with a helpful error message if the query
-   * contains unqualified terms and the schema has more fields than allowed.
+   * Uses tantivy4java's accurate field counting to determine how many fields
+   * would actually be searched. Throws IllegalArgumentException if the query
+   * would search more fields than allowed.
    *
    * @param queryString The query string from the IndexQueryAll filter
    * @param schema The Tantivy schema with field information
@@ -673,29 +646,35 @@ object FiltersToQueryConverter {
     schema: Schema,
     options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): Unit = {
-    val fieldCount = schema.getFieldNames.size()
     val maxFields = options
       .map(_.getInt(
         IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS,
         IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT))
       .getOrElse(IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT)
 
-    if (maxFields > 0 && containsUnqualifiedTerms(queryString) && fieldCount > maxFields) {
+    // Skip validation if disabled (maxFields <= 0)
+    if (maxFields <= 0) return
+
+    // Use tantivy4java's accurate field counting
+    val searchedFieldCount = countQueryFields(queryString, schema)
+
+    if (searchedFieldCount > maxFields) {
       val fieldSample = schema.getFieldNames.asScala.take(10).mkString(", ")
-      val moreFields = if (fieldCount > 10) s" ... and ${fieldCount - 10} more" else ""
+      val totalFields = schema.getFieldNames.size()
+      val moreFields = if (totalFields > 10) s" ... and ${totalFields - 10} more" else ""
 
       throw new IllegalArgumentException(
-        s"""Unqualified _indexall query would search $fieldCount fields (limit: $maxFields).
+        s"""_indexall query would search $searchedFieldCount fields (limit: $maxFields).
            |
            |Query: _indexall indexquery '$queryString'
            |
-           |To fix, qualify your search with field names:
-           |  _indexall indexquery '$fieldSample:$queryString'
+           |To fix, qualify your search with specific field names:
+           |  _indexall indexquery 'field1:$queryString'
            |  _indexall indexquery 'field1:term OR field2:term'
            |  _indexall indexquery 'title:"exact phrase"'
            |
-           |Or increase the limit (if searching all fields is intentional):
-           |  spark.conf.set("${IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS}", "$fieldCount")
+           |Or increase the limit (if searching many fields is intentional):
+           |  spark.conf.set("${IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS}", "$searchedFieldCount")
            |
            |Available fields: $fieldSample$moreFields""".stripMargin)
     }
@@ -1113,9 +1092,8 @@ object FiltersToQueryConverter {
             index.parseQuery(indexQuery.queryString, fieldNames)
           catch {
             case e: Exception =>
-              logger.warn(s"Failed to parse indexquery '${indexQuery.queryString}': ${e.getMessage}")
-              // Fallback to match-all on parse failure
-              Query.allQuery()
+              // Throw descriptive exception instead of silently falling back to match-all
+              throw IndexQueryParseException.forField(indexQuery.queryString, indexQuery.columnName, e)
           }
         }
 
@@ -1134,9 +1112,8 @@ object FiltersToQueryConverter {
             index.parseQuery(indexQueryAll.queryString)
           catch {
             case e: Exception =>
-              logger.warn(s"Failed to parse indexqueryall '${indexQueryAll.queryString}': ${e.getMessage}")
-              // Fallback to match-all on parse failure
-              Query.allQuery()
+              // Throw descriptive exception instead of silently falling back to match-all
+              throw IndexQueryParseException.forAllFields(indexQueryAll.queryString, e)
           }
         }
 
@@ -1705,13 +1682,7 @@ object FiltersToQueryConverter {
         try {
           val queryString = s"$attribute:$value*"
           queryLog(s"StringStartsWith: creating parseQuery for '$queryString'")
-          val query = splitSearchEngine.parseQuery(queryString)
-          if (query == null) {
-            queryLog(s"StringStartsWith: parseQuery returned null for '$queryString'")
-            None
-          } else {
-            Some(query)
-          }
+          Some(splitSearchEngine.parseQuery(queryString))
         } catch {
           case e: Exception =>
             queryLog(s"Failed to create parseQuery for StringStartsWith: ${e.getMessage}")
@@ -1723,13 +1694,7 @@ object FiltersToQueryConverter {
         try {
           val queryString = s"$attribute:*$value"
           queryLog(s"StringEndsWith: creating parseQuery for '$queryString'")
-          val query = splitSearchEngine.parseQuery(queryString)
-          if (query == null) {
-            queryLog(s"StringEndsWith: parseQuery returned null for '$queryString'")
-            None
-          } else {
-            Some(query)
-          }
+          Some(splitSearchEngine.parseQuery(queryString))
         } catch {
           case e: Exception =>
             queryLog(s"Failed to create parseQuery for StringEndsWith: ${e.getMessage}")
@@ -1741,13 +1706,7 @@ object FiltersToQueryConverter {
         try {
           val queryString = s"$attribute:*$value*"
           queryLog(s"StringContains: creating parseQuery for '$queryString'")
-          val query = splitSearchEngine.parseQuery(queryString)
-          if (query == null) {
-            queryLog(s"StringContains: parseQuery returned null for '$queryString'")
-            None
-          } else {
-            Some(query)
-          }
+          Some(splitSearchEngine.parseQuery(queryString))
         } catch {
           case e: Exception =>
             queryLog(s"Failed to create parseQuery for StringContains: ${e.getMessage}")
@@ -1818,17 +1777,22 @@ object FiltersToQueryConverter {
       case IndexQueryFilter(columnName, queryString) =>
         // Parse the custom IndexQuery using the split searcher with field-specific parsing
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
+        // Note: Driver-side validation should have already caught syntax errors
         queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'")
         try {
-          // Use the field-specific parseQuery method that takes field names list
           val parsedQuery = splitSearchEngine.parseQuery(queryString, columnName)
+          // splitSearchEngine.parseQuery() returns null on parse failures
+          if (parsedQuery == null) {
+            throw IndexQueryParseException.forField(queryString, columnName,
+              new RuntimeException("parseQuery returned null - invalid query syntax"))
+          }
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
+          case e: IndexQueryParseException => throw e
           case e: Exception =>
-            queryLog(s"SplitQuery parsing failed: ${e.getMessage}")
-            // Return None to fall back to legacy Query API
-            None
+            // Wrap tantivy exception in IndexQueryParseException for user-friendly error
+            throw IndexQueryParseException.forField(queryString, columnName, e)
         }
 
       case IndexQueryAllFilter(queryString) =>
@@ -1836,26 +1800,44 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(queryString, schema, options)
 
         // Parse the custom IndexQueryAll using the split searcher with ALL fields
-        // Get all field names from the schema to search across all fields
+        // Note: Driver-side validation should have already caught syntax errors
         import scala.collection.JavaConverters._
-        val allFieldNames = schema.getFieldNames // Already returns java.util.List[String]
+        val allFieldNames = schema.getFieldNames
         queryLog(s"Converting IndexQueryAllFilter to search across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
-        Some(splitSearchEngine.parseQuery(queryString, allFieldNames))
+        try {
+          val parsedQuery = splitSearchEngine.parseQuery(queryString, allFieldNames)
+          // splitSearchEngine.parseQuery() returns null on parse failures
+          if (parsedQuery == null) {
+            throw IndexQueryParseException.forAllFields(queryString,
+              new RuntimeException("parseQuery returned null - invalid query syntax"))
+          }
+          Some(parsedQuery)
+        } catch {
+          case e: IndexQueryParseException => throw e
+          case e: Exception =>
+            // Wrap tantivy exception in IndexQueryParseException for user-friendly error
+            throw IndexQueryParseException.forAllFields(queryString, e)
+        }
 
       case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter =>
         // Handle V2 IndexQuery expressions from temp views
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
+        // Note: Driver-side validation should have already caught syntax errors
         queryLog(s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'")
         try {
-          // Use the field-specific parseQuery method that takes field names list
           val parsedQuery = splitSearchEngine.parseQuery(indexQueryV2.queryString, indexQueryV2.columnName)
+          // splitSearchEngine.parseQuery() returns null on parse failures
+          if (parsedQuery == null) {
+            throw IndexQueryParseException.forField(indexQueryV2.queryString, indexQueryV2.columnName,
+              new RuntimeException("parseQuery returned null - invalid query syntax"))
+          }
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
+          case e: IndexQueryParseException => throw e
           case e: Exception =>
-            queryLog(s"SplitQuery parsing failed: ${e.getMessage}")
-            // Return None to fall back to legacy Query API
-            None
+            // Wrap tantivy exception in IndexQueryParseException for user-friendly error
+            throw IndexQueryParseException.forField(indexQueryV2.queryString, indexQueryV2.columnName, e)
         }
 
       case indexQueryAllV2: io.indextables.spark.filters.IndexQueryAllV2Filter =>
@@ -1863,15 +1845,22 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllV2.queryString, schema, options)
 
         // Handle V2 IndexQueryAll expressions from temp views
+        // Note: Driver-side validation should have already caught syntax errors
         queryLog(s"Converting IndexQueryAllV2Filter to SplitQuery: query='${indexQueryAllV2.queryString}'")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllV2.queryString)
+          // splitSearchEngine.parseQuery() returns null on parse failures
+          if (parsedQuery == null) {
+            throw IndexQueryParseException.forAllFields(indexQueryAllV2.queryString,
+              new RuntimeException("parseQuery returned null - invalid query syntax"))
+          }
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
+          case e: IndexQueryParseException => throw e
           case e: Exception =>
-            queryLog(s"SplitQuery parsing failed: ${e.getMessage}")
-            None
+            // Wrap tantivy exception in IndexQueryParseException for user-friendly error
+            throw IndexQueryParseException.forAllFields(indexQueryAllV2.queryString, e)
         }
 
       // Handle MixedBooleanFilter types - preserves OR/AND/NOT structure from IndexQuery expressions

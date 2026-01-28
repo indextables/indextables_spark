@@ -24,9 +24,11 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 
 import io.indextables.spark.config.IndexTables4SparkSQLConf
+import io.indextables.tantivy4java.core.Schema
 
 /**
- * Tests for the _indexall safety check that rejects unqualified queries on wide tables.
+ * Tests for the _indexall safety check that rejects queries searching too many fields.
+ * Uses tantivy4java's SplitQuery.countQueryFields() for accurate field counting.
  */
 class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
@@ -64,69 +66,113 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     file.delete()
   }
 
-  // ==================== Unit Tests for containsUnqualifiedTerms ====================
-
-  test("containsUnqualifiedTerms: detects simple unqualified term") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("spark") === true)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("machine") === true)
+  /**
+   * Helper to create a tantivy schema for testing countQueryFields.
+   * Creates a schema with text fields: title, content, body, author, tags.
+   *
+   * Note: Schema.fromDocMappingJson() expects a direct array format, not a wrapped object.
+   */
+  private def createTestSchema(): Schema = {
+    // Direct array format as expected by tantivy4java
+    val docMappingJson = """[
+      {"name": "title", "type": "text", "tokenizer": "default", "record": "position", "stored": true, "fast": false},
+      {"name": "content", "type": "text", "tokenizer": "default", "record": "position", "stored": true, "fast": false},
+      {"name": "body", "type": "text", "tokenizer": "default", "record": "position", "stored": true, "fast": false},
+      {"name": "author", "type": "text", "tokenizer": "default", "record": "position", "stored": true, "fast": false},
+      {"name": "tags", "type": "text", "tokenizer": "default", "record": "position", "stored": true, "fast": false}
+    ]"""
+    Schema.fromDocMappingJson(docMappingJson)
   }
 
-  test("containsUnqualifiedTerms: allows fully qualified query") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("url:spark") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("title:machine") === false)
+  // ==================== Unit Tests for countQueryFields ====================
+
+  test("countQueryFields: single qualified field returns 1") {
+    val schema = createTestSchema()
+    try {
+      assert(FiltersToQueryConverter.countQueryFields("title:spark", schema) === 1)
+      assert(FiltersToQueryConverter.countQueryFields("content:machine", schema) === 1)
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: detects mixed qualified and unqualified") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("url:spark AND machine") === true)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("title:test OR content:demo AND unqualified") === true)
+  test("countQueryFields: multiple qualified fields returns correct count") {
+    val schema = createTestSchema()
+    try {
+      assert(FiltersToQueryConverter.countQueryFields("title:spark OR content:spark", schema) === 2)
+      assert(FiltersToQueryConverter.countQueryFields("title:a AND body:b AND author:c", schema) === 3)
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: allows multiple qualified terms with OR") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("url:spark OR content:spark") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("field1:term1 AND field2:term2") === false)
+  test("countQueryFields: same field multiple times counts as 1") {
+    val schema = createTestSchema()
+    try {
+      assert(FiltersToQueryConverter.countQueryFields("title:spark AND title:lucene", schema) === 1)
+      assert(FiltersToQueryConverter.countQueryFields("content:a OR content:b OR content:c", schema) === 1)
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: detects unqualified phrase") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("\"apache spark\"") === true)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("\"machine learning\"") === true)
+  test("countQueryFields: unqualified term uses all default text fields") {
+    val schema = createTestSchema()
+    try {
+      // Unqualified search term should search all text fields (5 in our test schema)
+      val count = FiltersToQueryConverter.countQueryFields("searchterm", schema)
+      assert(count === 5, s"Expected 5 fields for unqualified search, got $count")
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: allows qualified phrase") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("title:\"apache spark\"") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("content:\"machine learning\"") === false)
+  test("countQueryFields: mixed qualified and unqualified") {
+    val schema = createTestSchema()
+    try {
+      // title:spark is 1 field, but "machine" unqualified adds all 5 text fields
+      // The union should be 5 (all text fields include title)
+      val count = FiltersToQueryConverter.countQueryFields("title:spark AND machine", schema)
+      assert(count === 5, s"Expected 5 fields for mixed query, got $count")
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: handles complex boolean expressions") {
-    // All qualified
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("(url:a OR url:b) AND title:c") === false)
-    // One unqualified
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("(url:a OR url:b) AND term") === true)
+  test("countQueryFields: qualified phrase returns 1") {
+    val schema = createTestSchema()
+    try {
+      assert(FiltersToQueryConverter.countQueryFields("title:\"apache spark\"", schema) === 1)
+      assert(FiltersToQueryConverter.countQueryFields("content:\"machine learning\"", schema) === 1)
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: handles nested field references") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("metadata.name:value") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("user.profile.name:test") === false)
+  test("countQueryFields: unqualified phrase uses all default text fields") {
+    val schema = createTestSchema()
+    try {
+      val count = FiltersToQueryConverter.countQueryFields("\"apache spark\"", schema)
+      assert(count === 5, s"Expected 5 fields for unqualified phrase, got $count")
+    } finally {
+      schema.close()
+    }
   }
 
-  test("containsUnqualifiedTerms: handles range queries") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("timestamp:[2024-01-01 TO 2024-12-31]") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("score:[10 TO 100]") === false)
-  }
-
-  test("containsUnqualifiedTerms: handles grouped terms") {
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("field:(term1 term2 term3)") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("title:(apache spark tantivy)") === false)
-  }
-
-  test("containsUnqualifiedTerms: boolean keywords alone are not unqualified") {
-    // Just keywords should not trigger as unqualified
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("field1:a AND field2:b") === false)
-    assert(FiltersToQueryConverter.containsUnqualifiedTerms("field1:a OR field2:b NOT field3:c") === false)
+  test("countQueryFields: complex boolean expression") {
+    val schema = createTestSchema()
+    try {
+      // All qualified: (title OR content) AND body = 3 fields
+      val count1 = FiltersToQueryConverter.countQueryFields("(title:a OR content:b) AND body:c", schema)
+      assert(count1 === 3, s"Expected 3 fields for qualified boolean, got $count1")
+    } finally {
+      schema.close()
+    }
   }
 
   // ==================== Integration Tests ====================
 
-  test("reject unqualified _indexall query when fields > limit") {
+  test("reject _indexall query when searched fields > limit") {
     val spark = this.spark
     import spark.implicits._
 
@@ -144,8 +190,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       readDf.filter("_indexall indexquery 'test'").collect()
     }
 
-    assert(exception.getMessage.contains("Unqualified _indexall query"))
-    assert(exception.getMessage.contains("16 fields"))
+    assert(exception.getMessage.contains("_indexall query would search"))
+    assert(exception.getMessage.contains("fields"))
     assert(exception.getMessage.contains("limit: 10"))
     assert(exception.getMessage.contains("To fix, qualify your search"))
   }
@@ -163,12 +209,12 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
-    // Should succeed - query is fully qualified
+    // Should succeed - query is fully qualified (searches only 1 field)
     val result = readDf.filter("_indexall indexquery 'f1:test'").collect()
     assert(result.length === 1)
   }
 
-  test("allow unqualified _indexall query when fields <= limit") {
+  test("allow _indexall query when searched fields <= limit") {
     val spark = this.spark
     import spark.implicits._
 

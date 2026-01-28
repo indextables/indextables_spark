@@ -482,6 +482,9 @@ class IndexTables4SparkSimpleAggregateReader(
       case e: IllegalArgumentException =>
         // Rethrow field validation errors - these should propagate to the user
         throw e
+      case e: io.indextables.spark.exceptions.IndexQueryParseException =>
+        // Rethrow IndexQuery parse errors - these should propagate to the user
+        throw e
       case e: Exception =>
         logger.error(s"SIMPLE AGGREGATE READER INITIALIZE: Failed to execute simple aggregation", e)
         // Return empty results on failure
@@ -953,6 +956,13 @@ class IndexTables4SparkSimpleAggregateReader(
           e
         )
         throw e
+      case e: io.indextables.spark.exceptions.IndexQueryParseException =>
+        // Rethrow IndexQuery parse errors - these should propagate to the user
+        logger.error(
+          s"SIMPLE AGGREGATE EXECUTION: IndexQuery parse error for split ${partition.split.path}",
+          e
+        )
+        throw e
       case e: Exception =>
         logger.error(
           s"SIMPLE AGGREGATE EXECUTION: Failed to execute simple aggregation for split ${partition.split.path}",
@@ -1099,6 +1109,9 @@ class IndexTables4SparkMultiSplitSimpleAggregateReader(
 
     } catch {
       case e: IllegalArgumentException =>
+        throw e
+      case e: io.indextables.spark.exceptions.IndexQueryParseException =>
+        // Rethrow IndexQuery parse errors - these should propagate to the user
         throw e
       case e: Exception =>
         logger.error(s"MULTI-SPLIT SIMPLE AGGREGATE READER: Failed to execute aggregation", e)
