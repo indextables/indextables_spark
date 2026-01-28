@@ -46,6 +46,8 @@ import io.indextables.spark.expressions.{
   RangeExpression
 }
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.exceptions.IndexQueryParseException
+import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter, MixedIndexQuery, MixedIndexQueryAll}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
@@ -879,7 +881,10 @@ class IndexTables4SparkScanBuilder(
         if (storedQueries.nonEmpty) {
           logger.debug(s"EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from relation storage")
           storedQueries.foreach(q => logger.debug(s"  - Relation IndexQuery: $q"))
-          return storedQueries.toArray
+          val result = storedQueries.toArray
+          // CRITICAL: Validate IndexQuery syntax on driver before tasks are created
+          validateIndexQueryFilters(result)
+          return result
         }
       case None =>
         logger.debug(s"EXTRACT DEBUG: No relation object available from ThreadLocal")
@@ -893,7 +898,10 @@ class IndexTables4SparkScanBuilder(
         if (registryQueries.nonEmpty) {
           logger.debug(s"EXTRACT DEBUG: Found ${registryQueries.length} IndexQuery filters from registry as fallback")
           registryQueries.foreach(q => logger.debug(s"  - Registry IndexQuery: $q"))
-          return registryQueries.toArray
+          val result = registryQueries.toArray
+          // CRITICAL: Validate IndexQuery syntax on driver before tasks are created
+          validateIndexQueryFilters(result)
+          return result
         }
       case None =>
         logger.debug(s"EXTRACT DEBUG: No query ID available in registry")
@@ -901,6 +909,101 @@ class IndexTables4SparkScanBuilder(
 
     logger.debug(s"EXTRACT DEBUG: No IndexQuery filters found using any method")
     Array.empty[Any]
+  }
+
+  /**
+   * Validate IndexQuery filters on the driver using tantivy's query parser.
+   * This prevents invalid queries from causing task failures and retries.
+   * Throws IndexQueryParseException immediately if a query has invalid syntax.
+   */
+  private def validateIndexQueryFilters(indexQueryFilters: Array[Any]): Unit = {
+    if (indexQueryFilters.isEmpty) return
+
+    logger.debug(s"VALIDATE: Validating ${indexQueryFilters.length} IndexQuery filters on driver")
+
+    // Create a minimal tantivy schema for query validation
+    // We only need the field names and types for parseQuery to validate syntax
+    val tantivySchema = try {
+      createTantivySchemaForValidation()
+    } catch {
+      case e: Exception =>
+        logger.warn(s"VALIDATE: Could not create tantivy schema for validation: ${e.getMessage}")
+        return // Skip validation if we can't create a schema
+    }
+
+    try {
+      indexQueryFilters.foreach {
+        case filter: IndexQueryFilter =>
+          validateSingleQuery(filter.queryString, Some(filter.columnName), tantivySchema)
+        case filter: IndexQueryAllFilter =>
+          validateSingleQuery(filter.queryString, None, tantivySchema)
+        // Handle wrapped filter types from MixedBoolean tree (PR #120)
+        case wrapped: MixedIndexQuery =>
+          validateSingleQuery(wrapped.filter.queryString, Some(wrapped.filter.columnName), tantivySchema)
+        case wrapped: MixedIndexQueryAll =>
+          validateSingleQuery(wrapped.filter.queryString, None, tantivySchema)
+        case other =>
+          logger.debug(s"VALIDATE: Skipping unknown filter type: ${other.getClass.getName}")
+      }
+      logger.debug(s"VALIDATE: All ${indexQueryFilters.length} IndexQuery filters passed validation")
+    } finally {
+      tantivySchema.close()
+    }
+  }
+
+  /**
+   * Validate a single query string using tantivy's parseQuery.
+   * Throws IndexQueryParseException if the query has invalid syntax.
+   *
+   * tantivy4java's SplitQuery.parseQuery() throws descriptive exceptions for parse failures,
+   * which we wrap in IndexQueryParseException for user-friendly error messages.
+   */
+  private def validateSingleQuery(
+    queryString: String,
+    fieldName: Option[String],
+    tantivySchema: io.indextables.tantivy4java.core.Schema
+  ): Unit = {
+    import io.indextables.tantivy4java.split.SplitQuery
+    import scala.jdk.CollectionConverters._
+
+    try {
+      val defaultFields = fieldName match {
+        case Some(field) => Array(field)
+        case None => tantivySchema.getFieldNames.asScala.toArray
+      }
+
+      // Use tantivy's parseQuery to validate syntax
+      // tantivy4java throws descriptive exceptions on parse failures
+      SplitQuery.parseQuery(queryString, tantivySchema, defaultFields)
+      logger.debug(s"VALIDATE: Query '$queryString' validated successfully")
+    } catch {
+      case e: IndexQueryParseException =>
+        throw e // Re-throw our own exceptions
+      case e: Exception =>
+        // Wrap tantivy exceptions in IndexQueryParseException
+        // The exception message from tantivy4java contains descriptive parse error details
+        throw fieldName match {
+          case Some(field) => IndexQueryParseException.forField(queryString, field, e)
+          case None => IndexQueryParseException.forAllFields(queryString, e)
+        }
+    }
+  }
+
+  /**
+   * Create a tantivy Schema from the docMappingJson in the transaction log.
+   * Uses tantivy4java's native Schema.fromDocMappingJson() for accurate field configuration.
+   */
+  private def createTantivySchemaForValidation(): io.indextables.tantivy4java.core.Schema = {
+    import io.indextables.tantivy4java.core.Schema
+
+    val files = transactionLog.listFiles()
+    val docMappingJson = files.headOption.flatMap(_.docMappingJson).getOrElse {
+      throw new IllegalStateException(
+        "No docMappingJson available in transaction log. Cannot validate IndexQuery syntax."
+      )
+    }
+
+    Schema.fromDocMappingJson(docMappingJson)
   }
 
   /**

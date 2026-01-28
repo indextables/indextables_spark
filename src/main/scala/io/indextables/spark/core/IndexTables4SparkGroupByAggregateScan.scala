@@ -625,6 +625,12 @@ class IndexTables4SparkGroupByAggregateReader(
       groupByResults = results.iterator
       logger.debug(s"GROUP BY READER: GROUP BY aggregation completed with ${results.length} groups")
     } catch {
+      case e: IllegalArgumentException =>
+        // Rethrow field validation errors - these should propagate to the user
+        throw e
+      case e: io.indextables.spark.exceptions.IndexQueryParseException =>
+        // Rethrow IndexQuery parse errors - these should propagate to the user
+        throw e
       case e: Exception =>
         logger.warn(s"GROUP BY READER: Failed to execute GROUP BY aggregation", e)
         // Return empty results on failure
@@ -2548,6 +2554,9 @@ class IndexTables4SparkMultiSplitGroupByAggregateReader(
 
     } catch {
       case e: IllegalArgumentException =>
+        throw e
+      case e: io.indextables.spark.exceptions.IndexQueryParseException =>
+        // Rethrow IndexQuery parse errors - these should propagate to the user
         throw e
       case e: Exception =>
         logger.error(s"MULTI-SPLIT GROUP BY READER: Failed to execute GROUP BY aggregation", e)
