@@ -307,4 +307,145 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     assert(msg.contains("spark.indextables.indexquery.indexall.maxUnqualifiedFields"))
     assert(msg.contains("Available fields:"))
   }
+
+  // ==================== Mixed Boolean Expression Tests (PR #120 compatibility) ====================
+
+  test("reject mixed boolean with one unqualified _indexall query") {
+    val spark = this.spark
+    import spark.implicits._
+
+    // Create a table with 15 fields (more than default limit of 10)
+    val data = Seq(
+      (1, "1234", "community content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"),
+      (2, "5678", "curl content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n")
+    )
+    val df = data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
+
+    val tablePath = tempDir.resolve("mixed_boolean_unqualified").toString
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+
+    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+      .createOrReplaceTempView("mixed_test")
+
+    // Mixed boolean: one qualified, one unqualified - should reject because 'curl' is unqualified
+    // WHERE uid='1234' AND (_indexall indexquery 'f1:community' OR _indexall indexquery 'curl')
+    val exception = intercept[Exception] {
+      spark.sql("""
+        SELECT * FROM mixed_test
+        WHERE uid = '1234'
+          AND ((_indexall indexquery 'f1:community') OR (_indexall indexquery 'curl'))
+      """).collect()
+    }
+
+    assert(exception.getMessage.contains("_indexall query would search"))
+    assert(exception.getMessage.contains("limit: 10"))
+  }
+
+  test("allow mixed boolean with all qualified _indexall queries") {
+    val spark = this.spark
+    import spark.implicits._
+
+    // Create a table with 15 fields (more than default limit of 10)
+    val data = Seq(
+      (1, "1234", "community content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"),
+      (2, "5678", "curl content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n")
+    )
+    val df = data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
+
+    val tablePath = tempDir.resolve("mixed_boolean_qualified").toString
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.f1", "text")  // text field for tokenized search
+      .mode("overwrite")
+      .save(tablePath)
+
+    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+      .createOrReplaceTempView("mixed_qualified_test")
+
+    // Mixed boolean: all qualified - should succeed
+    // WHERE uid='1234' AND (_indexall indexquery 'f1:community' OR _indexall indexquery 'f1:curl')
+    val result = spark.sql("""
+      SELECT * FROM mixed_qualified_test
+      WHERE uid = '1234'
+        AND ((_indexall indexquery 'f1:community') OR (_indexall indexquery 'f1:curl'))
+    """).collect()
+
+    assert(result.length === 1)
+  }
+
+  test("reject complex nested mixed boolean with unqualified _indexall") {
+    val spark = this.spark
+    import spark.implicits._
+
+    // Create a table with 15 fields (more than default limit of 10)
+    val data = Seq(
+      (1, "1234", "CRITICAL", "one content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
+      (2, "1234", "CLASS2", "two content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
+      (3, "5678", "CRITICAL", "one content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m")
+    )
+    val df = data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
+
+    val tablePath = tempDir.resolve("complex_nested_unqualified").toString
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+
+    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+      .createOrReplaceTempView("complex_nested_test")
+
+    // Complex nested: one qualified in first branch, unqualified in second
+    // WHERE uid='1234' AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
+    //                       OR (urgency <> 'CLASS2' AND _indexall indexquery 'two'))
+    val exception = intercept[Exception] {
+      spark.sql("""
+        SELECT * FROM complex_nested_test
+        WHERE uid = '1234'
+          AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
+               OR (urgency <> 'CLASS2' AND _indexall indexquery 'two'))
+      """).collect()
+    }
+
+    assert(exception.getMessage.contains("_indexall query would search"))
+    assert(exception.getMessage.contains("limit: 10"))
+  }
+
+  test("allow complex nested mixed boolean with all qualified _indexall") {
+    val spark = this.spark
+    import spark.implicits._
+
+    // Create a table with 15 fields (more than default limit of 10)
+    val data = Seq(
+      (1, "1234", "CRITICAL", "one content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
+      (2, "1234", "CLASS2", "two content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
+      (3, "5678", "CRITICAL", "one content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
+      (4, "1234", "LOW", "two content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m")
+    )
+    val df = data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
+
+    val tablePath = tempDir.resolve("complex_nested_qualified").toString
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.f1", "text")  // text field for tokenized search
+      .mode("overwrite")
+      .save(tablePath)
+
+    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+      .createOrReplaceTempView("complex_qualified_test")
+
+    // Complex nested: all _indexall queries are qualified
+    // WHERE uid='1234' AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
+    //                       OR (urgency <> 'CLASS2' AND _indexall indexquery 'f1:two'))
+    val result = spark.sql("""
+      SELECT * FROM complex_qualified_test
+      WHERE uid = '1234'
+        AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
+             OR (urgency <> 'CLASS2' AND _indexall indexquery 'f1:two'))
+    """).collect()
+
+    // id=1: uid='1234', urgency='CRITICAL', matches 'f1:one' -> included
+    // id=2: uid='1234', urgency='CLASS2', excluded by urgency <> 'CLASS2'
+    // id=3: uid='5678', excluded by uid filter
+    // id=4: uid='1234', urgency='LOW', matches 'f1:two' -> included
+    assert(result.length === 2)
+  }
 }
