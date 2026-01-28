@@ -47,7 +47,7 @@ import io.indextables.spark.expressions.{
 }
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
 import io.indextables.spark.exceptions.IndexQueryParseException
-import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter, MixedIndexQuery, MixedIndexQueryAll}
+import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter, MixedIndexQuery, MixedIndexQueryAll, MixedAndFilter, MixedOrFilter, MixedNotFilter, MixedSparkFilter, MixedBooleanFilter}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
@@ -883,7 +883,14 @@ class IndexTables4SparkScanBuilder(
           storedQueries.foreach(q => logger.debug(s"  - Relation IndexQuery: $q"))
           val result = storedQueries.toArray
           // CRITICAL: Validate IndexQuery syntax on driver before tasks are created
-          validateIndexQueryFilters(result)
+          // Clear cache on failure to prevent stale errors from persisting to future queries
+          try {
+            validateIndexQueryFilters(result)
+          } catch {
+            case e: Exception =>
+              IndexTables4SparkScanBuilder.clearIndexQueries(relation)
+              throw e
+          }
           return result
         }
       case None =>
@@ -942,6 +949,17 @@ class IndexTables4SparkScanBuilder(
           validateSingleQuery(wrapped.filter.queryString, Some(wrapped.filter.columnName), tantivySchema)
         case wrapped: MixedIndexQueryAll =>
           validateSingleQuery(wrapped.filter.queryString, None, tantivySchema)
+        // Handle MixedBooleanFilter tree structures (AND, OR, NOT combinations)
+        // These are created when IndexQuery is combined with Spark filters
+        case tree: MixedAndFilter =>
+          validateMixedBooleanTree(tree, tantivySchema)
+        case tree: MixedOrFilter =>
+          validateMixedBooleanTree(tree, tantivySchema)
+        case tree: MixedNotFilter =>
+          validateMixedBooleanTree(tree, tantivySchema)
+        case _: MixedSparkFilter =>
+          // Spark filters don't contain IndexQuery - skip
+          ()
         case other =>
           logger.debug(s"VALIDATE: Skipping unknown filter type: ${other.getClass.getName}")
       }
@@ -986,6 +1004,33 @@ class IndexTables4SparkScanBuilder(
           case Some(field) => IndexQueryParseException.forField(queryString, field, e)
           case None => IndexQueryParseException.forAllFields(queryString, e)
         }
+    }
+  }
+
+  /**
+   * Recursively validate all IndexQuery filters within a MixedBooleanFilter tree.
+   * This handles cases where IndexQuery is combined with Spark filters via AND/OR/NOT.
+   */
+  private def validateMixedBooleanTree(
+    tree: MixedBooleanFilter,
+    tantivySchema: io.indextables.tantivy4java.core.Schema
+  ): Unit = {
+    tree match {
+      case MixedIndexQuery(filter) =>
+        validateSingleQuery(filter.queryString, Some(filter.columnName), tantivySchema)
+      case MixedIndexQueryAll(filter) =>
+        validateSingleQuery(filter.queryString, None, tantivySchema)
+      case MixedAndFilter(left, right) =>
+        validateMixedBooleanTree(left, tantivySchema)
+        validateMixedBooleanTree(right, tantivySchema)
+      case MixedOrFilter(left, right) =>
+        validateMixedBooleanTree(left, tantivySchema)
+        validateMixedBooleanTree(right, tantivySchema)
+      case MixedNotFilter(child) =>
+        validateMixedBooleanTree(child, tantivySchema)
+      case _: MixedSparkFilter =>
+        // Spark filters don't contain IndexQuery - nothing to validate
+        ()
     }
   }
 

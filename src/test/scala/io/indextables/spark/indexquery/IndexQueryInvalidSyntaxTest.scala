@@ -581,4 +581,188 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
       s"Error message should include the field name 'my_special_field'. Got: $errorMessage"
     )
   }
+
+  // ============================================================================
+  // TEST: Bug #1 - Error should not persist across queries (PR #122 fix)
+  // ============================================================================
+
+  test("invalid syntax error should not persist to subsequent queries") {
+    val spark = this.spark
+    import spark.implicits._
+
+    val testPath = s"$tempDir/error_persistence_test"
+
+    val testData = Seq(
+      (1, "machine learning algorithms", "tech"),
+      (2, "data engineering pipeline", "tech"),
+      (3, "deep learning neural networks", "ai")
+    ).toDF("id", "title", "category")
+
+    testData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .mode("overwrite")
+      .save(testPath)
+
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+
+    df.createOrReplaceTempView("persistence_test")
+
+    // Query 1: Invalid syntax should fail
+    val exception = intercept[Exception] {
+      spark.sql("""
+        SELECT id, title FROM persistence_test
+        WHERE title indexquery '((invalid syntax'
+      """).collect()
+    }
+    assertDriverSideValidation(exception)
+
+    // Query 2: Valid syntax should succeed (error should NOT persist)
+    val results = spark.sql("""
+      SELECT id, title FROM persistence_test
+      WHERE title indexquery 'learning'
+    """).collect()
+
+    assert(results.length == 2,
+      s"Valid query after invalid query should succeed. Expected 2 results, got ${results.length}")
+  }
+
+  // ============================================================================
+  // TEST: Bug #2 - Validation should work with mixed predicates (PR #122 fix)
+  // ============================================================================
+
+  test("invalid syntax should be caught when combined with Spark filters via AND") {
+    val spark = this.spark
+    import spark.implicits._
+
+    val testPath = s"$tempDir/mixed_and_test"
+
+    val testData = Seq(
+      ("id1", "machine learning algorithms", "tech"),
+      ("id2", "data engineering pipeline", "tech"),
+      ("id3", "deep learning neural networks", "ai")
+    ).toDF("id", "title", "category")
+
+    testData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .mode("overwrite")
+      .save(testPath)
+
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+
+    df.createOrReplaceTempView("mixed_and_test")
+
+    // Invalid IndexQuery combined with Spark filter via AND
+    val exception = intercept[Exception] {
+      spark.sql("""
+        SELECT id, title FROM mixed_and_test
+        WHERE id = 'id1' AND title indexquery '((badquery'
+      """).collect()
+    }
+
+    // Verify driver-side validation (not task failure)
+    assertDriverSideValidation(exception)
+
+    val errorMessage = getFullErrorMessage(exception)
+    assert(
+      errorMessage.contains("IndexQuery") ||
+      errorMessage.contains("syntax") ||
+      errorMessage.contains("parse") ||
+      errorMessage.contains("Parse error"),
+      s"Error message should describe the syntax problem. Got: $errorMessage"
+    )
+  }
+
+  test("invalid syntax should be caught when combined with Spark filters via OR") {
+    val spark = this.spark
+    import spark.implicits._
+
+    val testPath = s"$tempDir/mixed_or_test"
+
+    val testData = Seq(
+      ("id1", "machine learning algorithms", "tech"),
+      ("id2", "data engineering pipeline", "tech"),
+      ("id3", "deep learning neural networks", "ai")
+    ).toDF("id", "title", "category")
+
+    testData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .mode("overwrite")
+      .save(testPath)
+
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+
+    df.createOrReplaceTempView("mixed_or_test")
+
+    // Invalid IndexQuery combined with Spark filter via OR
+    val exception = intercept[Exception] {
+      spark.sql("""
+        SELECT id, title FROM mixed_or_test
+        WHERE id = 'id1' OR title indexquery '((badquery'
+      """).collect()
+    }
+
+    // Verify driver-side validation (not task failure)
+    assertDriverSideValidation(exception)
+
+    val errorMessage = getFullErrorMessage(exception)
+    assert(
+      errorMessage.contains("IndexQuery") ||
+      errorMessage.contains("syntax") ||
+      errorMessage.contains("parse") ||
+      errorMessage.contains("Parse error"),
+      s"Error message should describe the syntax problem. Got: $errorMessage"
+    )
+  }
+
+  test("valid IndexQuery combined with Spark filters should work correctly") {
+    val spark = this.spark
+    import spark.implicits._
+
+    val testPath = s"$tempDir/mixed_valid_test"
+
+    val testData = Seq(
+      ("id1", "machine learning algorithms", "tech"),
+      ("id2", "data engineering pipeline", "tech"),
+      ("id3", "deep learning neural networks", "ai")
+    ).toDF("id", "title", "category")
+
+    testData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .mode("overwrite")
+      .save(testPath)
+
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+
+    df.createOrReplaceTempView("mixed_valid_test")
+
+    // Valid query: Spark filter AND IndexQuery
+    val resultsAnd = spark.sql("""
+      SELECT id, title FROM mixed_valid_test
+      WHERE category = 'tech' AND title indexquery 'learning'
+    """).collect()
+
+    assert(resultsAnd.length == 1,
+      s"Expected 1 result for AND combination, got ${resultsAnd.length}")
+
+    // Valid query: Spark filter OR IndexQuery
+    val resultsOr = spark.sql("""
+      SELECT id, title FROM mixed_valid_test
+      WHERE category = 'ai' OR title indexquery 'pipeline'
+    """).collect()
+
+    assert(resultsOr.length == 2,
+      s"Expected 2 results for OR combination, got ${resultsOr.length}")
+  }
 }
