@@ -18,7 +18,6 @@
 package io.indextables.spark.indexquery
 
 import io.indextables.spark.TestBase
-import org.apache.spark.SparkException
 
 /**
  * Test that IndexQuery with non-existent field throws a descriptive error.
@@ -56,7 +55,8 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     df.createOrReplaceTempView("test_table")
 
     // Test: IndexQuery with a field that doesn't exist should throw an error
-    val exception = intercept[SparkException] {
+    // Validation happens on driver before tasks are dispatched (PR #114 + #122 pattern)
+    val exception = intercept[IllegalArgumentException] {
       spark
         .sql("""
         SELECT id, title FROM test_table
@@ -66,17 +66,16 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     }
 
     // Verify the error message is descriptive
-    val errorMessage = exception.getMessage + Option(exception.getCause).map(_.getMessage).getOrElse("")
+    val errorMessage = exception.getMessage
 
     assert(
-      errorMessage.contains("fake_field") || errorMessage.contains("does not exist") ||
-        errorMessage.contains("not found"),
+      errorMessage.contains("fake_field") && errorMessage.contains("non-existent"),
       s"Error message should mention the non-existent field. Actual message: $errorMessage"
     )
 
     // Verify available fields are listed in the error
     assert(
-      errorMessage.contains("title") || errorMessage.contains("category") || errorMessage.contains("id"),
+      errorMessage.contains("Available fields"),
       s"Error message should list available fields. Actual message: $errorMessage"
     )
   }
@@ -140,7 +139,8 @@ class IndexQueryNonExistentFieldTest extends TestBase {
 
     df.createOrReplaceTempView("test_table_error_msg")
 
-    val exception = intercept[SparkException] {
+    // Validation happens on driver before tasks are dispatched (PR #114 + #122 pattern)
+    val exception = intercept[IllegalArgumentException] {
       spark
         .sql("""
         SELECT * FROM test_table_error_msg
@@ -149,12 +149,12 @@ class IndexQueryNonExistentFieldTest extends TestBase {
         .collect()
     }
 
-    val fullErrorMessage = getFullErrorMessage(exception)
+    val errorMessage = exception.getMessage
 
     // The error should mention available fields to help the user
     assert(
-      fullErrorMessage.contains("Available fields") || fullErrorMessage.contains("available fields"),
-      s"Error should mention available fields. Got: $fullErrorMessage"
+      errorMessage.contains("Available fields"),
+      s"Error should mention available fields. Got: $errorMessage"
     )
   }
 
@@ -184,7 +184,8 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     df.createOrReplaceTempView("simple_select_test")
 
     // Simple SELECT with non-existent field should fail
-    val exception = intercept[SparkException] {
+    // Validation happens on driver before tasks are dispatched (PR #114 + #122 pattern)
+    val exception = intercept[IllegalArgumentException] {
       spark
         .sql("""
         SELECT id, title FROM simple_select_test
@@ -193,10 +194,10 @@ class IndexQueryNonExistentFieldTest extends TestBase {
         .collect()
     }
 
-    val fullErrorMessage = getFullErrorMessage(exception)
+    val errorMessage = exception.getMessage
     assert(
-      fullErrorMessage.contains("bogus_field") && fullErrorMessage.contains("non-existent"),
-      s"Error should mention the non-existent field 'bogus_field'. Got: $fullErrorMessage"
+      errorMessage.contains("bogus_field") && errorMessage.contains("non-existent"),
+      s"Error should mention the non-existent field 'bogus_field'. Got: $errorMessage"
     )
   }
 
