@@ -156,18 +156,24 @@ class IndexTables4SparkScanBuilder(
         // Note: IsNull/IsNotNull on non-FAST fields are "safely unsupported" - they will be
         // handled by Spark's post-filtering, which doesn't affect aggregate correctness.
         // We only block on truly problematic unsupported filters.
-        val safelyUnsupportedFilters = effectiveUnsupportedFilters.filter {
-          case _: IsNull    => true  // Spark handles these via post-filtering
-          case _: IsNotNull => true  // Spark handles these via post-filtering
-          case _            => false
-        }
-        val blockingUnsupportedFilters = effectiveUnsupportedFilters.filterNot {
-          case _: IsNull    => true
-          case _: IsNotNull => true
-          case _            => false
+        //
+        // Use explicit isInstanceOf checks to ensure proper filtering (pattern matching can
+        // be tricky with Filter subclasses).
+        def isSafelyUnsupportedFilter(f: Filter): Boolean = {
+          f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull]
         }
 
+        val safelyUnsupportedFilters = effectiveUnsupportedFilters.filter(isSafelyUnsupportedFilter)
+        val blockingUnsupportedFilters = effectiveUnsupportedFilters.filterNot(isSafelyUnsupportedFilter)
+
+        logger.debug(s"BUILD: effectiveUnsupportedFilters=${effectiveUnsupportedFilters.length}, " +
+          s"safelyUnsupported=${safelyUnsupportedFilters.length}, blocking=${blockingUnsupportedFilters.length}")
+        effectiveUnsupportedFilters.foreach(f =>
+          logger.debug(s"BUILD:   - Unsupported filter: $f (class=${f.getClass.getName}, isSafe=${isSafelyUnsupportedFilter(f)})"))
+
         val hasAggregateInPlan = detectAggregateInQueryPlan()
+        logger.debug(s"BUILD: hasAggregateInPlan=$hasAggregateInPlan")
+
         if (blockingUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
           val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
           // Build specific guidance for string pattern filters
@@ -192,8 +198,8 @@ class IndexTables4SparkScanBuilder(
             s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
               s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
               s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
-              s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
-              s"Unsupported: IsNull, JSON field null checks." +
+              s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not. " +
+              s"Note: IsNull/IsNotNull on non-FAST fields are handled by Spark post-filtering and don't block aggregates." +
               stringPatternHint
           )
         }

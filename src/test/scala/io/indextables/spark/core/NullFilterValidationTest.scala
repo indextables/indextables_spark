@@ -288,4 +288,133 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       println(s"OR filter with IS NULL returned ${rows.length} records (expected 3)")
     }
   }
+
+  test("SELECT * with IS NULL on text field (non-FAST) should work via Spark post-filtering") {
+    withTempPath { path =>
+      // Create test data with some null text values
+      // This tests the exact scenario: SELECT * FROM table WHERE text_field IS NULL
+      // where text_field is a TEXT type (not FAST)
+      val data = spark.createDataFrame(Seq(
+        (1L, Some("Hello world, this is a test message")),
+        (2L, None),  // null text
+        (3L, Some("Another message with some content")),
+        (4L, None),  // null text
+        (5L, Some("Final message here"))
+      )).toDF("id", "message_content")
+
+      // Write with message_content as TEXT (not FAST) - typical for log/message fields
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message_content", "text")
+        // Note: NOT adding message_content to fastfields
+        .mode("overwrite")
+        .save(path)
+
+      // This is the exact query pattern that was failing:
+      // SELECT * FROM table WHERE text_field IS NULL
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+        .filter(col("message_content").isNull)
+
+      val rows = result.collect()
+
+      // Should return 2 rows (id=2 and id=4 have null message_content)
+      rows.length shouldBe 2
+      rows.map(_.getLong(0)).toSet shouldBe Set(2L, 4L)
+      println(s"SELECT * with IS NULL on TEXT field returned ${rows.length} records (expected 2)")
+    }
+  }
+
+  test("COUNT with IS NULL on text field (non-FAST) should work via Spark post-filtering") {
+    withTempPath { path =>
+      // Test aggregate with IS NULL on non-FAST text field
+      val data = spark.createDataFrame(Seq(
+        (1L, Some("Message one")),
+        (2L, None),
+        (3L, Some("Message three")),
+        (4L, None),
+        (5L, Some("Message five"))
+      )).toDF("id", "log_message")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.log_message", "text")
+        .mode("overwrite")
+        .save(path)
+
+      // COUNT with IS NULL on non-FAST text field should work
+      // Spark handles the filter via post-filtering
+      val count = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+        .filter(col("log_message").isNull)
+        .count()
+
+      count shouldBe 2L
+      println(s"COUNT with IS NULL on TEXT field: $count (expected 2)")
+    }
+  }
+
+  test("SELECT * with IS NOT NULL on text field (non-FAST) should work via Spark post-filtering") {
+    withTempPath { path =>
+      // Test IS NOT NULL on non-FAST TEXT field
+      val data = spark.createDataFrame(Seq(
+        (1L, Some("Hello world, this is a test message")),
+        (2L, None),  // null text
+        (3L, Some("Another message with some content")),
+        (4L, None),  // null text
+        (5L, Some("Final message here"))
+      )).toDF("id", "message_content")
+
+      // Write with message_content as TEXT (not FAST)
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message_content", "text")
+        .mode("overwrite")
+        .save(path)
+
+      // SELECT * WHERE text_field IS NOT NULL
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+        .filter(col("message_content").isNotNull)
+
+      val rows = result.collect()
+
+      // Should return 3 rows (id=1, 3, 5 have non-null message_content)
+      rows.length shouldBe 3
+      rows.map(_.getLong(0)).toSet shouldBe Set(1L, 3L, 5L)
+      println(s"SELECT * with IS NOT NULL on TEXT field returned ${rows.length} records (expected 3)")
+    }
+  }
+
+  test("COUNT with IS NOT NULL on text field (non-FAST) should work via Spark post-filtering") {
+    withTempPath { path =>
+      // Test aggregate with IS NOT NULL on non-FAST text field
+      val data = spark.createDataFrame(Seq(
+        (1L, Some("Message one")),
+        (2L, None),
+        (3L, Some("Message three")),
+        (4L, None),
+        (5L, Some("Message five"))
+      )).toDF("id", "log_message")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.log_message", "text")
+        .mode("overwrite")
+        .save(path)
+
+      // COUNT with IS NOT NULL on non-FAST text field should work
+      val count = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+        .filter(col("log_message").isNotNull)
+        .count()
+
+      count shouldBe 3L
+      println(s"COUNT with IS NOT NULL on TEXT field: $count (expected 3)")
+    }
+  }
 }
