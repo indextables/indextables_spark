@@ -66,6 +66,8 @@ statement
     | DESCRIBE indexTablesKeyword STORAGE STATS                 #describeStorageStats
     | DESCRIBE indexTablesKeyword ENVIRONMENT                   #describeEnvironment
     | DESCRIBE indexTablesKeyword STATE (path=STRING | table=qualifiedName)   #describeState
+    | DESCRIBE indexTablesKeyword COMPONENT SIZES (path=STRING | table=qualifiedName)
+        (WHERE whereClause=predicateToken)?                                 #describeComponentSizes
     | PREWARM indexTablesKeyword CACHE (path=STRING | table=qualifiedName)
         (FOR SEGMENTS '(' segmentList=identifierList ')')?
         (ON FIELDS '(' fieldList=identifierList ')')?
@@ -121,7 +123,7 @@ nonReserved
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
-    | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT
+    | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
     ;
 
 // Keywords (case-insensitive)
@@ -188,6 +190,8 @@ JOBS: [Jj][Oo][Bb][Ss];
 JOB: [Jj][Oo][Bb];
 WAIT: [Ww][Aa][Ii][Tt];
 TIMEOUT: [Tt][Ii][Mm][Ee][Oo][Uu][Tt];
+COMPONENT: [Cc][Oo][Mm][Pp][Oo][Nn][Ee][Nn][Tt];
+SIZES: [Ss][Ii][Zz][Ee][Ss];
 
 // Literals
 STRING
