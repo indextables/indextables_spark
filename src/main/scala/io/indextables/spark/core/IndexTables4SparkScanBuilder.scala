@@ -28,7 +28,7 @@ import org.apache.spark.sql.connector.read.{
   SupportsPushDownRequiredColumns,
   SupportsPushDownV2Filters
 }
-import org.apache.spark.sql.sources.{Filter, StringContains, StringEndsWith, StringStartsWith}
+import org.apache.spark.sql.sources.{Filter, IsNull, IsNotNull, StringContains, StringEndsWith, StringStartsWith}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
@@ -152,13 +152,28 @@ class IndexTables4SparkScanBuilder(
         // Check for unsupported filters that would block aggregate pushdown.
         // When Spark has unsupported filters, it won't call pushAggregation(), which means
         // any aggregation in the query will produce incorrect results (due to our default limit).
+        //
+        // Note: IsNull/IsNotNull on non-FAST fields are "safely unsupported" - they will be
+        // handled by Spark's post-filtering, which doesn't affect aggregate correctness.
+        // We only block on truly problematic unsupported filters.
+        val safelyUnsupportedFilters = effectiveUnsupportedFilters.filter {
+          case _: IsNull    => true  // Spark handles these via post-filtering
+          case _: IsNotNull => true  // Spark handles these via post-filtering
+          case _            => false
+        }
+        val blockingUnsupportedFilters = effectiveUnsupportedFilters.filterNot {
+          case _: IsNull    => true
+          case _: IsNotNull => true
+          case _            => false
+        }
+
         val hasAggregateInPlan = detectAggregateInQueryPlan()
-        if (effectiveUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
-          val unsupportedDesc = effectiveUnsupportedFilters.map(_.toString).mkString(", ")
+        if (blockingUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
+          val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
           // Build specific guidance for string pattern filters
-          val hasStringStartsWith    = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
-          val hasStringEndsWith      = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
-          val hasStringContains      = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringContains])
+          val hasStringStartsWith    = blockingUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
+          val hasStringEndsWith      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
+          val hasStringContains      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringContains])
           val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
 
           val stringPatternHint = if (hasStringPatternFilter) {
