@@ -25,6 +25,7 @@ import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
   CheckpointCommand,
+  DescribeComponentSizesCommand,
   DescribeDiskCacheCommand,
   DescribeEnvironmentCommand,
   DescribeMergeJobsCommand,
@@ -591,6 +592,32 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     val result = DescribeStateCommand(tablePath)
     logger.debug(s"Created DescribeStateCommand: $result")
     result
+  }
+
+  override def visitDescribeComponentSizes(ctx: DescribeComponentSizesContext): LogicalPlan = {
+    logger.debug(s"visitDescribeComponentSizes called with context: $ctx")
+
+    // Extract table path or identifier
+    val tablePath = if (ctx.path != null) {
+      logger.debug(s"Processing path: ${ctx.path.getText}")
+      ParserUtils.string(ctx.path)
+    } else if (ctx.table != null) {
+      logger.debug(s"Processing table: ${ctx.table.getText}")
+      val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+      tableId.mkString(".")
+    } else {
+      throw new IllegalArgumentException("DESCRIBE COMPONENT SIZES requires a path or table name")
+    }
+
+    // Extract optional WHERE clause
+    val wherePredicates = if (ctx.whereClause != null) {
+      Seq(extractRawText(ctx.whereClause))
+    } else {
+      Seq.empty
+    }
+
+    logger.debug(s"Creating DescribeComponentSizesCommand for: $tablePath, wherePredicates: $wherePredicates")
+    DescribeComponentSizesCommand(tablePath, wherePredicates)
   }
 
   override def visitPrewarmCache(ctx: PrewarmCacheContext): LogicalPlan = {
