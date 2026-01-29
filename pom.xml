@@ -171,12 +171,12 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.28.4: Schema.fromDocMappingJson() for driver-side query validation -->
+        <!-- Version 0.28.6: SplitExistsQuery and Query.existsQuery() for IS NULL/IS NOT NULL support -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.28.5</version>
+            <version>0.28.6</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 

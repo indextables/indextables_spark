@@ -28,7 +28,7 @@ import org.apache.spark.sql.connector.read.{
   SupportsPushDownRequiredColumns,
   SupportsPushDownV2Filters
 }
-import org.apache.spark.sql.sources.{Filter, StringContains, StringEndsWith, StringStartsWith}
+import org.apache.spark.sql.sources.{Filter, IsNull, IsNotNull, StringContains, StringEndsWith, StringStartsWith}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
@@ -152,13 +152,34 @@ class IndexTables4SparkScanBuilder(
         // Check for unsupported filters that would block aggregate pushdown.
         // When Spark has unsupported filters, it won't call pushAggregation(), which means
         // any aggregation in the query will produce incorrect results (due to our default limit).
+        //
+        // Note: IsNull/IsNotNull on non-FAST fields are "safely unsupported" - they will be
+        // handled by Spark's post-filtering, which doesn't affect aggregate correctness.
+        // We only block on truly problematic unsupported filters.
+        //
+        // Use explicit isInstanceOf checks to ensure proper filtering (pattern matching can
+        // be tricky with Filter subclasses).
+        def isSafelyUnsupportedFilter(f: Filter): Boolean = {
+          f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull]
+        }
+
+        val safelyUnsupportedFilters = effectiveUnsupportedFilters.filter(isSafelyUnsupportedFilter)
+        val blockingUnsupportedFilters = effectiveUnsupportedFilters.filterNot(isSafelyUnsupportedFilter)
+
+        logger.debug(s"BUILD: effectiveUnsupportedFilters=${effectiveUnsupportedFilters.length}, " +
+          s"safelyUnsupported=${safelyUnsupportedFilters.length}, blocking=${blockingUnsupportedFilters.length}")
+        effectiveUnsupportedFilters.foreach(f =>
+          logger.debug(s"BUILD:   - Unsupported filter: $f (class=${f.getClass.getName}, isSafe=${isSafelyUnsupportedFilter(f)})"))
+
         val hasAggregateInPlan = detectAggregateInQueryPlan()
-        if (effectiveUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
-          val unsupportedDesc = effectiveUnsupportedFilters.map(_.toString).mkString(", ")
+        logger.debug(s"BUILD: hasAggregateInPlan=$hasAggregateInPlan")
+
+        if (blockingUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
+          val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
           // Build specific guidance for string pattern filters
-          val hasStringStartsWith    = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
-          val hasStringEndsWith      = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
-          val hasStringContains      = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringContains])
+          val hasStringStartsWith    = blockingUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
+          val hasStringEndsWith      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
+          val hasStringContains      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringContains])
           val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
 
           val stringPatternHint = if (hasStringPatternFilter) {
@@ -177,8 +198,8 @@ class IndexTables4SparkScanBuilder(
             s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
               s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
               s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
-              s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
-              s"Unsupported: IsNull, JSON field null checks." +
+              s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not. " +
+              s"Note: IsNull/IsNotNull on non-FAST fields are handled by Spark post-filtering and don't block aggregates." +
               stringPatternHint
           )
         }
@@ -196,6 +217,10 @@ class IndexTables4SparkScanBuilder(
         // Same pattern as PR #122's syntax validation - fail fast on driver
         validateIndexQueryFieldsExist()
         logger.debug(s"BUILD: IndexQuery field validation passed for regular scan")
+
+        // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
+        // only returns true for these filters when the field is fast. Non-fast fields won't
+        // have the filter pushed down - Spark will handle them after reading data.
 
         logger.debug(s"BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${effectiveFilters.length} pushed filters")
         effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Creating scan with filter: $filter"))
@@ -671,10 +696,21 @@ class IndexTables4SparkScanBuilder(
       // This prevents silent failures where queries with non-existent fields return all data
       validateIndexQueryFieldsExist()
       logger.debug(s"AGGREGATE PUSHDOWN: IndexQuery field validation passed")
+
+      // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
+      // only returns true for these filters when the field is fast.
     } catch {
       case e: IllegalArgumentException if e.getMessage.contains("IndexQuery references non-existent") =>
         // Rethrow IndexQuery field validation errors - these should fail the query
         logger.error(s"AGGREGATE PUSHDOWN: IndexQuery field validation error - ${e.getMessage}")
+        throw e
+      case e: IllegalArgumentException if e.getMessage.contains("filter on field") =>
+        // Rethrow IS NULL/IS NOT NULL validation errors - these should fail the query
+        logger.error(s"AGGREGATE PUSHDOWN: Null filter validation error - ${e.getMessage}")
+        throw e
+      case e: IllegalArgumentException if e.getMessage.contains("filter references non-existent") =>
+        // Rethrow field existence errors - these should fail the query
+        logger.error(s"AGGREGATE PUSHDOWN: Null filter field not found - ${e.getMessage}")
         throw e
       case e: IllegalArgumentException =>
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
@@ -755,6 +791,18 @@ class IndexTables4SparkScanBuilder(
   private def isSupportedFilter(filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
 
+    // Check if a field is fast (for IsNull/IsNotNull support)
+    def isFieldFast(fieldName: String): Boolean = {
+      val fastFields = getActualFastFieldsFromSchema()
+      // Check direct match or parent field for nested JSON fields
+      if (fieldName.contains(".")) {
+        val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+        fastFields.contains(fieldName) || fastFields.contains(parentField)
+      } else {
+        fastFields.contains(fieldName)
+      }
+    }
+
     filter match {
       case EqualTo(attribute, _)            => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _)      => isFieldSuitableForExactMatching(attribute)
@@ -763,8 +811,10 @@ class IndexTables4SparkScanBuilder(
       case LessThan(attribute, _)           => true // Support range on all fields (both regular and JSON)
       case LessThanOrEqual(attribute, _)    => true // Support range on all fields (both regular and JSON)
       case _: In                            => true
-      case _: IsNull => false // Tantivy doesn't index nulls, can't filter for null values - Spark must post-filter
-      case IsNotNull(attribute) => !attribute.contains(".") // Supported for regular fields (wildcardQuery handles this)
+      // IsNull/IsNotNull only supported when field is fast (ExistsQuery requires FAST field)
+      // If field is not fast, filter will be handled by Spark instead (not pushed down)
+      case IsNull(attribute)    => isFieldFast(attribute)
+      case IsNotNull(attribute) => isFieldFast(attribute)
       case And(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
       case Or(left, right)      => isSupportedFilter(left) && isSupportedFilter(right)
       case Not(child)           => isSupportedFilter(child) // NOT is supported only if child is supported
@@ -1515,6 +1565,67 @@ class IndexTables4SparkScanBuilder(
         extractedFilters.foreach(f => validateField(f.columnName))
 
       case _ => // IndexQueryAllFilter and other types don't reference specific fields
+    }
+  }
+
+  /**
+   * Validate that IS NULL / IS NOT NULL filter fields are configured as FAST fields.
+   * ExistsQuery requires FAST fields in Tantivy. This validation runs on the driver
+   * to provide clear error messages before task execution.
+   *
+   * @throws IllegalArgumentException if a null filter references a non-fast field
+   */
+  private def validateNullFilterFieldsAreFast(): Unit = {
+    import org.apache.spark.sql.sources.{IsNull, IsNotNull, And, Or, Not}
+
+    // Helper to extract null filters from nested filter trees
+    def extractNullFilters(filter: Filter): Seq[(String, String)] = filter match {
+      case IsNull(attr)       => Seq(("IS NULL", attr))
+      case IsNotNull(attr)    => Seq(("IS NOT NULL", attr))
+      case And(left, right)   => extractNullFilters(left) ++ extractNullFilters(right)
+      case Or(left, right)    => extractNullFilters(left) ++ extractNullFilters(right)
+      case Not(child)         => extractNullFilters(child)
+      case _                  => Seq.empty
+    }
+
+    // Extract IsNull and IsNotNull filters from pushed filters
+    val nullFilters = _pushedFilters.flatMap(extractNullFilters)
+
+    if (nullFilters.isEmpty) return
+
+    // Get actual fast fields from schema
+    val fastFields = getActualFastFieldsFromSchema()
+    val availableFields = getSchemaFieldNames()
+
+    nullFilters.foreach { case (filterType, fieldName) =>
+      // Check field exists
+      if (!availableFields.contains(fieldName)) {
+        val availableList = availableFields.toSeq.sorted.mkString(", ")
+        throw new IllegalArgumentException(
+          s"$filterType filter references non-existent field '$fieldName'. " +
+          s"Available fields: [$availableList]"
+        )
+      }
+
+      // Check field is fast
+      val isFast = if (fieldName.contains(".")) {
+        // For nested JSON fields, check both field and parent
+        val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+        fastFields.contains(fieldName) || fastFields.contains(parentField)
+      } else {
+        fastFields.contains(fieldName)
+      }
+
+      if (!isFast) {
+        val fastFieldsList = fastFields.toSeq.sorted.mkString(", ")
+        throw new IllegalArgumentException(
+          s"$filterType filter on field '$fieldName' requires FAST field configuration. " +
+          s"ExistsQuery in Tantivy only works with FAST fields. " +
+          s"To fix: Add '$fieldName' to spark.indextables.indexing.fastfields configuration, " +
+          s"or for JSON fields use json.mode='full'. " +
+          s"Currently configured fast fields: [${if (fastFieldsList.isEmpty) "none" else fastFieldsList}]"
+        )
+      }
     }
   }
 
