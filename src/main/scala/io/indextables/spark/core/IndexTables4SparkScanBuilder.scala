@@ -191,6 +191,12 @@ class IndexTables4SparkScanBuilder(
         )
         extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
+        // CRITICAL: Validate IndexQuery field existence on driver before creating scan
+        // This prevents task failures on executors when fields don't exist
+        // Same pattern as PR #122's syntax validation - fail fast on driver
+        validateIndexQueryFieldsExist()
+        logger.debug(s"BUILD: IndexQuery field validation passed for regular scan")
+
         logger.debug(s"BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${effectiveFilters.length} pushed filters")
         effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Creating scan with filter: $filter"))
         new IndexTables4SparkScan(

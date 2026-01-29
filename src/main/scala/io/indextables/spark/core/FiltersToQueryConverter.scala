@@ -982,8 +982,10 @@ object FiltersToQueryConverter {
   /**
    * Check if a mixed filter (Spark Filter or custom filter) is valid for the schema.
    *
-   * For IndexQuery filters, throws IllegalArgumentException if the field doesn't exist.
-   * For other filters, returns false to allow graceful degradation.
+   * Returns false for filters that reference non-existent fields, allowing graceful degradation.
+   * Driver-side validation in IndexTables4SparkScanBuilder.validateIndexQueryFieldsExist() handles
+   * throwing descriptive errors for IndexQuery filters with invalid fields BEFORE tasks are created.
+   * This executor-side check is a safety net that should never be hit if driver validation ran.
    */
   private def isMixedFilterValidForSchema(filter: Any, fieldNames: Set[String]): Boolean = {
     import org.apache.spark.sql.sources._
@@ -1026,40 +1028,13 @@ object FiltersToQueryConverter {
 
     if (!isValid) {
       val missingFields = filterFields -- fieldNames
-
-      // For IndexQuery filters (including V2 variants and MixedBooleanFilter), throw an exception with a descriptive error message
-      // This prevents silent failures where queries return incorrect results
-      filter match {
-        case indexQuery: IndexQueryFilter =>
-          val availableFields = fieldNames.toSeq.sorted.mkString(", ")
-          throw new IllegalArgumentException(
-            s"IndexQuery references non-existent field '${indexQuery.columnName}'. " +
-              s"Available fields are: [$availableFields]"
-          )
-        case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter =>
-          val availableFields = fieldNames.toSeq.sorted.mkString(", ")
-          throw new IllegalArgumentException(
-            s"IndexQuery references non-existent field '${indexQueryV2.columnName}'. " +
-              s"Available fields are: [$availableFields]"
-          )
-        case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter =>
-          // Extract IndexQueryFilter instances from the tree and find the ones with invalid fields
-          val invalidFilters = io.indextables.spark.filters.MixedBooleanFilter.extractIndexQueryFilters(mixedFilter)
-            .filter(f => !fieldNames.contains(f.columnName))
-          if (invalidFilters.nonEmpty) {
-            val invalidField = invalidFilters.head.columnName
-            val availableFields = fieldNames.toSeq.sorted.mkString(", ")
-            throw new IllegalArgumentException(
-              s"IndexQuery references non-existent field '$invalidField'. " +
-                s"Available fields are: [$availableFields]"
-            )
-          } else {
-            // The invalid fields are from Spark filters, not IndexQuery - just log
-            queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
-          }
-        case _ =>
-          queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
-      }
+      // Log warning - driver-side validation should have caught this before tasks were created
+      // If we reach here, it indicates either:
+      // 1. A code path that bypasses driver validation (bug)
+      // 2. Schema mismatch between driver and executor (configuration issue)
+      logger.warn(s"Executor-side filter validation: filter $filter references non-existent fields: ${missingFields.mkString(", ")}. " +
+        s"This should have been caught by driver-side validation.")
+      queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
     }
 
     isValid
