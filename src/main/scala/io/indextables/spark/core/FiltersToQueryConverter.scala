@@ -29,7 +29,7 @@ import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.util.TimestampUtils
 import io.indextables.tantivy4java.core.{FieldType, Index, Schema}
 import io.indextables.tantivy4java.query.{Occur, Query}
-import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitMatchAllQuery, SplitQuery, SplitTermQuery}
+import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitExistsQuery, SplitMatchAllQuery, SplitQuery, SplitTermQuery}
 import org.slf4j.LoggerFactory
 
 // Data class for storing range optimization information
@@ -866,17 +866,21 @@ object FiltersToQueryConverter {
 
         case IsNull(attribute) =>
           queryLog(s"Creating IsNull query: $attribute IS NULL")
-          // For IsNull, we could return a query that matches no documents
-          // TODO: Implement proper null handling if needed
-          Query.allQuery()
+          // IS NULL = All documents EXCEPT those where field exists
+          // Pattern: MUST(AllQuery) + MUST_NOT(ExistsQuery)
+          // Requires FAST field - validated on driver side
+          val existsQuery = Query.existsQuery(schema, attribute)
+          val occurQueries = List(
+            new Query.OccurQuery(Occur.MUST, Query.allQuery()),
+            new Query.OccurQuery(Occur.MUST_NOT, existsQuery)
+          )
+          Query.booleanQuery(occurQueries.asJava)
 
         case IsNotNull(attribute) =>
           queryLog(s"Creating IsNotNull query: $attribute IS NOT NULL")
-          // Use wildcard query to match only documents where this field has an indexed value.
-          // Tantivy only indexes non-null values, so fieldname:* matches all docs with non-null values.
-          // Use lenient mode (true) to avoid errors for fields that might not exist in schema.
-          queryLog(s"Using wildcardQuery for IsNotNull on field '$attribute'")
-          Query.wildcardQuery(schema, attribute, "*", true)
+          // Use ExistsQuery to match documents where field has an indexed value
+          // Requires FAST field - validated on driver side
+          Query.existsQuery(schema, attribute)
 
         case And(left, right) =>
           queryLog(s"Creating And query: $left AND $right")
@@ -1442,10 +1446,19 @@ object FiltersToQueryConverter {
           Some(boolQuery)
         }
 
-      case IsNotNull(_) =>
-        // TODO: Use proper exists query when available
-        // For now, MatchAllQuery returns all documents - Spark will filter nulls
-        Some(new SplitMatchAllQuery())
+      case IsNotNull(attribute) =>
+        queryLog(s"Creating IsNotNull SplitExistsQuery: $attribute IS NOT NULL")
+        // SplitExistsQuery requires FAST field - validation done on driver side
+        Some(new SplitExistsQuery(attribute))
+
+      case IsNull(attribute) =>
+        queryLog(s"Creating IsNull query via boolean negation: $attribute IS NULL")
+        // IS NULL = All documents EXCEPT those where field exists
+        // Pattern: MUST(MatchAllQuery) + MUST_NOT(ExistsQuery)
+        val boolQuery = new SplitBooleanQuery()
+        boolQuery.addMust(new SplitMatchAllQuery())
+        boolQuery.addMustNot(new SplitExistsQuery(attribute))
+        Some(boolQuery)
 
       // For complex operations like range queries, wildcard queries, etc., fall back to string parsing
       case GreaterThan(attribute, value) =>
