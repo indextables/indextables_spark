@@ -278,6 +278,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.content", "text")
+      .mode("overwrite")
       .save(tablePath)
 
     tablePath
@@ -297,6 +298,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
+      .mode("overwrite")
       .save(tablePath)
 
     tablePath
@@ -315,6 +317,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("year", "region")
+      .mode("overwrite")
       .save(tablePath)
 
     tablePath
