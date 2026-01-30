@@ -152,6 +152,77 @@ object FiltersToQueryConverter {
     RangeInfo(min, max, minInclusive, maxInclusive)
   }
 
+  /**
+   * Transform an IndexQuery string to handle leading wildcards automatically.
+   *
+   * Tantivy's default query parser doesn't support leading wildcards (e.g., `*Configuration`).
+   * However, explicit field syntax (e.g., `fieldname:*Configuration`) uses the wildcard query
+   * builder directly, which does support leading wildcards.
+   *
+   * This method automatically transforms ALL leading wildcard terms in a query when we know the
+   * target field, making leading wildcard queries work transparently for users.
+   *
+   * Examples:
+   *   - Input: `*Configuration`, field: `message` -> Output: `message:*Configuration`
+   *   - Input: `*Broker*`, field: `content` -> Output: `content:*Broker*`
+   *   - Input: `config*`, field: `title` -> Output: `config*` (no change - trailing wildcard works)
+   *   - Input: `title:*test`, field: `title` -> Output: `title:*test` (already has field prefix)
+   *   - Input: `bob AND *wildcard*`, field: `msg` -> Output: `bob AND msg:*wildcard*`
+   *   - Input: `bob AND *ildcar* OR (sally AND *oogl*)`, field: `msg` ->
+   *            Output: `bob AND msg:*ildcar* OR (sally AND msg:*oogl*)`
+   *
+   * @param queryString The original query string
+   * @param fieldName The target field name for the IndexQuery
+   * @return The transformed query string with field prefix added to leading wildcard terms
+   */
+  def transformLeadingWildcardQuery(queryString: String, fieldName: String): String = {
+    val trimmed = queryString.trim
+
+    // If no wildcards at all, return as-is (fast path)
+    if (!trimmed.contains("*") && !trimmed.contains("?")) {
+      return trimmed
+    }
+
+    // Use regex to find leading wildcard terms that don't already have a field prefix.
+    // Pattern matches:
+    //   - A wildcard term starting with * or ?
+    //   - That is NOT preceded by a word character and colon (field prefix like "field:")
+    //   - The term continues with word characters and may contain more wildcards
+    //
+    // Negative lookbehind (?<!\w:) ensures we don't match terms that already have field prefix
+    // Word boundary or start ensures we match complete terms
+    //
+    // Examples that SHOULD match (no field prefix):
+    //   "*config" at start of string
+    //   " *config" after space
+    //   "(*config" after open paren
+    //
+    // Examples that should NOT match (already has field prefix):
+    //   "field:*config"
+    //
+    val leadingWildcardPattern = """(?<!\w:)(?<=^|[\s(])([*?][\w*?]+)""".r
+
+    val transformed = leadingWildcardPattern.replaceAllIn(trimmed, m => {
+      val wildcardTerm = m.group(1)
+      s"$fieldName:$wildcardTerm"
+    })
+
+    if (transformed != trimmed) {
+      queryLog(s"Transformed leading wildcard query '$trimmed' to '$transformed'")
+    }
+
+    transformed
+  }
+
+  /**
+   * Check if a query string contains a leading wildcard pattern.
+   * Useful for logging and diagnostics.
+   */
+  def hasLeadingWildcard(queryString: String): Boolean = {
+    val trimmed = queryString.trim
+    trimmed.startsWith("*") || trimmed.startsWith("?")
+  }
+
   /** Create an optimized range query from stored range information using SplitRangeQuery. */
   private def createOptimizedRangeQuery(
     field: String,
@@ -1766,9 +1837,14 @@ object FiltersToQueryConverter {
         // Parse the custom IndexQuery using the split searcher with field-specific parsing
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
-        queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'")
+        //
+        // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
+        // (e.g., columnName:*Configuration) which Tantivy's wildcard query builder supports
+        val transformedQuery = transformLeadingWildcardQuery(queryString, columnName)
+        queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'" +
+          (if (transformedQuery != queryString) s" (transformed to '$transformedQuery')" else ""))
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(queryString, columnName)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, columnName)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forField(queryString, columnName,
@@ -1811,9 +1887,13 @@ object FiltersToQueryConverter {
         // Handle V2 IndexQuery expressions from temp views
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
-        queryLog(s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'")
+        //
+        // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
+        val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, indexQueryV2.columnName)
+        queryLog(s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'" +
+          (if (transformedQuery != indexQueryV2.queryString) s" (transformed to '$transformedQuery')" else ""))
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(indexQueryV2.queryString, indexQueryV2.columnName)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryV2.columnName)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forField(indexQueryV2.queryString, indexQueryV2.columnName,
@@ -1876,9 +1956,12 @@ object FiltersToQueryConverter {
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
         // Delegate to existing IndexQueryFilter handling
-        queryLog(s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'")
+        // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
+        val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
+        queryLog(s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
+          (if (transformedQuery != indexQueryFilter.queryString) s" (transformed to '$transformedQuery')" else ""))
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryFilter.columnName)
           queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {

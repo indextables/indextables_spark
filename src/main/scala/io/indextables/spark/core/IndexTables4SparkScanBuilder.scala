@@ -1046,10 +1046,22 @@ class IndexTables4SparkScanBuilder(
         case None => tantivySchema.getFieldNames.asScala.toArray
       }
 
+      // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
+      // (e.g., fieldname:*Configuration) which Tantivy's wildcard query builder supports.
+      // This must match the transformation applied during query execution.
+      val queryToValidate = fieldName match {
+        case Some(field) =>
+          FiltersToQueryConverter.transformLeadingWildcardQuery(queryString, field)
+        case None =>
+          queryString // Can't transform without a specific field
+      }
+
       // Use tantivy's parseQuery to validate syntax
       // tantivy4java throws descriptive exceptions on parse failures
-      SplitQuery.parseQuery(queryString, tantivySchema, defaultFields)
-      logger.debug(s"VALIDATE: Query '$queryString' validated successfully")
+      SplitQuery.parseQuery(queryToValidate, tantivySchema, defaultFields)
+      logger.debug(s"VALIDATE: Query '$queryString'" +
+        (if (queryToValidate != queryString) s" (transformed to '$queryToValidate')" else "") +
+        " validated successfully")
     } catch {
       case e: IndexQueryParseException =>
         throw e // Re-throw our own exceptions
