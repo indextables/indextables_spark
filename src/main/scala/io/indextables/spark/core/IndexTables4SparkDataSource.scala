@@ -60,6 +60,7 @@ class IndexTables4SparkTable(
     Set(
       TableCapability.BATCH_READ,
       TableCapability.BATCH_WRITE,
+      TableCapability.MICRO_BATCH_READ,  // Streaming support
       TableCapability.OVERWRITE_BY_FILTER,
       TableCapability.TRUNCATE
     ).asJava
@@ -138,7 +139,21 @@ class IndexTables4SparkTable(
     logger.info(s"Passing ${tantivyConfigs.size} IndexTables4Spark configurations to scan builder")
     logger.info(s"Sources: Hadoop(${hadoopTantivyConfigs.size}), Spark(${sparkTantivyConfigs.size}), Options(${readTantivyConfigs.size})")
 
-    new IndexTables4SparkScanBuilder(spark, transactionLog, schema(), options, tantivyConfigs)
+    // Check if this is a streaming read
+    // Spark sets these options when creating streaming sources
+    val isStreaming = options.getBoolean("isStreaming", false) ||
+                      options.containsKey("streaming")
+
+    if (isStreaming) {
+      // Return streaming scan builder (no limit, no aggregates)
+      logger.info("Creating streaming scan builder for micro-batch read")
+      new io.indextables.spark.streaming.IndexTables4SparkStreamingScanBuilder(
+        spark, transactionLog, schema(), options, tantivyConfigs
+      )
+    } else {
+      // Return batch scan builder (supports limits and aggregates)
+      new IndexTables4SparkScanBuilder(spark, transactionLog, schema(), options, tantivyConfigs)
+    }
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {

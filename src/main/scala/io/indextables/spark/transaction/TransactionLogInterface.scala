@@ -286,4 +286,54 @@ trait TransactionLogInterface extends AutoCloseable {
    */
   def readVersion(version: Long): Seq[Action] =
     throw new UnsupportedOperationException("readVersion must be implemented by subclass")
+
+  // ============================================================================
+  // Streaming Support Methods
+  // ============================================================================
+
+  /**
+   * Gets the current transaction log version.
+   *
+   * This returns the latest committed version number. For streaming, this
+   * represents the "latest offset" available.
+   *
+   * @return Current version number (0 if no transactions yet)
+   */
+  def getCurrentVersion(): Long =
+    throw new UnsupportedOperationException("getCurrentVersion must be implemented by subclass")
+
+  /**
+   * Gets files added between two transaction log versions.
+   *
+   * This is the primary method for streaming incremental processing. It returns
+   * only AddActions for files that were added in the specified version range.
+   *
+   * @param fromVersion Exclusive lower bound (-1 means from beginning)
+   * @param toVersion Inclusive upper bound
+   * @return Sequence of AddActions for files added in the version range
+   */
+  def getFilesAddedBetweenVersions(fromVersion: Long, toVersion: Long): Seq[AddAction] =
+    throw new UnsupportedOperationException("getFilesAddedBetweenVersions must be implemented by subclass")
+
+  /**
+   * Gets the version at or after a given timestamp.
+   *
+   * This is used for streaming with startingTimestamp support (Delta Lake compatible).
+   * It finds the earliest version whose commit timestamp is >= the given timestamp.
+   *
+   * @param timestamp Timestamp in milliseconds since epoch
+   * @return Option containing the version number, or None if no version exists at or after the timestamp
+   */
+  def getVersionAtOrAfterTimestamp(timestamp: Long): Option[Long] =
+    throw new UnsupportedOperationException("getVersionAtOrAfterTimestamp must be implemented by subclass")
+
+  /**
+   * Gets the StreamingStateReader for efficient incremental file listing.
+   *
+   * The StreamingStateReader provides optimized methods for streaming operations,
+   * including version-range queries with manifest-level pruning for Avro state format.
+   *
+   * @return StreamingStateReader instance, or None if not supported
+   */
+  def getStreamingStateReader(): Option[io.indextables.spark.transaction.avro.StreamingStateReader] = None
 }

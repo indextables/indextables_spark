@@ -262,7 +262,19 @@ class TransactionLogAdapter(
   override def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] =
     optimizedLog.filterFilesInCooldown(candidateFiles)
 
-  // Note: Some methods like mergeFiles, getLatestVersion, readVersion, getVersions
-  // are not in the base TransactionLog class but could be added if needed.
-  // The OptimizedTransactionLog handles these operations internally.
+  // ============================================================================
+  // Streaming Support Methods
+  // ============================================================================
+
+  override def getCurrentVersion(): Long =
+    optimizedLog.getCurrentVersion()
+
+  override def getFilesAddedBetweenVersions(fromVersion: Long, toVersion: Long): Seq[AddAction] =
+    optimizedLog.getFilesAddedBetweenVersions(fromVersion, toVersion)
+
+  override def getStreamingStateReader(): Option[io.indextables.spark.transaction.avro.StreamingStateReader] =
+    optimizedLog.getStreamingStateReader()
+
+  override def getVersionAtOrAfterTimestamp(timestamp: Long): Option[Long] =
+    optimizedLog.getVersionAtOrAfterTimestamp(timestamp)
 }
