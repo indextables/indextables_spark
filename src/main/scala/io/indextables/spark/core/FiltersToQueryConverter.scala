@@ -250,6 +250,7 @@ object FiltersToQueryConverter {
         case FieldType.INTEGER  => "i64"
         case FieldType.UNSIGNED => "u64"
         case FieldType.FLOAT    => "f64"
+        case FieldType.IP_ADDR  => "ip"
         case _                  => "str"
       }
 
@@ -1270,8 +1271,8 @@ object FiltersToQueryConverter {
   /** Check if a field type is numeric (should use range queries instead of term queries for equality) */
   private def isNumericFieldType(fieldType: FieldType): Boolean =
     fieldType match {
-      case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => true
-      case _                                                    => false
+      case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => true
+      case _ => false
     }
 
   /** Convert Spark values to tantivy4java compatible values for filtering */
@@ -1360,6 +1361,11 @@ object FiltersToQueryConverter {
             catch { case _: Exception => throw new IllegalArgumentException(s"Cannot convert string '$s' to Float") }
           case other => other
         }
+      case FieldType.IP_ADDR =>
+        // IP addresses are passed as strings (IPv4 or IPv6 format)
+        val ipStr = value.toString
+        queryLog(s"IP_ADDR conversion: $value -> $ipStr")
+        ipStr
       case _ =>
         // For other types (TEXT, BYTES), pass through as-is
         value
@@ -1538,18 +1544,19 @@ object FiltersToQueryConverter {
 
         // Validate field type supports range operations
         fieldType match {
-          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
         }
 
-        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
+        // Use SplitRangeQuery for DATE and IP_ADDR fields to avoid parseQuery parsing issues
         try {
           val tantivyFieldType = fieldType match {
             case FieldType.DATE    => "date"
             case FieldType.INTEGER => "i64"
             case FieldType.FLOAT   => "f64"
+            case FieldType.IP_ADDR => "ip"
             case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
@@ -1572,18 +1579,19 @@ object FiltersToQueryConverter {
 
         // Validate field type supports range operations
         fieldType match {
-          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
         }
 
-        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
+        // Use SplitRangeQuery for DATE and IP_ADDR fields to avoid parseQuery parsing issues
         try {
           val tantivyFieldType = fieldType match {
             case FieldType.DATE    => "date"
             case FieldType.INTEGER => "i64"
             case FieldType.FLOAT   => "f64"
+            case FieldType.IP_ADDR => "ip"
             case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
@@ -1625,11 +1633,11 @@ object FiltersToQueryConverter {
 
         val isFastField = isFastFieldInSchema || isFastFieldInOptions
 
-        // For date fields, be more permissive since they're often used for range queries
-        val isDateFieldWorkaround = fieldType == FieldType.DATE
-        val shouldAllowQuery      = isFastField || isDateFieldWorkaround
+        // For date and IP address fields, be more permissive since they're often used for range queries
+        val isDateOrIpFieldWorkaround = fieldType == FieldType.DATE || fieldType == FieldType.IP_ADDR
+        val shouldAllowQuery          = isFastField || isDateOrIpFieldWorkaround
 
-        logger.debug(s"LessThan range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
+        logger.debug(s"LessThan range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateOrIpField=$isDateOrIpFieldWorkaround, shouldAllow=$shouldAllowQuery")
 
         if (!shouldAllowQuery) {
           logger.warn(
@@ -1640,18 +1648,19 @@ object FiltersToQueryConverter {
 
         // Validate field type supports range operations
         fieldType match {
-          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
         }
 
-        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
+        // Use SplitRangeQuery for DATE and IP_ADDR fields to avoid parseQuery parsing issues
         try {
           val tantivyFieldType = fieldType match {
             case FieldType.DATE    => "date"
             case FieldType.INTEGER => "i64"
             case FieldType.FLOAT   => "f64"
+            case FieldType.IP_ADDR => "ip"
             case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
@@ -1693,11 +1702,11 @@ object FiltersToQueryConverter {
 
         val isFastField = isFastFieldInSchema || isFastFieldInOptions
 
-        // For date fields, be more permissive since they're often used for range queries
-        val isDateFieldWorkaround = fieldType == FieldType.DATE
-        val shouldAllowQuery      = isFastField || isDateFieldWorkaround
+        // For date and IP address fields, be more permissive since they're often used for range queries
+        val isDateOrIpFieldWorkaround = fieldType == FieldType.DATE || fieldType == FieldType.IP_ADDR
+        val shouldAllowQuery          = isFastField || isDateOrIpFieldWorkaround
 
-        logger.debug(s"LessThanOrEqual range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
+        logger.debug(s"LessThanOrEqual range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateOrIpField=$isDateOrIpFieldWorkaround, shouldAllow=$shouldAllowQuery")
 
         if (!shouldAllowQuery) {
           logger.warn(
@@ -1708,18 +1717,19 @@ object FiltersToQueryConverter {
 
         // Validate field type supports range operations
         fieldType match {
-          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
         }
 
-        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
+        // Use SplitRangeQuery for DATE and IP_ADDR fields to avoid parseQuery parsing issues
         try {
           val tantivyFieldType = fieldType match {
             case FieldType.DATE    => "date"
             case FieldType.INTEGER => "i64"
             case FieldType.FLOAT   => "f64"
+            case FieldType.IP_ADDR => "ip"
             case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(

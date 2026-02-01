@@ -533,6 +533,15 @@ object SchemaMapping {
           }
           org.apache.spark.unsafe.types.UTF8String.fromString(jsonString)
 
+        // IP_ADDR -> StringType (IP addresses stored as StringType in Spark)
+        case (FieldType.IP_ADDR, StringType) =>
+          // IP addresses are returned as strings (IPv4 or IPv6 format)
+          val ipString = rawValue match {
+            case s: String => s
+            case other     => other.toString
+          }
+          org.apache.spark.unsafe.types.UTF8String.fromString(ipString)
+
         // Unsupported conversion
         case (fromType, toType) =>
           throw new IllegalArgumentException(

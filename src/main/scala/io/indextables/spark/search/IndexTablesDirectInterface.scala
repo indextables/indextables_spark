@@ -244,9 +244,14 @@ object TantivyDirectInterface {
                   val tokenizer    = indexingConfig.tokenizerOverride.getOrElse("default")
                   val recordOption = indexingConfig.indexRecordOption.getOrElse("position")
                   builder.addTextField(fieldName, stored, fast, tokenizer, recordOption)
+                case "ip" =>
+                  // IP address fields require fast=true for range queries
+                  // IP addresses support: term queries, range queries, IN queries
+                  logger.debug(s"CALLING addIpAddrField: name=$fieldName, stored=$stored, indexed=$indexed, fast=true")
+                  builder.addIpAddrField(fieldName, stored, indexed, true)
                 case other =>
                   throw new IllegalArgumentException(
-                    s"Unsupported field type override for field $fieldName: $other. Supported types: string, text"
+                    s"Unsupported field type override for field $fieldName: $other. Supported types: string, text, json, ip"
                   )
               }
             case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
@@ -720,7 +725,8 @@ class TantivyDirectInterface(
     addFloat: (String, Double) => Unit,
     addBoolean: (String, Boolean) => Unit,
     addBytes: (String, Array[Byte]) => Unit,
-    addDate: (String, java.time.LocalDateTime) => Unit)
+    addDate: (String, java.time.LocalDateTime) => Unit,
+    addIpAddr: (String, String) => Unit)
 
   private def addFieldToDocument(
     document: Document,
@@ -735,7 +741,8 @@ class TantivyDirectInterface(
       document.addFloat,
       document.addBoolean,
       document.addBytes,
-      document.addDate
+      document.addDate,
+      document.addIpAddr
     )
     addFieldGeneric(fieldName, value, dataType, adder, isBatch = false)
   }
@@ -753,7 +760,8 @@ class TantivyDirectInterface(
       batchDocument.addFloat,
       batchDocument.addBoolean,
       batchDocument.addBytes,
-      batchDocument.addDate
+      batchDocument.addDate,
+      batchDocument.addIpAddr
     )
     addFieldGeneric(fieldName, value, dataType, adder, isBatch = true)
   }
@@ -805,8 +813,16 @@ class TantivyDirectInterface(
     } else {
       dataType match {
         case org.apache.spark.sql.types.StringType =>
-          val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
-          adder.addText(fieldName, str)
+          // Check if this field is configured as an IP address field
+          val fieldTypeConfig = tantivyOptions.getFieldTypeMapping.get(fieldName.toLowerCase)
+          if (fieldTypeConfig.contains("ip")) {
+            val ipStr = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+            logger.debug(s"Adding IP address field: $fieldName = $ipStr")
+            adder.addIpAddr(fieldName, ipStr)
+          } else {
+            val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+            adder.addText(fieldName, str)
+          }
         case org.apache.spark.sql.types.LongType =>
           adder.addInteger(fieldName, value.asInstanceOf[Long])
         case org.apache.spark.sql.types.IntegerType =>

@@ -21,7 +21,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /** Configuration for field indexing behavior. */
 case class FieldIndexingConfig(
-  fieldType: Option[String] = None,         // "string", "text", or "json"
+  fieldType: Option[String] = None,         // "string", "text", "json", or "ip"
   isFast: Boolean = false,                  // Whether to enable fast fields
   isStoreOnly: Boolean = false,             // Store but don't index
   isIndexOnly: Boolean = false,             // Index but don't store
@@ -41,7 +41,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     Option(options.get("forceStandardStorage")).map(_.toBoolean)
 
   /** Valid field types for typemap configuration. */
-  private val ValidFieldTypes = Set("string", "text", "json")
+  private val ValidFieldTypes = Set("string", "text", "json", "ip")
 
   /** Valid index record options. */
   private val ValidIndexRecordOptions = Set("basic", "freq", "position")
