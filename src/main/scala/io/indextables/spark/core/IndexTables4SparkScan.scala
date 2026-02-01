@@ -133,25 +133,6 @@ class IndexTables4SparkScan(
 
   override def toBatch: Batch = this
 
-  /**
-   * Supports micro-batch streaming reads by returning a MicroBatchStream.
-   * This enables using IndexTables4Spark tables as streaming sources with readStream.
-   */
-  override def toMicroBatchStream(checkpointLocation: String): org.apache.spark.sql.connector.read.streaming.MicroBatchStream = {
-    logger.info(s"Creating MicroBatchStream for streaming read from ${transactionLog.getTablePath()}")
-    new io.indextables.spark.streaming.IndexTables4SparkMicroBatchStream(
-      sparkSession = sparkSession,
-      tablePath = transactionLog.getTablePath().toString,
-      transactionLog = transactionLog,
-      readSchema = readSchema,
-      fullTableSchema = fullTableSchema,
-      partitionColumns = transactionLog.getPartitionColumns(),
-      pushedFilters = pushedFilters,
-      indexQueryFilters = indexQueryFilters,
-      config = config
-    )
-  }
-
   override def planInputPartitions(): Array[InputPartition] = {
     // Capture baseline metrics at scan start for delta computation
     // User can call getMetricsDelta() after query to get per-query metrics
