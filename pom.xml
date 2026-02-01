@@ -171,12 +171,12 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.28.7: Leading wildcard query support improvements -->
+        <!-- Version 0.28.8: IP address field type support -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.28.7</version>
+            <version>0.28.8</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 

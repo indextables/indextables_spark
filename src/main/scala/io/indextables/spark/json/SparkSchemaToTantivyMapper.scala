@@ -113,12 +113,12 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
             )
           }
         case StringType =>
-          // Valid to have "string", "text", or "json" configuration
+          // Valid to have "string", "text", "json", or "ip" configuration
           val configuredType = getFieldType(field.name)
-          if (!Set("string", "text", "json").contains(configuredType)) {
+          if (!Set("string", "text", "json", "ip").contains(configuredType)) {
             throw new IllegalArgumentException(
               s"Field '${field.name}' has invalid type configuration: '$configuredType'. " +
-                s"Valid types are: string, text, json"
+                s"Valid types are: string, text, json, ip"
             )
           }
         case _ =>

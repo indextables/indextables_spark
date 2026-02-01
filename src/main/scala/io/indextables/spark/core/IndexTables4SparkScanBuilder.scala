@@ -857,6 +857,9 @@ class IndexTables4SparkScanBuilder(
       case Some("text") =>
         logger.debug(s"Field '$attribute' configured as 'text' - deferring exact matching to Spark")
         false
+      case Some("ip") =>
+        logger.debug(s"Field '$attribute' configured as 'ip' - supporting exact matching")
+        true
       case Some(other) =>
         logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
         true
