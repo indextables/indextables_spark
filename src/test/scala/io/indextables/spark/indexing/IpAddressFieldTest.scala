@@ -103,6 +103,9 @@ class IpAddressFieldTest extends TestBase {
 
       // Test less than or equal
       df.filter($"ip" <= "192.168.1.2").count() shouldBe 2 // .1 and .2
+
+      // Test BETWEEN operator (equivalent to >= AND <=)
+      df.filter($"ip".between("192.168.1.3", "192.168.1.7")).count() shouldBe 5
     }
   }
 
