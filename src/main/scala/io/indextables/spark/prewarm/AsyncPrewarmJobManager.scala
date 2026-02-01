@@ -17,13 +17,7 @@
 
 package io.indextables.spark.prewarm
 
-import java.util.concurrent.{
-  ConcurrentHashMap,
-  ExecutorService,
-  Executors,
-  Semaphore,
-  TimeUnit
-}
+import java.util.concurrent.{ConcurrentHashMap, ExecutorService, Executors, Semaphore, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 
 import scala.jdk.CollectionConverters._
@@ -31,8 +25,7 @@ import scala.jdk.CollectionConverters._
 import org.slf4j.LoggerFactory
 
 /**
- * Manages asynchronous prewarm jobs on executors. This is a JVM-wide singleton
- * that handles:
+ * Manages asynchronous prewarm jobs on executors. This is a JVM-wide singleton that handles:
  *   - Concurrency limiting via Semaphore (max concurrent jobs per executor)
  *   - Job tracking (active and completed jobs)
  *   - Progress tracking via AtomicInteger for real-time visibility
@@ -44,30 +37,30 @@ object AsyncPrewarmJobManager {
   private val logger = LoggerFactory.getLogger(getClass)
 
   // Configuration defaults
-  private val DEFAULT_MAX_CONCURRENT = 1
+  private val DEFAULT_MAX_CONCURRENT         = 1
   private val DEFAULT_COMPLETED_RETENTION_MS = 3600000L // 1 hour
 
   // Singleton state with volatile for visibility
-  @volatile private var maxConcurrent: Int = DEFAULT_MAX_CONCURRENT
-  @volatile private var completedRetentionMs: Long = DEFAULT_COMPLETED_RETENTION_MS
-  @volatile private var semaphore: Semaphore = new Semaphore(DEFAULT_MAX_CONCURRENT)
+  @volatile private var maxConcurrent: Int               = DEFAULT_MAX_CONCURRENT
+  @volatile private var completedRetentionMs: Long       = DEFAULT_COMPLETED_RETENTION_MS
+  @volatile private var semaphore: Semaphore             = new Semaphore(DEFAULT_MAX_CONCURRENT)
   @volatile private var executorService: ExecutorService = _
-  @volatile private var initialized: Boolean = false
-  private val initLock = new Object
+  @volatile private var initialized: Boolean             = false
+  private val initLock                                   = new Object
 
   // Job tracking
-  private val activeJobs = new ConcurrentHashMap[String, AsyncPrewarmJob]()
+  private val activeJobs    = new ConcurrentHashMap[String, AsyncPrewarmJob]()
   private val completedJobs = new ConcurrentHashMap[String, AsyncPrewarmJobResult]()
 
   // Cleanup tracking
   @volatile private var lastCleanupTime: Long = System.currentTimeMillis()
-  private val CLEANUP_INTERVAL_MS = 60000L // 1 minute
+  private val CLEANUP_INTERVAL_MS             = 60000L // 1 minute
 
   /**
-   * Configure the manager with specific settings. Should be called before starting jobs.
-   * Safe to call multiple times - will reconfigure if settings change.
+   * Configure the manager with specific settings. Should be called before starting jobs. Safe to call multiple times -
+   * will reconfigure if settings change.
    */
-  def configure(maxConcurrentJobs: Int, completedJobRetentionMs: Long = DEFAULT_COMPLETED_RETENTION_MS): Unit = {
+  def configure(maxConcurrentJobs: Int, completedJobRetentionMs: Long = DEFAULT_COMPLETED_RETENTION_MS): Unit =
     initLock.synchronized {
       if (!initialized || maxConcurrent != maxConcurrentJobs || completedRetentionMs != completedJobRetentionMs) {
         // Shutdown existing executor if reconfiguring
@@ -80,28 +73,35 @@ object AsyncPrewarmJobManager {
         semaphore = new Semaphore(maxConcurrentJobs)
 
         // Create daemon thread executor for background jobs
-        executorService = Executors.newCachedThreadPool(r => {
+        executorService = Executors.newCachedThreadPool { r =>
           val t = new Thread(r, s"async-prewarm-worker")
           t.setDaemon(true)
           t
-        })
+        }
 
         initialized = true
-        logger.info(s"AsyncPrewarmJobManager configured: maxConcurrent=$maxConcurrent, retentionMs=$completedRetentionMs")
+        logger.info(
+          s"AsyncPrewarmJobManager configured: maxConcurrent=$maxConcurrent, retentionMs=$completedRetentionMs"
+        )
       }
     }
-  }
 
   /**
-   * Try to start an async prewarm job. Returns Right(job) if started successfully,
-   * Left(reason) if rejected (e.g., at capacity).
+   * Try to start an async prewarm job. Returns Right(job) if started successfully, Left(reason) if rejected (e.g., at
+   * capacity).
    *
-   * @param jobId Unique job identifier
-   * @param tablePath The table being prewarmed
-   * @param hostname The executor hostname
-   * @param totalSplits Number of splits to prewarm
-   * @param work The actual prewarm work to execute
-   * @return Either the started job or a rejection reason
+   * @param jobId
+   *   Unique job identifier
+   * @param tablePath
+   *   The table being prewarmed
+   * @param hostname
+   *   The executor hostname
+   * @param totalSplits
+   *   Number of splits to prewarm
+   * @param work
+   *   The actual prewarm work to execute
+   * @return
+   *   Either the started job or a rejection reason
    */
   def tryStartJob(
     jobId: String,
@@ -141,98 +141,101 @@ object AsyncPrewarmJobManager {
 
     // Submit work to executor
     executorService.submit(new Runnable {
-      override def run(): Unit = {
+      override def run(): Unit =
         try {
           val result = work()
           completeJob(jobId, result)
         } catch {
           case e: InterruptedException =>
             Thread.currentThread().interrupt()
-            completeJob(jobId, AsyncPrewarmJobResult(
-              jobId = jobId,
-              tablePath = tablePath,
-              hostname = hostname,
-              totalSplits = totalSplits,
-              splitsPrewarmed = job.completedSplits.get(),
-              durationMs = System.currentTimeMillis() - job.startTime,
-              success = false,
-              errorMessage = Some("Job cancelled")
-            ))
+            completeJob(
+              jobId,
+              AsyncPrewarmJobResult(
+                jobId = jobId,
+                tablePath = tablePath,
+                hostname = hostname,
+                totalSplits = totalSplits,
+                splitsPrewarmed = job.completedSplits.get(),
+                durationMs = System.currentTimeMillis() - job.startTime,
+                success = false,
+                errorMessage = Some("Job cancelled")
+              )
+            )
           case e: Exception =>
             logger.error(s"Async prewarm job $jobId failed: ${e.getMessage}", e)
-            completeJob(jobId, AsyncPrewarmJobResult(
-              jobId = jobId,
-              tablePath = tablePath,
-              hostname = hostname,
-              totalSplits = totalSplits,
-              splitsPrewarmed = job.completedSplits.get(),
-              durationMs = System.currentTimeMillis() - job.startTime,
-              success = false,
-              errorMessage = Some(e.getMessage)
-            ))
-        } finally {
+            completeJob(
+              jobId,
+              AsyncPrewarmJobResult(
+                jobId = jobId,
+                tablePath = tablePath,
+                hostname = hostname,
+                totalSplits = totalSplits,
+                splitsPrewarmed = job.completedSplits.get(),
+                durationMs = System.currentTimeMillis() - job.startTime,
+                success = false,
+                errorMessage = Some(e.getMessage)
+              )
+            )
+        } finally
           semaphore.release()
-        }
-      }
     })
 
     Right(job)
   }
 
-  /**
-   * Get an active job by ID.
-   */
+  /** Get an active job by ID. */
   def getActiveJob(jobId: String): Option[AsyncPrewarmJob] =
     Option(activeJobs.get(jobId))
 
-  /**
-   * Get a completed job result by ID.
-   */
+  /** Get a completed job result by ID. */
   def getCompletedJob(jobId: String): Option[AsyncPrewarmJobResult] =
     Option(completedJobs.get(jobId))
 
-  /**
-   * Get all job status (both active and recently completed).
-   * Used by DESCRIBE PREWARM JOBS command.
-   */
+  /** Get all job status (both active and recently completed). Used by DESCRIBE PREWARM JOBS command. */
   def getAllJobStatus: Seq[PrewarmJobStatus] = {
     val now = System.currentTimeMillis()
 
     // Active jobs
-    val activeStatus = activeJobs.values().asScala.map { job =>
-      PrewarmJobStatus(
-        jobId = job.jobId,
-        tablePath = job.tablePath,
-        hostname = job.hostname,
-        status = job.status.get().toString,
-        totalSplits = job.totalSplits,
-        completedSplits = job.completedSplits.get(),
-        durationMs = now - job.startTime,
-        errorMessage = None
-      )
-    }.toSeq
+    val activeStatus = activeJobs
+      .values()
+      .asScala
+      .map { job =>
+        PrewarmJobStatus(
+          jobId = job.jobId,
+          tablePath = job.tablePath,
+          hostname = job.hostname,
+          status = job.status.get().toString,
+          totalSplits = job.totalSplits,
+          completedSplits = job.completedSplits.get(),
+          durationMs = now - job.startTime,
+          errorMessage = None
+        )
+      }
+      .toSeq
 
     // Completed jobs (within retention period)
-    val completedStatus = completedJobs.values().asScala.map { result =>
-      PrewarmJobStatus(
-        jobId = result.jobId,
-        tablePath = result.tablePath,
-        hostname = result.hostname,
-        status = if (result.success) "COMPLETED" else "FAILED",
-        totalSplits = result.totalSplits,
-        completedSplits = result.splitsPrewarmed,
-        durationMs = result.durationMs,
-        errorMessage = result.errorMessage
-      )
-    }.toSeq
+    val completedStatus = completedJobs
+      .values()
+      .asScala
+      .map { result =>
+        PrewarmJobStatus(
+          jobId = result.jobId,
+          tablePath = result.tablePath,
+          hostname = result.hostname,
+          status = if (result.success) "COMPLETED" else "FAILED",
+          totalSplits = result.totalSplits,
+          completedSplits = result.splitsPrewarmed,
+          durationMs = result.durationMs,
+          errorMessage = result.errorMessage
+        )
+      }
+      .toSeq
 
     activeStatus ++ completedStatus
   }
 
-  /**
-   * Cancel a running job by ID. Returns true if the job was found and cancelled.
-   */
-  def cancelJob(jobId: String): Boolean = {
+  /** Cancel a running job by ID. Returns true if the job was found and cancelled. */
+  def cancelJob(jobId: String): Boolean =
     Option(activeJobs.get(jobId)) match {
       case Some(job) =>
         if (job.status.compareAndSet(JobStatus.Running, JobStatus.Cancelled)) {
@@ -244,51 +247,33 @@ object AsyncPrewarmJobManager {
       case None =>
         false
     }
-  }
 
-  /**
-   * Update progress for a job. Called during prewarm execution.
-   */
-  def updateProgress(jobId: String, completedCount: Int): Unit = {
-    Option(activeJobs.get(jobId)).foreach { job =>
-      job.completedSplits.set(completedCount)
-    }
-  }
+  /** Update progress for a job. Called during prewarm execution. */
+  def updateProgress(jobId: String, completedCount: Int): Unit =
+    Option(activeJobs.get(jobId)).foreach(job => job.completedSplits.set(completedCount))
 
-  /**
-   * Increment progress for a job. Called after each split is prewarmed.
-   */
-  def incrementProgress(jobId: String): Int = {
+  /** Increment progress for a job. Called after each split is prewarmed. */
+  def incrementProgress(jobId: String): Int =
     Option(activeJobs.get(jobId)) match {
       case Some(job) => job.completedSplits.incrementAndGet()
-      case None => 0
+      case None      => 0
     }
-  }
 
-  /**
-   * Check if a job is cancelled (for cooperative cancellation).
-   */
-  def isJobCancelled(jobId: String): Boolean = {
+  /** Check if a job is cancelled (for cooperative cancellation). */
+  def isJobCancelled(jobId: String): Boolean =
     Option(activeJobs.get(jobId)) match {
       case Some(job) => job.status.get() == JobStatus.Cancelled
-      case None => false
+      case None      => false
     }
-  }
 
-  /**
-   * Get the number of active jobs.
-   */
+  /** Get the number of active jobs. */
   def getActiveJobCount: Int = activeJobs.size()
 
-  /**
-   * Get the number of available slots.
-   */
+  /** Get the number of available slots. */
   def getAvailableSlots: Int = semaphore.availablePermits()
 
-  /**
-   * Reset the manager (for testing). Clears all jobs and resets state.
-   */
-  def reset(): Unit = {
+  /** Reset the manager (for testing). Clears all jobs and resets state. */
+  def reset(): Unit =
     initLock.synchronized {
       activeJobs.clear()
       completedJobs.clear()
@@ -302,7 +287,6 @@ object AsyncPrewarmJobManager {
       initialized = false
       logger.info("AsyncPrewarmJobManager reset")
     }
-  }
 
   // Internal: Complete a job and move to completed map
   private def completeJob(jobId: String, result: AsyncPrewarmJobResult): Unit = {
@@ -315,18 +299,17 @@ object AsyncPrewarmJobManager {
   }
 
   // Internal: Ensure manager is initialized
-  private def ensureInitialized(): Unit = {
+  private def ensureInitialized(): Unit =
     if (!initialized) {
       configure(DEFAULT_MAX_CONCURRENT, DEFAULT_COMPLETED_RETENTION_MS)
     }
-  }
 
   // Internal: Clean up old completed jobs
   private def maybeCleanupOldJobs(): Unit = {
     val now = System.currentTimeMillis()
     if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
       lastCleanupTime = now
-      val cutoff = now - completedRetentionMs
+      val cutoff  = now - completedRetentionMs
       var removed = 0
       completedJobs.entrySet().removeIf { entry =>
         val shouldRemove = entry.getValue.completionTime.exists(_ < cutoff)
@@ -340,20 +323,16 @@ object AsyncPrewarmJobManager {
   }
 }
 
-/**
- * Status of an async prewarm job.
- */
+/** Status of an async prewarm job. */
 sealed trait JobStatus
 object JobStatus {
-  case object Running extends JobStatus { override def toString = "RUNNING" }
+  case object Running   extends JobStatus { override def toString = "RUNNING"   }
   case object Completed extends JobStatus { override def toString = "COMPLETED" }
-  case object Failed extends JobStatus { override def toString = "FAILED" }
+  case object Failed    extends JobStatus { override def toString = "FAILED"    }
   case object Cancelled extends JobStatus { override def toString = "CANCELLED" }
 }
 
-/**
- * Represents an active async prewarm job.
- */
+/** Represents an active async prewarm job. */
 case class AsyncPrewarmJob(
   jobId: String,
   tablePath: String,
@@ -361,12 +340,9 @@ case class AsyncPrewarmJob(
   startTime: Long,
   totalSplits: Int,
   completedSplits: AtomicInteger,
-  status: AtomicReference[JobStatus]
-)
+  status: AtomicReference[JobStatus])
 
-/**
- * Result from a completed async prewarm job.
- */
+/** Result from a completed async prewarm job. */
 case class AsyncPrewarmJobResult(
   jobId: String,
   tablePath: String,
@@ -376,12 +352,9 @@ case class AsyncPrewarmJobResult(
   durationMs: Long,
   success: Boolean,
   errorMessage: Option[String],
-  completionTime: Option[Long] = None
-)
+  completionTime: Option[Long] = None)
 
-/**
- * Status of a prewarm job for reporting. Used by DESCRIBE PREWARM JOBS.
- */
+/** Status of a prewarm job for reporting. Used by DESCRIBE PREWARM JOBS. */
 case class PrewarmJobStatus(
   jobId: String,
   tablePath: String,
@@ -390,5 +363,5 @@ case class PrewarmJobStatus(
   totalSplits: Int,
   completedSplits: Int,
   durationMs: Long,
-  errorMessage: Option[String]
-) extends Serializable
+  errorMessage: Option[String])
+    extends Serializable

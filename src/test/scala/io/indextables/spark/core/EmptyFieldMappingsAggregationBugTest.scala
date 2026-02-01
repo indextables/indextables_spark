@@ -17,27 +17,24 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
 
 import io.indextables.spark.TestBase
 
 /**
  * Test to reproduce the "object must have at least one field mapping" bug.
  *
- * When a StructType/ArrayType field is always null during writes, the docMappingJson
- * ends up with an empty field_mappings array for that field. When aggregation queries
- * are run (even on unrelated fields), the DocMapperBuilder parsing fails because
- * Quickwit requires object fields to have at least one field mapping.
+ * When a StructType/ArrayType field is always null during writes, the docMappingJson ends up with an empty
+ * field_mappings array for that field. When aggregation queries are run (even on unrelated fields), the
+ * DocMapperBuilder parsing fails because Quickwit requires object fields to have at least one field mapping.
  *
  * This bug occurs because:
- * 1. json_discovery.rs discovers sub-fields by sampling actual document data
- * 2. If all values are null, no sub-fields are discovered
- * 3. The docMappingJson has {"type": "object", "field_mappings": []}
- * 4. Quickwit's DocMapperBuilder rejects empty field_mappings
+ *   1. json_discovery.rs discovers sub-fields by sampling actual document data 2. If all values are null, no sub-fields
+ *      are discovered 3. The docMappingJson has {"type": "object", "field_mappings": []} 4. Quickwit's DocMapperBuilder
+ *      rejects empty field_mappings
  *
- * The fix filters out object fields with empty field_mappings when restoring
- * schemas from the transaction log.
+ * The fix filters out object fields with empty field_mappings when restoring schemas from the transaction log.
  */
 class EmptyFieldMappingsAggregationBugTest extends TestBase {
 
@@ -105,9 +102,7 @@ class EmptyFieldMappingsAggregationBugTest extends TestBase {
       // If we get here, the bug is fixed
       aggregationResult.length shouldBe 3 // host1, host2, host3
       println(s"Aggregation query succeeded with ${aggregationResult.length} groups")
-      aggregationResult.foreach { row =>
-        println(s"  ${row.getString(0)}: ${row.getLong(1)} rows")
-      }
+      aggregationResult.foreach(row => println(s"  ${row.getString(0)}: ${row.getLong(1)} rows"))
     }
   }
 

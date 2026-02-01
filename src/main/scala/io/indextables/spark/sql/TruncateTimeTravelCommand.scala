@@ -88,7 +88,7 @@ case class TruncateTimeTravelCommand(
 
       // Create transaction log - CloudStorageProvider will handle credential resolution
       // with proper refresh logic via V1ToV2CredentialsProviderAdapter
-      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
+      val options        = new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
 
       // Invalidate cache to ensure fresh read of transaction log state

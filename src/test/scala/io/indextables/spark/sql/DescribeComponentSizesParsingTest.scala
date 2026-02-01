@@ -49,7 +49,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   // === Basic Syntax Tests ===
 
   test("DESCRIBE INDEXTABLES COMPONENT SIZES should parse with path only") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test_table'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test_table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -59,7 +59,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE INDEXTABLES COMPONENT SIZES should parse with S3 path") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES 's3://bucket/table'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES 's3://bucket/table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -68,7 +68,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE INDEXTABLES COMPONENT SIZES should parse with Azure path") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES 'abfss://container@account.dfs.core.windows.net/path'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES 'abfss://container@account.dfs.core.windows.net/path'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -77,19 +77,19 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE TANTIVY4SPARK COMPONENT SIZES should also work") {
-    val sql = "DESCRIBE TANTIVY4SPARK COMPONENT SIZES '/tmp/test_table'"
+    val sql  = "DESCRIBE TANTIVY4SPARK COMPONENT SIZES '/tmp/test_table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
   }
 
   test("DESCRIBE COMPONENT SIZES should parse case-insensitive keywords") {
-    val sql = "describe indextables component sizes '/tmp/test_table'"
+    val sql  = "describe indextables component sizes '/tmp/test_table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
   }
 
   test("DESCRIBE INDEXTABLES COMPONENT SIZES should parse with table identifier") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES my_table"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES my_table"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -98,7 +98,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE INDEXTABLES COMPONENT SIZES should parse with qualified table identifier") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES my_db.my_table"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES my_db.my_table"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -109,7 +109,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   // === WHERE Clause Tests ===
 
   test("DESCRIBE COMPONENT SIZES should parse with simple WHERE clause") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year = '2024'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year = '2024'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -120,7 +120,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE COMPONENT SIZES should parse with compound WHERE clause (AND)") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year = '2024' AND region = 'us-east'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year = '2024' AND region = 'us-east'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -131,7 +131,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE COMPONENT SIZES should parse with compound WHERE clause (OR)") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year = '2023' OR year = '2024'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year = '2023' OR year = '2024'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -141,7 +141,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE COMPONENT SIZES should parse with IN clause") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE region IN ('us-east', 'us-west')"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE region IN ('us-east', 'us-west')"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -151,7 +151,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE COMPONENT SIZES should parse with BETWEEN clause") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE month BETWEEN 1 AND 6"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE month BETWEEN 1 AND 6"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -161,7 +161,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE COMPONENT SIZES should parse with comparison operators") {
-    val sql = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year >= '2020' AND year < '2025'"
+    val sql  = "DESCRIBE INDEXTABLES COMPONENT SIZES '/tmp/test' WHERE year >= '2020' AND year < '2025'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -174,7 +174,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   // === Mixed Case and Whitespace Tests ===
 
   test("DESCRIBE COMPONENT SIZES should handle mixed case in WHERE clause") {
-    val sql = "DESCRIBE IndExtables COMPONENT Sizes '/tmp/test' Where year = '2024'"
+    val sql  = "DESCRIBE IndExtables COMPONENT Sizes '/tmp/test' Where year = '2024'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 
@@ -184,7 +184,7 @@ class DescribeComponentSizesParsingTest extends AnyFunSuite with BeforeAndAfterE
   }
 
   test("DESCRIBE COMPONENT SIZES should handle extra whitespace") {
-    val sql = "DESCRIBE   INDEXTABLES   COMPONENT   SIZES   '/tmp/test'   WHERE   year = '2024'"
+    val sql  = "DESCRIBE   INDEXTABLES   COMPONENT   SIZES   '/tmp/test'   WHERE   year = '2024'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DescribeComponentSizesCommand])
 

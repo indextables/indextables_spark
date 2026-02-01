@@ -17,11 +17,11 @@
 
 package io.indextables.spark.transaction.avro
 
-import org.apache.avro.Schema
-import org.apache.avro.generic.GenericRecord
-
 import scala.io.Source
 import scala.util.{Failure, Success, Try}
+
+import org.apache.avro.generic.GenericRecord
+import org.apache.avro.Schema
 
 /**
  * Avro schema definitions and utilities for the state file format.
@@ -167,9 +167,7 @@ object AvroSchemas {
   /** Parsed FileEntry schema (lazily initialized) */
   lazy val FILE_ENTRY_SCHEMA: Schema = new Schema.Parser().parse(FILE_ENTRY_SCHEMA_JSON)
 
-  /**
-   * The PartitionBounds Avro schema definition as a JSON string.
-   */
+  /** The PartitionBounds Avro schema definition as a JSON string. */
   val PARTITION_BOUNDS_SCHEMA_JSON: String =
     """{
       |  "type": "record",
@@ -195,9 +193,7 @@ object AvroSchemas {
   /** Parsed PartitionBounds schema (lazily initialized) */
   lazy val PARTITION_BOUNDS_SCHEMA: Schema = new Schema.Parser().parse(PARTITION_BOUNDS_SCHEMA_JSON)
 
-  /**
-   * The ManifestInfo Avro schema definition as a JSON string.
-   */
+  /** The ManifestInfo Avro schema definition as a JSON string. */
   val MANIFEST_INFO_SCHEMA_JSON: String =
     """{
       |  "type": "record",
@@ -259,8 +255,8 @@ object AvroSchemas {
   /**
    * The StateManifest Avro schema definition as a JSON string.
    *
-   * This is the metadata file stored in each state directory that describes
-   * the complete table state at a specific version.
+   * This is the metadata file stored in each state directory that describes the complete table state at a specific
+   * version.
    */
   val STATE_MANIFEST_SCHEMA_JSON: String =
     """{
@@ -367,9 +363,8 @@ object AvroSchemas {
     try {
       val schemaJson = Source.fromInputStream(stream).mkString
       new Schema.Parser().parse(schemaJson)
-    } finally {
+    } finally
       stream.close()
-    }
   }
 
   /**
@@ -383,39 +378,39 @@ object AvroSchemas {
   def toFileEntry(record: GenericRecord): FileEntry = {
     import scala.jdk.CollectionConverters._
 
-    def getOptionalString(field: String): Option[String] = {
+    def getOptionalString(field: String): Option[String] =
       Option(record.get(field)).map(_.toString)
-    }
 
-    def getOptionalLong(field: String): Option[Long] = {
+    def getOptionalLong(field: String): Option[Long] =
       Option(record.get(field)).map {
         case l: java.lang.Long    => l.toLong
         case i: java.lang.Integer => i.toLong
         case other                => other.toString.toLong
       }
-    }
 
-    def getOptionalInt(field: String): Option[Int] = {
+    def getOptionalInt(field: String): Option[Int] =
       Option(record.get(field)).map {
         case i: java.lang.Integer => i.toInt
         case l: java.lang.Long    => l.toInt
         case other                => other.toString.toInt
       }
-    }
 
-    def getOptionalStringMap(field: String): Option[Map[String, String]] = {
+    def getOptionalStringMap(field: String): Option[Map[String, String]] =
       Option(record.get(field)).map { value =>
-        value.asInstanceOf[java.util.Map[CharSequence, CharSequence]].asScala.map { case (k, v) =>
-          k.toString -> v.toString
-        }.toMap
+        value
+          .asInstanceOf[java.util.Map[CharSequence, CharSequence]]
+          .asScala
+          .map {
+            case (k, v) =>
+              k.toString -> v.toString
+          }
+          .toMap
       }
-    }
 
-    def getOptionalStringSet(field: String): Option[Set[String]] = {
+    def getOptionalStringSet(field: String): Option[Set[String]] =
       Option(record.get(field)).map { value =>
         value.asInstanceOf[java.util.Collection[CharSequence]].asScala.map(_.toString).toSet
       }
-    }
 
     FileEntry(
       path = record.get("path").toString,
@@ -506,7 +501,7 @@ object AvroSchemas {
     record.put("totalBytes", manifest.totalBytes)
 
     // Convert manifests array
-    val manifestInfoSchema = schema.getField("manifests").schema().getElementType
+    val manifestInfoSchema    = schema.getField("manifests").schema().getElementType
     val partitionBoundsSchema = manifestInfoSchema.getField("partitionBounds").schema().getTypes.get(1).getValueType
     val manifestRecords = manifest.manifests.map { info =>
       val manifestRecord = new GenericData.Record(manifestInfoSchema)
@@ -517,11 +512,12 @@ object AvroSchemas {
 
       // Convert partition bounds
       val boundsMap = info.partitionBounds.map { bounds =>
-        bounds.map { case (col, pb) =>
-          val boundsRecord = new GenericData.Record(partitionBoundsSchema)
-          boundsRecord.put("min", pb.min.orNull)
-          boundsRecord.put("max", pb.max.orNull)
-          col -> boundsRecord
+        bounds.map {
+          case (col, pb) =>
+            val boundsRecord = new GenericData.Record(partitionBoundsSchema)
+            boundsRecord.put("min", pb.min.orNull)
+            boundsRecord.put("max", pb.max.orNull)
+            col -> boundsRecord
         }.asJava
       }.orNull
       manifestRecord.put("partitionBounds", boundsMap)
@@ -551,19 +547,23 @@ object AvroSchemas {
   def genericRecordToStateManifest(record: GenericRecord): StateManifest = {
     import scala.jdk.CollectionConverters._
 
-    def getOptionalString(field: String): Option[String] = {
+    def getOptionalString(field: String): Option[String] =
       Option(record.get(field)).map(_.toString)
-    }
 
     // Parse manifests array
     val manifestRecords = record.get("manifests").asInstanceOf[java.util.Collection[GenericRecord]].asScala
     val manifests = manifestRecords.map { manifestRecord =>
       val partitionBounds = Option(manifestRecord.get("partitionBounds")).map { boundsMap =>
-        boundsMap.asInstanceOf[java.util.Map[CharSequence, GenericRecord]].asScala.map { case (col, boundsRecord) =>
-          val min = Option(boundsRecord.get("min")).map(_.toString)
-          val max = Option(boundsRecord.get("max")).map(_.toString)
-          col.toString -> PartitionBounds(min, max)
-        }.toMap
+        boundsMap
+          .asInstanceOf[java.util.Map[CharSequence, GenericRecord]]
+          .asScala
+          .map {
+            case (col, boundsRecord) =>
+              val min = Option(boundsRecord.get("min")).map(_.toString)
+              val max = Option(boundsRecord.get("max")).map(_.toString)
+              col.toString -> PartitionBounds(min, max)
+          }
+          .toMap
       }
 
       ManifestInfo(
@@ -578,12 +578,20 @@ object AvroSchemas {
     }.toSeq
 
     // Parse tombstones
-    val tombstones = record.get("tombstones").asInstanceOf[java.util.Collection[CharSequence]].asScala
-      .map(_.toString).toSeq
+    val tombstones = record
+      .get("tombstones")
+      .asInstanceOf[java.util.Collection[CharSequence]]
+      .asScala
+      .map(_.toString)
+      .toSeq
 
     // Parse schema registry
-    val schemaRegistry = record.get("schemaRegistry").asInstanceOf[java.util.Map[CharSequence, CharSequence]].asScala
-      .map { case (k, v) => k.toString -> v.toString }.toMap
+    val schemaRegistry = record
+      .get("schemaRegistry")
+      .asInstanceOf[java.util.Map[CharSequence, CharSequence]]
+      .asScala
+      .map { case (k, v) => k.toString -> v.toString }
+      .toMap
 
     StateManifest(
       formatVersion = record.get("formatVersion").asInstanceOf[Int],

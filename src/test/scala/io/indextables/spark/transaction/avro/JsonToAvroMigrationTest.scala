@@ -25,14 +25,11 @@ import io.indextables.spark.TestBase
  * Tests for validating the migration/transition process from JSON checkpoints to Avro state format.
  *
  * These tests ensure:
- *   1. Tables created with JSON checkpoints can be upgraded to Avro format
- *   2. Data integrity is preserved during the transition
- *   3. Schema registry and docMappingJson are correctly migrated
- *   4. The table remains fully functional after migration
- *   5. Incremental operations work correctly after migration
+ *   1. Tables created with JSON checkpoints can be upgraded to Avro format 2. Data integrity is preserved during the
+ *      transition 3. Schema registry and docMappingJson are correctly migrated 4. The table remains fully functional
+ *      after migration 5. Incremental operations work correctly after migration
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.JsonToAvroMigrationTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.JsonToAvroMigrationTest'
  */
 class JsonToAvroMigrationTest extends TestBase {
 
@@ -127,7 +124,7 @@ class JsonToAvroMigrationTest extends TestBase {
       println(s"  ➤ Checkpoint result: ${checkpointResult.map(_.toString).mkString(", ")}")
 
       // Verify state is now avro-state
-      val state2 = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      val state2  = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
       val format2 = state2(0).getAs[String]("format")
       format2 shouldBe "avro-state"
 
@@ -138,7 +135,7 @@ class JsonToAvroMigrationTest extends TestBase {
       // ========================================
       println("\n📖 Phase 4: Verifying data integrity after migration...")
 
-      val read3 = spark.read.format(provider).load(path)
+      val read3  = spark.read.format(provider).load(path)
       val count3 = read3.count()
       count3 shouldBe 6
 
@@ -199,7 +196,7 @@ class JsonToAvroMigrationTest extends TestBase {
       // ========================================
       println("\n📖 Phase 7: Final verification...")
 
-      val finalRead = spark.read.format(provider).load(path)
+      val finalRead  = spark.read.format(provider).load(path)
       val finalCount = finalRead.count()
       finalCount shouldBe 8
 
@@ -225,17 +222,17 @@ class JsonToAvroMigrationTest extends TestBase {
       spark.conf.unset("spark.indextables.state.format")
 
       println(s"""
-      |============================================
-      |🎉 JSON TO AVRO MIGRATION TEST COMPLETED
-      |============================================
-      |Path: $path
-      |Initial format: $format1
-      |Final format: avro-state
-      |Records migrated: 6
-      |Records after migration: 8
-      |Sum(score): $finalSum
-      |IndexQuery works: Yes
-      |============================================
+                 |============================================
+                 |🎉 JSON TO AVRO MIGRATION TEST COMPLETED
+                 |============================================
+                 |Path: $path
+                 |Initial format: $format1
+                 |Final format: avro-state
+                 |Records migrated: 6
+                 |Records after migration: 8
+                 |Sum(score): $finalSum
+                 |IndexQuery works: Yes
+                 |============================================
       """.stripMargin)
     }
   }
@@ -254,8 +251,11 @@ class JsonToAvroMigrationTest extends TestBase {
         (1, "First batch content"),
         (2, "Second batch content")
       )
-      spark.createDataFrame(data1).toDF("id", "text_content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data1)
+        .toDF("id", "text_content")
+        .write
+        .format(provider)
         .option("spark.indextables.indexing.typemap.text_content", "text")
         .mode("overwrite")
         .save(path)
@@ -268,14 +268,17 @@ class JsonToAvroMigrationTest extends TestBase {
         (3, "Third batch content"),
         (4, "Fourth batch content")
       )
-      spark.createDataFrame(data2).toDF("id", "text_content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data2)
+        .toDF("id", "text_content")
+        .write
+        .format(provider)
         .option("spark.indextables.indexing.typemap.text_content", "text")
         .mode("append")
         .save(path)
 
       // Verify IndexQuery works before migration
-      val preRead = spark.read.format(provider).load(path)
+      val preRead   = spark.read.format(provider).load(path)
       val preSearch = preRead.filter("text_content indexquery 'content'").count()
       preSearch shouldBe 4
 
@@ -290,7 +293,7 @@ class JsonToAvroMigrationTest extends TestBase {
       state(0).getAs[String]("format") shouldBe "avro-state"
 
       // Verify IndexQuery still works after migration
-      val postRead = spark.read.format(provider).load(path)
+      val postRead   = spark.read.format(provider).load(path)
       val postSearch = postRead.filter("text_content indexquery 'content'").count()
       postSearch shouldBe 4
 
@@ -314,8 +317,9 @@ class JsonToAvroMigrationTest extends TestBase {
       // Write multiple batches to create multiple files
       for (i <- 0 until 5) {
         val data = (1 to 10).map(j => (i * 10 + j, s"Content batch $i item $j", i * 10 + j))
-        val df = spark.createDataFrame(data).toDF("id", "content", "score")
-        df.write.format(provider)
+        val df   = spark.createDataFrame(data).toDF("id", "content", "score")
+        df.write
+          .format(provider)
           .option("spark.indextables.indexing.fastfields", "score")
           .mode(if (i == 0) "overwrite" else "append")
           .save(path)
@@ -378,7 +382,8 @@ class JsonToAvroMigrationTest extends TestBase {
       )
       val df = spark.createDataFrame(data).toDF("id", "region", "month")
 
-      df.write.format(provider)
+      df.write
+        .format(provider)
         .partitionBy("region", "month")
         .mode("overwrite")
         .save(path)
@@ -387,8 +392,11 @@ class JsonToAvroMigrationTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Verify partition pruning works before migration
-      val prePruned = spark.read.format(provider).load(path)
-        .filter(col("region") === "us-east").count()
+      val prePruned = spark.read
+        .format(provider)
+        .load(path)
+        .filter(col("region") === "us-east")
+        .count()
       prePruned shouldBe 3
 
       println(s"✅ Pre-migration partition pruning: us-east count=$prePruned")
@@ -402,13 +410,19 @@ class JsonToAvroMigrationTest extends TestBase {
       state(0).getAs[String]("format") shouldBe "avro-state"
 
       // Verify partition pruning still works after migration
-      val postPruned = spark.read.format(provider).load(path)
-        .filter(col("region") === "us-east").count()
+      val postPruned = spark.read
+        .format(provider)
+        .load(path)
+        .filter(col("region") === "us-east")
+        .count()
       postPruned shouldBe 3
 
       // Verify compound partition filter
-      val compoundFilter = spark.read.format(provider).load(path)
-        .filter(col("region") === "us-west" && col("month") === "2024-02").count()
+      val compoundFilter = spark.read
+        .format(provider)
+        .load(path)
+        .filter(col("region") === "us-west" && col("month") === "2024-02")
+        .count()
       compoundFilter shouldBe 1
 
       println(s"✅ Post-migration partition pruning: us-east count=$postPruned")
@@ -422,8 +436,8 @@ class JsonToAvroMigrationTest extends TestBase {
 
   test("Migration from JSON with 11 transactions validates shared manifest directory structure") {
     withTempPath { tempDir =>
-      val path = tempDir
-      val txLogPath = new java.io.File(path, "_transaction_log")
+      val path         = tempDir
+      val txLogPath    = new java.io.File(path, "_transaction_log")
       val manifestsDir = new java.io.File(txLogPath, "manifests")
 
       println(s"Testing shared manifest directory structure after migration at: $path")
@@ -440,8 +454,9 @@ class JsonToAvroMigrationTest extends TestBase {
       var totalRecords = 0
       for (i <- 1 to 11) {
         val data = (1 to 5).map(j => ((i - 1) * 5 + j, s"Document $i-$j", i * 10))
-        val df = spark.createDataFrame(data).toDF("id", "content", "score")
-        df.write.format(provider)
+        val df   = spark.createDataFrame(data).toDF("id", "content", "score")
+        df.write
+          .format(provider)
           .option("spark.indextables.indexing.fastfields", "score")
           .option("spark.indextables.state.format", "json")
           .mode(if (i == 1) "overwrite" else "append")
@@ -480,8 +495,9 @@ class JsonToAvroMigrationTest extends TestBase {
       println("\nPhase 3: Running additional Avro transaction...")
 
       val avroTxData = (1 to 10).map(j => (totalRecords + j, s"Avro document $j", 999))
-      val dfAvro = spark.createDataFrame(avroTxData).toDF("id", "content", "score")
-      dfAvro.write.format(provider)
+      val dfAvro     = spark.createDataFrame(avroTxData).toDF("id", "content", "score")
+      dfAvro.write
+        .format(provider)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("append")
         .save(path)
@@ -494,7 +510,7 @@ class JsonToAvroMigrationTest extends TestBase {
       // ========================================
       println("\nValidation 1: Verifying all data can be read...")
 
-      val finalRead = spark.read.format(provider).load(path)
+      val finalRead  = spark.read.format(provider).load(path)
       val finalCount = finalRead.count()
       finalCount shouldBe totalRecords
 
@@ -531,7 +547,8 @@ class JsonToAvroMigrationTest extends TestBase {
       // ========================================
       println("\nValidation 3: Verifying state directories contain only _manifest.avro...")
 
-      val stateDirs = txLogPath.listFiles()
+      val stateDirs = txLogPath
+        .listFiles()
         .filter(f => f.isDirectory && f.getName.startsWith("state-v"))
         .sortBy(_.getName)
 
@@ -556,16 +573,16 @@ class JsonToAvroMigrationTest extends TestBase {
       // Final summary
       // ========================================
       println(s"""
-      |============================================
-      |SHARED MANIFEST DIRECTORY TEST COMPLETED
-      |============================================
-      |Path: $path
-      |Total transactions: 12 (11 JSON + 1 Avro)
-      |Total records: $totalRecords
-      |Manifests in shared directory: ${manifestFiles.length}
-      |State directories: ${stateDirs.length}
-      |All state dirs contain only _manifest.avro: Yes
-      |============================================
+                 |============================================
+                 |SHARED MANIFEST DIRECTORY TEST COMPLETED
+                 |============================================
+                 |Path: $path
+                 |Total transactions: 12 (11 JSON + 1 Avro)
+                 |Total records: $totalRecords
+                 |Manifests in shared directory: ${manifestFiles.length}
+                 |State directories: ${stateDirs.length}
+                 |All state dirs contain only _manifest.avro: Yes
+                 |============================================
       """.stripMargin)
 
       // Clean up

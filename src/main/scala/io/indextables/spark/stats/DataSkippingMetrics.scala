@@ -17,15 +17,12 @@
 
 package io.indextables.spark.stats
 
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 
 import org.slf4j.LoggerFactory
 
-/**
- * Metrics for data skipping effectiveness tracking.
- * Tracks files scanned vs skipped at each level of filtering.
- */
+/** Metrics for data skipping effectiveness tracking. Tracks files scanned vs skipped at each level of filtering. */
 case class DataSkippingStats(
   totalFiles: Long,
   partitionPrunedFiles: Long,
@@ -37,10 +34,7 @@ case class DataSkippingStats(
   filterTypes: Map[String, Long] // Count of each filter type that contributed to skipping
 )
 
-/**
- * Thread-safe metrics collector for data skipping operations.
- * Supports per-table and global metrics aggregation.
- */
+/** Thread-safe metrics collector for data skipping operations. Supports per-table and global metrics aggregation. */
 object DataSkippingMetrics {
 
   private val logger = LoggerFactory.getLogger(DataSkippingMetrics.getClass)
@@ -49,20 +43,25 @@ object DataSkippingMetrics {
   private val tableMetrics = new ConcurrentHashMap[String, TableMetrics]()
 
   // Global metrics (aggregated across all tables)
-  private val globalTotalFiles = new AtomicLong(0)
+  private val globalTotalFiles       = new AtomicLong(0)
   private val globalPartitionSkipped = new AtomicLong(0)
-  private val globalDataSkipped = new AtomicLong(0)
-  private val globalFinalFiles = new AtomicLong(0)
-  private val globalFilterTypeSkips = new ConcurrentHashMap[String, AtomicLong]()
+  private val globalDataSkipped      = new AtomicLong(0)
+  private val globalFinalFiles       = new AtomicLong(0)
+  private val globalFilterTypeSkips  = new ConcurrentHashMap[String, AtomicLong]()
 
   /**
    * Record data skipping results for a scan operation.
    *
-   * @param tablePath Path to the table
-   * @param totalFiles Total files before any filtering
-   * @param afterPartitionPruning Files remaining after partition pruning
-   * @param afterDataSkipping Files remaining after min/max data skipping
-   * @param filterTypesUsed Map of filter type names to count of files skipped by that filter type
+   * @param tablePath
+   *   Path to the table
+   * @param totalFiles
+   *   Total files before any filtering
+   * @param afterPartitionPruning
+   *   Files remaining after partition pruning
+   * @param afterDataSkipping
+   *   Files remaining after min/max data skipping
+   * @param filterTypesUsed
+   *   Map of filter type names to count of files skipped by that filter type
    */
   def recordScan(
     tablePath: String,
@@ -72,7 +71,7 @@ object DataSkippingMetrics {
     filterTypesUsed: Map[String, Long] = Map.empty
   ): Unit = {
     val partitionSkipped = totalFiles - afterPartitionPruning
-    val dataSkipped = afterPartitionPruning - afterDataSkipping
+    val dataSkipped      = afterPartitionPruning - afterDataSkipping
 
     // Update per-table metrics
     val metrics = tableMetrics.computeIfAbsent(tablePath, _ => new TableMetrics())
@@ -80,8 +79,9 @@ object DataSkippingMetrics {
     metrics.partitionSkipped.addAndGet(partitionSkipped)
     metrics.dataSkipped.addAndGet(dataSkipped)
     metrics.finalFiles.addAndGet(afterDataSkipping)
-    filterTypesUsed.foreach { case (filterType, count) =>
-      metrics.filterTypeSkips.computeIfAbsent(filterType, _ => new AtomicLong(0)).addAndGet(count)
+    filterTypesUsed.foreach {
+      case (filterType, count) =>
+        metrics.filterTypeSkips.computeIfAbsent(filterType, _ => new AtomicLong(0)).addAndGet(count)
     }
 
     // Update global metrics
@@ -89,8 +89,9 @@ object DataSkippingMetrics {
     globalPartitionSkipped.addAndGet(partitionSkipped)
     globalDataSkipped.addAndGet(dataSkipped)
     globalFinalFiles.addAndGet(afterDataSkipping)
-    filterTypesUsed.foreach { case (filterType, count) =>
-      globalFilterTypeSkips.computeIfAbsent(filterType, _ => new AtomicLong(0)).addAndGet(count)
+    filterTypesUsed.foreach {
+      case (filterType, count) =>
+        globalFilterTypeSkips.computeIfAbsent(filterType, _ => new AtomicLong(0)).addAndGet(count)
     }
 
     logger.debug(
@@ -98,25 +99,21 @@ object DataSkippingMetrics {
     )
   }
 
-  /**
-   * Get metrics for a specific table.
-   */
-  def getTableStats(tablePath: String): Option[DataSkippingStats] = {
+  /** Get metrics for a specific table. */
+  def getTableStats(tablePath: String): Option[DataSkippingStats] =
     Option(tableMetrics.get(tablePath)).map { metrics =>
-      val total = metrics.totalFiles.get()
+      val total            = metrics.totalFiles.get()
       val partitionSkipped = metrics.partitionSkipped.get()
-      val dataSkipped = metrics.dataSkipped.get()
-      val finalFiles = metrics.finalFiles.get()
+      val dataSkipped      = metrics.dataSkipped.get()
+      val finalFiles       = metrics.finalFiles.get()
 
-      val afterPartition = total - partitionSkipped
+      val afterPartition    = total - partitionSkipped
       val partitionSkipRate = if (total > 0) partitionSkipped.toDouble / total else 0.0
-      val dataSkipRate = if (afterPartition > 0) dataSkipped.toDouble / afterPartition else 0.0
-      val totalSkipRate = if (total > 0) (total - finalFiles).toDouble / total else 0.0
+      val dataSkipRate      = if (afterPartition > 0) dataSkipped.toDouble / afterPartition else 0.0
+      val totalSkipRate     = if (total > 0) (total - finalFiles).toDouble / total else 0.0
 
       val filterTypes = scala.collection.mutable.Map[String, Long]()
-      metrics.filterTypeSkips.forEach { (k, v) =>
-        filterTypes.put(k, v.get())
-      }
+      metrics.filterTypeSkips.forEach((k, v) => filterTypes.put(k, v.get()))
 
       DataSkippingStats(
         totalFiles = total,
@@ -129,26 +126,21 @@ object DataSkippingMetrics {
         filterTypes = filterTypes.toMap
       )
     }
-  }
 
-  /**
-   * Get global aggregated metrics across all tables.
-   */
+  /** Get global aggregated metrics across all tables. */
   def getGlobalStats(): DataSkippingStats = {
-    val total = globalTotalFiles.get()
+    val total            = globalTotalFiles.get()
     val partitionSkipped = globalPartitionSkipped.get()
-    val dataSkipped = globalDataSkipped.get()
-    val finalFiles = globalFinalFiles.get()
+    val dataSkipped      = globalDataSkipped.get()
+    val finalFiles       = globalFinalFiles.get()
 
-    val afterPartition = total - partitionSkipped
+    val afterPartition    = total - partitionSkipped
     val partitionSkipRate = if (total > 0) partitionSkipped.toDouble / total else 0.0
-    val dataSkipRate = if (afterPartition > 0) dataSkipped.toDouble / afterPartition else 0.0
-    val totalSkipRate = if (total > 0) (total - finalFiles).toDouble / total else 0.0
+    val dataSkipRate      = if (afterPartition > 0) dataSkipped.toDouble / afterPartition else 0.0
+    val totalSkipRate     = if (total > 0) (total - finalFiles).toDouble / total else 0.0
 
     val filterTypes = scala.collection.mutable.Map[String, Long]()
-    globalFilterTypeSkips.forEach { (k, v) =>
-      filterTypes.put(k, v.get())
-    }
+    globalFilterTypeSkips.forEach((k, v) => filterTypes.put(k, v.get()))
 
     DataSkippingStats(
       totalFiles = total,
@@ -162,17 +154,13 @@ object DataSkippingMetrics {
     )
   }
 
-  /**
-   * Reset metrics for a specific table.
-   */
+  /** Reset metrics for a specific table. */
   def resetTableStats(tablePath: String): Unit = {
     tableMetrics.remove(tablePath)
     logger.debug(s"Reset data skipping metrics for $tablePath")
   }
 
-  /**
-   * Reset all metrics (both per-table and global).
-   */
+  /** Reset all metrics (both per-table and global). */
   def resetAll(): Unit = {
     tableMetrics.clear()
     globalTotalFiles.set(0)
@@ -183,9 +171,7 @@ object DataSkippingMetrics {
     logger.debug("Reset all data skipping metrics")
   }
 
-  /**
-   * Get a formatted summary string for logging/display.
-   */
+  /** Get a formatted summary string for logging/display. */
   def formatStats(stats: DataSkippingStats): String = {
     val sb = new StringBuilder()
     sb.append(s"Data Skipping Statistics:\n")
@@ -196,8 +182,9 @@ object DataSkippingMetrics {
     sb.append(s"  Total skip rate: ${f"${stats.totalSkipRate * 100}%.1f"}%%\n")
     if (stats.filterTypes.nonEmpty) {
       sb.append(s"  Filter type contributions:\n")
-      stats.filterTypes.toSeq.sortBy(-_._2).foreach { case (filterType, count) =>
-        sb.append(s"    - $filterType: $count files skipped\n")
+      stats.filterTypes.toSeq.sortBy(-_._2).foreach {
+        case (filterType, count) =>
+          sb.append(s"    - $filterType: $count files skipped\n")
       }
     }
     sb.toString()
@@ -205,10 +192,10 @@ object DataSkippingMetrics {
 
   // Internal class for per-table metrics tracking
   private class TableMetrics {
-    val totalFiles = new AtomicLong(0)
+    val totalFiles       = new AtomicLong(0)
     val partitionSkipped = new AtomicLong(0)
-    val dataSkipped = new AtomicLong(0)
-    val finalFiles = new AtomicLong(0)
-    val filterTypeSkips = new ConcurrentHashMap[String, AtomicLong]()
+    val dataSkipped      = new AtomicLong(0)
+    val finalFiles       = new AtomicLong(0)
+    val filterTypeSkips  = new ConcurrentHashMap[String, AtomicLong]()
   }
 }

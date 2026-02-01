@@ -23,8 +23,8 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Tests for TablePathNormalizer utility.
  *
- * This utility is critical for credential provider caching - it ensures that different
- * splits from the same table all normalize to the same cache key.
+ * This utility is critical for credential provider caching - it ensures that different splits from the same table all
+ * normalize to the same cache key.
  */
 class TablePathNormalizerTest extends AnyFunSuite with Matchers {
 
@@ -51,12 +51,18 @@ class TablePathNormalizerTest extends AnyFunSuite with Matchers {
   }
 
   test("normalizeToTablePath should strip both partitions and file extension") {
-    TablePathNormalizer.normalizeToTablePath("s3://bucket/table/year=2024/month=01/part-00000.split") shouldBe "s3://bucket/table"
+    TablePathNormalizer.normalizeToTablePath(
+      "s3://bucket/table/year=2024/month=01/part-00000.split"
+    ) shouldBe "s3://bucket/table"
   }
 
   test("normalizeToTablePath should strip transaction log paths") {
-    TablePathNormalizer.normalizeToTablePath("s3://bucket/table/_transaction_log/00000.json") shouldBe "s3://bucket/table"
-    TablePathNormalizer.normalizeToTablePath("s3://bucket/table/_transaction_log/checkpoint/v1.checkpoint.json") shouldBe "s3://bucket/table"
+    TablePathNormalizer.normalizeToTablePath(
+      "s3://bucket/table/_transaction_log/00000.json"
+    ) shouldBe "s3://bucket/table"
+    TablePathNormalizer.normalizeToTablePath(
+      "s3://bucket/table/_transaction_log/checkpoint/v1.checkpoint.json"
+    ) shouldBe "s3://bucket/table"
   }
 
   test("normalizeToTablePath should preserve table path without file/partition suffix") {
@@ -66,7 +72,9 @@ class TablePathNormalizerTest extends AnyFunSuite with Matchers {
   }
 
   test("normalizeToTablePath should handle nested table paths") {
-    TablePathNormalizer.normalizeToTablePath("s3://bucket/data/warehouse/table/part-00000.split") shouldBe "s3://bucket/data/warehouse/table"
+    TablePathNormalizer.normalizeToTablePath(
+      "s3://bucket/data/warehouse/table/part-00000.split"
+    ) shouldBe "s3://bucket/data/warehouse/table"
   }
 
   test("normalizeToTablePath should preserve different S3 protocol variants") {
@@ -75,10 +83,14 @@ class TablePathNormalizerTest extends AnyFunSuite with Matchers {
   }
 
   test("normalizeToTablePath should handle Azure paths") {
-    TablePathNormalizer.normalizeToTablePath("abfss://container@account.dfs.core.windows.net/table/part-00000.split") shouldBe
+    TablePathNormalizer.normalizeToTablePath(
+      "abfss://container@account.dfs.core.windows.net/table/part-00000.split"
+    ) shouldBe
       "abfss://container@account.dfs.core.windows.net/table"
 
-    TablePathNormalizer.normalizeToTablePath("wasbs://container@account.blob.core.windows.net/table/year=2024/data.split") shouldBe
+    TablePathNormalizer.normalizeToTablePath(
+      "wasbs://container@account.blob.core.windows.net/table/year=2024/data.split"
+    ) shouldBe
       "wasbs://container@account.blob.core.windows.net/table"
   }
 

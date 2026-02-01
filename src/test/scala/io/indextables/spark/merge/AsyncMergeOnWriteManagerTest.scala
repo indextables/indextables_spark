@@ -23,15 +23,13 @@ import org.scalatest.BeforeAndAfterEach
 
 class AsyncMergeOnWriteManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     // Reset manager before each test for isolation
     AsyncMergeOnWriteManager.reset()
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     // Clean up after each test
     AsyncMergeOnWriteManager.reset()
-  }
 
   test("configure initializes manager with custom settings") {
     val config = AsyncMergeOnWriteConfig(
@@ -129,12 +127,12 @@ class AsyncMergeOnWriteManagerTest extends AnyFunSuite with Matchers with Before
     noException should be thrownBy {
       import java.io._
       val baos = new ByteArrayOutputStream()
-      val oos = new ObjectOutputStream(baos)
+      val oos  = new ObjectOutputStream(baos)
       oos.writeObject(report)
       oos.close()
 
-      val bais = new ByteArrayInputStream(baos.toByteArray)
-      val ois = new ObjectInputStream(bais)
+      val bais         = new ByteArrayInputStream(baos.toByteArray)
+      val ois          = new ObjectInputStream(bais)
       val deserialized = ois.readObject().asInstanceOf[MergeJobStatus.MergeJobStatusReport]
       ois.close()
 

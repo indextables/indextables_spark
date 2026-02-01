@@ -46,7 +46,7 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
   private var cachedProtocol: Option[ProtocolAction]  = None
 
   // Partition index cache for optimized partition pruning
-  private val partitionIndexCache                       = new AtomicLong(0L) // timestamp when partition index was cached
+  private val partitionIndexCache = new AtomicLong(0L) // timestamp when partition index was cached
   private var cachedPartitionIndex: Option[PartitionIndex] = None
 
   // Statistics

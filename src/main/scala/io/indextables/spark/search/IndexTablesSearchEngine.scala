@@ -35,7 +35,7 @@ class TantivySearchEngine private (
     schema: StructType,
     options: CaseInsensitiveStringMap,
     config: Map[String, String]
-  ) = {
+  ) =
     this(
       {
         // Extract working directory from configuration hierarchy with auto-detection
@@ -48,7 +48,6 @@ class TantivySearchEngine private (
       options,
       config
     )
-  }
 
   def addDocument(row: InternalRow): Unit =
     directInterface.addDocument(row)

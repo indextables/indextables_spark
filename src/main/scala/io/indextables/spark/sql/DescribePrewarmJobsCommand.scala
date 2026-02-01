@@ -46,8 +46,8 @@ import org.slf4j.LoggerFactory
  *   - duration_ms: Duration in milliseconds
  *   - error_message: Error message if failed (null otherwise)
  *
- * Note: Each executor maintains its own async prewarm job state. This command
- * aggregates job status from all active executors in the cluster.
+ * Note: Each executor maintains its own async prewarm job state. This command aggregates job status from all active
+ * executors in the cluster.
  */
 case class DescribePrewarmJobsCommand() extends LeafRunnableCommand {
 
@@ -83,9 +83,9 @@ case class DescribePrewarmJobsCommand() extends LeafRunnableCommand {
       val executorJobs = sc
         .parallelize(1 to numExecutors, numExecutors)
         .mapPartitionsWithIndex { (index, _) =>
-          val executorId = s"executor-$index"
+          val executorId     = s"executor-$index"
           val blockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
-          val host = s"${blockManagerId.host}:${blockManagerId.port}"
+          val host           = s"${blockManagerId.host}:${blockManagerId.port}"
 
           // Get all job status from this executor
           val jobs = AsyncPrewarmJobManager.getAllJobStatus

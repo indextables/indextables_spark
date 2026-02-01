@@ -31,9 +31,8 @@ import io.indextables.spark.RealAzureTestBase
  *   - Fast field and segment-level component detection
  *
  * Credentials are loaded from multiple sources with priority:
- *   1. System properties: test.azure.storageAccount, test.azure.accountKey
- *   2. ~/.azure/credentials file
- *   3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+ *   1. System properties: test.azure.storageAccount, test.azure.accountKey 2. ~/.azure/credentials file 3. Environment
+ *      variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
  */
 class RealAzureDescribeComponentSizesTest extends RealAzureTestBase {
 
@@ -127,9 +126,12 @@ class RealAzureDescribeComponentSizesTest extends RealAzureTestBase {
 
     // Verify we have fastfield components
     result.createOrReplaceTempView("components")
-    val fastfieldCount = spark.sql(
-      "SELECT COUNT(*) FROM components WHERE component_type = 'fastfield'"
-    ).head().getLong(0)
+    val fastfieldCount = spark
+      .sql(
+        "SELECT COUNT(*) FROM components WHERE component_type = 'fastfield'"
+      )
+      .head()
+      .getLong(0)
 
     println(s"📊 Found $fastfieldCount fastfield components")
     fastfieldCount should be >= 1L
@@ -225,10 +227,12 @@ class RealAzureDescribeComponentSizesTest extends RealAzureTestBase {
     totalSize should be > 0L
 
     // Test grouping by component type
-    val typeBreakdown = spark.sql(
-      "SELECT component_type, COUNT(*) as cnt, SUM(size_bytes) as total_bytes " +
-        "FROM azure_components GROUP BY component_type ORDER BY total_bytes DESC"
-    ).collect()
+    val typeBreakdown = spark
+      .sql(
+        "SELECT component_type, COUNT(*) as cnt, SUM(size_bytes) as total_bytes " +
+          "FROM azure_components GROUP BY component_type ORDER BY total_bytes DESC"
+      )
+      .collect()
 
     println(s"📊 Component type breakdown:")
     typeBreakdown.foreach { row =>

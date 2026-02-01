@@ -106,7 +106,7 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
         }
 
         val lastCheckpointBytes = cloudProvider.readFile(lastCheckpointPath.toString)
-        val lastCheckpointJson = new String(lastCheckpointBytes, "UTF-8")
+        val lastCheckpointJson  = new String(lastCheckpointBytes, "UTF-8")
         val checkpointInfo = io.indextables.spark.util.JsonUtil.mapper.readValue(
           lastCheckpointJson,
           classOf[LastCheckpointInfo]
@@ -121,9 +121,8 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
         } else {
           describeJsonState(resolvedPath.toString, cloudProvider, checkpointInfo, format)
         }
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     } catch {
       case e: Exception =>
         val errorMsg = s"Failed to describe state: ${e.getMessage}"
@@ -145,22 +144,23 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
     }
 
   private def describeAvroState(
-      resolvedPathStr: String,
-      transactionLogPath: Path,
-      cloudProvider: io.indextables.spark.io.CloudStorageProvider,
-      checkpointInfo: LastCheckpointInfo): Seq[Row] = {
+    resolvedPathStr: String,
+    transactionLogPath: Path,
+    cloudProvider: io.indextables.spark.io.CloudStorageProvider,
+    checkpointInfo: LastCheckpointInfo
+  ): Seq[Row] = {
 
     val stateDir = checkpointInfo.stateDir.getOrElse(
       throw new IllegalStateException("Avro state checkpoint missing stateDir")
     )
 
     val stateDirPath = new Path(transactionLogPath, stateDir).toString
-    val manifestIO = StateManifestIO(cloudProvider)
-    val manifest = manifestIO.readStateManifest(stateDirPath)
+    val manifestIO   = StateManifestIO(cloudProvider)
+    val manifest     = manifestIO.readStateManifest(stateDirPath)
 
-    val numManifests = manifest.manifests.size
+    val numManifests  = manifest.manifests.size
     val numTombstones = manifest.tombstones.size
-    val totalEntries = manifest.manifests.map(_.numEntries).sum
+    val totalEntries  = manifest.manifests.map(_.numEntries).sum
 
     val tombstoneRatio = if (totalEntries > 0) {
       numTombstones.toDouble / totalEntries
@@ -189,11 +189,11 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
   }
 
   private def describeJsonState(
-      resolvedPathStr: String,
-      cloudProvider: io.indextables.spark.io.CloudStorageProvider,
-      checkpointInfo: LastCheckpointInfo,
-      format: String): Seq[Row] = {
-
+    resolvedPathStr: String,
+    cloudProvider: io.indextables.spark.io.CloudStorageProvider,
+    checkpointInfo: LastCheckpointInfo,
+    format: String
+  ): Seq[Row] =
     Seq(
       Row(
         resolvedPathStr,
@@ -208,7 +208,6 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
         "OK"
       )
     )
-  }
 
   private def resolveTablePath(pathOrTable: String, sparkSession: SparkSession): Path =
     if (
@@ -220,7 +219,7 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
     } else {
       try {
         val tableIdentifier = sparkSession.sessionState.sqlParser.parseTableIdentifier(pathOrTable)
-        val catalog = sparkSession.sessionState.catalog
+        val catalog         = sparkSession.sessionState.catalog
         if (catalog.tableExists(tableIdentifier)) {
           val tableMetadata = catalog.getTableMetadata(tableIdentifier)
           new Path(tableMetadata.location)

@@ -24,27 +24,19 @@ import io.indextables.spark.RealAzureTestBase
 /**
  * Full lifecycle integration tests for Avro state format on real Azure Blob Storage.
  *
- * These tests validate the Avro transaction log format works correctly through
- * the complete table lifecycle on Azure:
- *   1. Write data and create Avro checkpoint
- *   2. Verify state format is "avro-state"
- *   3. Read data from Avro state
- *   4. Append data (incremental write after Avro checkpoint)
- *   5. Merge splits with Avro state
- *   6. Drop partition with Avro state
- *   7. Truncate time travel with Avro state
- *   8. Create new Avro checkpoint
- *   9. Verify final state and data integrity
+ * These tests validate the Avro transaction log format works correctly through the complete table lifecycle on Azure:
+ *   1. Write data and create Avro checkpoint 2. Verify state format is "avro-state" 3. Read data from Avro state 4.
+ *      Append data (incremental write after Avro checkpoint) 5. Merge splits with Avro state 6. Drop partition with
+ *      Avro state 7. Truncate time travel with Avro state 8. Create new Avro checkpoint 9. Verify final state and data
+ *      integrity
  *
  * Prerequisites:
  *   - Azure credentials configured via ~/.azure/credentials or environment variables
  *   - Azure container accessible for testing
  *
- * Run with:
- *   mvn test -DwildcardSuites='io.indextables.spark.transaction.avro.RealAzureAvroStateLifecycleTest'
+ * Run with: mvn test -DwildcardSuites='io.indextables.spark.transaction.avro.RealAzureAvroStateLifecycleTest'
  *
- * Configure container via system property:
- *   -Dtest.azure.container=your-test-container
+ * Configure container via system property: -Dtest.azure.container=your-test-container
  */
 class RealAzureAvroStateLifecycleTest extends RealAzureTestBase {
 
@@ -71,7 +63,7 @@ class RealAzureAvroStateLifecycleTest extends RealAzureTestBase {
   }
 
   test("Avro state full lifecycle on Azure: write -> checkpoint -> read -> merge -> drop partition -> truncate -> checkpoint -> read") {
-    val testId = generateTestId()
+    val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/avro-lifecycle-$testId"
 
     println(s"🚀 Starting Avro state lifecycle test at: $azurePath")
@@ -267,19 +259,19 @@ class RealAzureAvroStateLifecycleTest extends RealAzureTestBase {
     println(s"✅ Step 11 complete: Final count=$finalCount, sum(score)=$finalSum")
 
     println(s"""
-    |============================================
-    |🎉 AZURE AVRO STATE LIFECYCLE TEST COMPLETED
-    |============================================
-    |Path: $azurePath
-    |Format: avro-state (verified at each checkpoint)
-    |Final records: $finalCount
-    |Final sum(score): $finalSum
-    |============================================
+               |============================================
+               |🎉 AZURE AVRO STATE LIFECYCLE TEST COMPLETED
+               |============================================
+               |Path: $azurePath
+               |Format: avro-state (verified at each checkpoint)
+               |Final records: $finalCount
+               |Final sum(score): $finalSum
+               |============================================
     """.stripMargin)
   }
 
   test("Avro state on Azure: schema registry preserves docMappingJson") {
-    val testId = generateTestId()
+    val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/avro-schema-registry-$testId"
 
     println(s"🚀 Testing schema registry on Azure at: $azurePath")
@@ -320,9 +312,9 @@ class RealAzureAvroStateLifecycleTest extends RealAzureTestBase {
   }
 
   test("Avro state on Azure with abfss:// URL scheme") {
-    val testId = generateTestId()
+    val testId      = generateTestId()
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/avro-abfss-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/avro-abfss-$testId"
 
     println(s"🚀 Testing Avro state with abfss:// at: $abfssPath")
 
@@ -364,7 +356,7 @@ class RealAzureAvroStateLifecycleTest extends RealAzureTestBase {
   }
 
   test("Avro state on Azure: partition pruning with manifest bounds") {
-    val testId = generateTestId()
+    val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/avro-partition-pruning-$testId"
 
     println(s"🚀 Testing partition pruning on Azure at: $azurePath")
@@ -416,12 +408,12 @@ class RealAzureAvroStateLifecycleTest extends RealAzureTestBase {
       "OAuth credentials not available - skipping test"
     )
 
-    val tenantId = getTenantId.get
-    val clientId = getClientId.get
+    val tenantId     = getTenantId.get
+    val clientId     = getClientId.get
     val clientSecret = getClientSecret.get
-    val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
+    val storageAcct  = getStorageAccount.getOrElse("devstoreaccount1")
 
-    val testId = generateTestId()
+    val testId    = generateTestId()
     val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/avro-oauth-$testId"
 
     println(s"🚀 Testing Avro state with OAuth at: $abfssPath")

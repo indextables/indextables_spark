@@ -17,36 +17,34 @@
 
 package io.indextables.spark.util
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Tests for ConfigUtils Hadoop Configuration caching.
  *
- * The Hadoop Configuration cache is a performance optimization that avoids
- * repeated creation of expensive Configuration objects when processing
- * many splits.
+ * The Hadoop Configuration cache is a performance optimization that avoids repeated creation of expensive Configuration
+ * objects when processing many splits.
  */
 class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     // Clear the cache before each test for isolation
     ConfigUtils.clearHadoopConfigCache()
-  }
 
   test("getOrCreateHadoopConfiguration should return Configuration with indextables keys") {
     val config = Map(
       "spark.indextables.aws.accessKey" -> "AKIATEST",
       "spark.indextables.aws.secretKey" -> "secret",
-      "unrelated.key" -> "ignored"
+      "unrelated.key"                   -> "ignored"
     )
 
     val hadoopConf = ConfigUtils.getOrCreateHadoopConfiguration(config)
 
     hadoopConf.get("spark.indextables.aws.accessKey") shouldBe "AKIATEST"
     hadoopConf.get("spark.indextables.aws.secretKey") shouldBe "secret"
-    hadoopConf.get("unrelated.key") shouldBe null  // Non-indextables keys are not copied
+    hadoopConf.get("unrelated.key") shouldBe null // Non-indextables keys are not copied
   }
 
   test("getOrCreateHadoopConfiguration should return same instance for same config") {
@@ -59,7 +57,7 @@ class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAn
     val conf2 = ConfigUtils.getOrCreateHadoopConfiguration(config)
 
     // Should return the same cached instance
-    conf1 shouldBe theSameInstanceAs (conf2)
+    conf1 shouldBe theSameInstanceAs(conf2)
   }
 
   test("getOrCreateHadoopConfiguration should return different instances for different configs") {
@@ -70,7 +68,7 @@ class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAn
     val conf2 = ConfigUtils.getOrCreateHadoopConfiguration(config2)
 
     // Should be different instances with different values
-    conf1 should not be theSameInstanceAs (conf2)
+    conf1 should not be theSameInstanceAs(conf2)
     conf1.get("spark.indextables.aws.accessKey") shouldBe "AKIATEST1"
     conf2.get("spark.indextables.aws.accessKey") shouldBe "AKIATEST2"
   }
@@ -79,18 +77,18 @@ class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAn
     // These two configs have the same indextables keys, so should produce same cache entry
     val config1 = Map(
       "spark.indextables.aws.accessKey" -> "AKIATEST",
-      "spark.executor.memory" -> "4g"  // Not indextables, should be ignored
+      "spark.executor.memory"           -> "4g" // Not indextables, should be ignored
     )
     val config2 = Map(
       "spark.indextables.aws.accessKey" -> "AKIATEST",
-      "spark.executor.memory" -> "8g"  // Different non-indextables key
+      "spark.executor.memory"           -> "8g" // Different non-indextables key
     )
 
     val conf1 = ConfigUtils.getOrCreateHadoopConfiguration(config1)
     val conf2 = ConfigUtils.getOrCreateHadoopConfiguration(config2)
 
     // Should return the same cached instance since indextables keys are the same
-    conf1 shouldBe theSameInstanceAs (conf2)
+    conf1 shouldBe theSameInstanceAs(conf2)
   }
 
   test("clearHadoopConfigCache should invalidate cached configurations") {
@@ -103,7 +101,7 @@ class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAn
     val conf2 = ConfigUtils.getOrCreateHadoopConfiguration(config)
 
     // Should be different instances after cache clear
-    conf1 should not be theSameInstanceAs (conf2)
+    conf1 should not be theSameInstanceAs(conf2)
   }
 
   test("getOrCreateHadoopConfiguration should handle empty config") {
@@ -118,13 +116,9 @@ class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAn
     val config = Map("spark.indextables.aws.accessKey" -> "AKIATEST")
 
     // Run concurrent accesses
-    val results = (1 to 100).par.map { _ =>
-      ConfigUtils.getOrCreateHadoopConfiguration(config)
-    }.toList
+    val results = (1 to 100).par.map(_ => ConfigUtils.getOrCreateHadoopConfiguration(config)).toList
 
     // All results should be the same instance
-    results.foreach { conf =>
-      conf shouldBe theSameInstanceAs (results.head)
-    }
+    results.foreach(conf => conf shouldBe theSameInstanceAs(results.head))
   }
 }

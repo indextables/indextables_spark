@@ -143,7 +143,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
               filter
             }
           case None =>
-            logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias but no DataSourceV2Relation in subtree")
+            logger.debug(
+              s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias but no DataSourceV2Relation in subtree"
+            )
             filter
         }
       case filter @ Filter(condition, child) =>
@@ -193,8 +195,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     }
 
   /**
-   * Check if an expression is ONLY IndexQuery expressions (no Spark predicates).
-   * Used to identify NOT(IndexQuery) patterns that should be replaced with Literal(true).
+   * Check if an expression is ONLY IndexQuery expressions (no Spark predicates). Used to identify NOT(IndexQuery)
+   * patterns that should be replaced with Literal(true).
    *
    * Returns true for:
    *   - IndexQueryExpression
@@ -227,11 +229,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   /**
    * Convert IndexQuery expressions and store them for the ScanBuilder to retrieve.
    *
-   * This method now builds a mixed boolean filter tree that preserves the full OR/AND
-   * structure when IndexQuery expressions are combined with boolean operators. This fixes
-   * the bug where:
-   *   (url indexquery 'community') OR (url indexquery 'curl')
-   * Was incorrectly converted to AND semantics instead of OR.
+   * This method now builds a mixed boolean filter tree that preserves the full OR/AND structure when IndexQuery
+   * expressions are combined with boolean operators. This fixes the bug where: (url indexquery 'community') OR (url
+   * indexquery 'curl') Was incorrectly converted to AND semantics instead of OR.
    */
   private def convertIndexQueryExpressions(
     expr: Expression,
@@ -250,7 +250,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
     // Check if expression contains any IndexQuery expressions
     if (!containsIndexQueryExpression(expr)) {
-      return expr  // No IndexQuery, nothing to do
+      return expr // No IndexQuery, nothing to do
     }
 
     // Try to build a mixed boolean filter tree that preserves the full structure
@@ -282,8 +282,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
           // If NOT contains ANY IndexQuery, replace entire NOT with true
           // (Tantivy handles the full NOT via MixedBooleanFilter)
           case Not(child) if containsIndexQueryExpression(child) => Literal(true)
-          case _: IndexQueryExpression => Literal(true)
-          case _: IndexQueryAllExpression => Literal(true)
+          case _: IndexQueryExpression                           => Literal(true)
+          case _: IndexQueryAllExpression                        => Literal(true)
         }
         transformedExpr
 
@@ -323,7 +323,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
                 indexQueries += IndexQueryAllFilter(queryString)
                 Literal(true)
               case _ =>
-                logger.debug(s"V2IndexQueryExpressionRule: Unable to extract query from IndexQueryAll, using Literal(true)")
+                logger.debug(
+                  s"V2IndexQueryExpressionRule: Unable to extract query from IndexQueryAll, using Literal(true)"
+                )
                 Literal(true)
             }
         }
@@ -341,9 +343,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   }
 
   /**
-   * Build a mixed boolean filter tree from a Catalyst expression.
-   * Returns Some(filter) if successful, None if the expression structure
-   * can't be represented (e.g., complex expressions we don't support).
+   * Build a mixed boolean filter tree from a Catalyst expression. Returns Some(filter) if successful, None if the
+   * expression structure can't be represented (e.g., complex expressions we don't support).
    */
   private def buildMixedBooleanFilter(expr: Expression): Option[MixedBooleanFilter] = {
     import org.apache.spark.sql.catalyst.expressions.{And, Or, Not, Literal => CatLiteral}
@@ -368,13 +369,13 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
       // Boolean combinations
       case Or(left, right) =>
         for {
-          leftFilter <- buildMixedBooleanFilter(left)
+          leftFilter  <- buildMixedBooleanFilter(left)
           rightFilter <- buildMixedBooleanFilter(right)
         } yield MixedOrFilter(leftFilter, rightFilter)
 
       case And(left, right) =>
         for {
-          leftFilter <- buildMixedBooleanFilter(left)
+          leftFilter  <- buildMixedBooleanFilter(left)
           rightFilter <- buildMixedBooleanFilter(right)
         } yield MixedAndFilter(leftFilter, rightFilter)
 
@@ -387,16 +388,23 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     }
   }
 
-  /**
-   * Convert a Catalyst expression to a Spark Filter.
-   * Returns None if the expression type is not supported.
-   */
+  /** Convert a Catalyst expression to a Spark Filter. Returns None if the expression type is not supported. */
   private def catalystExprToSparkFilter(expr: Expression): Option[org.apache.spark.sql.sources.Filter] = {
-    import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal, EqualTo => CatEqualTo,
-      GreaterThan => CatGreaterThan, GreaterThanOrEqual => CatGreaterThanOrEqual,
-      LessThan => CatLessThan, LessThanOrEqual => CatLessThanOrEqual,
-      In => CatIn, IsNull => CatIsNull, IsNotNull => CatIsNotNull,
-      And => CatAnd, Or => CatOr, Not => CatNot}
+    import org.apache.spark.sql.catalyst.expressions.{
+      AttributeReference,
+      Literal,
+      EqualTo => CatEqualTo,
+      GreaterThan => CatGreaterThan,
+      GreaterThanOrEqual => CatGreaterThanOrEqual,
+      LessThan => CatLessThan,
+      LessThanOrEqual => CatLessThanOrEqual,
+      In => CatIn,
+      IsNull => CatIsNull,
+      IsNotNull => CatIsNotNull,
+      And => CatAnd,
+      Or => CatOr,
+      Not => CatNot
+    }
     import org.apache.spark.sql.sources
 
     expr match {
@@ -451,27 +459,27 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
       case CatAnd(left, right) =>
         for {
-          leftFilter <- catalystExprToSparkFilter(left)
+          leftFilter  <- catalystExprToSparkFilter(left)
           rightFilter <- catalystExprToSparkFilter(right)
         } yield sources.And(leftFilter, rightFilter)
 
       case CatOr(left, right) =>
         for {
-          leftFilter <- catalystExprToSparkFilter(left)
+          leftFilter  <- catalystExprToSparkFilter(left)
           rightFilter <- catalystExprToSparkFilter(right)
         } yield sources.Or(leftFilter, rightFilter)
 
       case CatNot(child) =>
         catalystExprToSparkFilter(child).map(sources.Not)
 
-      case _ => None  // Unsupported expression type
+      case _ => None // Unsupported expression type
     }
   }
 
   /** Unwrap Spark internal types to Java types for Filter compatibility. */
   private def unwrapValue(value: Any): Any = value match {
     case utf8: org.apache.spark.unsafe.types.UTF8String => utf8.toString
-    case other => other
+    case other                                          => other
   }
 
   /**

@@ -17,9 +17,9 @@
 
 package io.indextables.spark.prewarm
 
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -28,19 +28,16 @@ import org.scalatest.BeforeAndAfterEach
 /**
  * Unit tests for AsyncPrewarmJobManager.
  *
- * Tests the singleton's concurrency limiting, job tracking, progress tracking,
- * and cleanup behavior.
+ * Tests the singleton's concurrency limiting, job tracking, progress tracking, and cleanup behavior.
  */
 class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     // Reset manager before each test
     AsyncPrewarmJobManager.reset()
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     AsyncPrewarmJobManager.reset()
-  }
 
   test("configure should initialize manager with specified settings") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 3, completedJobRetentionMs = 60000L)
@@ -83,7 +80,7 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
   test("tryStartJob should reject when at max capacity") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 1)
 
-    val jobStarted = new CountDownLatch(1)
+    val jobStarted     = new CountDownLatch(1)
     val jobCanComplete = new CountDownLatch(1)
 
     // Start first job (blocking)
@@ -109,9 +106,7 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
       tablePath = "s3://bucket/table",
       hostname = "host1",
       totalSplits = 5,
-      work = () => {
-        AsyncPrewarmJobResult("job-2", "s3://bucket/table", "host1", 5, 5, 50, true, None)
-      }
+      work = () => AsyncPrewarmJobResult("job-2", "s3://bucket/table", "host1", 5, 5, 50, true, None)
     )
 
     result2.isLeft shouldBe true
@@ -144,9 +139,7 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
       tablePath = "s3://bucket/table",
       hostname = "host1",
       totalSplits = 5,
-      work = () => {
-        AsyncPrewarmJobResult("duplicate-job", "s3://bucket/table", "host1", 5, 5, 50, true, None)
-      }
+      work = () => AsyncPrewarmJobResult("duplicate-job", "s3://bucket/table", "host1", 5, 5, 50, true, None)
     )
 
     result2.isLeft shouldBe true
@@ -159,7 +152,7 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
   test("getActiveJob should return running jobs") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 1)
 
-    val jobStarted = new CountDownLatch(1)
+    val jobStarted     = new CountDownLatch(1)
     val jobCanComplete = new CountDownLatch(1)
 
     AsyncPrewarmJobManager.tryStartJob(
@@ -187,8 +180,8 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
   test("getAllJobStatus should return both active and completed jobs") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 2, completedJobRetentionMs = 60000L)
 
-    val job1Completed = new CountDownLatch(1)
-    val job2Started = new CountDownLatch(1)
+    val job1Completed   = new CountDownLatch(1)
+    val job2Started     = new CountDownLatch(1)
     val job2CanComplete = new CountDownLatch(1)
 
     // Start first job (completes quickly)
@@ -238,7 +231,7 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
   test("incrementProgress should update job progress") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 1)
 
-    val progress = new AtomicInteger(0)
+    val progress     = new AtomicInteger(0)
     val jobCompleted = new CountDownLatch(1)
 
     AsyncPrewarmJobManager.tryStartJob(
@@ -264,9 +257,9 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
   test("cancelJob should mark job as cancelled") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 1)
 
-    val jobStarted = new CountDownLatch(1)
+    val jobStarted     = new CountDownLatch(1)
     val checkCancelled = new CountDownLatch(1)
-    val wasCancelled = new AtomicInteger(0)
+    val wasCancelled   = new AtomicInteger(0)
 
     AsyncPrewarmJobManager.tryStartJob(
       jobId = "cancel-job",
@@ -297,7 +290,7 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
   test("isJobCancelled should return false for non-cancelled jobs") {
     AsyncPrewarmJobManager.configure(maxConcurrentJobs = 1)
 
-    val jobStarted = new CountDownLatch(1)
+    val jobStarted     = new CountDownLatch(1)
     val jobCanComplete = new CountDownLatch(1)
 
     AsyncPrewarmJobManager.tryStartJob(

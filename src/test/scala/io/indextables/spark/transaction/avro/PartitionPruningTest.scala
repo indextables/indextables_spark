@@ -18,6 +18,7 @@
 package io.indextables.spark.transaction.avro
 
 import org.apache.spark.sql.sources._
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -50,7 +51,7 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val result = PartitionPruner.pruneManifests(manifests, filter)
 
     result should have size 2
-    result.map(_.path) should contain allOf("m2.avro", "m3.avro")
+    result.map(_.path) should contain allOf ("m2.avro", "m3.avro")
   }
 
   test("pruneManifests should prune by less than filter") {
@@ -65,7 +66,7 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val result = PartitionPruner.pruneManifests(manifests, filter)
 
     result should have size 2
-    result.map(_.path) should contain allOf("m1.avro", "m2.avro")
+    result.map(_.path) should contain allOf ("m1.avro", "m2.avro")
   }
 
   test("pruneManifests should prune by IN filter") {
@@ -81,23 +82,32 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val result = PartitionPruner.pruneManifests(manifests, filter)
 
     result should have size 2
-    result.map(_.path) should contain allOf("m2.avro", "m3.avro")
+    result.map(_.path) should contain allOf ("m2.avro", "m3.avro")
   }
 
   test("pruneManifests should handle AND filters") {
     val manifests = Seq(
-      createManifestInfo("m1.avro", Map(
-        "date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-15")),
-        "region" -> PartitionBounds(Some("us-east"), Some("us-east"))
-      )),
-      createManifestInfo("m2.avro", Map(
-        "date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-15")),
-        "region" -> PartitionBounds(Some("us-west"), Some("us-west"))
-      )),
-      createManifestInfo("m3.avro", Map(
-        "date" -> PartitionBounds(Some("2024-01-16"), Some("2024-01-31")),
-        "region" -> PartitionBounds(Some("us-east"), Some("us-east"))
-      ))
+      createManifestInfo(
+        "m1.avro",
+        Map(
+          "date"   -> PartitionBounds(Some("2024-01-01"), Some("2024-01-15")),
+          "region" -> PartitionBounds(Some("us-east"), Some("us-east"))
+        )
+      ),
+      createManifestInfo(
+        "m2.avro",
+        Map(
+          "date"   -> PartitionBounds(Some("2024-01-01"), Some("2024-01-15")),
+          "region" -> PartitionBounds(Some("us-west"), Some("us-west"))
+        )
+      ),
+      createManifestInfo(
+        "m3.avro",
+        Map(
+          "date"   -> PartitionBounds(Some("2024-01-16"), Some("2024-01-31")),
+          "region" -> PartitionBounds(Some("us-east"), Some("us-east"))
+        )
+      )
     )
 
     // Filter: date = "2024-01-10" AND region = "us-east"
@@ -120,7 +130,7 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val result = PartitionPruner.pruneManifests(manifests, filter)
 
     result should have size 2
-    result.map(_.path) should contain allOf("m1.avro", "m3.avro")
+    result.map(_.path) should contain allOf ("m1.avro", "m3.avro")
   }
 
   test("pruneManifests should include manifests without partition bounds") {
@@ -135,7 +145,7 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val result = PartitionPruner.pruneManifests(manifests, filter)
 
     result should have size 2
-    result.map(_.path) should contain allOf("m1.avro", "m2.avro")
+    result.map(_.path) should contain allOf ("m1.avro", "m2.avro")
   }
 
   test("pruneManifests should return all manifests when no filter provided") {
@@ -179,7 +189,7 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val result = PartitionPruner.pruneManifests(manifests, filter)
 
     result should have size 2
-    result.map(_.path) should contain allOf("m2.avro", "m3.avro")
+    result.map(_.path) should contain allOf ("m2.avro", "m3.avro")
   }
 
   test("boundsMatchFilter should handle IsNotNull filter") {
@@ -219,11 +229,17 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
 
     // Filter only on partition columns
     PartitionPruner.isPartitionFilter(EqualTo("date", "2024-01-01"), partitionColumns) shouldBe true
-    PartitionPruner.isPartitionFilter(And(EqualTo("date", "2024-01-01"), EqualTo("region", "us")), partitionColumns) shouldBe true
+    PartitionPruner.isPartitionFilter(
+      And(EqualTo("date", "2024-01-01"), EqualTo("region", "us")),
+      partitionColumns
+    ) shouldBe true
 
     // Filter includes non-partition column
     PartitionPruner.isPartitionFilter(EqualTo("id", 123), partitionColumns) shouldBe false
-    PartitionPruner.isPartitionFilter(And(EqualTo("date", "2024-01-01"), EqualTo("id", 123)), partitionColumns) shouldBe false
+    PartitionPruner.isPartitionFilter(
+      And(EqualTo("date", "2024-01-01"), EqualTo("id", 123)),
+      partitionColumns
+    ) shouldBe false
   }
 
   test("separateFilters should correctly split partition and data filters") {
@@ -242,21 +258,21 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
 
     partitionFilters.map {
       case EqualTo(attr, _) => attr
-      case _ => ""
-    } should contain allOf("date", "region")
+      case _                => ""
+    } should contain allOf ("date", "region")
 
     dataFilters.map {
-      case EqualTo(attr, _) => attr
+      case EqualTo(attr, _)     => attr
       case GreaterThan(attr, _) => attr
-      case _ => ""
-    } should contain allOf("id", "score")
+      case _                    => ""
+    } should contain allOf ("id", "score")
   }
 
   test("partition pruning should provide significant speedup on large manifest lists") {
     // Create 100 manifests with different date ranges
     val manifests = (1 to 100).map { i =>
       val startDate = f"2024-$i%02d-01"
-      val endDate = f"2024-$i%02d-28"
+      val endDate   = f"2024-$i%02d-28"
       createManifestInfo(s"m$i.avro", Map("month" -> PartitionBounds(Some(startDate), Some(endDate))))
     }
 
@@ -264,8 +280,8 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     val filter = EqualTo("month", "2024-06-15")
 
     val startTime = System.currentTimeMillis()
-    val result = PartitionPruner.pruneManifests(manifests, filter)
-    val duration = System.currentTimeMillis() - startTime
+    val result    = PartitionPruner.pruneManifests(manifests, filter)
+    val duration  = System.currentTimeMillis() - startTime
 
     // Should prune to 1 manifest
     result should have size 1
@@ -278,8 +294,9 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
   // Helper methods
 
   private def createManifestInfo(
-      path: String,
-      partitionBounds: Map[String, PartitionBounds]): ManifestInfo = {
+    path: String,
+    partitionBounds: Map[String, PartitionBounds]
+  ): ManifestInfo =
     ManifestInfo(
       path = path,
       numEntries = 1000,
@@ -287,5 +304,4 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
       maxAddedAtVersion = 100,
       partitionBounds = Some(partitionBounds)
     )
-  }
 }

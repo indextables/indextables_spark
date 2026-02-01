@@ -22,9 +22,8 @@ import io.indextables.spark.TestBase
 /**
  * Test cases for IndexQuery operator with Common Table Expressions (CTEs).
  *
- * These tests verify that the indexquery operator works correctly when used
- * within CTE (WITH ... AS) SQL constructs, both in the inner CTE definition
- * and in the outer query that references the CTE.
+ * These tests verify that the indexquery operator works correctly when used within CTE (WITH ... AS) SQL constructs,
+ * both in the inner CTE definition and in the outer query that references the CTE.
  */
 class IndexQueryCTETest extends TestBase {
 
@@ -69,7 +68,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"CTE outer indexquery results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, content='${r.getString(1)}'"))
@@ -119,7 +118,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"CTE inner indexquery results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, content='${r.getString(1)}'"))
@@ -170,7 +169,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"CTE dual indexquery results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, title='${r.getString(1)}', desc='${r.getString(2)}'"))
@@ -221,7 +220,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"Multiple CTEs results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, content='${r.getString(1)}', views=${r.getInt(3)}"))
@@ -269,7 +268,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"CTE aggregation results: ${rows.length}")
     rows.foreach(r => println(s"  category=${r.getString(0)}, count=${r.getLong(1)}"))
@@ -319,15 +318,13 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"Nested CTE results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, content='${r.getString(1)}', score=${r.getInt(2)}"))
 
     // Results should have spark in content (from first CTE)
-    rows.foreach { row =>
-      assert(row.getString(1).toLowerCase.contains("spark"), "Content should contain 'spark'")
-    }
+    rows.foreach(row => assert(row.getString(1).toLowerCase.contains("spark"), "Content should contain 'spark'"))
   }
 
   test("CTE with IndexQuery and JOIN") {
@@ -374,7 +371,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"CTE with JOIN results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, content='${r.getString(1)}', author='${r.getString(2)}'"))
@@ -421,7 +418,7 @@ class IndexQueryCTETest extends TestBase {
     """
 
     val result = spark.sql(sql)
-    val rows = result.collect()
+    val rows   = result.collect()
 
     println(s"CTE phrase search results: ${rows.length}")
     rows.foreach(r => println(s"  id=${r.getString(0)}, content='${r.getString(1)}'"))
@@ -429,8 +426,7 @@ class IndexQueryCTETest extends TestBase {
     // Should find documents with "machine learning" phrase
     assert(rows.length >= 1, "Should find documents with 'machine learning' phrase")
     rows.foreach { row =>
-      assert(row.getString(1).toLowerCase.contains("machine learning"),
-        "Content should contain 'machine learning'")
+      assert(row.getString(1).toLowerCase.contains("machine learning"), "Content should contain 'machine learning'")
     }
   }
 }

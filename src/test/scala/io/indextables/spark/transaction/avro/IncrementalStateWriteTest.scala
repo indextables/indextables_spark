@@ -17,22 +17,20 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 /**
  * Tests for incremental state writes with shared manifests.
  *
  * These tests verify:
- *   1. Incremental writes only create new manifests for new files
- *   2. Existing manifests are reused via references
- *   3. Shared manifest directory is used correctly
- *   4. Re-read on retry picks up concurrent changes
- *   5. Compaction triggers are configurable
+ *   1. Incremental writes only create new manifests for new files 2. Existing manifests are reused via references 3.
+ *      Shared manifest directory is used correctly 4. Re-read on retry picks up concurrent changes 5. Compaction
+ *      triggers are configurable
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.IncrementalStateWriteTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.IncrementalStateWriteTest'
  */
 class IncrementalStateWriteTest extends TestBase {
 
@@ -72,11 +70,9 @@ class IncrementalStateWriteTest extends TestBase {
 
         // Read the state manifest to verify structure
         val manifestIO = StateManifestIO(cloudProvider)
-        val state1 = manifestIO.readStateManifest(result1.stateDir)
+        val state1     = manifestIO.readStateManifest(result1.stateDir)
         state1.manifests.size should be >= 1
-        state1.manifests.foreach { m =>
-          m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/")
-        }
+        state1.manifests.foreach(m => m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/"))
 
         // Write incremental state with 1 new file
         val newFiles = Seq(createTestFileEntry("file3.split", 2L))
@@ -98,13 +94,10 @@ class IncrementalStateWriteTest extends TestBase {
         state2.tombstones shouldBe empty
 
         // All manifests should reference the shared directory
-        state2.manifests.foreach { m =>
-          m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/")
-        }
+        state2.manifests.foreach(m => m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/"))
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -137,28 +130,27 @@ class IncrementalStateWriteTest extends TestBase {
 
         // Write incremental state with new file and removal
         // Use a high threshold to ensure incremental write (not compaction)
-        val newFiles = Seq(createTestFileEntry("file4.split", 2L))
+        val newFiles     = Seq(createTestFileEntry("file4.split", 2L))
         val removedPaths = Set("file2.split")
 
         val result2 = stateWriter.writeIncrementalWithRetry(
           newFiles,
           removedPaths,
           Map.empty,
-          CompactionConfig(tombstoneThreshold = 0.50)  // 50% threshold prevents compaction
+          CompactionConfig(tombstoneThreshold = 0.50) // 50% threshold prevents compaction
         )
 
         // Read state manifest
         val manifestIO = StateManifestIO(cloudProvider)
-        val state2 = manifestIO.readStateManifest(result2.stateDir)
+        val state2     = manifestIO.readStateManifest(result2.stateDir)
 
         // Should have 3 live files (3 - 1 removed + 1 new)
         state2.numFiles shouldBe 3
         // Should have tombstone for removed file
         state2.tombstones should contain("file2.split")
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -190,7 +182,7 @@ class IncrementalStateWriteTest extends TestBase {
 
         // Use config with low threshold to trigger compaction
         val compactionConfig = CompactionConfig(
-          tombstoneThreshold = 0.10,  // 10% threshold
+          tombstoneThreshold = 0.10, // 10% threshold
           maxManifests = 100
         )
 
@@ -203,15 +195,14 @@ class IncrementalStateWriteTest extends TestBase {
 
         // Read state manifest
         val manifestIO = StateManifestIO(cloudProvider)
-        val state2 = manifestIO.readStateManifest(result2.stateDir)
+        val state2     = manifestIO.readStateManifest(result2.stateDir)
 
         // After compaction, tombstones should be cleared
         state2.tombstones shouldBe empty
         state2.numFiles shouldBe 7
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -237,12 +228,12 @@ class IncrementalStateWriteTest extends TestBase {
           manifests = Seq(
             ManifestInfo(
               path = "manifests/manifest-1.avro",
-              numEntries = 110,  // 100 live + 10 tombstones
+              numEntries = 110, // 100 live + 10 tombstones
               minAddedAtVersion = 1L,
               maxAddedAtVersion = 1L
             )
           ),
-          tombstones = (1 to 10).map(i => s"removed$i.split"),  // 10 existing tombstones
+          tombstones = (1 to 10).map(i => s"removed$i.split"), // 10 existing tombstones
           schemaRegistry = Map.empty,
           protocolVersion = 4
         )
@@ -267,7 +258,7 @@ class IncrementalStateWriteTest extends TestBase {
           formatVersion = 1,
           stateVersion = 1L,
           createdAt = System.currentTimeMillis(),
-          numFiles = 100000,  // 100K files
+          numFiles = 100000, // 100K files
           totalBytes = 10000000L,
           manifests = Seq(
             ManifestInfo(
@@ -277,7 +268,7 @@ class IncrementalStateWriteTest extends TestBase {
               maxAddedAtVersion = 1L
             )
           ),
-          tombstones = Seq.empty,  // No existing tombstones
+          tombstones = Seq.empty, // No existing tombstones
           schemaRegistry = Map.empty,
           protocolVersion = 4
         )
@@ -289,14 +280,13 @@ class IncrementalStateWriteTest extends TestBase {
         // With 100K files and 150 removes: tombstoneRatio = 0.15% (well below 50%)
         // But 150 > 100, so large remove threshold triggers compaction
         val enabledLargeRemoveConfig = CompactionConfig(
-          tombstoneThreshold = 0.50,  // High threshold so tombstones don't trigger
+          tombstoneThreshold = 0.50, // High threshold so tombstones don't trigger
           largeRemoveThreshold = 100
         )
         stateWriter.needsCompaction(largeManifest, 150, enabledLargeRemoveConfig) shouldBe true
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -332,14 +322,11 @@ class IncrementalStateWriteTest extends TestBase {
 
         // Manifest should be in shared directory
         val manifestIO = StateManifestIO(cloudProvider)
-        val state = manifestIO.readStateManifest(result.stateDir)
-        state.manifests.foreach { m =>
-          m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/")
-        }
+        val state      = manifestIO.readStateManifest(result.stateDir)
+        state.manifests.foreach(m => m.path should startWith(StateConfig.SHARED_MANIFEST_DIR + "/"))
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -349,15 +336,21 @@ class IncrementalStateWriteTest extends TestBase {
 
       // First write
       val data1 = Seq((1, "doc1"), (2, "doc2"))
-      spark.createDataFrame(data1).toDF("id", "content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data1)
+        .toDF("id", "content")
+        .write
+        .format(provider)
         .mode("overwrite")
         .save(path)
 
       // Second write (append)
       val data2 = Seq((3, "doc3"), (4, "doc4"))
-      spark.createDataFrame(data2).toDF("id", "content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data2)
+        .toDF("id", "content")
+        .write
+        .format(provider)
         .mode("append")
         .save(path)
 
@@ -371,7 +364,7 @@ class IncrementalStateWriteTest extends TestBase {
     }
   }
 
-  private def createTestFileEntry(path: String, version: Long): FileEntry = {
+  private def createTestFileEntry(path: String, version: Long): FileEntry =
     FileEntry(
       path = path,
       partitionValues = Map.empty,
@@ -381,5 +374,4 @@ class IncrementalStateWriteTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

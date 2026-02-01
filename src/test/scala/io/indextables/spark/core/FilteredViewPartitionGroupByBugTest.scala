@@ -6,9 +6,8 @@ import io.indextables.spark.TestBase
 
 /**
  * Test to reproduce the "unexpected number of columns" bug that occurs when:
- * 1. A view is created with a filter
- * 2. A bucket aggregation (date_histogram) is run on the view
- * 3. Then a partition GROUP BY count(*) query is run on the view
+ *   1. A view is created with a filter 2. A bucket aggregation (date_histogram) is run on the view 3. Then a partition
+ *      GROUP BY count(*) query is run on the view
  *
  * The bucket aggregation corrupts state that affects the subsequent partition count.
  */
@@ -49,24 +48,28 @@ class FilteredViewPartitionGroupByBugTest extends TestBase {
 
       // Step 2: Run date_histogram on the view
       println("Step 2: Running date_histogram on filtered view...")
-      val histResult = spark.sql("""
+      val histResult = spark
+        .sql("""
         SELECT indextables_date_histogram(event_time, '1h') as hour_bucket, count(*) as cnt
         FROM my_view
         GROUP BY indextables_date_histogram(event_time, '1h')
         ORDER BY hour_bucket
-      """).collect()
+      """)
+        .collect()
 
       println("DateHistogram results:")
       histResult.foreach(row => println(s"  ${row.getTimestamp(0)} => ${row.getLong(1)}"))
 
       // Step 3: Run partition GROUP BY count(*) - THIS SHOULD FAIL
       println("\nStep 3: Running partition GROUP BY count(*)...")
-      val partitionResult = spark.sql("""
+      val partitionResult = spark
+        .sql("""
         SELECT load_date, count(*) as cnt
         FROM my_view
         GROUP BY load_date
         ORDER BY load_date
-      """).collect()
+      """)
+        .collect()
 
       println("Partition count results:")
       partitionResult.foreach(row => println(s"  ${row.getString(0)} => ${row.getLong(1)}"))

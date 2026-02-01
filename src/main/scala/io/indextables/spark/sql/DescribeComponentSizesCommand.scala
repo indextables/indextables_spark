@@ -74,11 +74,12 @@ case class DescribeComponentSizesCommand(
   )
 
   /**
-   * Resolve AWS credentials on the driver and return a modified config.
-   * This eliminates executor-side HTTP calls for credential providers like UnityCatalogAWSCredentialProvider.
+   * Resolve AWS credentials on the driver and return a modified config. This eliminates executor-side HTTP calls for
+   * credential providers like UnityCatalogAWSCredentialProvider.
    */
   private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: String): Map[String, String] = {
-    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+    val providerClass = config
+      .get("spark.indextables.aws.credentialsProviderClass")
       .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
 
     providerClass match {
@@ -86,7 +87,8 @@ case class DescribeComponentSizesCommand(
         try {
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
           val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config, normalizedPath
+            config,
+            normalizedPath
           )
 
           credentials match {
@@ -149,7 +151,9 @@ case class DescribeComponentSizesCommand(
         val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
           val parsed = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
           val filters = PartitionPredicateUtils.expressionsToFilters(parsed)
-          logger.info(s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning")
+          logger.info(
+            s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning"
+          )
           (parsed, filters)
         } else {
           (Seq.empty, Seq.empty)
@@ -168,7 +172,8 @@ case class DescribeComponentSizesCommand(
 
         // Apply in-memory partition filtering for any predicates not converted to Spark Filters
         if (parsedPredicates.nonEmpty) {
-          addActions = PartitionPredicateUtils.filterAddActionsByPredicates(addActions, partitionSchema, parsedPredicates)
+          addActions =
+            PartitionPredicateUtils.filterAddActionsByPredicates(addActions, partitionSchema, parsedPredicates)
           logger.info(s"After in-memory partition filtering: ${addActions.length} splits")
         }
 
@@ -179,7 +184,7 @@ case class DescribeComponentSizesCommand(
 
         // Broadcast config for executor access
         val broadcastConfig = sc.broadcast(mergedConfig)
-        val tablePathStr = resolvedPath.toString
+        val tablePathStr    = resolvedPath.toString
 
         // Create tasks with split metadata
         val tasks = addActions.map { addAction =>
@@ -192,7 +197,8 @@ case class DescribeComponentSizesCommand(
         logger.info(s"Processing ${tasks.length} splits for component sizes")
 
         // Execute tasks in parallel across executors
-        val results = sc.parallelize(tasks, math.min(tasks.length, sc.defaultParallelism))
+        val results = sc
+          .parallelize(tasks, math.min(tasks.length, sc.defaultParallelism))
           .flatMap(task => executeComponentSizeTask(task, broadcastConfig.value))
           .collect()
           .toSeq
@@ -228,7 +234,7 @@ case class DescribeComponentSizesCommand(
       val actualPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
 
       // Create cache config and manager
-      val cacheConfig = ConfigUtils.createSplitCacheConfig(config, Some(task.tablePath))
+      val cacheConfig  = ConfigUtils.createSplitCacheConfig(config, Some(task.tablePath))
       val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
 
       // Create split metadata from AddAction
@@ -250,20 +256,22 @@ case class DescribeComponentSizesCommand(
         }
 
         // Convert each component size entry to a Row
-        componentSizes.asScala.map { case (componentKey, sizeBytes) =>
-          val (componentType, fieldName) = parseComponentKey(componentKey)
-          Row(
-            task.addAction.path,
-            partitionValuesJson,
-            componentKey,
-            sizeBytes.toLong,
-            componentType,
-            fieldName
-          )
+        componentSizes.asScala.map {
+          case (componentKey, sizeBytes) =>
+            val (componentType, fieldName) = parseComponentKey(componentKey)
+            Row(
+              task.addAction.path,
+              partitionValuesJson,
+              componentKey,
+              sizeBytes.toLong,
+              componentType,
+              fieldName
+            )
         }.toSeq
 
       } finally
-        try { splitSearcher.close() } catch { case _: Exception => }
+        try splitSearcher.close()
+        catch { case _: Exception => }
 
     } catch {
       case e: Exception =>
@@ -298,8 +306,8 @@ case class DescribeComponentSizesCommand(
       ("fieldnorm", fieldName)
     } else if (componentKey.contains(".")) {
       // Generic field.type format
-      val lastDot = componentKey.lastIndexOf('.')
-      val fieldName = componentKey.substring(0, lastDot)
+      val lastDot       = componentKey.lastIndexOf('.')
+      val fieldName     = componentKey.substring(0, lastDot)
       val componentType = componentKey.substring(lastDot + 1)
       (componentType, fieldName)
     } else {
@@ -317,7 +325,7 @@ case class DescribeComponentSizesCommand(
     } else {
       try {
         val tableIdentifier = sparkSession.sessionState.sqlParser.parseTableIdentifier(pathOrTable)
-        val catalog = sparkSession.sessionState.catalog
+        val catalog         = sparkSession.sessionState.catalog
         if (catalog.tableExists(tableIdentifier)) {
           val tableMetadata = catalog.getTableMetadata(tableIdentifier)
           new Path(tableMetadata.location)

@@ -164,10 +164,8 @@ class AvroPurgeOnWriteTest extends AnyFunSuite with BeforeAndAfterEach {
       .save(tablePath)
 
     // Verify state directory exists after purge
-    val txLogDir = new File(tablePath, "_transaction_log")
-    val stateDirectories = txLogDir.listFiles().filter { f =>
-      f.getName.startsWith("state-v") && f.isDirectory
-    }
+    val txLogDir         = new File(tablePath, "_transaction_log")
+    val stateDirectories = txLogDir.listFiles().filter(f => f.getName.startsWith("state-v") && f.isDirectory)
     assert(stateDirectories.length >= 1, "State directory should be preserved after purge")
 
     // Verify data is intact

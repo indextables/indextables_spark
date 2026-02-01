@@ -19,27 +19,24 @@ package io.indextables.spark.transaction.avro
 
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.sql.SerializableSplitMetadata
+import io.indextables.spark.TestBase
 
 /**
  * Tests for skipped files functionality with Avro state format.
  *
  * These tests verify:
- *   1. Skipped files are tracked correctly with Avro state
- *   2. State consolidation preserves skip information
- *   3. SerializableSplitMetadata works with Avro format
- *   4. Cooldown behavior works with Avro checkpoints
+ *   1. Skipped files are tracked correctly with Avro state 2. State consolidation preserves skip information 3.
+ *      SerializableSplitMetadata works with Avro format 4. Cooldown behavior works with Avro checkpoints
  *
  * This is the Avro equivalent of SkippedFilesIntegrationTest.
  *
- * Note: Since SkipAction entries are tracked in the transaction log (not the state),
- * some skip tracking functionality works similarly in both formats. These tests
- * verify the interaction between skipped files and Avro state.
+ * Note: Since SkipAction entries are tracked in the transaction log (not the state), some skip tracking functionality
+ * works similarly in both formats. These tests verify the interaction between skipped files and Avro state.
  */
 class AvroSkippedFilesTest extends TestBase {
 
-  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[AvroSkippedFilesTest])
+  private val logger   = org.slf4j.LoggerFactory.getLogger(classOf[AvroSkippedFilesTest])
   private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
 
   // ============================================================================
@@ -272,11 +269,13 @@ class AvroSkippedFilesTest extends TestBase {
       logger.info("Testing partitioned data tracking")
 
       // Create partitioned data
-      val df = spark.range(0, 300).selectExpr(
-        "id",
-        "CAST(id AS STRING) as text",
-        "CAST(id % 3 AS STRING) as partition_col"
-      )
+      val df = spark
+        .range(0, 300)
+        .selectExpr(
+          "id",
+          "CAST(id AS STRING) as text",
+          "CAST(id % 3 AS STRING) as partition_col"
+        )
       df.write.format(provider).partitionBy("partition_col").mode("overwrite").save(path)
 
       // Create checkpoint
@@ -287,11 +286,15 @@ class AvroSkippedFilesTest extends TestBase {
       stateResult(0).getAs[String]("format") shouldBe "avro-state"
 
       // Verify partition filtering works
-      val partition0 = spark.read.format(provider).load(path)
+      val partition0 = spark.read
+        .format(provider)
+        .load(path)
         .filter("partition_col = '0'")
       partition0.count() shouldBe 100 // 300 / 3
 
-      val partition1 = spark.read.format(provider).load(path)
+      val partition1 = spark.read
+        .format(provider)
+        .load(path)
         .filter("partition_col = '1'")
       partition1.count() shouldBe 100
 
@@ -319,13 +322,13 @@ class AvroSkippedFilesTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Verify state directory exists
-      val txLogDir = new java.io.File(s"$path/_transaction_log")
+      val txLogDir  = new java.io.File(s"$path/_transaction_log")
       val stateDirs = txLogDir.listFiles().filter(_.getName.startsWith("state-v"))
       stateDirs should not be empty
 
       // Verify manifest exists
       val latestStateDir = stateDirs.maxBy(_.getName)
-      val manifestFile = new java.io.File(latestStateDir, "_manifest.avro")
+      val manifestFile   = new java.io.File(latestStateDir, "_manifest.avro")
       manifestFile.exists() shouldBe true
 
       // Verify data integrity

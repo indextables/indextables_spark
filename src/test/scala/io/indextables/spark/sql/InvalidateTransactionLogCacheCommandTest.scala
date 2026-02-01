@@ -18,13 +18,13 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
 
     // Check result format
     val result = results.head
-    assert(result.getString(0) == "GLOBAL")                                     // table_path
+    assert(result.getString(0) == "GLOBAL")                                                    // table_path
     assert(result.getString(1).contains("global transaction log caches cleared successfully")) // result
     // Cache hits/misses may vary based on prior test activity, so we just check they are >= 0
-    assert(result.getLong(2) >= 0L)                                             // cache_hits_before
-    assert(result.getLong(3) >= 0L)                                             // cache_misses_before
+    assert(result.getLong(2) >= 0L) // cache_hits_before
+    assert(result.getLong(3) >= 0L) // cache_misses_before
     // hit_rate_before can be a percentage or "N/A" if no requests yet
-    assert(result.getString(4) != null)                                         // hit_rate_before
+    assert(result.getString(4) != null) // hit_rate_before
   }
 
   test("InvalidateTransactionLogCacheCommand should work for specific table path") {

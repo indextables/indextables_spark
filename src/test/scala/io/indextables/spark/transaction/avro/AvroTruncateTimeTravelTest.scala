@@ -210,10 +210,8 @@ class AvroTruncateTimeTravelTest extends TestBase {
     spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'").collect()
 
     // Verify Avro state directory exists
-    val txLogDir = new File(tablePath, "_transaction_log")
-    val stateDirectories = txLogDir.listFiles().filter { f =>
-      f.getName.startsWith("state-v") && f.isDirectory
-    }
+    val txLogDir         = new File(tablePath, "_transaction_log")
+    val stateDirectories = txLogDir.listFiles().filter(f => f.getName.startsWith("state-v") && f.isDirectory)
 
     // Should have at least one state directory
     stateDirectories.length should be >= 1

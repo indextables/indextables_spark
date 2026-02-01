@@ -17,11 +17,12 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 class GarbageCollectionTest extends TestBase {
 
@@ -67,9 +68,8 @@ class GarbageCollectionTest extends TestBase {
         // Verify we can still read the latest state
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
         streamingReader.getCurrentVersion shouldBe 20
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -111,9 +111,8 @@ class GarbageCollectionTest extends TestBase {
         // Verify we can read the latest
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
         streamingReader.getCurrentVersion shouldBe 20
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -157,13 +156,12 @@ class GarbageCollectionTest extends TestBase {
 
         // Verify final state
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
-        val metadata = streamingReader.getStateMetadata
+        val metadata        = streamingReader.getStateMetadata
         metadata shouldBe defined
         metadata.get.stateVersion shouldBe 10
         metadata.get.numFiles shouldBe 140 // 150 - 10 removed
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -190,7 +188,7 @@ class GarbageCollectionTest extends TestBase {
         )
 
         // Check state directory contents
-        val stateDir = new Path(txLogPath, "state-v00000000000000000005").toString
+        val stateDir   = new Path(txLogPath, "state-v00000000000000000005").toString
         val stateFiles = cloudProvider.listFiles(stateDir, recursive = true)
 
         // Should have _manifest.avro
@@ -198,9 +196,8 @@ class GarbageCollectionTest extends TestBase {
 
         // Should have at least one .avro manifest file
         stateFiles.exists(_.path.endsWith(".avro")) shouldBe true
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -245,18 +242,18 @@ class GarbageCollectionTest extends TestBase {
         streamingReader.getCurrentVersion shouldBe 0
         streamingReader.getStateMetadata shouldBe None
         streamingReader.getChangesSince(0).adds shouldBe empty
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -277,5 +274,4 @@ class GarbageCollectionTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

@@ -265,24 +265,23 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       // Drop 2023 partitions
       spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2023'").collect()
 
-    // Use DESCRIBE TRANSACTION LOG to verify remove actions
-    // Schema: version, log_file_path, action_type, path, partition_values, ...
-    val describeResult = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' INCLUDE ALL").collect()
+      // Use DESCRIBE TRANSACTION LOG to verify remove actions
+      // Schema: version, log_file_path, action_type, path, partition_values, ...
+      val describeResult = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' INCLUDE ALL").collect()
 
-    // Should have at least one remove action for the dropped partition
-    // action_type is at index 2
-    val removeActions = describeResult.filter(_.getString(2) == "remove")
-    assert(removeActions.length >= 1, s"Expected at least one remove action, got: ${removeActions.length}")
+      // Should have at least one remove action for the dropped partition
+      // action_type is at index 2
+      val removeActions = describeResult.filter(_.getString(2) == "remove")
+      assert(removeActions.length >= 1, s"Expected at least one remove action, got: ${removeActions.length}")
 
-    // The 'path' column (index 3) should contain the split file path
-    val removeActionPath = removeActions(0).getString(3)
-    assert(
-      removeActionPath != null && removeActionPath.endsWith(".split"),
-      s"Expected remove action for a .split file, got: $removeActionPath"
-    )
-    } finally {
+      // The 'path' column (index 3) should contain the split file path
+      val removeActionPath = removeActions(0).getString(3)
+      assert(
+        removeActionPath != null && removeActionPath.endsWith(".split"),
+        s"Expected remove action for a .split file, got: $removeActionPath"
+      )
+    } finally
       spark.conf.unset("spark.indextables.state.format")
-    }
   }
 
   test("PURGE INDEXTABLE should clean up files from dropped partitions after retention") {
@@ -472,7 +471,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(count2 == 4, s"Expected 4 records after second insert, got $count2")
 
     // Verify both partitions exist
-    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val df               = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val partition01Count = df.filter($"partition_key" === "01").count()
     val partition02Count = df.filter($"partition_key" === "02").count()
     println(s"Partition counts: 01=$partition01Count, 02=$partition02Count")
@@ -484,7 +483,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE partition_key = '02'").collect()
     dropResult.foreach(r => println(s"Drop result: ${r.mkString(", ")}"))
 
-    val dropStatus = dropResult(0).getString(1)
+    val dropStatus  = dropResult(0).getString(1)
     val dropMessage = dropResult(0).getString(5)
     println(s"Drop status: $dropStatus, message: $dropMessage")
 
@@ -493,14 +492,21 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(dropResult(0).getLong(2) == 1, s"Expected 1 partition dropped, got ${dropResult(0).getLong(2)}")
 
     // Verify partition 02 is dropped but partition 01 still exists
-    val afterDropCount = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+    val afterDropCount =
+      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
     println(s"After drop 02: count=$afterDropCount")
     assert(afterDropCount == 2, s"Expected 2 records after dropping partition 02, got $afterDropCount")
 
-    val afterDrop01 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .load(tablePath).filter($"partition_key" === "01").count()
-    val afterDrop02 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .load(tablePath).filter($"partition_key" === "02").count()
+    val afterDrop01 = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+      .filter($"partition_key" === "01")
+      .count()
+    val afterDrop02 = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+      .filter($"partition_key" === "02")
+      .count()
     println(s"After drop: partition 01=$afterDrop01, partition 02=$afterDrop02")
 
     assert(afterDrop01 == 2, s"Partition 01 should still have 2 records, got $afterDrop01")
@@ -585,7 +591,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE partition_key = '02'").collect()
       dropResult.foreach(r => println(s"[AVRO] Drop result: ${r.mkString(", ")}"))
 
-      val dropStatus = dropResult(0).getString(1)
+      val dropStatus  = dropResult(0).getString(1)
       val dropMessage = dropResult(0).getString(5)
       println(s"[AVRO] Drop status: $dropStatus, message: $dropMessage")
 
@@ -594,23 +600,29 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       assert(dropResult(0).getLong(2) == 1, s"Expected 1 partition dropped, got ${dropResult(0).getLong(2)}")
 
       // Verify partition 02 is dropped but partition 01 still exists
-      val afterDropCount = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      val afterDropCount =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
       println(s"[AVRO] After drop 02: count=$afterDropCount")
       assert(afterDropCount == 2, s"Expected 2 records after dropping partition 02, got $afterDropCount")
 
-      val afterDrop01 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .load(tablePath).filter($"partition_key" === "01").count()
-      val afterDrop02 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .load(tablePath).filter($"partition_key" === "02").count()
+      val afterDrop01 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+        .filter($"partition_key" === "01")
+        .count()
+      val afterDrop02 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+        .filter($"partition_key" === "02")
+        .count()
       println(s"[AVRO] After drop: partition 01=$afterDrop01, partition 02=$afterDrop02")
 
       assert(afterDrop01 == 2, s"Partition 01 should still have 2 records, got $afterDrop01")
       assert(afterDrop02 == 0, s"Partition 02 should be empty, got $afterDrop02")
 
       println("=== [AVRO] Test passed: DROP PARTITIONS works correctly with separate inserts ===")
-    } finally {
+    } finally
       spark.conf.unset("spark.indextables.state.format")
-    }
   }
 
   test("Multiple DROP INDEXTABLES PARTITIONS operations should be cumulative") {

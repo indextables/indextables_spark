@@ -17,13 +17,12 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.AddAction
-
-import org.slf4j.LoggerFactory
-
 import scala.util.{Failure, Success, Try}
 import scala.util.Random
+
+import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.AddAction
+import org.slf4j.LoggerFactory
 
 /**
  * Writer for Avro state files with support for incremental and compacted writes.
@@ -35,19 +34,19 @@ import scala.util.Random
  *   - Partition bounds computation for partition pruning
  */
 class StateWriter(
-    cloudProvider: CloudStorageProvider,
-    transactionLogPath: String,
-    compression: String = StateConfig.COMPRESSION_DEFAULT,
-    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT,
-    entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT,
-    retryConfig: StateRetryConfig = StateRetryConfig()) {
+  cloudProvider: CloudStorageProvider,
+  transactionLogPath: String,
+  compression: String = StateConfig.COMPRESSION_DEFAULT,
+  compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT,
+  entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT,
+  retryConfig: StateRetryConfig = StateRetryConfig()) {
 
   private val log = LoggerFactory.getLogger(getClass)
 
-  private val manifestIO = StateManifestIO(cloudProvider)
+  private val manifestIO     = StateManifestIO(cloudProvider)
   private val manifestWriter = AvroManifestWriter(cloudProvider)
   private val manifestReader = AvroManifestReader(cloudProvider)
-  private val random = new Random()
+  private val random         = new Random()
 
   /**
    * Write a new state with automatic retry.
@@ -68,11 +67,12 @@ class StateWriter(
    *   The new state directory path
    */
   def writeState(
-      currentVersion: Long,
-      newFiles: Seq[FileEntry],
-      removedPaths: Set[String],
-      schemaRegistry: Map[String, String] = Map.empty,
-      forceCompaction: Boolean = false): String = {
+    currentVersion: Long,
+    newFiles: Seq[FileEntry],
+    removedPaths: Set[String],
+    schemaRegistry: Map[String, String] = Map.empty,
+    forceCompaction: Boolean = false
+  ): String = {
 
     val compactionConfig = if (forceCompaction) {
       CompactionConfig(forceCompaction = true)
@@ -94,8 +94,8 @@ class StateWriter(
   /**
    * Write a new state with automatic retry on concurrent write conflict.
    *
-   * This method handles version assignment and retry logic internally. If a concurrent writer
-   * creates the same state version, this method will increment the version and retry.
+   * This method handles version assignment and retry logic internally. If a concurrent writer creates the same state
+   * version, this method will increment the version and retry.
    *
    * @param currentVersion
    *   Initial transaction version to attempt
@@ -111,13 +111,14 @@ class StateWriter(
    *   if all retry attempts fail due to concurrent conflicts
    */
   def writeStateWithRetry(
-      currentVersion: Long,
-      liveFiles: Seq[FileEntry],
-      schemaRegistry: Map[String, String],
-      metadata: Option[String] = None): StateWriteResult = {
+    currentVersion: Long,
+    liveFiles: Seq[FileEntry],
+    schemaRegistry: Map[String, String],
+    metadata: Option[String] = None
+  ): StateWriteResult = {
 
-    var attempt = 1
-    var version = currentVersion
+    var attempt             = 1
+    var version             = currentVersion
     var lastConflictVersion = 0L
 
     while (attempt <= retryConfig.maxAttempts) {
@@ -134,8 +135,10 @@ class StateWriter(
 
         if (attempt <= retryConfig.maxAttempts) {
           val delay = calculateRetryDelay(attempt)
-          log.info(s"Concurrent state conflict at version $lastConflictVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
-            s"Retrying with version $version after ${delay}ms")
+          log.info(
+            s"Concurrent state conflict at version $lastConflictVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
+              s"Retrying with version $version after ${delay}ms"
+          )
           Thread.sleep(delay)
         }
       } else {
@@ -159,8 +162,10 @@ class StateWriter(
 
           if (attempt <= retryConfig.maxAttempts) {
             val delay = calculateRetryDelay(attempt)
-            log.info(s"Concurrent state conflict at version $lastConflictVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
-              s"Retrying with version $version after ${delay}ms")
+            log.info(
+              s"Concurrent state conflict at version $lastConflictVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
+                s"Retrying with version $version after ${delay}ms"
+            )
             Thread.sleep(delay)
           }
         }
@@ -179,9 +184,8 @@ class StateWriter(
   /**
    * Write a new state incrementally with automatic retry on concurrent write conflict.
    *
-   * This method performs incremental writes (reusing existing manifests) when possible,
-   * falling back to compaction when needed. On each retry, it re-reads the latest base
-   * state to incorporate changes from concurrent writers.
+   * This method performs incremental writes (reusing existing manifests) when possible, falling back to compaction when
+   * needed. On each retry, it re-reads the latest base state to incorporate changes from concurrent writers.
    *
    * CRITICAL: Re-reads base state on EVERY retry attempt to avoid stale manifest lists.
    *
@@ -201,21 +205,22 @@ class StateWriter(
    *   if all retry attempts fail due to concurrent conflicts
    */
   def writeIncrementalWithRetry(
-      newFiles: Seq[FileEntry],
-      removedPaths: Set[String],
-      schemaRegistry: Map[String, String],
-      compactionConfig: CompactionConfig = CompactionConfig(),
-      metadata: Option[String] = None,
-      minVersion: Option[Long] = None): StateWriteResult = {
+    newFiles: Seq[FileEntry],
+    removedPaths: Set[String],
+    schemaRegistry: Map[String, String],
+    compactionConfig: CompactionConfig = CompactionConfig(),
+    metadata: Option[String] = None,
+    minVersion: Option[Long] = None
+  ): StateWriteResult = {
 
-    var attempt = 1
+    var attempt             = 1
     var lastConflictVersion = 0L
 
     // Cache the base state - only re-read on version conflict
     // This optimization avoids re-reading manifests on retry when the conflict
     // was detected via conditional write (the base state hasn't changed)
     var cachedBaseState: Option[(String, StateManifest)] = None
-    var lastReadBaseVersion = -1L
+    var lastReadBaseVersion                              = -1L
 
     while (attempt <= retryConfig.maxAttempts) {
       // Only re-read base state if:
@@ -240,7 +245,7 @@ class StateWriter(
       }
 
       val newVersion = math.max(baseVersion + 1, minVersion.getOrElse(1L))
-      val stateDir = s"$transactionLogPath/${manifestIO.formatStateDir(newVersion)}"
+      val stateDir   = s"$transactionLogPath/${manifestIO.formatStateDir(newVersion)}"
 
       log.debug(s"Attempting incremental write at version $newVersion (attempt $attempt/${retryConfig.maxAttempts})")
 
@@ -252,8 +257,10 @@ class StateWriter(
 
         if (attempt <= retryConfig.maxAttempts) {
           val delay = calculateRetryDelay(attempt)
-          log.info(s"Concurrent state conflict at version $newVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
-            s"Re-reading base state and retrying after ${delay}ms")
+          log.info(
+            s"Concurrent state conflict at version $newVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
+              s"Re-reading base state and retrying after ${delay}ms"
+          )
           Thread.sleep(delay)
         }
       } else {
@@ -262,10 +269,27 @@ class StateWriter(
             val shouldCompact = needsCompaction(manifest, removedPaths.size, compactionConfig)
             if (shouldCompact) {
               log.info(s"Writing compacted state for version $newVersion (compaction triggered)")
-              tryWriteCompactedStateIncremental(stateDir, manifest, newFiles, removedPaths, newVersion, schemaRegistry, metadata, compactionConfig)
+              tryWriteCompactedStateIncremental(
+                stateDir,
+                manifest,
+                newFiles,
+                removedPaths,
+                newVersion,
+                schemaRegistry,
+                metadata,
+                compactionConfig
+              )
             } else {
               log.info(s"Writing incremental state for version $newVersion")
-              tryWriteIncrementalStateToShared(stateDir, manifest, newFiles, removedPaths, newVersion, schemaRegistry, metadata)
+              tryWriteIncrementalStateToShared(
+                stateDir,
+                manifest,
+                newFiles,
+                removedPaths,
+                newVersion,
+                schemaRegistry,
+                metadata
+              )
             }
           case None =>
             log.info(s"Writing initial state for version $newVersion")
@@ -290,8 +314,10 @@ class StateWriter(
 
           if (attempt <= retryConfig.maxAttempts) {
             val delay = calculateRetryDelay(attempt)
-            log.info(s"Concurrent state conflict at version $newVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
-              s"Retrying with next version after ${delay}ms")
+            log.info(
+              s"Concurrent state conflict at version $newVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
+                s"Retrying with next version after ${delay}ms"
+            )
             Thread.sleep(delay)
           }
         }
@@ -310,19 +336,21 @@ class StateWriter(
   /**
    * Try to write an incremental state to the shared manifest location.
    *
-   * New manifests are written to the shared `manifests/` directory and referenced
-   * by relative path from the state's `_manifest.avro`.
+   * New manifests are written to the shared `manifests/` directory and referenced by relative path from the state's
+   * `_manifest.avro`.
    *
-   * @return true if write succeeded, false if concurrent conflict detected
+   * @return
+   *   true if write succeeded, false if concurrent conflict detected
    */
   private def tryWriteIncrementalStateToShared(
-      newStateDir: String,
-      baseManifest: StateManifest,
-      newFiles: Seq[FileEntry],
-      removedPaths: Set[String],
-      currentVersion: Long,
-      schemaRegistry: Map[String, String],
-      metadata: Option[String]): Boolean = {
+    newStateDir: String,
+    baseManifest: StateManifest,
+    newFiles: Seq[FileEntry],
+    removedPaths: Set[String],
+    currentVersion: Long,
+    schemaRegistry: Map[String, String],
+    metadata: Option[String]
+  ): Boolean = {
 
     // Create state directory
     if (!cloudProvider.exists(newStateDir)) {
@@ -339,8 +367,8 @@ class StateWriter(
     if (newFiles.nonEmpty) {
       ensureSharedManifestDir()
 
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val manifestId       = manifestWriter.generateManifestId()
+      val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
       val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
       manifestWriter.writeManifest(fullManifestPath, newFiles, compression, compressionLevel)
@@ -352,12 +380,12 @@ class StateWriter(
     // Merge tombstones using Set for deduplication (O(n) instead of potential duplicates)
     // This prevents tombstone accumulation when the same file is removed multiple times
     val existingTombstoneSet = baseManifest.tombstones.toSet
-    val newTombstoneSet = existingTombstoneSet ++ removedPaths
-    val newTombstones = newTombstoneSet.toSeq
+    val newTombstoneSet      = existingTombstoneSet ++ removedPaths
+    val newTombstones        = newTombstoneSet.toSeq
 
     // Calculate live file count
     val totalEntriesInManifests = newManifests.map(_.numEntries).sum
-    val numLiveFiles = totalEntriesInManifests - newTombstoneSet.size
+    val numLiveFiles            = totalEntriesInManifests - newTombstoneSet.size
 
     // Calculate total bytes (estimate)
     val totalBytes = baseManifest.totalBytes + newFiles.map(_.size).sum
@@ -385,7 +413,8 @@ class StateWriter(
     if (written) {
       log.info(
         s"Wrote incremental state: version=$currentVersion, newFiles=${newFiles.size}, " +
-          s"newTombstones=${removedPaths.size}, totalManifests=${newManifests.size}")
+          s"newTombstones=${removedPaths.size}, totalManifests=${newManifests.size}"
+      )
     }
 
     written
@@ -394,20 +423,22 @@ class StateWriter(
   /**
    * Try to write a compacted state during incremental write (when compaction is needed).
    *
-   * Uses selective compaction when beneficial (only rewrite dirty manifests), falling
-   * back to full compaction (streaming or in-memory) when selective isn't worthwhile.
+   * Uses selective compaction when beneficial (only rewrite dirty manifests), falling back to full compaction
+   * (streaming or in-memory) when selective isn't worthwhile.
    *
-   * @return true if write succeeded, false if concurrent conflict detected
+   * @return
+   *   true if write succeeded, false if concurrent conflict detected
    */
   private def tryWriteCompactedStateIncremental(
-      newStateDir: String,
-      baseManifest: StateManifest,
-      newFiles: Seq[FileEntry],
-      removedPaths: Set[String],
-      currentVersion: Long,
-      schemaRegistry: Map[String, String],
-      metadata: Option[String],
-      compactionConfig: CompactionConfig = CompactionConfig()): Boolean = {
+    newStateDir: String,
+    baseManifest: StateManifest,
+    newFiles: Seq[FileEntry],
+    removedPaths: Set[String],
+    currentVersion: Long,
+    schemaRegistry: Map[String, String],
+    metadata: Option[String],
+    compactionConfig: CompactionConfig = CompactionConfig()
+  ): Boolean = {
 
     // Create state directory
     if (!cloudProvider.exists(newStateDir)) {
@@ -425,8 +456,16 @@ class StateWriter(
 
     // Try selective compaction first (only rewrite dirty manifests)
     val selectiveResult = trySelectiveCompaction(
-      newStateDir, baseManifest, baseStateDir, newFiles, tombstoneSet,
-      currentVersion, schemaRegistry, metadata, compactionConfig)
+      newStateDir,
+      baseManifest,
+      baseStateDir,
+      newFiles,
+      tombstoneSet,
+      currentVersion,
+      schemaRegistry,
+      metadata,
+      compactionConfig
+    )
 
     if (selectiveResult.isDefined) {
       return selectiveResult.get
@@ -437,7 +476,7 @@ class StateWriter(
 
     // Estimate if we need streaming compaction (avoid loading 1M+ entries into memory)
     val estimatedTotalEntries = baseManifest.manifests.map(_.numEntries).sum + newFiles.size
-    val useStreaming = estimatedTotalEntries > 100000 // Use streaming for 100K+ entries
+    val useStreaming          = estimatedTotalEntries > 100000 // Use streaming for 100K+ entries
 
     val (newManifests, liveFileCount, totalBytes) = if (useStreaming) {
       log.info(s"Using streaming compaction for $estimatedTotalEntries estimated entries")
@@ -470,7 +509,8 @@ class StateWriter(
     if (written) {
       log.info(
         s"Wrote compacted state: version=$currentVersion, files=$liveFileCount, " +
-          s"manifests=${newManifests.size}, tombstones=0, streaming=$useStreaming")
+          s"manifests=${newManifests.size}, tombstones=0, streaming=$useStreaming"
+      )
     }
 
     written
@@ -479,26 +519,26 @@ class StateWriter(
   /**
    * In-memory full compaction for smaller tables.
    *
-   * @return (newManifests, liveFileCount, totalBytes)
+   * @return
+   *   (newManifests, liveFileCount, totalBytes)
    */
   private def fullCompactInMemory(
-      baseManifest: StateManifest,
-      baseStateDir: String,
-      newFiles: Seq[FileEntry],
-      tombstoneSet: Set[String]): (Seq[ManifestInfo], Long, Long) = {
+    baseManifest: StateManifest,
+    baseStateDir: String,
+    newFiles: Seq[FileEntry],
+    tombstoneSet: Set[String]
+  ): (Seq[ManifestInfo], Long, Long) = {
 
-    val manifestPaths = manifestIO.resolveManifestPaths(baseManifest, transactionLogPath, baseStateDir)
-    val existingEntries = manifestReader.readManifestsParallel(manifestPaths)
+    val manifestPaths       = manifestIO.resolveManifestPaths(baseManifest, transactionLogPath, baseStateDir)
+    val existingEntries     = manifestReader.readManifestsParallel(manifestPaths)
     val liveExistingEntries = manifestIO.applyTombstones(existingEntries, baseManifest.tombstones)
 
     // Combine with new files, filter out removed
-    val allFiles = liveExistingEntries ++ newFiles
+    val allFiles  = liveExistingEntries ++ newFiles
     val liveFiles = allFiles.filterNot(f => tombstoneSet.contains(f.path))
 
     // Sort files by partition values for locality
-    val sortedFiles = liveFiles.sortBy { entry =>
-      entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
-    }
+    val sortedFiles = liveFiles.sortBy(entry => entry.partitionValues.toSeq.sorted.map(_._2).mkString("|"))
 
     // Partition into manifest chunks and write to shared location
     val manifestChunks = if (sortedFiles.isEmpty) {
@@ -508,8 +548,8 @@ class StateWriter(
     }
 
     val manifests = manifestChunks.map { chunk =>
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val manifestId       = manifestWriter.generateManifestId()
+      val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
       val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
       if (chunk.nonEmpty) {
@@ -527,21 +567,23 @@ class StateWriter(
   /**
    * Try selective compaction - only rewrite manifests with high tombstone ratios.
    *
-   * For a table with 10,000 partitions where only 1 partition has high tombstone ratio,
-   * this allows rewriting just that 1 manifest instead of all 10,000 partitions.
+   * For a table with 10,000 partitions where only 1 partition has high tombstone ratio, this allows rewriting just that
+   * 1 manifest instead of all 10,000 partitions.
    *
-   * @return Some(true) if write succeeded, Some(false) if conflict, None if selective not beneficial
+   * @return
+   *   Some(true) if write succeeded, Some(false) if conflict, None if selective not beneficial
    */
   private def trySelectiveCompaction(
-      newStateDir: String,
-      baseManifest: StateManifest,
-      baseStateDir: String,
-      newFiles: Seq[FileEntry],
-      tombstoneSet: Set[String],
-      currentVersion: Long,
-      schemaRegistry: Map[String, String],
-      metadata: Option[String],
-      compactionConfig: CompactionConfig): Option[Boolean] = {
+    newStateDir: String,
+    baseManifest: StateManifest,
+    baseStateDir: String,
+    newFiles: Seq[FileEntry],
+    tombstoneSet: Set[String],
+    currentVersion: Long,
+    schemaRegistry: Map[String, String],
+    metadata: Option[String],
+    compactionConfig: CompactionConfig
+  ): Option[Boolean] = {
 
     // Normalize manifest paths for reuse
     val normalizedManifests = normalizeManifestPaths(baseManifest.manifests, baseManifest.stateVersion)
@@ -550,21 +592,23 @@ class StateWriter(
     val manifestsWithTombstones = TombstoneDistributor.distributeTombstones(normalizedManifests, tombstoneSet)
 
     // Partition into keep (clean) and rewrite (dirty)
-    val (keepManifests, rewriteManifests) = TombstoneDistributor.selectivePartition(
-      manifestsWithTombstones, compactionConfig.tombstoneThreshold)
+    val (keepManifests, rewriteManifests) =
+      TombstoneDistributor.selectivePartition(manifestsWithTombstones, compactionConfig.tombstoneThreshold)
 
     // Check if selective compaction is beneficial
     if (!TombstoneDistributor.isSelectiveCompactionBeneficial(keepManifests, rewriteManifests)) {
       return None // Fall back to full compaction
     }
 
-    log.info(s"Using selective compaction: keeping ${keepManifests.size} clean manifests, " +
-      s"rewriting ${rewriteManifests.size} dirty manifests")
+    log.info(
+      s"Using selective compaction: keeping ${keepManifests.size} clean manifests, " +
+        s"rewriting ${rewriteManifests.size} dirty manifests"
+    )
 
     // Process dirty manifests - read entries, filter tombstones, write new manifest
     val rewrittenManifests = rewriteManifests.flatMap { dirtyManifest =>
       val manifestPath = manifestIO.resolveManifestPath(dirtyManifest, transactionLogPath, baseStateDir)
-      val entries = manifestReader.readManifest(manifestPath)
+      val entries      = manifestReader.readManifest(manifestPath)
 
       // Filter out tombstones
       val liveEntries = entries.filterNot(e => tombstoneSet.contains(e.path))
@@ -574,12 +618,10 @@ class StateWriter(
         None
       } else {
         // Sort by partition for locality
-        val sortedEntries = liveEntries.sortBy { entry =>
-          entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
-        }
+        val sortedEntries = liveEntries.sortBy(entry => entry.partitionValues.toSeq.sorted.map(_._2).mkString("|"))
 
-        val manifestId = manifestWriter.generateManifestId()
-        val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+        val manifestId       = manifestWriter.generateManifestId()
+        val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
         val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
         manifestWriter.writeManifest(fullManifestPath, sortedEntries, compression, compressionLevel)
@@ -589,8 +631,8 @@ class StateWriter(
 
     // Add new files manifest
     val newFilesManifest = if (newFiles.nonEmpty) {
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val manifestId       = manifestWriter.generateManifestId()
+      val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
       val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
       manifestWriter.writeManifest(fullManifestPath, newFiles, compression, compressionLevel)
@@ -601,11 +643,11 @@ class StateWriter(
 
     // Combine: kept manifests (cleared tombstone counts) + rewritten + new files
     val cleanedKeepManifests = keepManifests.map(_.copy(tombstoneCount = 0, liveEntryCount = -1))
-    val allManifests = cleanedKeepManifests ++ rewrittenManifests ++ newFilesManifest.toSeq
+    val allManifests         = cleanedKeepManifests ++ rewrittenManifests ++ newFilesManifest.toSeq
 
     // Calculate totals
     val liveFileCount = allManifests.map(_.numEntries).sum
-    val totalBytes = baseManifest.totalBytes + newFiles.map(_.size).sum // Estimate
+    val totalBytes    = baseManifest.totalBytes + newFiles.map(_.size).sum // Estimate
 
     // Merge schema registries
     val mergedRegistry = baseManifest.schemaRegistry ++ schemaRegistry
@@ -631,43 +673,45 @@ class StateWriter(
       log.info(
         s"Wrote selectively compacted state: version=$currentVersion, files=$liveFileCount, " +
           s"kept=${keepManifests.size}, rewritten=${rewriteManifests.size}, " +
-          s"manifests=${allManifests.size}, tombstones=0")
+          s"manifests=${allManifests.size}, tombstones=0"
+      )
     }
 
     Some(written)
   }
 
   /**
-   * Streaming compaction that processes manifests one at a time to avoid loading
-   * all entries into memory. For tables with 1M+ files, this reduces memory from
-   * ~500MB to ~50MB per manifest chunk.
+   * Streaming compaction that processes manifests one at a time to avoid loading all entries into memory. For tables
+   * with 1M+ files, this reduces memory from ~500MB to ~50MB per manifest chunk.
    *
-   * @return (newManifests, liveFileCount, totalBytes)
+   * @return
+   *   (newManifests, liveFileCount, totalBytes)
    */
   private def streamingCompact(
-      baseManifest: StateManifest,
-      baseStateDir: String,
-      newFiles: Seq[FileEntry],
-      tombstoneSet: Set[String],
-      currentVersion: Long): (Seq[ManifestInfo], Long, Long) = {
+    baseManifest: StateManifest,
+    baseStateDir: String,
+    newFiles: Seq[FileEntry],
+    tombstoneSet: Set[String],
+    currentVersion: Long
+  ): (Seq[ManifestInfo], Long, Long) = {
 
     import scala.collection.mutable.ArrayBuffer
 
-    val newManifests = ArrayBuffer[ManifestInfo]()
-    var currentChunk = ArrayBuffer[FileEntry]()
+    val newManifests  = ArrayBuffer[ManifestInfo]()
+    var currentChunk  = ArrayBuffer[FileEntry]()
     var liveFileCount = 0L
-    var totalBytes = 0L
+    var totalBytes    = 0L
 
     // Helper to flush current chunk to a new manifest
-    def flushChunk(): Unit = {
+    def flushChunk(): Unit =
       if (currentChunk.nonEmpty) {
         // Sort chunk by partition values for locality before writing
         val sortedChunk = currentChunk.sortBy { entry =>
           entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
         }.toSeq
 
-        val manifestId = manifestWriter.generateManifestId()
-        val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+        val manifestId       = manifestWriter.generateManifestId()
+        val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
         val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
         manifestWriter.writeManifest(fullManifestPath, sortedChunk, compression, compressionLevel)
@@ -675,12 +719,11 @@ class StateWriter(
 
         currentChunk.clear()
       }
-    }
 
     // Process existing manifests one at a time
     baseManifest.manifests.foreach { manifestInfo =>
       val manifestPath = manifestIO.resolveManifestPath(manifestInfo, transactionLogPath, baseStateDir)
-      val entries = manifestReader.readManifest(manifestPath)
+      val entries      = manifestReader.readManifest(manifestPath)
 
       // Filter out tombstones and add to current chunk
       entries.foreach { entry =>
@@ -715,15 +758,17 @@ class StateWriter(
 
     // Handle edge case of no live files
     if (newManifests.isEmpty) {
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val manifestId       = manifestWriter.generateManifestId()
+      val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
       val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
       manifestWriter.writeManifest(fullManifestPath, Seq.empty, compression, compressionLevel)
       newManifests += manifestWriter.createManifestInfo(manifestRelPath, Seq.empty)
     }
 
-    log.info(s"Streaming compaction complete: processed ${baseManifest.manifests.size} source manifests, " +
-      s"wrote ${newManifests.size} output manifests, $liveFileCount live files")
+    log.info(
+      s"Streaming compaction complete: processed ${baseManifest.manifests.size} source manifests, " +
+        s"wrote ${newManifests.size} output manifests, $liveFileCount live files"
+    )
 
     (newManifests.toSeq, liveFileCount, totalBytes)
   }
@@ -731,14 +776,16 @@ class StateWriter(
   /**
    * Try to write an initial state (no existing state) to the shared manifest location.
    *
-   * @return true if write succeeded, false if concurrent conflict detected
+   * @return
+   *   true if write succeeded, false if concurrent conflict detected
    */
   private def tryWriteInitialStateToShared(
-      newStateDir: String,
-      files: Seq[FileEntry],
-      currentVersion: Long,
-      schemaRegistry: Map[String, String],
-      metadata: Option[String]): Boolean = {
+    newStateDir: String,
+    files: Seq[FileEntry],
+    currentVersion: Long,
+    schemaRegistry: Map[String, String],
+    metadata: Option[String]
+  ): Boolean = {
 
     // Create state directory
     if (!cloudProvider.exists(newStateDir)) {
@@ -746,9 +793,7 @@ class StateWriter(
     }
 
     // Sort files by partition values for locality
-    val sortedFiles = files.sortBy { entry =>
-      entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
-    }
+    val sortedFiles = files.sortBy(entry => entry.partitionValues.toSeq.sorted.map(_._2).mkString("|"))
 
     // Ensure shared manifest directory exists
     ensureSharedManifestDir()
@@ -761,8 +806,8 @@ class StateWriter(
     }
 
     val newManifests = manifestChunks.map { chunk =>
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val manifestId       = manifestWriter.generateManifestId()
+      val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
       val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
       if (chunk.nonEmpty) {
@@ -794,7 +839,8 @@ class StateWriter(
     if (written) {
       log.info(
         s"Wrote initial state: version=$currentVersion, files=${files.size}, " +
-          s"manifests=${newManifests.size}")
+          s"manifests=${newManifests.size}"
+      )
     }
 
     written
@@ -803,25 +849,26 @@ class StateWriter(
   /**
    * Normalize manifest paths for referencing from a new state.
    *
-   * Legacy paths (created by CHECKPOINT) are relative to their original state directory.
-   * When referencing them from a new state, we need to include the state directory prefix
-   * so they can be resolved correctly.
+   * Legacy paths (created by CHECKPOINT) are relative to their original state directory. When referencing them from a
+   * new state, we need to include the state directory prefix so they can be resolved correctly.
    *
    * Path formats:
    *   - "manifests/manifest-xxx.avro" → shared manifest, keep as-is
    *   - "state-v00000001/manifest-xxx.avro" → already normalized, keep as-is
    *   - "manifest-xxx.avro" → legacy per-state, convert to "state-v00000001/manifest-xxx.avro"
    */
-  private def normalizeManifestPaths(manifests: Seq[ManifestInfo], baseStateVersion: Long): Seq[ManifestInfo] = {
+  private def normalizeManifestPaths(manifests: Seq[ManifestInfo], baseStateVersion: Long): Seq[ManifestInfo] =
     manifests.map { m =>
       val path = m.path
-      if (path.startsWith(StateConfig.SHARED_MANIFEST_DIR + "/") ||
-          path.startsWith("state-v") ||
-          path.startsWith("s3://") ||
-          path.startsWith("abfss://") ||
-          path.startsWith("wasbs://") ||
-          path.startsWith("gs://") ||
-          path.startsWith("/")) {
+      if (
+        path.startsWith(StateConfig.SHARED_MANIFEST_DIR + "/") ||
+        path.startsWith("state-v") ||
+        path.startsWith("s3://") ||
+        path.startsWith("abfss://") ||
+        path.startsWith("wasbs://") ||
+        path.startsWith("gs://") ||
+        path.startsWith("/")
+      ) {
         // Already normalized or absolute path
         m
       } else {
@@ -830,11 +877,8 @@ class StateWriter(
         m.copy(path = normalizedPath)
       }
     }
-  }
 
-  /**
-   * Ensure the shared manifest directory exists.
-   */
+  /** Ensure the shared manifest directory exists. */
   private def ensureSharedManifestDir(): Unit = {
     val sharedDir = s"$transactionLogPath/${StateConfig.SHARED_MANIFEST_DIR}"
     if (!cloudProvider.exists(sharedDir)) {
@@ -847,14 +891,16 @@ class StateWriter(
    *
    * Writes manifests to the shared `manifests/` directory for cross-version reuse.
    *
-   * @return true if write succeeded, false if concurrent conflict detected
+   * @return
+   *   true if write succeeded, false if concurrent conflict detected
    */
   private def tryWriteCompactedState(
-      stateDir: String,
-      liveFiles: Seq[FileEntry],
-      version: Long,
-      schemaRegistry: Map[String, String],
-      metadata: Option[String]): Boolean = {
+    stateDir: String,
+    liveFiles: Seq[FileEntry],
+    version: Long,
+    schemaRegistry: Map[String, String],
+    metadata: Option[String]
+  ): Boolean = {
 
     // Create directory (safe - directory names are versioned)
     if (!cloudProvider.exists(stateDir)) {
@@ -865,9 +911,7 @@ class StateWriter(
     ensureSharedManifestDir()
 
     // Sort files by partition values for locality
-    val sortedFiles = liveFiles.sortBy { entry =>
-      entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
-    }
+    val sortedFiles = liveFiles.sortBy(entry => entry.partitionValues.toSeq.sorted.map(_._2).mkString("|"))
 
     // Partition into manifest chunks
     val manifestChunks = if (sortedFiles.isEmpty) {
@@ -878,8 +922,8 @@ class StateWriter(
 
     // Write new manifests to shared location (safe - UUID naming ensures uniqueness)
     val newManifests = manifestChunks.map { chunk =>
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val manifestId       = manifestWriter.generateManifestId()
+      val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
       val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
       if (chunk.nonEmpty) {
@@ -915,10 +959,8 @@ class StateWriter(
     written
   }
 
-  /**
-   * Find the next available state version by scanning existing state directories.
-   */
-  private def findNextAvailableVersion(afterVersion: Long): Long = {
+  /** Find the next available state version by scanning existing state directories. */
+  private def findNextAvailableVersion(afterVersion: Long): Long =
     Try {
       val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
       val manifestFiles = files
@@ -938,14 +980,11 @@ class StateWriter(
       case Success(v) => v
       case Failure(_) => afterVersion + 1
     }
-  }
 
-  /**
-   * Calculate exponential backoff delay with jitter for retry attempts.
-   */
+  /** Calculate exponential backoff delay with jitter for retry attempts. */
   private def calculateRetryDelay(attempt: Int): Long = {
     val exponentialDelay = retryConfig.baseDelayMs * math.pow(2, attempt - 1).toLong
-    val cappedDelay = math.min(exponentialDelay, retryConfig.maxDelayMs)
+    val cappedDelay      = math.min(exponentialDelay, retryConfig.maxDelayMs)
     // Add jitter: 75% to 125% of the calculated delay
     val jitter = 0.75 + random.nextDouble() * 0.5
     (cappedDelay * jitter).toLong
@@ -954,14 +993,15 @@ class StateWriter(
   /**
    * Write a compacted state from a list of live files.
    *
-   * This is used both for compaction and for initial checkpoint creation from AddActions.
-   * Writes manifests to the shared `manifests/` directory for cross-version reuse.
+   * This is used both for compaction and for initial checkpoint creation from AddActions. Writes manifests to the
+   * shared `manifests/` directory for cross-version reuse.
    */
   def writeCompactedStateFromFiles(
-      newStateDir: String,
-      liveFiles: Seq[FileEntry],
-      currentVersion: Long,
-      schemaRegistry: Map[String, String]): Unit = {
+    newStateDir: String,
+    liveFiles: Seq[FileEntry],
+    currentVersion: Long,
+    schemaRegistry: Map[String, String]
+  ): Unit = {
 
     if (!cloudProvider.exists(newStateDir)) {
       cloudProvider.createDirectory(newStateDir)
@@ -971,9 +1011,7 @@ class StateWriter(
     ensureSharedManifestDir()
 
     // Sort files by partition values for locality
-    val sortedFiles = liveFiles.sortBy { entry =>
-      entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
-    }
+    val sortedFiles = liveFiles.sortBy(entry => entry.partitionValues.toSeq.sorted.map(_._2).mkString("|"))
 
     // Partition into manifest chunks
     val manifestChunks = if (sortedFiles.isEmpty) {
@@ -983,19 +1021,20 @@ class StateWriter(
     }
 
     // Write new manifests to shared location with partition bounds
-    val newManifests = manifestChunks.zipWithIndex.map { case (chunk, idx) =>
-      val manifestId = manifestWriter.generateManifestId()
-      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
-      val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
+    val newManifests = manifestChunks.zipWithIndex.map {
+      case (chunk, idx) =>
+        val manifestId       = manifestWriter.generateManifestId()
+        val manifestRelPath  = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+        val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
 
-      if (chunk.nonEmpty) {
-        manifestWriter.writeManifest(fullManifestPath, chunk, compression, compressionLevel)
-      } else {
-        // Write empty manifest for consistency
-        manifestWriter.writeManifest(fullManifestPath, Seq.empty, compression, compressionLevel)
-      }
+        if (chunk.nonEmpty) {
+          manifestWriter.writeManifest(fullManifestPath, chunk, compression, compressionLevel)
+        } else {
+          // Write empty manifest for consistency
+          manifestWriter.writeManifest(fullManifestPath, Seq.empty, compression, compressionLevel)
+        }
 
-      manifestWriter.createManifestInfo(manifestRelPath, chunk)
+        manifestWriter.createManifestInfo(manifestRelPath, chunk)
     }
 
     // Write clean manifest (no tombstones after compaction)
@@ -1015,7 +1054,8 @@ class StateWriter(
 
     log.info(
       s"Wrote compacted state: version=$currentVersion, files=${liveFiles.size}, " +
-        s"manifests=${newManifests.size}, tombstones=0")
+        s"manifests=${newManifests.size}, tombstones=0"
+    )
   }
 
   /**
@@ -1031,9 +1071,10 @@ class StateWriter(
    *   true if compaction should be performed
    */
   def needsCompaction(
-      manifest: StateManifest,
-      newRemoves: Int,
-      config: CompactionConfig = CompactionConfig()): Boolean = {
+    manifest: StateManifest,
+    newRemoves: Int,
+    config: CompactionConfig = CompactionConfig()
+  ): Boolean = {
 
     // Force compaction if requested
     if (config.forceCompaction) {
@@ -1051,7 +1092,7 @@ class StateWriter(
     }
 
     val tombstoneRatio = totalTombstones.toDouble / manifest.numFiles
-    val manifestCount = manifest.manifests.size
+    val manifestCount  = manifest.manifests.size
 
     // Compact when:
     // 1. Tombstones exceed threshold (configurable, default 10%)
@@ -1069,16 +1110,15 @@ class StateWriter(
       log.debug(
         s"Compaction needed: tombstoneRatio=$tombstoneRatio (threshold=${config.tombstoneThreshold}), " +
           s"manifestCount=$manifestCount (max=${config.maxManifests}), " +
-          s"newRemoves=$newRemoves (threshold=${config.largeRemoveThreshold})")
+          s"newRemoves=$newRemoves (threshold=${config.largeRemoveThreshold})"
+      )
     }
 
     shouldCompact
   }
 
-  /**
-   * Find the latest state directory and its manifest.
-   */
-  private def findLatestState(): Option[(String, StateManifest)] = {
+  /** Find the latest state directory and its manifest. */
+  private def findLatestState(): Option[(String, StateManifest)] =
     Try {
       // List all files recursively and look for _manifest.avro files in state directories
       val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
@@ -1091,10 +1131,12 @@ class StateWriter(
       }
 
       // Extract state directory paths from manifest file paths
-      val stateDirs = manifestFiles.map { f =>
-        // Remove /_manifest.avro from the path to get the state directory
-        f.path.stripSuffix("/_manifest.avro")
-      }.filter(p => manifestIO.parseStateDirVersion(p).isDefined)
+      val stateDirs = manifestFiles
+        .map { f =>
+          // Remove /_manifest.avro from the path to get the state directory
+          f.path.stripSuffix("/_manifest.avro")
+        }
+        .filter(p => manifestIO.parseStateDirVersion(p).isDefined)
 
       if (stateDirs.isEmpty) {
         return None
@@ -1116,17 +1158,14 @@ class StateWriter(
         log.debug(s"No existing state found: ${e.getMessage}")
         None
     }
-  }
 
-  /**
-   * Convert AddActions to FileEntries for writing.
-   */
+  /** Convert AddActions to FileEntries for writing. */
   def convertAddActionsToFileEntries(
-      adds: Seq[AddAction],
-      version: Long,
-      timestamp: Long = System.currentTimeMillis()): Seq[FileEntry] = {
+    adds: Seq[AddAction],
+    version: Long,
+    timestamp: Long = System.currentTimeMillis()
+  ): Seq[FileEntry] =
     adds.map(add => FileEntry.fromAddAction(add, version, timestamp))
-  }
 }
 
 object StateWriter {
@@ -1150,12 +1189,12 @@ object StateWriter {
    *   StateWriter instance
    */
   def apply(
-      cloudProvider: CloudStorageProvider,
-      transactionLogPath: String,
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT,
-      entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT,
-      retryConfig: StateRetryConfig = StateRetryConfig()): StateWriter = {
+    cloudProvider: CloudStorageProvider,
+    transactionLogPath: String,
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT,
+    entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT,
+    retryConfig: StateRetryConfig = StateRetryConfig()
+  ): StateWriter =
     new StateWriter(cloudProvider, transactionLogPath, compression, compressionLevel, entriesPerManifest, retryConfig)
-  }
 }

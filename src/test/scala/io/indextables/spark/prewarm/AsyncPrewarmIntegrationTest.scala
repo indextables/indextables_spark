@@ -32,8 +32,8 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Integration tests for async prewarm functionality.
  *
- * Tests the ASYNC MODE option for PREWARM INDEXTABLES CACHE command,
- * DESCRIBE INDEXTABLES PREWARM JOBS, and WAIT FOR INDEXTABLES PREWARM JOBS commands.
+ * Tests the ASYNC MODE option for PREWARM INDEXTABLES CACHE command, DESCRIBE INDEXTABLES PREWARM JOBS, and WAIT FOR
+ * INDEXTABLES PREWARM JOBS commands.
  */
 class AsyncPrewarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 

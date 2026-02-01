@@ -156,9 +156,9 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
               // makeCopy takes all constructor args and handles version differences.
               val originalArgs = agg.productIterator.toArray.map(_.asInstanceOf[AnyRef])
               val newArgs = Array[AnyRef](
-                transformedGrouping,   // Replace groupingExpressions (position 0)
-                transformedAggExprs,   // Replace aggregateExpressions (position 1)
-                child                  // Keep child (position 2)
+                transformedGrouping,    // Replace groupingExpressions (position 0)
+                transformedAggExprs,    // Replace aggregateExpressions (position 1)
+                child                   // Keep child (position 2)
               ) ++ originalArgs.drop(3) // Preserve any additional args (e.g., hint in Spark 4.x)
               val transformedAgg = agg.makeCopy(newArgs).asInstanceOf[Aggregate]
 

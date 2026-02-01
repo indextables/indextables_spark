@@ -24,8 +24,8 @@ import org.slf4j.LoggerFactory
 /**
  * Partition pruner for Avro state manifests.
  *
- * This pruner filters manifests based on partition bounds, allowing the reader to skip manifests
- * that cannot contain matching files based on partition predicates.
+ * This pruner filters manifests based on partition bounds, allowing the reader to skip manifests that cannot contain
+ * matching files based on partition predicates.
  *
  * The pruner supports:
  *   - Equality filters (EqualTo)
@@ -56,7 +56,7 @@ object PartitionPruner {
     val result = manifests.filter { manifest =>
       manifest.partitionBounds match {
         case Some(bounds) => boundsMatchFilter(bounds, filter)
-        case None => true // No bounds means we can't prune, include it
+        case None         => true // No bounds means we can't prune, include it
       }
     }
 
@@ -98,7 +98,7 @@ object PartitionPruner {
    * @return
    *   True if the bounds may contain matching data, false if they definitely don't
    */
-  def boundsMatchFilter(bounds: Map[String, PartitionBounds], filter: Filter): Boolean = {
+  def boundsMatchFilter(bounds: Map[String, PartitionBounds], filter: Filter): Boolean =
     filter match {
       case EqualTo(attr, value) =>
         boundsContainValue(bounds, attr, value.toString)
@@ -150,7 +150,7 @@ object PartitionPruner {
         // If we have non-null bounds, there are non-null values
         bounds.get(attr) match {
           case Some(b) => b.min.isDefined || b.max.isDefined
-          case None => true
+          case None    => true
         }
 
       case StringStartsWith(attr, value) =>
@@ -172,15 +172,13 @@ object PartitionPruner {
         log.debug(s"Unknown filter type for partition pruning: ${filter.getClass.getSimpleName}")
         true
     }
-  }
 
-  /**
-   * Check if value falls within partition bounds.
-   */
+  /** Check if value falls within partition bounds. */
   private def boundsContainValue(
-      bounds: Map[String, PartitionBounds],
-      attr: String,
-      value: String): Boolean = {
+    bounds: Map[String, PartitionBounds],
+    attr: String,
+    value: String
+  ): Boolean =
     bounds.get(attr) match {
       case Some(b) =>
         val minOk = b.min.forall(_ <= value)
@@ -190,16 +188,14 @@ object PartitionPruner {
         // Attribute not in bounds - can't prune
         true
     }
-  }
 
-  /**
-   * Check if bounds have values greater than the given value.
-   */
+  /** Check if bounds have values greater than the given value. */
   private def boundsGreaterThan(
-      bounds: Map[String, PartitionBounds],
-      attr: String,
-      value: String,
-      inclusive: Boolean): Boolean = {
+    bounds: Map[String, PartitionBounds],
+    attr: String,
+    value: String,
+    inclusive: Boolean
+  ): Boolean =
     bounds.get(attr) match {
       case Some(b) =>
         b.max match {
@@ -212,16 +208,14 @@ object PartitionPruner {
       case None =>
         true
     }
-  }
 
-  /**
-   * Check if bounds have values less than the given value.
-   */
+  /** Check if bounds have values less than the given value. */
   private def boundsLessThan(
-      bounds: Map[String, PartitionBounds],
-      attr: String,
-      value: String,
-      inclusive: Boolean): Boolean = {
+    bounds: Map[String, PartitionBounds],
+    attr: String,
+    value: String,
+    inclusive: Boolean
+  ): Boolean =
     bounds.get(attr) match {
       case Some(b) =>
         b.min match {
@@ -234,15 +228,13 @@ object PartitionPruner {
       case None =>
         true
     }
-  }
 
-  /**
-   * Check if any value in the bounds could start with the given prefix.
-   */
+  /** Check if any value in the bounds could start with the given prefix. */
   private def boundsOverlapPrefix(
-      bounds: Map[String, PartitionBounds],
-      attr: String,
-      prefix: String): Boolean = {
+    bounds: Map[String, PartitionBounds],
+    attr: String,
+    prefix: String
+  ): Boolean =
     bounds.get(attr) match {
       case Some(b) =>
         (b.min, b.max) match {
@@ -266,7 +258,6 @@ object PartitionPruner {
       case None =>
         true
     }
-  }
 
   /**
    * Extract partition column names from a filter expression.
@@ -276,27 +267,26 @@ object PartitionPruner {
    * @return
    *   Set of referenced column names
    */
-  def extractReferencedColumns(filter: Filter): Set[String] = {
+  def extractReferencedColumns(filter: Filter): Set[String] =
     filter match {
-      case EqualTo(attr, _) => Set(attr)
-      case GreaterThan(attr, _) => Set(attr)
+      case EqualTo(attr, _)            => Set(attr)
+      case GreaterThan(attr, _)        => Set(attr)
       case GreaterThanOrEqual(attr, _) => Set(attr)
-      case LessThan(attr, _) => Set(attr)
-      case LessThanOrEqual(attr, _) => Set(attr)
-      case In(attr, _) => Set(attr)
-      case IsNull(attr) => Set(attr)
-      case IsNotNull(attr) => Set(attr)
-      case StringStartsWith(attr, _) => Set(attr)
-      case StringEndsWith(attr, _) => Set(attr)
-      case StringContains(attr, _) => Set(attr)
-      case And(left, right) => extractReferencedColumns(left) ++ extractReferencedColumns(right)
-      case Or(left, right) => extractReferencedColumns(left) ++ extractReferencedColumns(right)
-      case Not(child) => extractReferencedColumns(child)
-      case AlwaysTrue() => Set.empty
-      case AlwaysFalse() => Set.empty
-      case _ => Set.empty
+      case LessThan(attr, _)           => Set(attr)
+      case LessThanOrEqual(attr, _)    => Set(attr)
+      case In(attr, _)                 => Set(attr)
+      case IsNull(attr)                => Set(attr)
+      case IsNotNull(attr)             => Set(attr)
+      case StringStartsWith(attr, _)   => Set(attr)
+      case StringEndsWith(attr, _)     => Set(attr)
+      case StringContains(attr, _)     => Set(attr)
+      case And(left, right)            => extractReferencedColumns(left) ++ extractReferencedColumns(right)
+      case Or(left, right)             => extractReferencedColumns(left) ++ extractReferencedColumns(right)
+      case Not(child)                  => extractReferencedColumns(child)
+      case AlwaysTrue()                => Set.empty
+      case AlwaysFalse()               => Set.empty
+      case _                           => Set.empty
     }
-  }
 
   /**
    * Check if a filter only references the given partition columns.
@@ -324,8 +314,8 @@ object PartitionPruner {
    *   (partitionFilters, dataFilters) tuple
    */
   def separateFilters(
-      filters: Seq[Filter],
-      partitionColumns: Set[String]): (Seq[Filter], Seq[Filter]) = {
+    filters: Seq[Filter],
+    partitionColumns: Set[String]
+  ): (Seq[Filter], Seq[Filter]) =
     filters.partition(f => isPartitionFilter(f, partitionColumns))
-  }
 }

@@ -166,7 +166,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
     val shortExpirationSeconds = 1L
     val options = new CaseInsensitiveStringMap(
       Map(
-        "spark.indextables.state.format" -> "json",
+        "spark.indextables.state.format"                        -> "json",
         "spark.indextables.transaction.cache.expirationSeconds" -> shortExpirationSeconds.toString
       ).asJava
     )

@@ -17,17 +17,17 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.AddAction
-
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import io.indextables.spark.TestBase
 
 class AvroManifestWriterTest extends TestBase {
 
   test("writeToBytes should write empty manifest") {
     val writer = new AvroManifestWriter(null)
-    val bytes = writer.writeToBytes(Seq.empty)
+    val bytes  = writer.writeToBytes(Seq.empty)
 
     bytes should not be empty
 
@@ -40,8 +40,8 @@ class AvroManifestWriterTest extends TestBase {
 
   test("writeToBytes should write single entry") {
     val writer = new AvroManifestWriter(null)
-    val entry = createTestFileEntry("splits/file1.split")
-    val bytes = writer.writeToBytes(Seq(entry))
+    val entry  = createTestFileEntry("splits/file1.split")
+    val bytes  = writer.writeToBytes(Seq(entry))
 
     // Read back and verify
     val reader = new AvroManifestReader(null)
@@ -52,9 +52,9 @@ class AvroManifestWriterTest extends TestBase {
   }
 
   test("writeToBytes should write multiple entries") {
-    val writer = new AvroManifestWriter(null)
+    val writer  = new AvroManifestWriter(null)
     val entries = (1 to 100).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
-    val bytes = writer.writeToBytes(entries)
+    val bytes   = writer.writeToBytes(entries)
 
     // Read back and verify
     val reader = new AvroManifestReader(null)
@@ -116,11 +116,11 @@ class AvroManifestWriterTest extends TestBase {
   }
 
   test("writeToBytes with zstd compression should produce smaller output") {
-    val writer = new AvroManifestWriter(null)
+    val writer  = new AvroManifestWriter(null)
     val entries = (1 to 1000).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
 
     val uncompressedBytes = writer.writeToBytes(entries, compression = "none")
-    val compressedBytes = writer.writeToBytes(entries, compression = "zstd")
+    val compressedBytes   = writer.writeToBytes(entries, compression = "zstd")
 
     // Compressed should be smaller
     compressedBytes.length should be < uncompressedBytes.length
@@ -132,7 +132,7 @@ class AvroManifestWriterTest extends TestBase {
   }
 
   test("writeToBytes with snappy compression should work") {
-    val writer = new AvroManifestWriter(null)
+    val writer  = new AvroManifestWriter(null)
     val entries = (1 to 100).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
 
     val bytes = writer.writeToBytes(entries, compression = "snappy")
@@ -153,7 +153,7 @@ class AvroManifestWriterTest extends TestBase {
       )
 
       try {
-        val writer = new AvroManifestWriter(cloudProvider)
+        val writer  = new AvroManifestWriter(cloudProvider)
         val entries = (1 to 50).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
 
         val manifestPath = s"$tempPath/manifest-test.avro"
@@ -167,9 +167,8 @@ class AvroManifestWriterTest extends TestBase {
         val result = reader.readManifest(manifestPath)
 
         result should have size 50
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -182,17 +181,17 @@ class AvroManifestWriterTest extends TestBase {
       )
 
       try {
-        val writer = new AvroManifestWriter(cloudProvider)
+        val writer       = new AvroManifestWriter(cloudProvider)
         val manifestPath = s"$tempPath/manifest-test.avro"
 
         // First write should succeed
         val entries1 = Seq(createTestFileEntry("file1.split"))
-        val result1 = writer.writeManifestIfNotExists(manifestPath, entries1)
+        val result1  = writer.writeManifestIfNotExists(manifestPath, entries1)
         result1 shouldBe defined
 
         // Second write should fail (file exists)
         val entries2 = Seq(createTestFileEntry("file2.split"))
-        val result2 = writer.writeManifestIfNotExists(manifestPath, entries2)
+        val result2  = writer.writeManifestIfNotExists(manifestPath, entries2)
         result2 shouldBe None
 
         // Read back should have first entry
@@ -201,15 +200,14 @@ class AvroManifestWriterTest extends TestBase {
 
         result should have size 1
         result.head.path shouldBe "file1.split"
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   test("convertFromAddAction should convert AddAction to FileEntry") {
     val writer = new AvroManifestWriter(null)
-    val add = createTestAddAction("splits/test.split")
+    val add    = createTestAddAction("splits/test.split")
 
     val entry = writer.convertFromAddAction(add, version = 42, timestamp = 1705123456789L)
 
@@ -234,9 +232,7 @@ class AvroManifestWriterTest extends TestBase {
     ids.toSet.size shouldBe 100
 
     // All IDs should be hex characters
-    ids.foreach { id =>
-      id.forall(c => c.isDigit || ('a' to 'f').contains(c.toLower)) shouldBe true
-    }
+    ids.foreach(id => id.forall(c => c.isDigit || ('a' to 'f').contains(c.toLower)) shouldBe true)
   }
 
   test("computePartitionBounds should compute correct bounds") {
@@ -299,20 +295,20 @@ class AvroManifestWriterTest extends TestBase {
   }
 
   test("writeToBytes should handle large manifest efficiently") {
-    val writer = new AvroManifestWriter(null)
+    val writer  = new AvroManifestWriter(null)
     val entries = (1 to 10000).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
 
-    val startTime = System.currentTimeMillis()
-    val bytes = writer.writeToBytes(entries, compression = "zstd")
+    val startTime     = System.currentTimeMillis()
+    val bytes         = writer.writeToBytes(entries, compression = "zstd")
     val writeDuration = System.currentTimeMillis() - startTime
 
     // Write 10K entries should be reasonably fast (< 2 seconds)
     writeDuration should be < 2000L
 
     // Read back and verify
-    val reader = new AvroManifestReader(null)
-    val readStart = System.currentTimeMillis()
-    val result = reader.readFromBytes(bytes)
+    val reader       = new AvroManifestReader(null)
+    val readStart    = System.currentTimeMillis()
+    val result       = reader.readFromBytes(bytes)
     val readDuration = System.currentTimeMillis() - readStart
 
     result should have size 10000
@@ -324,9 +320,10 @@ class AvroManifestWriterTest extends TestBase {
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -347,9 +344,8 @@ class AvroManifestWriterTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 
-  private def createTestAddAction(path: String): AddAction = {
+  private def createTestAddAction(path: String): AddAction =
     AddAction(
       path = path,
       partitionValues = Map.empty,
@@ -358,5 +354,4 @@ class AvroManifestWriterTest extends TestBase {
       dataChange = true,
       numRecords = Some(100L)
     )
-  }
 }

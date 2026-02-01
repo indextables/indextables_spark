@@ -17,24 +17,22 @@
 
 package io.indextables.spark.indexquery
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.exceptions.IndexQueryParseException
+import io.indextables.spark.TestBase
 
 /**
  * Test cases for IndexQuery behavior with invalid query syntax.
  *
  * These tests verify that:
- * 1. Invalid query syntax throws IndexQueryParseException on the DRIVER (pre-scan validation)
- * 2. Error messages are user-friendly and include the problematic query
- * 3. No Spark tasks are created/failed (validation happens before task scheduling)
+ *   1. Invalid query syntax throws IndexQueryParseException on the DRIVER (pre-scan validation) 2. Error messages are
+ *      user-friendly and include the problematic query 3. No Spark tasks are created/failed (validation happens before
+ *      task scheduling)
  */
 class IndexQueryInvalidSyntaxTest extends TestBase {
 
-  /**
-   * Helper to get full error message chain from an exception
-   */
+  /** Helper to get full error message chain from an exception */
   private def getFullErrorMessage(e: Throwable): String = {
-    val messages = scala.collection.mutable.ArrayBuffer[String]()
+    val messages           = scala.collection.mutable.ArrayBuffer[String]()
     var current: Throwable = e
     while (current != null) {
       if (current.getMessage != null) {
@@ -46,8 +44,8 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
   }
 
   /**
-   * Check if exception chain contains IndexQueryParseException.
-   * This verifies that the error was properly wrapped in our custom exception.
+   * Check if exception chain contains IndexQueryParseException. This verifies that the error was properly wrapped in
+   * our custom exception.
    */
   private def containsIndexQueryParseException(e: Throwable): Boolean = {
     var current: Throwable = e
@@ -61,8 +59,8 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
   }
 
   /**
-   * Verify that an exception was thrown during driver-side validation,
-   * NOT during task execution. Task failures would contain "Task X in stage Y failed".
+   * Verify that an exception was thrown during driver-side validation, NOT during task execution. Task failures would
+   * contain "Task X in stage Y failed".
    */
   private def assertDriverSideValidation(e: Throwable): Unit = {
     val errorMessage = getFullErrorMessage(e)
@@ -71,14 +69,14 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     assert(
       !errorMessage.contains("Task") || !errorMessage.contains("failed"),
       s"Exception appears to be from task execution, not driver-side validation. " +
-      s"Error: $errorMessage"
+        s"Error: $errorMessage"
     )
 
     // Should contain IndexQueryParseException in the chain
     assert(
       containsIndexQueryParseException(e),
       s"Exception chain should contain IndexQueryParseException for proper error handling. " +
-      s"Got: ${e.getClass.getName}: $errorMessage"
+        s"Got: ${e.getClass.getName}: $errorMessage"
     )
   }
 
@@ -113,10 +111,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid query with unbalanced parentheses should throw an error
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, title FROM parens_test
         WHERE title indexquery '((machine learning'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -127,9 +127,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     // The error should mention the invalid syntax
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -160,10 +160,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid query with broken field reference syntax
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, content FROM field_ref_test
         WHERE content indexquery 'content:'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -172,9 +174,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -205,10 +207,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid query with unclosed quote
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, description FROM quotes_test
         WHERE description indexquery '"unclosed phrase'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -217,9 +221,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the quote problem. Got: $errorMessage"
     )
   }
@@ -250,10 +254,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid query with dangling boolean operator
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, name FROM boolean_test
         WHERE name indexquery 'apple AND AND orange'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -262,9 +268,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the boolean problem. Got: $errorMessage"
     )
   }
@@ -295,10 +301,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Completely malformed query
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, title FROM malformed_test
         WHERE title indexquery '))))(((('
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -307,9 +315,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the malformed query. Got: $errorMessage"
     )
   }
@@ -341,10 +349,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid syntax in aggregation should throw on driver
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT COUNT(*) FROM count_invalid_test
         WHERE content indexquery '((('
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -353,9 +363,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -389,26 +399,32 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     df.createOrReplaceTempView("valid_test")
 
     // Valid query with proper parentheses
-    val results1 = spark.sql("""
+    val results1 = spark
+      .sql("""
       SELECT id, title FROM valid_test
       WHERE title indexquery '(machine OR deep) AND learning'
-    """).collect()
+    """)
+      .collect()
 
     assert(results1.length == 2, s"Expected 2 results, got ${results1.length}")
 
     // Valid phrase query
-    val results2 = spark.sql("""
+    val results2 = spark
+      .sql("""
       SELECT id, title FROM valid_test
       WHERE title indexquery '"machine learning"'
-    """).collect()
+    """)
+      .collect()
 
     assert(results2.length == 1, s"Expected 1 result for phrase query, got ${results2.length}")
 
     // Valid simple query
-    val results3 = spark.sql("""
+    val results3 = spark
+      .sql("""
       SELECT id, title FROM valid_test
       WHERE title indexquery 'pipeline'
-    """).collect()
+    """)
+      .collect()
 
     assert(results3.length == 1, s"Expected 1 result for simple query, got ${results3.length}")
   }
@@ -439,19 +455,23 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     df.createOrReplaceTempView("valid_agg_test")
 
     // COUNT with valid IndexQuery
-    val countResult = spark.sql("""
+    val countResult = spark
+      .sql("""
       SELECT COUNT(*) FROM valid_agg_test
       WHERE title indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
 
     assert(countResult.length == 1, s"Expected 1 row, got ${countResult.length}")
     assert(countResult(0).getLong(0) == 2, s"Expected count of 2, got ${countResult(0).getLong(0)}")
 
     // SUM with valid IndexQuery
-    val sumResult = spark.sql("""
+    val sumResult = spark
+      .sql("""
       SELECT SUM(score) FROM valid_agg_test
       WHERE title indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
 
     assert(sumResult.length == 1, s"Expected 1 row, got ${sumResult.length}")
     assert(sumResult(0).getDouble(0) == 250.0, s"Expected sum of 250.0, got ${sumResult(0).getDouble(0)}")
@@ -482,15 +502,16 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     // Empty query - may either throw an error or return no results
     // depending on tantivy behavior (both are acceptable, but not returning all docs)
     try {
-      val results = spark.sql("""
+      val results = spark
+        .sql("""
         SELECT id, content FROM empty_query_test
         WHERE content indexquery ''
-      """).collect()
+      """)
+        .collect()
 
       // If it doesn't throw, it should return empty (not all docs)
       // Empty string is treated as "no query terms" which matches nothing
-      assert(results.length <= 1,
-        s"Empty query should not return all documents. Got ${results.length} rows")
+      assert(results.length <= 1, s"Empty query should not return all documents. Got ${results.length} rows")
     } catch {
       case _: Exception =>
         // Throwing an error for empty query is acceptable
@@ -523,10 +544,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val invalidQuery = "((broken query syntax"
 
     val exception = intercept[Exception] {
-      spark.sql(s"""
+      spark
+        .sql(s"""
         SELECT id, content FROM error_msg_test
         WHERE content indexquery '$invalidQuery'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation
@@ -564,10 +587,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     df.createOrReplaceTempView("error_field_test")
 
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, my_special_field FROM error_field_test
         WHERE my_special_field indexquery '((('
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation
@@ -612,21 +637,27 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Query 1: Invalid syntax should fail
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, title FROM persistence_test
         WHERE title indexquery '((invalid syntax'
-      """).collect()
+      """)
+        .collect()
     }
     assertDriverSideValidation(exception)
 
     // Query 2: Valid syntax should succeed (error should NOT persist)
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, title FROM persistence_test
       WHERE title indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
 
-    assert(results.length == 2,
-      s"Valid query after invalid query should succeed. Expected 2 results, got ${results.length}")
+    assert(
+      results.length == 2,
+      s"Valid query after invalid query should succeed. Expected 2 results, got ${results.length}"
+    )
   }
 
   // ============================================================================
@@ -659,10 +690,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid IndexQuery combined with Spark filter via AND
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, title FROM mixed_and_test
         WHERE id = 'id1' AND title indexquery '((badquery'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -671,9 +704,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -704,10 +737,12 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
 
     // Invalid IndexQuery combined with Spark filter via OR
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT id, title FROM mixed_or_test
         WHERE id = 'id1' OR title indexquery '((badquery'
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -716,9 +751,9 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -748,21 +783,23 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     df.createOrReplaceTempView("mixed_valid_test")
 
     // Valid query: Spark filter AND IndexQuery
-    val resultsAnd = spark.sql("""
+    val resultsAnd = spark
+      .sql("""
       SELECT id, title FROM mixed_valid_test
       WHERE category = 'tech' AND title indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
 
-    assert(resultsAnd.length == 1,
-      s"Expected 1 result for AND combination, got ${resultsAnd.length}")
+    assert(resultsAnd.length == 1, s"Expected 1 result for AND combination, got ${resultsAnd.length}")
 
     // Valid query: Spark filter OR IndexQuery
-    val resultsOr = spark.sql("""
+    val resultsOr = spark
+      .sql("""
       SELECT id, title FROM mixed_valid_test
       WHERE category = 'ai' OR title indexquery 'pipeline'
-    """).collect()
+    """)
+      .collect()
 
-    assert(resultsOr.length == 2,
-      s"Expected 2 results for OR combination, got ${resultsOr.length}")
+    assert(resultsOr.length == 2, s"Expected 2 results for OR combination, got ${resultsOr.length}")
   }
 }

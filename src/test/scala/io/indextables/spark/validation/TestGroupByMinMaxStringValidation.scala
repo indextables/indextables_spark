@@ -2,21 +2,19 @@ package io.indextables.spark.validation
 
 import java.io.File
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
 
 import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Test that MIN/MAX aggregations work correctly on string fast fields.
  *
- * This validates the fix for the issue where MIN/MAX on string fast fields
- * would incorrectly fail with "Missing fast fields for aggregation columns"
- * even though the field was correctly configured as a fast field.
+ * This validates the fix for the issue where MIN/MAX on string fast fields would incorrectly fail with "Missing fast
+ * fields for aggregation columns" even though the field was correctly configured as a fast field.
  *
- * The root cause was that `isNumericFastField` was being used for MIN/MAX
- * validation, which required fields to be both fast AND numeric. The fix
- * uses `isFastField` instead, which allows MIN/MAX on any fast field type.
+ * The root cause was that `isNumericFastField` was being used for MIN/MAX validation, which required fields to be both
+ * fast AND numeric. The fix uses `isFastField` instead, which allows MIN/MAX on any fast field type.
  */
 class TestGroupByMinMaxStringValidation extends AnyFunSuite {
 
@@ -62,17 +60,19 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
 
       // First verify that GROUP BY with just COUNT works (baseline)
       println("\n1. Testing GROUP BY with COUNT(*) only (baseline)...")
-      val countQuery = df.groupBy("load_date", "code", "hostname").agg(count("*").as("cnt"))
+      val countQuery  = df.groupBy("load_date", "code", "hostname").agg(count("*").as("cnt"))
       val countResult = countQuery.collect()
       println(s"   ✅ COUNT(*) query succeeded with ${countResult.length} rows")
 
       // Now test GROUP BY with MIN/MAX on string fields
       println("\n2. Testing GROUP BY with MIN/MAX on string fast fields...")
-      val minMaxQuery = df.groupBy("load_date").agg(
-        count("*").as("cnt"),
-        min("code").as("min_code"),
-        max("code").as("max_code")
-      )
+      val minMaxQuery = df
+        .groupBy("load_date")
+        .agg(
+          count("*").as("cnt"),
+          min("code").as("min_code"),
+          max("code").as("max_code")
+        )
 
       val minMaxResult = minMaxQuery.collect()
       println(s"   ✅ MIN/MAX query succeeded with ${minMaxResult.length} rows")
@@ -85,10 +85,22 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
       val day1 = minMaxResult.find(_.getString(0) == "2024-01-01").get
       val day2 = minMaxResult.find(_.getString(0) == "2024-01-02").get
 
-      assert(day1.getString(2) == "code_a", s"Expected min_code for 2024-01-01 to be 'code_a', got '${day1.getString(2)}'")
-      assert(day1.getString(3) == "code_c", s"Expected max_code for 2024-01-01 to be 'code_c', got '${day1.getString(3)}'")
-      assert(day2.getString(2) == "code_a", s"Expected min_code for 2024-01-02 to be 'code_a', got '${day2.getString(2)}'")
-      assert(day2.getString(3) == "code_d", s"Expected max_code for 2024-01-02 to be 'code_d', got '${day2.getString(3)}'")
+      assert(
+        day1.getString(2) == "code_a",
+        s"Expected min_code for 2024-01-01 to be 'code_a', got '${day1.getString(2)}'"
+      )
+      assert(
+        day1.getString(3) == "code_c",
+        s"Expected max_code for 2024-01-01 to be 'code_c', got '${day1.getString(3)}'"
+      )
+      assert(
+        day2.getString(2) == "code_a",
+        s"Expected min_code for 2024-01-02 to be 'code_a', got '${day2.getString(2)}'"
+      )
+      assert(
+        day2.getString(3) == "code_d",
+        s"Expected max_code for 2024-01-02 to be 'code_d', got '${day2.getString(3)}'"
+      )
 
       println("\n   ✅ Result values verified correctly")
 
@@ -137,10 +149,12 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // This should throw an exception because code is not a fast field
-      val query = df.groupBy("load_date").agg(
-        count("*").as("cnt"),
-        min("code").as("min_code")
-      )
+      val query = df
+        .groupBy("load_date")
+        .agg(
+          count("*").as("cnt"),
+          min("code").as("min_code")
+        )
 
       try {
         val physicalPlan = query.queryExecution.executedPlan.toString

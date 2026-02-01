@@ -1,5 +1,7 @@
 package io.indextables.spark.transaction
 
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -7,8 +9,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
-
-import scala.jdk.CollectionConverters._
 
 /**
  * Integration test to validate transaction log file naming with large batches (>100 actions). This test ensures the bug

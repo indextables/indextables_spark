@@ -17,22 +17,23 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
+import scala.jdk.CollectionConverters._
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import scala.jdk.CollectionConverters._
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
+import io.indextables.spark.TestBase
 
 /**
  * Tests for checkpoint configuration and read optimization with Avro state format.
  *
  * These tests validate that:
- * 1. Checkpoint interval configuration works correctly with Avro format
- * 2. Reads properly use Avro state directories for fast state reconstruction
+ *   1. Checkpoint interval configuration works correctly with Avro format 2. Reads properly use Avro state directories
+ *      for fast state reconstruction
  */
 class AvroCheckpointConfigurationTest extends TestBase {
 
@@ -41,15 +42,17 @@ class AvroCheckpointConfigurationTest extends TestBase {
       val tablePath = new Path(tempPath)
 
       // Avro format is default, no explicit checkpoint needed
-      val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+      val options        = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
         // Initialize the table
-        val schema = StructType(Seq(
-          StructField("id", LongType),
-          StructField("name", StringType)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", LongType),
+            StructField("name", StringType)
+          )
+        )
         transactionLog.initialize(schema)
 
         // Write first batch
@@ -73,18 +76,17 @@ class AvroCheckpointConfigurationTest extends TestBase {
         )
 
         try {
-          val txLogPath = new Path(tablePath, "_transaction_log")
+          val txLogPath  = new Path(tablePath, "_transaction_log")
           val stateFiles = cloudProvider.listFiles(txLogPath.toString)
-          val stateDirs = stateFiles.filter(f => new Path(f.path).getName.startsWith("state-v"))
+          val stateDirs  = stateFiles.filter(f => new Path(f.path).getName.startsWith("state-v"))
 
           // Avro state directory should exist
           stateDirs should not be empty
 
           // Should have state directory for version 1
           stateDirs.exists(f => f.path.contains("state-v00000000000000000001")) shouldBe true
-        } finally {
+        } finally
           cloudProvider.close()
-        }
 
         // Write second batch
         val addActions2 = (11 to 20).map { i =>
@@ -107,18 +109,16 @@ class AvroCheckpointConfigurationTest extends TestBase {
         )
 
         try {
-          val txLogPath = new Path(tablePath, "_transaction_log")
+          val txLogPath  = new Path(tablePath, "_transaction_log")
           val stateFiles = cloudProvider2.listFiles(txLogPath.toString)
-          val stateDirs = stateFiles.filter(f => new Path(f.path).getName.startsWith("state-v"))
+          val stateDirs  = stateFiles.filter(f => new Path(f.path).getName.startsWith("state-v"))
 
           // Should have state directory for version 2
           stateDirs.exists(f => f.path.contains("state-v00000000000000000002")) shouldBe true
-        } finally {
+        } finally
           cloudProvider2.close()
-        }
-      } finally {
+      } finally
         transactionLog.close()
-      }
     }
   }
 
@@ -127,14 +127,16 @@ class AvroCheckpointConfigurationTest extends TestBase {
       val tablePath = new Path(tempPath)
 
       // Write data using Avro format (default)
-      val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+      val options        = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
-        val schema = StructType(Seq(
-          StructField("id", LongType),
-          StructField("name", StringType)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", LongType),
+            StructField("name", StringType)
+          )
+        )
         transactionLog.initialize(schema)
 
         // Write 100 files
@@ -149,9 +151,8 @@ class AvroCheckpointConfigurationTest extends TestBase {
           )
         }
         transactionLog.addFiles(addActions)
-      } finally {
+      } finally
         transactionLog.close()
-      }
 
       // Reopen the table and read - should use Avro state
       val transactionLog2 = TransactionLogFactory.create(tablePath, spark, options)
@@ -163,12 +164,9 @@ class AvroCheckpointConfigurationTest extends TestBase {
         files should have size 100
 
         // Verify all files are present
-        (1 to 100).foreach { i =>
-          files.map(_.path) should contain(s"split$i.split")
-        }
-      } finally {
+        (1 to 100).foreach(i => files.map(_.path) should contain(s"split$i.split"))
+      } finally
         transactionLog2.close()
-      }
     }
   }
 
@@ -183,10 +181,12 @@ class AvroCheckpointConfigurationTest extends TestBase {
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
-        val schema = StructType(Seq(
-          StructField("id", LongType),
-          StructField("name", StringType)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", LongType),
+            StructField("name", StringType)
+          )
+        )
         transactionLog.initialize(schema)
 
         // Write 20 transactions with 50 files each = 1000 files total
@@ -204,17 +204,16 @@ class AvroCheckpointConfigurationTest extends TestBase {
           }
           transactionLog.addFiles(addActions)
         }
-      } finally {
+      } finally
         transactionLog.close()
-      }
 
       // Reopen and read - should be fast using Avro state
       val transactionLog2 = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
         val startTime = System.currentTimeMillis()
-        val files = transactionLog2.listFiles()
-        val duration = System.currentTimeMillis() - startTime
+        val files     = transactionLog2.listFiles()
+        val duration  = System.currentTimeMillis() - startTime
 
         // Should have all 1000 files
         files should have size 1000
@@ -222,9 +221,8 @@ class AvroCheckpointConfigurationTest extends TestBase {
         // Reading should be fast (< 2 seconds for 1000 files using Avro state)
         // JSON replay of 20 transactions would be much slower
         duration should be < 2000L
-      } finally {
+      } finally
         transactionLog2.close()
-      }
     }
   }
 
@@ -238,14 +236,16 @@ class AvroCheckpointConfigurationTest extends TestBase {
       val tablePath = new Path(tempPath)
 
       // Use default options (Avro format is default)
-      val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+      val options        = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
-        val schema = StructType(Seq(
-          StructField("id", LongType),
-          StructField("name", StringType)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", LongType),
+            StructField("name", StringType)
+          )
+        )
         transactionLog.initialize(schema)
 
         // Write some data
@@ -260,9 +260,8 @@ class AvroCheckpointConfigurationTest extends TestBase {
           )
         }
         transactionLog.addFiles(addActions)
-      } finally {
+      } finally
         transactionLog.close()
-      }
 
       // Verify Avro state was created
       val cloudProvider = CloudStorageProviderFactory.createProvider(
@@ -273,14 +272,13 @@ class AvroCheckpointConfigurationTest extends TestBase {
 
       try {
         val txLogPath = new Path(tablePath, "_transaction_log")
-        val files = cloudProvider.listFiles(txLogPath.toString)
+        val files     = cloudProvider.listFiles(txLogPath.toString)
         val stateDirs = files.filter(f => new Path(f.path).getName.startsWith("state-v"))
 
         // Avro state directory should exist
         stateDirs should not be empty
-      } finally {
+      } finally
         cloudProvider.close()
-      }
 
       // Reopen and verify files can be read
       val transactionLog2 = TransactionLogFactory.create(tablePath, spark, options)
@@ -288,9 +286,8 @@ class AvroCheckpointConfigurationTest extends TestBase {
       try {
         val files = transactionLog2.listFiles()
         files should have size 5
-      } finally {
+      } finally
         transactionLog2.close()
-      }
     }
   }
 
@@ -299,13 +296,15 @@ class AvroCheckpointConfigurationTest extends TestBase {
       val tablePath = new Path(tempPath)
 
       // Use Avro format (default)
-      val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+      val options        = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
-        val schema = StructType(Seq(
-          StructField("id", LongType)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", LongType)
+          )
+        )
         transactionLog.initialize(schema)
 
         // Write some data
@@ -320,9 +319,8 @@ class AvroCheckpointConfigurationTest extends TestBase {
           )
         }
         transactionLog.addFiles(addActions)
-      } finally {
+      } finally
         transactionLog.close()
-      }
 
       // Check _last_checkpoint file
       val cloudProvider = CloudStorageProviderFactory.createProvider(
@@ -332,11 +330,11 @@ class AvroCheckpointConfigurationTest extends TestBase {
       )
 
       try {
-        val txLogPath = new Path(tablePath, "_transaction_log")
+        val txLogPath          = new Path(tablePath, "_transaction_log")
         val lastCheckpointPath = s"${txLogPath.toString}/_last_checkpoint"
 
         if (cloudProvider.exists(lastCheckpointPath)) {
-          val bytes = cloudProvider.readFile(lastCheckpointPath)
+          val bytes   = cloudProvider.readFile(lastCheckpointPath)
           val content = new String(bytes, java.nio.charset.StandardCharsets.UTF_8)
 
           // Should indicate Avro state format
@@ -344,9 +342,8 @@ class AvroCheckpointConfigurationTest extends TestBase {
         }
         // Note: _last_checkpoint may not exist if the implementation
         // directly discovers state directories instead of using the hint file
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 }

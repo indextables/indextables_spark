@@ -22,8 +22,8 @@ import io.indextables.spark.TestBase
 /**
  * Test that IndexQuery with non-existent field throws a descriptive error.
  *
- * Previously, the system would silently ignore the predicate and return all documents,
- * which led to incorrect results without any indication of the problem.
+ * Previously, the system would silently ignore the predicate and return all documents, which led to incorrect results
+ * without any indication of the problem.
  */
 class IndexQueryNonExistentFieldTest extends TestBase {
 
@@ -548,7 +548,7 @@ class IndexQueryNonExistentFieldTest extends TestBase {
   }
 
   private def getFullErrorMessage(e: Throwable): String = {
-    val messages = scala.collection.mutable.ArrayBuffer[String]()
+    val messages           = scala.collection.mutable.ArrayBuffer[String]()
     var current: Throwable = e
     while (current != null) {
       if (current.getMessage != null) {

@@ -30,15 +30,13 @@ import io.indextables.spark.RealAzureTestBase
  * Validates async prewarm functionality with real Azure Blob Storage.
  *
  * This test suite validates:
- *   1. PREWARM ... ASYNC MODE returns immediately with job_id
- *   2. DESCRIBE INDEXTABLES PREWARM JOBS shows running/completed jobs
- *   3. WAIT FOR INDEXTABLES PREWARM JOBS blocks until completion
- *   4. After async prewarm, queries hit cache
+ *   1. PREWARM ... ASYNC MODE returns immediately with job_id 2. DESCRIBE INDEXTABLES PREWARM JOBS shows
+ *      running/completed jobs 3. WAIT FOR INDEXTABLES PREWARM JOBS blocks until completion 4. After async prewarm,
+ *      queries hit cache
  *
  * Credentials are loaded from multiple sources with the following priority:
- *   1. System properties: test.azure.storageAccount, test.azure.accountKey
- *   2. ~/.azure/credentials file (matches tantivy4java pattern)
- *   3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+ *   1. System properties: test.azure.storageAccount, test.azure.accountKey 2. ~/.azure/credentials file (matches
+ *      tantivy4java pattern) 3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
  */
 class RealAzureAsyncPrewarmValidationTest extends RealAzureTestBase {
 

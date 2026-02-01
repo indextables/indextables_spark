@@ -17,39 +17,38 @@
 
 package io.indextables.spark.filters
 
-import org.scalatest.funsuite.AnyFunSuite
-
 import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Tests for IndexQuery boolean combinations (OR, AND, NOT).
  *
- * These tests verify that the fix for the bug where SQL OR combining multiple
- * indexquery expressions returned no results is working correctly.
+ * These tests verify that the fix for the bug where SQL OR combining multiple indexquery expressions returned no
+ * results is working correctly.
  *
  * The bug was:
  *   - Working: `url indexquery 'community OR curl'` (Tantivy-native OR)
  *   - Broken: `(url indexquery 'community') OR (url indexquery 'curl')` (SQL OR)
  *
- * The fix introduces MixedBooleanFilter types that preserve the boolean structure
- * instead of flattening IndexQuery expressions with AND semantics.
+ * The fix introduces MixedBooleanFilter types that preserve the boolean structure instead of flattening IndexQuery
+ * expressions with AND semantics.
  */
 class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
   test("MixedBooleanFilter types should have correct references") {
     // Test MixedIndexQuery references
     val indexQueryFilter = IndexQueryFilter("url", "test query")
-    val mixedIndexQuery = MixedIndexQuery(indexQueryFilter)
+    val mixedIndexQuery  = MixedIndexQuery(indexQueryFilter)
     assert(mixedIndexQuery.references().toSet == Set("url"))
 
     // Test MixedIndexQueryAll references (should be empty)
     val indexQueryAllFilter = IndexQueryAllFilter("test query")
-    val mixedIndexQueryAll = MixedIndexQueryAll(indexQueryAllFilter)
+    val mixedIndexQueryAll  = MixedIndexQueryAll(indexQueryAllFilter)
     assert(mixedIndexQueryAll.references().isEmpty)
 
     // Test MixedSparkFilter references
     import org.apache.spark.sql.sources.EqualTo
-    val sparkFilter = EqualTo("status", "active")
+    val sparkFilter      = EqualTo("status", "active")
     val mixedSparkFilter = MixedSparkFilter(sparkFilter)
     assert(mixedSparkFilter.references().toSet == Set("status"))
 
@@ -129,21 +128,25 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("test_urls")
 
       // Test 1: Native Tantivy OR (should work)
-      val nativeOrResult = spark.sql("""
+      val nativeOrResult = spark
+        .sql("""
         SELECT id, url FROM test_urls
         WHERE url indexquery 'community OR curl'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Native OR result count: ${nativeOrResult.length}")
       nativeOrResult.foreach(r => println(s"  id=${r.getInt(0)}, url='${r.getString(1)}'"))
 
       // Test 2: SQL OR combining multiple IndexQuery expressions (was broken, now fixed)
-      val sqlOrResult = spark.sql("""
+      val sqlOrResult = spark
+        .sql("""
         SELECT id, url FROM test_urls
         WHERE (url indexquery 'community') OR (url indexquery 'curl')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"SQL OR result count: ${sqlOrResult.length}")
       sqlOrResult.foreach(r => println(s"  id=${r.getInt(0)}, url='${r.getString(1)}'"))
@@ -195,13 +198,15 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Complex mixed predicate:
       // (urgency = 'CRITICAL' AND url indexquery 'one') OR (urgency <> 'CLASS2' AND url indexquery 'two')
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, urgency, url FROM test_mixed
         WHERE uid = 'user1'
           AND ((urgency = 'CRITICAL' AND url indexquery 'one')
                OR (urgency <> 'CLASS2' AND url indexquery 'two'))
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Mixed predicate result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, urgency='${r.getString(1)}', url='${r.getString(2)}'"))
@@ -250,15 +255,19 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Test: (A OR B) AND (C OR D)
       // (content indexquery 'term1' OR content indexquery 'term2') AND (status = 'active' OR priority > 5)
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, status, priority FROM test_nested
         WHERE ((content indexquery 'term1') OR (content indexquery 'term2'))
           AND (status = 'active' OR priority > 5)
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Nested OR/AND result count: ${result.length}")
-      result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}', priority=${r.getInt(3)}"))
+      result.foreach(r =>
+        println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}', priority=${r.getInt(3)}")
+      )
 
       // Expected:
       // - id=1: term1, active, 10 -> (term1 OR term2) AND (active OR 10>5) -> YES
@@ -303,11 +312,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("test_not")
 
       // Test: NOT indexquery combined with other predicate
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, status FROM test_not
         WHERE NOT (content indexquery 'excluded') AND status = 'active'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"NOT indexquery result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}'"))
@@ -355,11 +366,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("test_sql_or")
 
       // Test using SQL with OR operator
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, url FROM test_sql_or
         WHERE (url indexquery 'community') OR (url indexquery 'curl')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"SQL OR result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, url='${r.getString(1)}'"))
@@ -402,11 +415,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("test_indexall")
 
       // Test IndexQueryAll - should search across all text fields (content AND tags)
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, tags FROM test_indexall
         WHERE _indexall indexquery 'spark'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"IndexQueryAll result count: ${result.length}")
       result.foreach(r => println(s"  id='${r.getString(0)}', content='${r.getString(1)}', tags='${r.getString(2)}'"))
@@ -448,10 +463,12 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Test: IndexQuery with a field that doesn't exist should throw an error
       val exception = intercept[Exception] {
-        spark.sql("""
+        spark
+          .sql("""
           SELECT id, content FROM test_nonexistent
           WHERE fake_field indexquery 'something'
-        """).collect()
+        """)
+          .collect()
       }
 
       val errorMessage = exception.getMessage + Option(exception.getCause).map(_.getMessage).getOrElse("")
@@ -500,11 +517,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Query with partition predicate AND indexquery
       // CRITICAL: This must return ONLY rows from 2024-01-01 partition
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, load_date, message FROM partitioned_data
         WHERE load_date = '2024-01-01' AND message indexquery 'error OR warning'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Partition + IndexQuery result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, load_date='${r.getString(1)}', message='${r.getString(2)}'"))
@@ -553,20 +572,24 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Query: partition_col = 'x' AND (indexquery 'a' OR indexquery 'b')
       // This MUST preserve partition pruning
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, partition_col, content FROM partition_or_test
         WHERE partition_col = '2024-01-01'
           AND ((content indexquery 'term_a') OR (content indexquery 'term_b'))
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Partition + OR IndexQuery result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, partition='${r.getString(1)}', content='${r.getString(2)}'"))
 
       // ALL results must be from the specified partition
       val resultPartitions = result.map(_.getString(1)).distinct
-      assert(resultPartitions.length == 1 && resultPartitions.head == "2024-01-01",
-        s"All results should be from 2024-01-01, got: ${resultPartitions.mkString(", ")}")
+      assert(
+        resultPartitions.length == 1 && resultPartitions.head == "2024-01-01",
+        s"All results should be from 2024-01-01, got: ${resultPartitions.mkString(", ")}"
+      )
 
       // Should get id=1 and id=2 (matching terms in correct partition)
       val resultIds = result.map(_.getInt(0)).toSet
@@ -605,21 +628,27 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("complex_partition_test")
 
       // Complex query: partition filter AND ((spark_filter AND indexquery) OR (spark_filter AND indexquery))
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, date_partition, priority, content FROM complex_partition_test
         WHERE date_partition = '2024-01-01'
           AND ((priority = 'CRITICAL' AND content indexquery 'term_one')
                OR (priority <> 'CRITICAL' AND content indexquery 'term_two'))
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Complex partition query result count: ${result.length}")
-      result.foreach(r => println(s"  id=${r.getInt(0)}, partition='${r.getString(1)}', priority='${r.getString(2)}', content='${r.getString(3)}'"))
+      result.foreach(r =>
+        println(s"  id=${r.getInt(0)}, partition='${r.getString(1)}', priority='${r.getString(2)}', content='${r.getString(3)}'")
+      )
 
       // All results MUST be from 2024-01-01
       val resultPartitions = result.map(_.getString(1)).distinct
-      assert(resultPartitions.length == 1 && resultPartitions.head == "2024-01-01",
-        s"All results should be from 2024-01-01, got: ${resultPartitions.mkString(", ")}")
+      assert(
+        resultPartitions.length == 1 && resultPartitions.head == "2024-01-01",
+        s"All results should be from 2024-01-01, got: ${resultPartitions.mkString(", ")}"
+      )
 
       // Expected results:
       // - id=1: 2024-01-01, CRITICAL, term_one -> YES (first OR branch)
@@ -639,10 +668,10 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
   test("MixedBooleanFilter.extractIndexQueryFilters should work correctly") {
     // Unit test for the extraction helper methods
-    val indexQuery1 = MixedIndexQuery(IndexQueryFilter("field1", "query1"))
-    val indexQuery2 = MixedIndexQuery(IndexQueryFilter("field2", "query2"))
+    val indexQuery1   = MixedIndexQuery(IndexQueryFilter("field1", "query1"))
+    val indexQuery2   = MixedIndexQuery(IndexQueryFilter("field2", "query2"))
     val indexQueryAll = MixedIndexQueryAll(IndexQueryAllFilter("query_all"))
-    val sparkFilter = MixedSparkFilter(org.apache.spark.sql.sources.EqualTo("col", "val"))
+    val sparkFilter   = MixedSparkFilter(org.apache.spark.sql.sources.EqualTo("col", "val"))
 
     // Test extraction from nested structure
     val complexTree = MixedAndFilter(
@@ -656,7 +685,10 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
     assert(extractedIndexQueries.exists(_.columnName == "field2"), "Should include field2")
 
     val extractedIndexQueryAll = MixedBooleanFilter.extractIndexQueryAllFilters(complexTree)
-    assert(extractedIndexQueryAll.length == 1, s"Should extract 1 IndexQueryAllFilter, got ${extractedIndexQueryAll.length}")
+    assert(
+      extractedIndexQueryAll.length == 1,
+      s"Should extract 1 IndexQueryAllFilter, got ${extractedIndexQueryAll.length}"
+    )
     assert(extractedIndexQueryAll.head.queryString == "query_all", "Should have correct query string")
   }
 
@@ -687,11 +719,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("multi_or_test")
 
       // Multiple OR'd IndexQueries on the same field
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, title FROM multi_or_test
         WHERE (title indexquery 'apache') OR (title indexquery 'streaming') OR (title indexquery 'machine')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Multiple OR IndexQuery result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, title='${r.getString(1)}'"))
@@ -719,10 +753,10 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Create test data
       val testData = Seq(
-        (1, "term_match content", "12345"),  // matches: NOT(term_match AND id=12345) = NOT(true AND true) = false
-        (2, "term_match content", "99999"),  // matches: NOT(term_match AND id=12345) = NOT(true AND false) = true
-        (3, "other content", "12345"),       // matches: NOT(term_match AND id=12345) = NOT(false AND true) = true
-        (4, "other content", "99999")        // matches: NOT(term_match AND id=12345) = NOT(false AND false) = true
+        (1, "term_match content", "12345"), // matches: NOT(term_match AND id=12345) = NOT(true AND true) = false
+        (2, "term_match content", "99999"), // matches: NOT(term_match AND id=12345) = NOT(true AND false) = true
+        (3, "other content", "12345"),      // matches: NOT(term_match AND id=12345) = NOT(false AND true) = true
+        (4, "other content", "99999")       // matches: NOT(term_match AND id=12345) = NOT(false AND false) = true
       ).toDF("id", "content", "code")
 
       testData.write
@@ -740,11 +774,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       // Test: NOT (content indexquery 'term_match' AND code = '12345')
       // This should use De Morgan's law: NOT(A AND B) = NOT A OR NOT B
       // So documents matching (term_match AND code=12345) are EXCLUDED
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, code FROM not_mixed_test
         WHERE NOT (content indexquery 'term_match' AND code = '12345')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"NOT mixed predicate result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', code='${r.getString(2)}'"))
@@ -766,12 +802,12 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Create test data
       val testData = Seq(
-        (1, "term_a content", "field2_b value", "12345", "99"),  // matches (A AND id) -> excluded
-        (2, "term_a content", "other", "12345", "99"),           // matches (A AND id) -> excluded
-        (3, "other", "field2_b value", "12345", "99"),           // matches (B AND code) -> excluded
-        (4, "other", "field2_b value", "other", "99"),           // matches (B AND code) -> excluded
+        (1, "term_a content", "field2_b value", "12345", "99"), // matches (A AND id) -> excluded
+        (2, "term_a content", "other", "12345", "99"),          // matches (A AND id) -> excluded
+        (3, "other", "field2_b value", "12345", "99"),          // matches (B AND code) -> excluded
+        (4, "other", "field2_b value", "other", "99"),          // matches (B AND code) -> excluded
         (5, "term_a content", "field2_b value", "other", "other"), // matches A but not (A AND id), matches B but not (B AND code) -> included
-        (6, "other", "other", "12345", "99")                     // no match -> included
+        (6, "other", "other", "12345", "99") // no match -> included
       ).toDF("id", "content1", "content2", "idcol", "codeval")
 
       testData.write
@@ -791,7 +827,8 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       // This excludes documents where EITHER:
       // - content1 has 'term_a' AND idcol is '12345'
       // - content2 has 'field2_b' AND codeval is '99'
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id FROM not_complex_or_test
         WHERE NOT (
           (content1 indexquery 'term_a' AND idcol = '12345')
@@ -799,7 +836,8 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
           (content2 indexquery 'field2_b' AND codeval = '99')
         )
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"NOT complex OR result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}"))
@@ -843,11 +881,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Test: NOT NOT (content indexquery 'target') AND status = 'active'
       // Double NOT should cancel, equivalent to: content indexquery 'target' AND status = 'active'
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, status FROM double_not_test
         WHERE NOT (NOT (content indexquery 'target')) AND status = 'active'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Double NOT result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}'"))
@@ -869,11 +909,11 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Create test data with multiple text fields
       val testData = Seq(
-        (1, "alpha content", "beta tags"),      // both match -> YES
-        (2, "alpha content", "gamma tags"),     // only field1 matches -> NO
-        (3, "delta content", "beta tags"),      // only field2 matches -> NO
-        (4, "delta content", "gamma tags"),     // neither matches -> NO
-        (5, "alpha stuff", "beta description")  // both match -> YES
+        (1, "alpha content", "beta tags"),     // both match -> YES
+        (2, "alpha content", "gamma tags"),    // only field1 matches -> NO
+        (3, "delta content", "beta tags"),     // only field2 matches -> NO
+        (4, "delta content", "gamma tags"),    // neither matches -> NO
+        (5, "alpha stuff", "beta description") // both match -> YES
       ).toDF("id", "field1", "field2")
 
       testData.write
@@ -890,11 +930,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("multi_field_and_test")
 
       // Test: IndexQuery on different fields with AND
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, field1, field2 FROM multi_field_and_test
         WHERE (field1 indexquery 'alpha') AND (field2 indexquery 'beta')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Multi-field AND result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, field1='${r.getString(1)}', field2='${r.getString(2)}'"))
@@ -912,10 +954,10 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Create test data with multiple text fields
       val testData = Seq(
-        (1, "alpha content", "other tags"),     // field1 matches -> YES
-        (2, "other content", "beta tags"),      // field2 matches -> YES
-        (3, "alpha content", "beta tags"),      // both match -> YES
-        (4, "other content", "other tags")      // neither matches -> NO
+        (1, "alpha content", "other tags"), // field1 matches -> YES
+        (2, "other content", "beta tags"),  // field2 matches -> YES
+        (3, "alpha content", "beta tags"),  // both match -> YES
+        (4, "other content", "other tags")  // neither matches -> NO
       ).toDF("id", "field1", "field2")
 
       testData.write
@@ -932,11 +974,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("multi_field_or_test")
 
       // Test: IndexQuery on different fields with OR
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, field1, field2 FROM multi_field_or_test
         WHERE (field1 indexquery 'alpha') OR (field2 indexquery 'beta')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Multi-field OR result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, field1='${r.getString(1)}', field2='${r.getString(2)}'"))
@@ -974,11 +1018,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("indexall_combined_test")
 
       // Test: _indexall combined with status filter
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, title, tags, status FROM indexall_combined_test
         WHERE _indexall indexquery 'spark' AND status = 'active'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"IndexQueryAll + filter result count: ${result.length}")
       result.foreach(r => println(s"  id='${r.getString(0)}', title='${r.getString(1)}', status='${r.getString(3)}'"))
@@ -1017,11 +1063,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("indexall_or_specific_test")
 
       // Test: _indexall for 'spark' OR specific field for 'python'
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, title, category FROM indexall_or_specific_test
         WHERE (_indexall indexquery 'spark') OR (category indexquery 'python')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"IndexQueryAll OR specific result count: ${result.length}")
       result.foreach(r => println(s"  id='${r.getString(0)}', title='${r.getString(1)}', category='${r.getString(2)}'"))
@@ -1060,11 +1108,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("range_pred_test")
 
       // Test: IndexQuery with range predicate
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, priority FROM range_pred_test
         WHERE content indexquery 'target' AND priority > 5
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Range predicate result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', priority=${r.getInt(2)}"))
@@ -1103,11 +1153,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("in_clause_test")
 
       // Test: IndexQuery with IN clause
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, status FROM in_clause_test
         WHERE content indexquery 'target' AND status IN ('active', 'pending')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"IN clause result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}'"))
@@ -1146,11 +1198,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("string_eq_test")
 
       // Test: IndexQuery with string equality
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, status FROM string_eq_test
         WHERE content indexquery 'target' AND status = 'active'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"String equality result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}'"))
@@ -1190,15 +1244,19 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Test: ((A OR B) AND C) OR D
       // ((alpha OR beta) AND active) OR score > 12
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, status, score FROM deep_nested_test
         WHERE (((content indexquery 'alpha') OR (content indexquery 'beta')) AND status = 'active')
               OR score > 12
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Deep nested result count: ${result.length}")
-      result.foreach(r => println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}', score=${r.getInt(3)}"))
+      result.foreach(r =>
+        println(s"  id=${r.getInt(0)}, content='${r.getString(1)}', status='${r.getString(2)}', score=${r.getInt(3)}")
+      )
 
       // Expected:
       // - id=1: alpha, active -> YES (first part)
@@ -1240,11 +1298,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Test: partition_col = 'x' OR (indexquery AND spark_pred)
       // Note: This is tricky - partition filter in OR means we need to scan multiple partitions
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, date_part, content FROM partition_or_indexquery_test
         WHERE date_part = '2024-01-01' OR (content indexquery 'target' AND date_part = '2024-01-02')
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Partition OR IndexQuery result count: ${result.length}")
       result.foreach(r => println(s"  id=${r.getInt(0)}, date_part='${r.getString(1)}', content='${r.getString(2)}'"))

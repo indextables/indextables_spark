@@ -18,19 +18,18 @@
 package io.indextables.spark.core
 
 import org.apache.spark.sql.functions._
-
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.avro.{StateConfig, StateWriter, StreamingStateReader}
-import io.indextables.spark.io.CloudStorageProviderFactory
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.avro.{StateConfig, StateWriter, StreamingStateReader}
+import io.indextables.spark.TestBase
 
 /**
  * End-to-end integration tests for Avro state format.
  *
- * These tests verify that the Avro state format works correctly with actual Spark
- * read/write operations, including:
+ * These tests verify that the Avro state format works correctly with actual Spark read/write operations, including:
  *   - Writing data and creating Avro checkpoints
  *   - Reading data from Avro state format
  *   - Partition filtering with Avro manifest pruning
@@ -45,7 +44,7 @@ class AvroStateIntegrationTest extends TestBase {
     withTempPath { path =>
       // Write test data
       val data = (1 to 100).map(i => (i, s"name_$i", i * 10.0))
-      val df = spark.createDataFrame(data).toDF("id", "name", "score")
+      val df   = spark.createDataFrame(data).toDF("id", "name", "score")
 
       df.write
         .format(provider)
@@ -86,7 +85,7 @@ class AvroStateIntegrationTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Read and verify
-      val readDf = spark.read.format(provider).load(path)
+      val readDf  = spark.read.format(provider).load(path)
       val results = readDf.orderBy("id").collect()
 
       results.length shouldBe 3
@@ -127,7 +126,9 @@ class AvroStateIntegrationTest extends TestBase {
       allData.count() shouldBe 5
 
       // Read with partition filter
-      val filtered = spark.read.format(provider).load(path)
+      val filtered = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("date") === "2024-01-01")
         .collect()
 
@@ -155,14 +156,18 @@ class AvroStateIntegrationTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Query single partition - should benefit from manifest pruning
-      val singlePartition = spark.read.format(provider).load(path)
+      val singlePartition = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "region_0")
         .collect()
 
       singlePartition.length shouldBe 10
 
       // Query multiple partitions with IN filter
-      val multiPartition = spark.read.format(provider).load(path)
+      val multiPartition = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region").isin("region_0", "region_1", "region_2"))
         .collect()
 
@@ -174,7 +179,7 @@ class AvroStateIntegrationTest extends TestBase {
     withTempPath { path =>
       // Write initial data
       val data1 = Seq((1, "Alice"), (2, "Bob"))
-      val df1 = spark.createDataFrame(data1).toDF("id", "name")
+      val df1   = spark.createDataFrame(data1).toDF("id", "name")
 
       df1.write
         .format(provider)
@@ -186,7 +191,7 @@ class AvroStateIntegrationTest extends TestBase {
 
       // Write more data (append)
       val data2 = Seq((3, "Charlie"), (4, "Diana"))
-      val df2 = spark.createDataFrame(data2).toDF("id", "name")
+      val df2   = spark.createDataFrame(data2).toDF("id", "name")
 
       df2.write
         .format(provider)
@@ -206,7 +211,7 @@ class AvroStateIntegrationTest extends TestBase {
     withTempPath { path =>
       // Write test data
       val data = (1 to 100).map(i => (i, s"name_$i", i.toDouble))
-      val df = spark.createDataFrame(data).toDF("id", "name", "score")
+      val df   = spark.createDataFrame(data).toDF("id", "name", "score")
 
       df.write
         .format(provider)
@@ -219,11 +224,13 @@ class AvroStateIntegrationTest extends TestBase {
 
       // Run aggregation
       val readDf = spark.read.format(provider).load(path)
-      val aggResult = readDf.agg(
-        count("*").as("cnt"),
-        sum("score").as("total"),
-        avg("score").as("avg_score")
-      ).collect()
+      val aggResult = readDf
+        .agg(
+          count("*").as("cnt"),
+          sum("score").as("total"),
+          avg("score").as("avg_score")
+        )
+        .collect()
 
       aggResult.length shouldBe 1
       aggResult(0).getAs[Long]("cnt") shouldBe 100
@@ -236,7 +243,7 @@ class AvroStateIntegrationTest extends TestBase {
     withTempPath { path =>
       // Write test data
       val data = (1 to 50).map(i => (i, s"name_$i"))
-      val df = spark.createDataFrame(data).toDF("id", "name")
+      val df   = spark.createDataFrame(data).toDF("id", "name")
 
       df.write
         .format(provider)
@@ -269,24 +276,21 @@ class AvroStateIntegrationTest extends TestBase {
     withTempPath { path =>
       // Write initial data
       val data1 = (1 to 10).map(i => (i, s"name_$i"))
-      spark.createDataFrame(data1).toDF("id", "name")
-        .write.format(provider).mode("overwrite").save(path)
+      spark.createDataFrame(data1).toDF("id", "name").write.format(provider).mode("overwrite").save(path)
 
       // First checkpoint
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Append more data
       val data2 = (11 to 20).map(i => (i, s"name_$i"))
-      spark.createDataFrame(data2).toDF("id", "name")
-        .write.format(provider).mode("append").save(path)
+      spark.createDataFrame(data2).toDF("id", "name").write.format(provider).mode("append").save(path)
 
       // Second checkpoint
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Append even more data
       val data3 = (21 to 30).map(i => (i, s"name_$i"))
-      spark.createDataFrame(data3).toDF("id", "name")
-        .write.format(provider).mode("append").save(path)
+      spark.createDataFrame(data3).toDF("id", "name").write.format(provider).mode("append").save(path)
 
       // Third checkpoint
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
@@ -340,7 +344,7 @@ class AvroStateIntegrationTest extends TestBase {
     withTempPath { path =>
       // Write larger dataset
       val data = (1 to 1000).map(i => (i, s"name_$i", i % 100, i * 1.5))
-      val df = spark.createDataFrame(data).toDF("id", "name", "category", "value")
+      val df   = spark.createDataFrame(data).toDF("id", "name", "category", "value")
 
       df.write
         .format(provider)

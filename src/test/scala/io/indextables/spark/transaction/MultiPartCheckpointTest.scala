@@ -201,8 +201,8 @@ class MultiPartCheckpointTest extends TestBase {
 
         // All AddActions should have docMappingJson restored
         restoredAdds.foreach { add =>
-          add.docMappingJson shouldBe defined  // Schema should be restored from registry
-          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
+          add.docMappingJson shouldBe defined // Schema should be restored from registry
+          add.docMappingRef shouldBe defined  // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()
@@ -541,8 +541,8 @@ class MultiPartCheckpointTest extends TestBase {
         val v3Adds = restoredV3.get.collect { case a: AddAction => a }
         v3Adds.length shouldBe 15
         v3Adds.foreach { add =>
-          add.docMappingJson shouldBe defined  // Schema should be restored from registry
-          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
+          add.docMappingJson shouldBe defined // Schema should be restored from registry
+          add.docMappingRef shouldBe defined  // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()
@@ -656,7 +656,7 @@ class MultiPartCheckpointTest extends TestBase {
 
   /** Creates options map that includes JSON format for checkpoint testing */
   private def createJsonFormatOptions(
-      extraOptions: java.util.Map[String, String] = java.util.Collections.emptyMap()
+    extraOptions: java.util.Map[String, String] = java.util.Collections.emptyMap()
   ): org.apache.spark.sql.util.CaseInsensitiveStringMap = {
     val merged = new java.util.HashMap[String, String]()
     merged.put("spark.indextables.state.format", "json")

@@ -212,9 +212,9 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
           col("year") === year && col("quarter") === quarter
         )
 
-        val collectedData = partitionData.collect()
+        val collectedData  = partitionData.collect()
         val partitionCount = collectedData.length
-        val expectedCount = idRange.size
+        val expectedCount  = idRange.size
 
         assert(
           partitionCount == expectedCount,
@@ -222,7 +222,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         )
 
         // Verify ID ranges are correct
-        val actualIds = collectedData.map(_.getLong(0)).sorted
+        val actualIds   = collectedData.map(_.getLong(0)).sorted
         val expectedIds = idRange.toArray.map(_.toLong)
 
         assert(actualIds.sameElements(expectedIds), s"Partition year=$year quarter=$quarter has incorrect IDs")
@@ -513,7 +513,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Create a single partition with MANY small files to trigger multi-generation merges
     // With target size 100MB and small files, this should create multiple merge groups
-    val numBatches = 20  // Many small files
+    val numBatches    = 20 // Many small files
     val filesPerBatch = 2  // Spark typically creates 2 files per write
 
     (1 to numBatches).foreach { batch =>
@@ -541,7 +541,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Use a 1MB target size (minimum allowed) to force multiple merge groups
     // With many small files, this should still create multiple merge groups
-    val smallTargetSize = 1 * 1024 * 1024L  // 1MB target - minimum allowed
+    val smallTargetSize = 1 * 1024 * 1024L // 1MB target - minimum allowed
 
     // Execute MERGE SPLITS with small target size
     logger.info(s"Executing MERGE SPLITS with minimum target size ($smallTargetSize bytes = 1MB)")
@@ -549,8 +549,8 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     mergeResult.show(false)
 
     // Get the merge metrics
-    val metrics = mergeResult.collect().head.getStruct(1)
-    val status = metrics.getAs[String]("status")
+    val metrics     = mergeResult.collect().head.getStruct(1)
+    val status      = metrics.getAs[String]("status")
     val mergedFiles = Option(metrics.getAs[Any]("merged_files")).map(_.toString.toInt).getOrElse(0)
     val mergeGroups = Option(metrics.getAs[Any]("merge_groups")).map(_.toString.toInt).getOrElse(0)
 
@@ -561,8 +561,8 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
-    val totalCount = finalData.count()
-    val expectedCount = numBatches * 10L  // 10 records per batch
+    val totalCount    = finalData.count()
+    val expectedCount = numBatches * 10L // 10 records per batch
 
     logger.info(s"Final record count: $totalCount (expected: $expectedCount)")
 

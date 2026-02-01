@@ -31,10 +31,9 @@ import org.scalatest.BeforeAndAfterEach
  */
 class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     // Invalidate partition filter cache before each test to ensure isolation
     PartitionFilterCache.invalidate()
-  }
 
   test("String date partition values should match string filter values") {
     // Simulate how partition values are stored in transaction log (as strings)

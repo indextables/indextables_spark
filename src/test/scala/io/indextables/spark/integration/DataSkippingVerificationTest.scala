@@ -19,16 +19,20 @@ package io.indextables.spark.integration
 
 import scala.jdk.CollectionConverters._
 
+import org.apache.spark.sql.connector.read.InputPartition
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.core.{IndexTables4SparkScan, IndexTables4SparkInputPartition, IndexTables4SparkMultiSplitInputPartition}
+import io.indextables.spark.core.{
+  IndexTables4SparkInputPartition,
+  IndexTables4SparkMultiSplitInputPartition,
+  IndexTables4SparkScan
+}
 import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.TestBase
-import org.apache.spark.sql.connector.read.InputPartition
 import org.scalatest.BeforeAndAfterEach
 
 class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
@@ -357,13 +361,12 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
   }
 
   /** Extract all paths from partitions (handles both single-split and multi-split types) */
-  private def extractPaths(partitions: Array[InputPartition]): Seq[String] = {
+  private def extractPaths(partitions: Array[InputPartition]): Seq[String] =
     partitions.flatMap {
-      case single: IndexTables4SparkInputPartition => Seq(single.addAction.path)
+      case single: IndexTables4SparkInputPartition          => Seq(single.addAction.path)
       case multi: IndexTables4SparkMultiSplitInputPartition => multi.addActions.map(_.path)
       case other => throw new IllegalArgumentException(s"Unknown partition type: ${other.getClass}")
     }.toSeq
-  }
 
   private def createScanWithFilters(filters: Array[Filter]): IndexTables4SparkScan = {
     val schema = StructType(

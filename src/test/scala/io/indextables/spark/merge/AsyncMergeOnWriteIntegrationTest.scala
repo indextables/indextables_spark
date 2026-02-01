@@ -24,11 +24,9 @@ import org.scalatest.BeforeAndAfterEach
  * Integration tests for async merge-on-write functionality.
  *
  * These tests verify:
- *   1. Async merge does not block write completion
- *   2. New threshold calculation formulas work correctly
- *   3. Configuration options are respected
- *   4. Multiple writes can proceed while merge runs in background
- *   5. Job monitoring via SQL command works
+ *   1. Async merge does not block write completion 2. New threshold calculation formulas work correctly 3.
+ *      Configuration options are respected 4. Multiple writes can proceed while merge runs in background 5. Job
+ *      monitoring via SQL command works
  */
 class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach {
 
@@ -154,7 +152,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
-      .option("spark.indextables.mergeOnWrite.batchCpuFraction", "0.5")    // Large batches
+      .option("spark.indextables.mergeOnWrite.batchCpuFraction", "0.5")   // Large batches
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "10") // Require 10 batches
       .option("spark.indextables.mergeOnWrite.targetSize", "1G")          // Large target to reduce groups
       .save(tablePath)
@@ -178,7 +176,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     logger.info(s"Default parallelism (cluster CPUs): $defaultParallelism")
 
     // Test configuration
-    val batchCpuFraction = 0.25
+    val batchCpuFraction    = 0.25
     val minBatchesToTrigger = 2
 
     // Expected values

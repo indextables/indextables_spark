@@ -25,7 +25,7 @@ import io.indextables.spark.TestBase
  */
 class SQLIndexQueryValidationTest extends TestBase {
 
-  private var testDataPath: String = _
+  private var testDataPath: String              = _
   private var sharedTempDir: java.nio.file.Path = _
 
   override def beforeAll(): Unit = {

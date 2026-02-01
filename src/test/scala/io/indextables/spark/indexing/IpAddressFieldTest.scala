@@ -208,9 +208,9 @@ class IpAddressFieldTest extends TestBase {
       val data = Seq(
         ("server1", "2001:db8::1"),
         ("server2", "2001:db8::2"),
-        ("server3", "::1"),                              // Loopback
-        ("server4", "fe80::1"),                          // Link-local
-        ("server5", "2001:db8:85a3::8a2e:370:7334")      // Full IPv6
+        ("server3", "::1"),                         // Loopback
+        ("server4", "fe80::1"),                     // Link-local
+        ("server5", "2001:db8:85a3::8a2e:370:7334") // Full IPv6
       ).toDF("name", "ip")
 
       data.write
@@ -328,7 +328,8 @@ class IpAddressFieldTest extends TestBase {
       avgResult.collect()(0).getDouble(0) shouldBe 15.5 +- 0.01
 
       // Test COUNT(*) with IP range filter
-      val countResult = df.filter($"ip" >= "192.168.1.0" && $"ip" <= "192.168.1.255")
+      val countResult = df
+        .filter($"ip" >= "192.168.1.0" && $"ip" <= "192.168.1.255")
         .agg(functions.count("*"))
       countResult.collect()(0).getLong(0) shouldBe 3
     }
@@ -359,7 +360,7 @@ class IpAddressFieldTest extends TestBase {
 
       // Test GROUP BY on IP field with COUNT
       val groupByResult = df.groupBy("ip").count().orderBy($"count".desc)
-      val results = groupByResult.collect()
+      val results       = groupByResult.collect()
 
       results.length shouldBe 3
       // 192.168.1.1 and 192.168.1.2 both have 2 entries
@@ -368,7 +369,9 @@ class IpAddressFieldTest extends TestBase {
       results(2).getLong(1) shouldBe 1 // 10.0.0.1 has 1 entry
 
       // Test GROUP BY with SUM
-      val sumByIp = df.groupBy("ip").agg(functions.sum("requests").as("total_requests"))
+      val sumByIp = df
+        .groupBy("ip")
+        .agg(functions.sum("requests").as("total_requests"))
         .orderBy($"total_requests".desc)
       val sumResults = sumByIp.collect()
 

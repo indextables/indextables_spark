@@ -22,9 +22,9 @@ import java.net.URI
 /**
  * Utility for normalizing paths to their table root level.
  *
- * This is critical for credential providers (like UnityCatalogAWSCredentialProvider) to ensure
- * consistent cache keys. Without normalization, different splits from the same table would
- * result in different cache keys, causing redundant HTTP calls.
+ * This is critical for credential providers (like UnityCatalogAWSCredentialProvider) to ensure consistent cache keys.
+ * Without normalization, different splits from the same table would result in different cache keys, causing redundant
+ * HTTP calls.
  *
  * Examples:
  *   - s3://bucket/table/part-00000.split -> s3://bucket/table
@@ -40,23 +40,23 @@ object TablePathNormalizer {
   /**
    * Normalize a path to its table root by stripping file names and partition paths.
    *
-   * This ensures that credential providers are always created with the table root path,
-   * not individual split file paths or partition subdirectories, which is essential for
-   * cache consistency.
+   * This ensures that credential providers are always created with the table root path, not individual split file paths
+   * or partition subdirectories, which is essential for cache consistency.
    *
    * Normalization rules (applied in order):
-   *   1. Strip transaction log paths (_transaction_log/...)
-   *   2. If path ends with a data file (.split, .avro, .json, .gz), truncate to the last '/'
-   *   3. Strip all trailing Hive-style partition paths (/key=value/)
+   *   1. Strip transaction log paths (_transaction_log/...) 2. If path ends with a data file (.split, .avro, .json,
+   *      .gz), truncate to the last '/' 3. Strip all trailing Hive-style partition paths (/key=value/)
    *
-   * @param path The path to normalize (can be full URI like s3://bucket/path or relative path)
-   * @return Normalized path at table root level
+   * @param path
+   *   The path to normalize (can be full URI like s3://bucket/path or relative path)
+   * @return
+   *   Normalized path at table root level
    */
   def normalizeToTablePath(path: String): String = {
     if (path == null || path.isEmpty) return path
 
     try {
-      val uri = new URI(path)
+      val uri      = new URI(path)
       var pathPart = uri.getPath
 
       if (pathPart == null || pathPart.isEmpty) {
@@ -107,8 +107,10 @@ object TablePathNormalizer {
   /**
    * Check if a path segment is a Hive-style partition (key=value format).
    *
-   * @param segment Path segment to check
-   * @return true if the segment matches Hive partition format
+   * @param segment
+   *   Path segment to check
+   * @return
+   *   true if the segment matches Hive partition format
    */
   def isHivePartitionSegment(segment: String): Boolean =
     segment.nonEmpty && segment.contains('=') && !segment.startsWith("=")

@@ -17,43 +17,39 @@
 
 package io.indextables.spark.util
 
-/**
- * Utility functions for partition planning and distribution.
- */
+/** Utility functions for partition planning and distribution. */
 object PartitionUtils {
 
   /**
    * Interleave partitions by host for better cluster utilization.
    *
-   * Instead of scheduling all partitions for host1, then host2, etc.:
-   *   [h1,h1,h1,h2,h2,h2,h3,h3,h3]
+   * Instead of scheduling all partitions for host1, then host2, etc.: [h1,h1,h1,h2,h2,h2,h3,h3,h3]
    *
-   * This produces a round-robin ordering:
-   *   [h1,h2,h3,h1,h2,h3,h1,h2,h3]
+   * This produces a round-robin ordering: [h1,h2,h3,h1,h2,h3,h1,h2,h3]
    *
-   * This ensures Spark distributes work across all hosts from the start,
-   * rather than saturating one host at a time.
+   * This ensures Spark distributes work across all hosts from the start, rather than saturating one host at a time.
    *
-   * @param batchesByHost Map of host -> sequence of partitions for that host
-   * @tparam T The partition type
-   * @return Interleaved sequence of partitions
+   * @param batchesByHost
+   *   Map of host -> sequence of partitions for that host
+   * @tparam T
+   *   The partition type
+   * @return
+   *   Interleaved sequence of partitions
    */
   def interleaveByHost[T](batchesByHost: Map[String, Seq[T]]): Seq[T] = {
     if (batchesByHost.isEmpty) return Seq.empty
 
     // Sort by host name for deterministic ordering
     val hostBatches: Seq[(String, Seq[T])] = batchesByHost.toSeq.sortBy(_._1)
-    val maxBatches = hostBatches.map(_._2.length).max
+    val maxBatches                         = hostBatches.map(_._2.length).max
 
     // Round-robin: take batch i from each host, then batch i+1, etc.
     val result = scala.collection.mutable.ArrayBuffer[T]()
-    for (batchIndex <- 0 until maxBatches) {
-      for ((_, batches) <- hostBatches) {
+    for (batchIndex <- 0 until maxBatches)
+      for ((_, batches) <- hostBatches)
         if (batchIndex < batches.length) {
           result += batches(batchIndex)
         }
-      }
-    }
     result.toSeq
   }
 }
@@ -62,8 +58,8 @@ object PartitionUtils {
  * Calculates optimal splitsPerTask based on cluster size and split count.
  *
  * Auto-selection algorithm:
- * - If totalSplits <= defaultParallelism × 2: use 1 split per task (maximize parallelism)
- * - Otherwise: ensure at least 4 × defaultParallelism groups, capped at maxSplitsPerTask
+ *   - If totalSplits <= defaultParallelism × 2: use 1 split per task (maximize parallelism)
+ *   - Otherwise: ensure at least 4 × defaultParallelism groups, capped at maxSplitsPerTask
  */
 object SplitsPerTaskCalculator {
 
@@ -73,18 +69,23 @@ object SplitsPerTaskCalculator {
   /**
    * Calculate optimal splitsPerTask based on cluster size and split count.
    *
-   * @param totalSplits        Total number of splits to process
-   * @param defaultParallelism spark.sparkContext.defaultParallelism
-   * @param configuredValue    User-configured value ("auto", numeric string, or None)
-   * @param maxSplitsPerTask   Maximum splits per task (cap for auto-selection)
-   * @return Optimal splitsPerTask value (always >= 1)
+   * @param totalSplits
+   *   Total number of splits to process
+   * @param defaultParallelism
+   *   spark.sparkContext.defaultParallelism
+   * @param configuredValue
+   *   User-configured value ("auto", numeric string, or None)
+   * @param maxSplitsPerTask
+   *   Maximum splits per task (cap for auto-selection)
+   * @return
+   *   Optimal splitsPerTask value (always >= 1)
    */
   def calculate(
-      totalSplits: Int,
-      defaultParallelism: Int,
-      configuredValue: Option[String],
-      maxSplitsPerTask: Int = DefaultMaxSplitsPerTask
-  ): Int = {
+    totalSplits: Int,
+    defaultParallelism: Int,
+    configuredValue: Option[String],
+    maxSplitsPerTask: Int = DefaultMaxSplitsPerTask
+  ): Int =
     // Check if user explicitly set a numeric value
     configuredValue.flatMap(v => scala.util.Try(v.toInt).toOption) match {
       case Some(explicit) =>
@@ -94,24 +95,27 @@ object SplitsPerTaskCalculator {
         // Auto-selection: "auto", empty, or invalid value
         autoSelect(totalSplits, defaultParallelism, maxSplitsPerTask)
     }
-  }
 
   /**
    * Auto-select optimal splitsPerTask based on cluster size and split count.
    *
    * Algorithm:
-   * - Small tables (splits <= parallelism × 2): 1 split per task for max parallelism
-   * - Large tables: batch to ensure >= 4 × parallelism groups, capped at maxSplitsPerTask
+   *   - Small tables (splits <= parallelism × 2): 1 split per task for max parallelism
+   *   - Large tables: batch to ensure >= 4 × parallelism groups, capped at maxSplitsPerTask
    *
-   * @param totalSplits        Total number of splits to process
-   * @param defaultParallelism spark.sparkContext.defaultParallelism
-   * @param maxSplitsPerTask   Maximum splits per task (cap)
-   * @return Optimal splitsPerTask value (always >= 1)
+   * @param totalSplits
+   *   Total number of splits to process
+   * @param defaultParallelism
+   *   spark.sparkContext.defaultParallelism
+   * @param maxSplitsPerTask
+   *   Maximum splits per task (cap)
+   * @return
+   *   Optimal splitsPerTask value (always >= 1)
    */
   private def autoSelect(
-      totalSplits: Int,
-      defaultParallelism: Int,
-      maxSplitsPerTask: Int
+    totalSplits: Int,
+    defaultParallelism: Int,
+    maxSplitsPerTask: Int
   ): Int = {
     val parallelism = math.max(1, defaultParallelism) // Guard against 0
     val threshold   = parallelism * 2

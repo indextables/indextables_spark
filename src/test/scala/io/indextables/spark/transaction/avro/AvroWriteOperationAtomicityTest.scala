@@ -29,17 +29,15 @@ import io.indextables.spark.TestBase
  * Tests for write operation atomicity with Avro state format.
  *
  * These tests verify:
- *   1. Avro state is created atomically after successful writes
- *   2. Split files and state are consistent
- *   3. Append operations work correctly with Avro state
- *   4. Overwrite operations are atomic
- *   5. Concurrent writes are handled safely
+ *   1. Avro state is created atomically after successful writes 2. Split files and state are consistent 3. Append
+ *      operations work correctly with Avro state 4. Overwrite operations are atomic 5. Concurrent writes are handled
+ *      safely
  *
  * This is the Avro equivalent of WriteOperationAtomicityTest.
  */
 class AvroWriteOperationAtomicityTest extends TestBase {
 
-  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[AvroWriteOperationAtomicityTest])
+  private val logger   = org.slf4j.LoggerFactory.getLogger(classOf[AvroWriteOperationAtomicityTest])
   private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
 
   // ============================================================================
@@ -58,12 +56,12 @@ class AvroWriteOperationAtomicityTest extends TestBase {
       checkpointResult(0).getAs[String]("status") shouldBe "SUCCESS"
 
       // Verify state directory exists
-      val txLogDir = new File(s"$path/_transaction_log")
+      val txLogDir  = new File(s"$path/_transaction_log")
       val stateDirs = txLogDir.listFiles().filter(_.getName.startsWith("state-v"))
       stateDirs should not be empty
 
       // Verify manifest exists (state is complete)
-      val stateDir = stateDirs.head
+      val stateDir     = stateDirs.head
       val manifestFile = new File(stateDir, "_manifest.avro")
       manifestFile.exists() shouldBe true
 
@@ -86,7 +84,7 @@ class AvroWriteOperationAtomicityTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Get split files
-      val tableDir = new File(path)
+      val tableDir   = new File(path)
       val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
       splitFiles should not be empty
 
@@ -128,8 +126,13 @@ class AvroWriteOperationAtomicityTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Verify all IDs present
-      val ids = spark.read.format(provider).load(path)
-        .select("id").collect().map(_.getLong(0)).sorted
+      val ids = spark.read
+        .format(provider)
+        .load(path)
+        .select("id")
+        .collect()
+        .map(_.getLong(0))
+        .sorted
       ids shouldBe (0L until 200L).toArray
 
       logger.info("Atomic append test passed")
@@ -150,9 +153,7 @@ class AvroWriteOperationAtomicityTest extends TestBase {
       val tableDir = new File(path)
 
       // Should have no temp files
-      val tempFiles = tableDir.listFiles().filter(f =>
-        f.getName.contains(".tmp") || f.getName.contains(".partial")
-      )
+      val tempFiles = tableDir.listFiles().filter(f => f.getName.contains(".tmp") || f.getName.contains(".partial"))
       tempFiles shouldBe empty
 
       // All split files should be valid (non-empty)
@@ -171,7 +172,7 @@ class AvroWriteOperationAtomicityTest extends TestBase {
       val df = spark.range(0, 1000).repartition(10).selectExpr("id", "CAST(id AS STRING) as text")
       df.write.format(provider).mode("overwrite").save(path)
 
-      val tableDir = new File(path)
+      val tableDir   = new File(path)
       val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
       // All split file names should be unique
@@ -398,7 +399,7 @@ class AvroWriteOperationAtomicityTest extends TestBase {
       for (i <- 1 to 5) {
         // Read
         val readResult = spark.read.format(provider).load(path)
-        val count = readResult.count()
+        val count      = readResult.count()
         logger.info(s"Iteration $i: read $count rows")
 
         // Write

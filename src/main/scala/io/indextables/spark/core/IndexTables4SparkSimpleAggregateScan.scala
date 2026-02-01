@@ -80,18 +80,20 @@ class IndexTables4SparkSimpleAggregateScan(
       schema,
       pushedFilters,
       options,
-      resolvedConfig,  // Use resolved config with driver-side credentials
+      resolvedConfig, // Use resolved config with driver-side credentials
       aggregation,
       indexQueryFilters
     )
   }
 
   /**
-   * Resolve AWS credentials on the driver and return a modified config.
-   * See IndexTables4SparkScan.resolveCredentialsOnDriver for detailed documentation.
+   * Resolve AWS credentials on the driver and return a modified config. See
+   * IndexTables4SparkScan.resolveCredentialsOnDriver for detailed documentation.
    */
-  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path): Map[String, String] = {
-    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path)
+    : Map[String, String] = {
+    val providerClass = config
+      .get("spark.indextables.aws.credentialsProviderClass")
       .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
 
     providerClass match {
@@ -99,7 +101,8 @@ class IndexTables4SparkSimpleAggregateScan(
         try {
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath.toString)
           val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config, normalizedPath
+            config,
+            normalizedPath
           )
 
           credentials match {
@@ -289,31 +292,41 @@ class IndexTables4SparkSimpleAggregateBatch(
     val partitions = if (splitsPerTask == 1) {
       // Fallback to single-split behavior for backward compatibility
       // Still interleave by host for better distribution
-      val batchesByHost = splitsByHost.map { case (host, hostSplits) =>
-        host -> hostSplits.map { split =>
-          new IndexTables4SparkSimpleAggregatePartition(
-            split, schema, pushedFilters, config, aggregation,
-            transactionLog.getTablePath(), indexQueryFilters,
-            if (host == "unknown") None else Some(host)
-          )
-        }
+      val batchesByHost = splitsByHost.map {
+        case (host, hostSplits) =>
+          host -> hostSplits.map { split =>
+            new IndexTables4SparkSimpleAggregatePartition(
+              split,
+              schema,
+              pushedFilters,
+              config,
+              aggregation,
+              transactionLog.getTablePath(),
+              indexQueryFilters,
+              if (host == "unknown") None else Some(host)
+            )
+          }
       }
       PartitionUtils.interleaveByHost(batchesByHost)
     } else {
       // Group splits by host and batch them
-      val batchesByHost = splitsByHost.map { case (host, hostSplits) =>
-        host -> hostSplits.grouped(splitsPerTask).map { batch =>
-          new IndexTables4SparkMultiSplitSimpleAggregatePartition(
-            splits = batch,
-            schema = schema,
-            pushedFilters = pushedFilters,
-            config = config,
-            aggregation = aggregation,
-            tablePath = transactionLog.getTablePath(),
-            indexQueryFilters = indexQueryFilters,
-            preferredHost = if (host == "unknown") None else Some(host)
-          )
-        }.toSeq
+      val batchesByHost = splitsByHost.map {
+        case (host, hostSplits) =>
+          host -> hostSplits
+            .grouped(splitsPerTask)
+            .map { batch =>
+              new IndexTables4SparkMultiSplitSimpleAggregatePartition(
+                splits = batch,
+                schema = schema,
+                pushedFilters = pushedFilters,
+                config = config,
+                aggregation = aggregation,
+                tablePath = transactionLog.getTablePath(),
+                indexQueryFilters = indexQueryFilters,
+                preferredHost = if (host == "unknown") None else Some(host)
+              )
+            }
+            .toSeq
       }
       PartitionUtils.interleaveByHost(batchesByHost)
     }
@@ -367,9 +380,8 @@ class IndexTables4SparkSimpleAggregatePartition(
 }
 
 /**
- * Input partition holding multiple splits for batch simple aggregation processing.
- * All splits share the same preferredHost for cache locality.
- * The reader will execute aggregations on each split and combine results.
+ * Input partition holding multiple splits for batch simple aggregation processing. All splits share the same
+ * preferredHost for cache locality. The reader will execute aggregations on each split and combine results.
  */
 class IndexTables4SparkMultiSplitSimpleAggregatePartition(
   val splits: Seq[io.indextables.spark.transaction.AddAction],
@@ -1008,8 +1020,8 @@ class IndexTables4SparkSimpleAggregateReader(
     }
 
   /**
-   * Read fast fields from docMappingJson metadata in the split.
-   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
+   * Read fast fields from docMappingJson metadata in the split. Uses cached DocMappingMetadata to avoid repeated JSON
+   * parsing.
    */
   private def getFastFieldsFromDocMapping(): Set[String] = {
     // Use cached DocMappingMetadata - no JSON parsing here
@@ -1022,11 +1034,10 @@ class IndexTables4SparkSimpleAggregateReader(
 }
 
 /**
- * Reader for multi-split simple aggregation partitions.
- * Executes aggregations on each split and combines results:
- * - COUNT/SUM: adds values together
- * - MIN: takes the minimum across all splits
- * - MAX: takes the maximum across all splits
+ * Reader for multi-split simple aggregation partitions. Executes aggregations on each split and combines results:
+ *   - COUNT/SUM: adds values together
+ *   - MIN: takes the minimum across all splits
+ *   - MAX: takes the maximum across all splits
  */
 class IndexTables4SparkMultiSplitSimpleAggregateReader(
   partition: IndexTables4SparkMultiSplitSimpleAggregatePartition,
@@ -1035,7 +1046,7 @@ class IndexTables4SparkMultiSplitSimpleAggregateReader(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitSimpleAggregateReader])
   private var aggregateResults: Iterator[org.apache.spark.sql.catalyst.InternalRow] = _
-  private var isInitialized = false
+  private var isInitialized                                                         = false
 
   override def next(): Boolean = {
     if (!isInitialized) {
@@ -1085,13 +1096,11 @@ class IndexTables4SparkMultiSplitSimpleAggregateReader(
 
         // Collect all results from this split
         val results = scala.collection.mutable.ArrayBuffer[InternalRow]()
-        try {
-          while (singleReader.next()) {
+        try
+          while (singleReader.next())
             results += singleReader.get().copy()
-          }
-        } finally {
+        finally
           singleReader.close()
-        }
         results
       }
 
@@ -1121,9 +1130,9 @@ class IndexTables4SparkMultiSplitSimpleAggregateReader(
 
   /**
    * Combine aggregate results from multiple splits.
-   * - COUNT/SUM: adds values together
-   * - MIN: takes the minimum across all splits
-   * - MAX: takes the maximum across all splits
+   *   - COUNT/SUM: adds values together
+   *   - MIN: takes the minimum across all splits
+   *   - MAX: takes the maximum across all splits
    */
   private def combineAggregateResults(
     results: Seq[org.apache.spark.sql.catalyst.InternalRow],
@@ -1131,96 +1140,100 @@ class IndexTables4SparkMultiSplitSimpleAggregateReader(
   ): org.apache.spark.sql.catalyst.InternalRow = {
     import org.apache.spark.sql.connector.expressions.aggregate._
 
-    val combined = aggregation.aggregateExpressions.zipWithIndex.map { case (aggExpr, idx) =>
-      aggExpr match {
-        case _: Count | _: CountStar =>
-          // COUNT: sum all counts
-          val totalCount = results.map(row => row.getLong(idx)).sum
-          totalCount: Any
+    val combined = aggregation.aggregateExpressions.zipWithIndex.map {
+      case (aggExpr, idx) =>
+        aggExpr match {
+          case _: Count | _: CountStar =>
+            // COUNT: sum all counts
+            val totalCount = results.map(row => row.getLong(idx)).sum
+            totalCount: Any
 
-        case _: Sum =>
-          // SUM: sum all values
-          // Detect if values are Long or Double by looking at first non-null result
-          val firstValue = results.find(r => !r.isNullAt(idx)).map(_.get(idx, null))
-          firstValue match {
-            case Some(_: java.lang.Long) =>
-              val totalSum = results.filter(!_.isNullAt(idx)).map(_.getLong(idx)).sum
-              java.lang.Long.valueOf(totalSum): Any
-            case Some(_: java.lang.Double) =>
-              val totalSum = results.filter(!_.isNullAt(idx)).map(_.getDouble(idx)).sum
-              java.lang.Double.valueOf(totalSum): Any
-            case _ =>
-              // Default to Long
-              val totalSum = results.filter(!_.isNullAt(idx)).map(row => {
-                try { row.getLong(idx) }
-                catch { case _: ClassCastException => row.getDouble(idx).toLong }
-              }).sum
-              java.lang.Long.valueOf(totalSum): Any
-          }
-
-        case _: Min =>
-          // MIN: take the minimum
-          val validResults = results.filter(!_.isNullAt(idx))
-          if (validResults.isEmpty) {
-            null: Any
-          } else {
-            val firstValue = validResults.head.get(idx, null)
+          case _: Sum =>
+            // SUM: sum all values
+            // Detect if values are Long or Double by looking at first non-null result
+            val firstValue = results.find(r => !r.isNullAt(idx)).map(_.get(idx, null))
             firstValue match {
-              case _: java.lang.Integer =>
-                val minVal = validResults.map(_.getInt(idx)).min
-                java.lang.Integer.valueOf(minVal): Any
-              case _: java.lang.Long =>
-                val minVal = validResults.map(_.getLong(idx)).min
-                java.lang.Long.valueOf(minVal): Any
-              case _: java.lang.Float =>
-                val minVal = validResults.map(_.getFloat(idx)).min
-                java.lang.Float.valueOf(minVal): Any
-              case _: java.lang.Double =>
-                val minVal = validResults.map(_.getDouble(idx)).min
-                java.lang.Double.valueOf(minVal): Any
+              case Some(_: java.lang.Long) =>
+                val totalSum = results.filter(!_.isNullAt(idx)).map(_.getLong(idx)).sum
+                java.lang.Long.valueOf(totalSum): Any
+              case Some(_: java.lang.Double) =>
+                val totalSum = results.filter(!_.isNullAt(idx)).map(_.getDouble(idx)).sum
+                java.lang.Double.valueOf(totalSum): Any
               case _ =>
-                // Default to Double
-                val minVal = validResults.map(_.getDouble(idx)).min
-                java.lang.Double.valueOf(minVal): Any
+                // Default to Long
+                val totalSum = results
+                  .filter(!_.isNullAt(idx))
+                  .map { row =>
+                    try row.getLong(idx)
+                    catch { case _: ClassCastException => row.getDouble(idx).toLong }
+                  }
+                  .sum
+                java.lang.Long.valueOf(totalSum): Any
             }
-          }
 
-        case _: Max =>
-          // MAX: take the maximum
-          val validResults = results.filter(!_.isNullAt(idx))
-          if (validResults.isEmpty) {
-            null: Any
-          } else {
-            val firstValue = validResults.head.get(idx, null)
-            firstValue match {
-              case _: java.lang.Integer =>
-                val maxVal = validResults.map(_.getInt(idx)).max
-                java.lang.Integer.valueOf(maxVal): Any
-              case _: java.lang.Long =>
-                val maxVal = validResults.map(_.getLong(idx)).max
-                java.lang.Long.valueOf(maxVal): Any
-              case _: java.lang.Float =>
-                val maxVal = validResults.map(_.getFloat(idx)).max
-                java.lang.Float.valueOf(maxVal): Any
-              case _: java.lang.Double =>
-                val maxVal = validResults.map(_.getDouble(idx)).max
-                java.lang.Double.valueOf(maxVal): Any
-              case _ =>
-                // Default to Double
-                val maxVal = validResults.map(_.getDouble(idx)).max
-                java.lang.Double.valueOf(maxVal): Any
+          case _: Min =>
+            // MIN: take the minimum
+            val validResults = results.filter(!_.isNullAt(idx))
+            if (validResults.isEmpty) {
+              null: Any
+            } else {
+              val firstValue = validResults.head.get(idx, null)
+              firstValue match {
+                case _: java.lang.Integer =>
+                  val minVal = validResults.map(_.getInt(idx)).min
+                  java.lang.Integer.valueOf(minVal): Any
+                case _: java.lang.Long =>
+                  val minVal = validResults.map(_.getLong(idx)).min
+                  java.lang.Long.valueOf(minVal): Any
+                case _: java.lang.Float =>
+                  val minVal = validResults.map(_.getFloat(idx)).min
+                  java.lang.Float.valueOf(minVal): Any
+                case _: java.lang.Double =>
+                  val minVal = validResults.map(_.getDouble(idx)).min
+                  java.lang.Double.valueOf(minVal): Any
+                case _ =>
+                  // Default to Double
+                  val minVal = validResults.map(_.getDouble(idx)).min
+                  java.lang.Double.valueOf(minVal): Any
+              }
             }
-          }
 
-        case other =>
-          logger.warn(s"MULTI-SPLIT SIMPLE AGGREGATE: Unsupported aggregation type for combining: ${other.getClass.getSimpleName}")
-          // Default: take from first result
-          if (results.nonEmpty && !results.head.isNullAt(idx)) {
-            results.head.get(idx, null)
-          } else {
-            0L: Any
-          }
-      }
+          case _: Max =>
+            // MAX: take the maximum
+            val validResults = results.filter(!_.isNullAt(idx))
+            if (validResults.isEmpty) {
+              null: Any
+            } else {
+              val firstValue = validResults.head.get(idx, null)
+              firstValue match {
+                case _: java.lang.Integer =>
+                  val maxVal = validResults.map(_.getInt(idx)).max
+                  java.lang.Integer.valueOf(maxVal): Any
+                case _: java.lang.Long =>
+                  val maxVal = validResults.map(_.getLong(idx)).max
+                  java.lang.Long.valueOf(maxVal): Any
+                case _: java.lang.Float =>
+                  val maxVal = validResults.map(_.getFloat(idx)).max
+                  java.lang.Float.valueOf(maxVal): Any
+                case _: java.lang.Double =>
+                  val maxVal = validResults.map(_.getDouble(idx)).max
+                  java.lang.Double.valueOf(maxVal): Any
+                case _ =>
+                  // Default to Double
+                  val maxVal = validResults.map(_.getDouble(idx)).max
+                  java.lang.Double.valueOf(maxVal): Any
+              }
+            }
+
+          case other =>
+            logger.warn(s"MULTI-SPLIT SIMPLE AGGREGATE: Unsupported aggregation type for combining: ${other.getClass.getSimpleName}")
+            // Default: take from first result
+            if (results.nonEmpty && !results.head.isNullAt(idx)) {
+              results.head.get(idx, null)
+            } else {
+              0L: Any
+            }
+        }
     }
 
     org.apache.spark.sql.catalyst.InternalRow.fromSeq(combined)

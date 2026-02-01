@@ -25,21 +25,25 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 /**
  * Tests for IS NULL / IS NOT NULL filter support.
  *
- * These filters require FAST field configuration in Tantivy to work correctly.
- * The validation runs on the driver to provide clear error messages.
+ * These filters require FAST field configuration in Tantivy to work correctly. The validation runs on the driver to
+ * provide clear error messages.
  */
 class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
   test("IS NOT NULL with fast field should return only non-null records") {
     withTempPath { path =>
       // Create test data with some null values
-      val data = spark.createDataFrame(Seq(
-        (1, Some("alice@example.com"), 100),
-        (2, None, 200),
-        (3, Some("bob@example.com"), 300),
-        (4, None, 400),
-        (5, Some("carol@example.com"), 500)
-      )).toDF("id", "email", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, Some("alice@example.com"), 100),
+            (2, None, 200),
+            (3, Some("bob@example.com"), 300),
+            (4, None, 400),
+            (5, Some("carol@example.com"), 500)
+          )
+        )
+        .toDF("id", "email", "score")
 
       // Write with email configured as fast field
       data.write
@@ -80,13 +84,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("IS NULL with fast field should return only null records") {
     withTempPath { path =>
       // Create test data with some null values
-      val data = spark.createDataFrame(Seq(
-        (1, Some("alice@example.com"), 100),
-        (2, None, 200),
-        (3, Some("bob@example.com"), 300),
-        (4, None, 400),
-        (5, Some("carol@example.com"), 500)
-      )).toDF("id", "email", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, Some("alice@example.com"), 100),
+            (2, None, 200),
+            (3, Some("bob@example.com"), 300),
+            (4, None, 400),
+            (5, Some("carol@example.com"), 500)
+          )
+        )
+        .toDF("id", "email", "score")
 
       // Write with email configured as fast field
       data.write
@@ -111,10 +119,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("IS NOT NULL on non-fast field should be handled by Spark") {
     withTempPath { path =>
       // Create test data (no nulls in name column)
-      val data = spark.createDataFrame(Seq(
-        (1, "alice", 100),
-        (2, "bob", 200)
-      )).toDF("id", "name", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, "alice", 100),
+            (2, "bob", 200)
+          )
+        )
+        .toDF("id", "name", "score")
 
       // Write with only score as fast field (name is NOT fast)
       data.write
@@ -141,10 +153,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("IS NULL on non-fast field should be handled by Spark") {
     withTempPath { path =>
       // Create test data (no nulls in name column)
-      val data = spark.createDataFrame(Seq(
-        (1, "alice", 100),
-        (2, "bob", 200)
-      )).toDF("id", "name", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, "alice", 100),
+            (2, "bob", 200)
+          )
+        )
+        .toDF("id", "name", "score")
 
       // Write with only score as fast field (name is NOT fast)
       data.write
@@ -170,10 +186,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("IS NULL/IS NOT NULL on non-existent field should throw error") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        (1, "alice", 100),
-        (2, "bob", 200)
-      )).toDF("id", "name", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, "alice", 100),
+            (2, "bob", 200)
+          )
+        )
+        .toDF("id", "name", "score")
 
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -201,13 +221,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("Combined filter with IS NOT NULL and equality should work") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        (1, Some("active"), 100),
-        (2, None, 200),
-        (3, Some("inactive"), 300),
-        (4, Some("active"), 400),
-        (5, None, 500)
-      )).toDF("id", "status", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, Some("active"), 100),
+            (2, None, 200),
+            (3, Some("inactive"), 300),
+            (4, Some("active"), 400),
+            (5, None, 500)
+          )
+        )
+        .toDF("id", "status", "score")
 
       // Write with all fields as fast
       data.write
@@ -232,13 +256,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("Aggregate with IS NOT NULL filter should work when field is fast") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        (1, Some("active"), 100),
-        (2, None, 200),
-        (3, Some("inactive"), 300),
-        (4, Some("active"), 400),
-        (5, None, 500)
-      )).toDF("id", "status", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, Some("active"), 100),
+            (2, None, 200),
+            (3, Some("inactive"), 300),
+            (4, Some("active"), 400),
+            (5, None, 500)
+          )
+        )
+        .toDF("id", "status", "score")
 
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -261,13 +289,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("OR filter with IS NULL should work") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        (1, Some("alice"), 100),
-        (2, None, 200),
-        (3, Some("bob"), 300),
-        (4, None, 50),
-        (5, Some("carol"), 500)
-      )).toDF("id", "name", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, Some("alice"), 100),
+            (2, None, 200),
+            (3, Some("bob"), 300),
+            (4, None, 50),
+            (5, Some("carol"), 500)
+          )
+        )
+        .toDF("id", "name", "score")
 
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -294,13 +326,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       // Create test data with some null text values
       // This tests the exact scenario: SELECT * FROM table WHERE text_field IS NULL
       // where text_field is a TEXT type (not FAST)
-      val data = spark.createDataFrame(Seq(
-        (1L, Some("Hello world, this is a test message")),
-        (2L, None),  // null text
-        (3L, Some("Another message with some content")),
-        (4L, None),  // null text
-        (5L, Some("Final message here"))
-      )).toDF("id", "message_content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1L, Some("Hello world, this is a test message")),
+            (2L, None), // null text
+            (3L, Some("Another message with some content")),
+            (4L, None), // null text
+            (5L, Some("Final message here"))
+          )
+        )
+        .toDF("id", "message_content")
 
       // Write with message_content as TEXT (not FAST) - typical for log/message fields
       data.write
@@ -329,13 +365,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("COUNT with IS NULL on text field (non-FAST) should work via Spark post-filtering") {
     withTempPath { path =>
       // Test aggregate with IS NULL on non-FAST text field
-      val data = spark.createDataFrame(Seq(
-        (1L, Some("Message one")),
-        (2L, None),
-        (3L, Some("Message three")),
-        (4L, None),
-        (5L, Some("Message five"))
-      )).toDF("id", "log_message")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1L, Some("Message one")),
+            (2L, None),
+            (3L, Some("Message three")),
+            (4L, None),
+            (5L, Some("Message five"))
+          )
+        )
+        .toDF("id", "log_message")
 
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -359,13 +399,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("SELECT * with IS NOT NULL on text field (non-FAST) should work via Spark post-filtering") {
     withTempPath { path =>
       // Test IS NOT NULL on non-FAST TEXT field
-      val data = spark.createDataFrame(Seq(
-        (1L, Some("Hello world, this is a test message")),
-        (2L, None),  // null text
-        (3L, Some("Another message with some content")),
-        (4L, None),  // null text
-        (5L, Some("Final message here"))
-      )).toDF("id", "message_content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1L, Some("Hello world, this is a test message")),
+            (2L, None), // null text
+            (3L, Some("Another message with some content")),
+            (4L, None), // null text
+            (5L, Some("Final message here"))
+          )
+        )
+        .toDF("id", "message_content")
 
       // Write with message_content as TEXT (not FAST)
       data.write
@@ -392,13 +436,17 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
   test("COUNT with IS NOT NULL on text field (non-FAST) should work via Spark post-filtering") {
     withTempPath { path =>
       // Test aggregate with IS NOT NULL on non-FAST text field
-      val data = spark.createDataFrame(Seq(
-        (1L, Some("Message one")),
-        (2L, None),
-        (3L, Some("Message three")),
-        (4L, None),
-        (5L, Some("Message five"))
-      )).toDF("id", "log_message")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1L, Some("Message one")),
+            (2L, None),
+            (3L, Some("Message three")),
+            (4L, None),
+            (5L, Some("Message five"))
+          )
+        )
+        .toDF("id", "log_message")
 
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")

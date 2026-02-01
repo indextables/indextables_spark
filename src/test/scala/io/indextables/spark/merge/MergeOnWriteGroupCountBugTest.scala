@@ -120,7 +120,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "4G")
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1000") // Very high threshold
-      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1") // Lower threshold for tests
+      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")         // Lower threshold for tests
       .partitionBy("year")
       .save(tablePath)
 
@@ -167,8 +167,8 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
-      .option("spark.indextables.mergeOnWrite.targetSize", "10M")          // Small target = many groups
-      .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1")   // Low threshold (default)
+      .option("spark.indextables.mergeOnWrite.targetSize", "10M")        // Small target = many groups
+      .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1") // Low threshold (default)
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
       .partitionBy("year")
       .save(tablePath)

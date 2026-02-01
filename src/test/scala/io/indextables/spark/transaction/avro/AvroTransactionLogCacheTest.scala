@@ -109,13 +109,13 @@ class AvroTransactionLogCacheTest extends TestBase {
       val afterRead = CloudStorageProvider.getCountersSnapshot
 
       // Execute multiple queries
-      val count1 = readDf.count()
+      val count1      = readDf.count()
       val afterCount1 = CloudStorageProvider.getCountersSnapshot
 
-      val count2 = readDf.filter("id > 50").count()
+      val count2      = readDf.filter("id > 50").count()
       val afterCount2 = CloudStorageProvider.getCountersSnapshot
 
-      val sum = readDf.agg(Map("id" -> "sum")).collect()
+      val sum      = readDf.agg(Map("id" -> "sum")).collect()
       val afterSum = CloudStorageProvider.getCountersSnapshot
 
       // Verify counts
@@ -198,7 +198,7 @@ class AvroTransactionLogCacheTest extends TestBase {
       readDf2.schema
 
       val afterRead = CloudStorageProvider.getCountersSnapshot
-      val newCalls = afterRead.exists - beforeInvalidate.exists
+      val newCalls  = afterRead.exists - beforeInvalidate.exists
       assert(newCalls > 0, s"After cache invalidation, read should cause storage calls, got $newCalls")
     }
   }
@@ -215,7 +215,7 @@ class AvroTransactionLogCacheTest extends TestBase {
         .save(tempPath)
 
       // Verify Avro state directory was created
-      val txLogPath = new File(tempPath, "_transaction_log")
+      val txLogPath        = new File(tempPath, "_transaction_log")
       val stateDirectories = txLogPath.listFiles().filter(_.getName.startsWith("state-v"))
 
       assert(stateDirectories.nonEmpty, "Should have created Avro state directory")
@@ -313,7 +313,7 @@ class AvroTransactionLogCacheTest extends TestBase {
       val afterRead = CloudStorageProvider.getCountersSnapshot
 
       // Collect all data
-      val collected = readDf.collect()
+      val collected    = readDf.collect()
       val afterCollect = CloudStorageProvider.getCountersSnapshot
 
       assert(collected.length == 100)
@@ -330,11 +330,13 @@ class AvroTransactionLogCacheTest extends TestBase {
   test("Avro state: partitioned count query should make zero storage requests after cache warm") {
     withTempPath { tempPath =>
       // Write partitioned test data with checkpoint to create Avro state
-      val df = spark.range(100).selectExpr(
-        "id",
-        "concat('text_', id) as content",
-        "cast(id % 5 as string) as partition_col"
-      )
+      val df = spark
+        .range(100)
+        .selectExpr(
+          "id",
+          "concat('text_', id) as content",
+          "cast(id % 5 as string) as partition_col"
+        )
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -367,9 +369,9 @@ class AvroTransactionLogCacheTest extends TestBase {
       val afterQuery = CloudStorageProvider.getCountersSnapshot
 
       // Calculate total storage requests made during second query
-      val totalRequests = afterQuery.total - beforeQuery.total
-      val existsCalls = afterQuery.exists - beforeQuery.exists
-      val readFileCalls = afterQuery.readFile - beforeQuery.readFile
+      val totalRequests  = afterQuery.total - beforeQuery.total
+      val existsCalls    = afterQuery.exists - beforeQuery.exists
+      val readFileCalls  = afterQuery.readFile - beforeQuery.readFile
       val listFilesCalls = afterQuery.listFiles - beforeQuery.listFiles
 
       // Verify zero storage requests for the cached query
@@ -433,11 +435,13 @@ class AvroTransactionLogCacheTest extends TestBase {
   test("Avro state: multiple queries should all make zero storage requests after cache warm") {
     withTempPath { tempPath =>
       // Write test data with checkpoint to create Avro state
-      val df = spark.range(100).selectExpr(
-        "id",
-        "id * 2 as value",
-        "concat('text_', id) as content"
-      )
+      val df = spark
+        .range(100)
+        .selectExpr(
+          "id",
+          "id * 2 as value",
+          "concat('text_', id) as content"
+        )
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -464,8 +468,8 @@ class AvroTransactionLogCacheTest extends TestBase {
       // Execute multiple queries - ALL should use cached data
       val count1 = spark.sql("SELECT count(*) FROM test_table_multi").collect()(0).getLong(0)
       val count2 = spark.sql("SELECT count(*) FROM test_table_multi WHERE id > 50").collect()(0).getLong(0)
-      val sum = spark.sql("SELECT sum(value) FROM test_table_multi").collect()(0).getLong(0)
-      val avg = spark.sql("SELECT avg(value) FROM test_table_multi").collect()(0).getDouble(0)
+      val sum    = spark.sql("SELECT sum(value) FROM test_table_multi").collect()(0).getLong(0)
+      val avg    = spark.sql("SELECT avg(value) FROM test_table_multi").collect()(0).getDouble(0)
 
       val afterQueries = CloudStorageProvider.getCountersSnapshot
 

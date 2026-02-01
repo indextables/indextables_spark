@@ -24,8 +24,8 @@ import org.scalatest.matchers.should.Matchers
  * Unit tests for SplitsPerTaskCalculator auto-selection algorithm.
  *
  * Algorithm summary:
- * - If totalSplits <= defaultParallelism × 2: use 1 split per task (maximize parallelism)
- * - Otherwise: ensure at least 4 × defaultParallelism groups, capped at maxSplitsPerTask
+ *   - If totalSplits <= defaultParallelism × 2: use 1 split per task (maximize parallelism)
+ *   - Otherwise: ensure at least 4 × defaultParallelism groups, capped at maxSplitsPerTask
  */
 class SplitsPerTaskCalculatorTest extends AnyFunSuite with Matchers {
 
@@ -396,7 +396,7 @@ class SplitsPerTaskCalculatorTest extends AnyFunSuite with Matchers {
   }
 
   test("group count: large table achieves approximately 4x parallelism groups") {
-    val totalSplits = 1024  // Use power of 2 for exact division
+    val totalSplits = 1024 // Use power of 2 for exact division
     val parallelism = 64
     val splitsPerTask = SplitsPerTaskCalculator.calculate(
       totalSplits = totalSplits,
@@ -404,7 +404,7 @@ class SplitsPerTaskCalculatorTest extends AnyFunSuite with Matchers {
       configuredValue = None
     )
     val groups       = math.ceil(totalSplits.toDouble / splitsPerTask).toInt
-    val targetGroups = parallelism * 4  // 256
+    val targetGroups = parallelism * 4 // 256
     // Algorithm: splitsPerTask = ceil(1024/256) = 4, groups = 1024/4 = 256
     groups shouldBe targetGroups
   }
@@ -418,12 +418,12 @@ class SplitsPerTaskCalculatorTest extends AnyFunSuite with Matchers {
       configuredValue = None
     )
     val groups       = math.ceil(totalSplits.toDouble / splitsPerTask).toInt
-    val targetGroups = parallelism * 4  // 256
+    val targetGroups = parallelism * 4 // 256
     // Algorithm: splitsPerTask = ceil(1000/256) = 4, groups = ceil(1000/4) = 250
     // We get close to target (within 10%), but not exactly due to ceiling
     splitsPerTask shouldBe 4
     groups shouldBe 250
-    groups.toDouble / targetGroups should be >= 0.9  // Within 10% of target
+    groups.toDouble / targetGroups should be >= 0.9 // Within 10% of target
   }
 
   test("group count: very large table still respects max splits cap") {

@@ -39,12 +39,14 @@ case class EnvironmentConfigSource() extends ConfigSource {
 /**
  * ConfigSource that reads from a Map[String, String] directly.
  *
- * This is the fast path for credential resolution - it avoids creating Hadoop Configuration
- * objects when we already have the config as a Map. This is critical for performance when
- * resolving credentials on executors, as Hadoop Configuration creation is expensive.
+ * This is the fast path for credential resolution - it avoids creating Hadoop Configuration objects when we already
+ * have the config as a Map. This is critical for performance when resolving credentials on executors, as Hadoop
+ * Configuration creation is expensive.
  *
- * @param config Map containing configuration key-value pairs
- * @param prefix Optional prefix to prepend to keys (e.g., "spark.indextables.databricks")
+ * @param config
+ *   Map containing configuration key-value pairs
+ * @param prefix
+ *   Optional prefix to prepend to keys (e.g., "spark.indextables.databricks")
  */
 case class MapConfigSource(config: Map[String, String], prefix: String = "") extends ConfigSource {
   override def get(key: String): Option[String] = {

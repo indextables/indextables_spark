@@ -17,21 +17,20 @@
 
 package io.indextables.spark.indexquery
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.core.FiltersToQueryConverter
+import io.indextables.spark.TestBase
 
 /**
  * Test cases for wildcard query patterns in IndexQuery.
  *
  * This tests verifies that all wildcard patterns work correctly:
- * - Leading wildcards: `*term` (e.g., `*Configuration`)
- * - Trailing wildcards: `term*` (e.g., `Config*`)
- * - Embedded wildcards: `te*rm` (e.g., `Con*tion`)
- * - Combined wildcards: `*term*` (e.g., `*Broker*`)
+ *   - Leading wildcards: `*term` (e.g., `*Configuration`)
+ *   - Trailing wildcards: `term*` (e.g., `Config*`)
+ *   - Embedded wildcards: `te*rm` (e.g., `Con*tion`)
+ *   - Combined wildcards: `*term*` (e.g., `*Broker*`)
  *
- * GitHub Issue #127: Leading wildcards were throwing verbose Java exceptions
- * instead of working. The fix automatically transforms leading wildcard queries
- * to use explicit field syntax which Tantivy supports.
+ * GitHub Issue #127: Leading wildcards were throwing verbose Java exceptions instead of working. The fix automatically
+ * transforms leading wildcard queries to use explicit field syntax which Tantivy supports.
  */
 class WildcardQueryTest extends TestBase {
 
@@ -145,10 +144,12 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("trailing_wildcard_test")
 
     // Trailing wildcard should match "ConfigurationManager" and "ConfigService"
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM trailing_wildcard_test
       WHERE message indexquery 'Config*'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 2, s"Expected 2 results for 'Config*', got ${results.length}")
   }
@@ -178,10 +179,12 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("embedded_wildcard_test")
 
     // Embedded wildcard should match "Configuration" and "Connection"
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM embedded_wildcard_test
       WHERE message indexquery 'Con*tion'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 2, s"Expected 2 results for 'Con*tion', got ${results.length}")
   }
@@ -212,10 +215,12 @@ class WildcardQueryTest extends TestBase {
 
     // Leading wildcard should match "AppConfiguration" and "SystemConfiguration"
     // This was the pattern that previously threw an exception (Issue #127)
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM leading_wildcard_test
       WHERE message indexquery '*Configuration'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 2, s"Expected 2 results for '*Configuration', got ${results.length}")
   }
@@ -246,10 +251,12 @@ class WildcardQueryTest extends TestBase {
 
     // Combined wildcard (*Broker*) should match documents containing "Broker"
     // This was the pattern that previously threw an exception (Issue #127)
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM combined_wildcard_test
       WHERE message indexquery '*Broker*'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 2, s"Expected 2 results for '*Broker*', got ${results.length}")
   }
@@ -280,10 +287,12 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("question_wildcard_test")
 
     // Question mark matches single character - "Con?ig" matches "Config"
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM question_wildcard_test
       WHERE message indexquery 'Con?ig'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 1, s"Expected 1 result for 'Con?ig', got ${results.length}")
   }
@@ -313,10 +322,12 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("leading_question_wildcard_test")
 
     // Leading question mark should match single character at start
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM leading_question_wildcard_test
       WHERE message indexquery '?onfig'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 2, s"Expected 2 results for '?onfig', got ${results.length}")
   }
@@ -347,19 +358,23 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("wildcard_agg_test")
 
     // COUNT with leading wildcard
-    val countResult = spark.sql("""
+    val countResult = spark
+      .sql("""
       SELECT COUNT(*) FROM wildcard_agg_test
       WHERE message indexquery '*Configuration'
-    """).collect()
+    """)
+      .collect()
 
     assert(countResult.length == 1, s"Expected 1 row, got ${countResult.length}")
     assert(countResult(0).getLong(0) == 2, s"Expected count of 2, got ${countResult(0).getLong(0)}")
 
     // SUM with leading wildcard
-    val sumResult = spark.sql("""
+    val sumResult = spark
+      .sql("""
       SELECT SUM(score) FROM wildcard_agg_test
       WHERE message indexquery '*Configuration'
-    """).collect()
+    """)
+      .collect()
 
     assert(sumResult.length == 1, s"Expected 1 row, got ${sumResult.length}")
     assert(sumResult(0).getDouble(0) == 300.0, s"Expected sum of 300.0, got ${sumResult(0).getDouble(0)}")
@@ -390,10 +405,12 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("wildcard_combined_test")
 
     // Leading wildcard combined with Spark filter
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM wildcard_combined_test
       WHERE level = 'error' AND message indexquery '*Configuration'
-    """).collect()
+    """)
+      .collect()
 
     assert(results.length == 2, s"Expected 2 results for combined filter, got ${results.length}")
   }
@@ -428,10 +445,12 @@ class WildcardQueryTest extends TestBase {
     // Should match documents containing "bob" AND words ending in "ildcar"
     // OR documents containing "sally" AND words starting with "Goo" (ending in "oogl" pattern)
     // This tests the transformation: bob AND *ildcar* -> bob AND message:*ildcar*
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM complex_boolean_wildcard_test
       WHERE message indexquery 'bob AND *ildcar*'
-    """).collect()
+    """)
+      .collect()
 
     // Should match row 3: "bob tested the WildcardHandler" (bob AND *ildcar* matches "Wildcard")
     assert(results.length == 1, s"Expected 1 result for 'bob AND *ildcar*', got ${results.length}")
@@ -465,10 +484,12 @@ class WildcardQueryTest extends TestBase {
 
     // Test leading wildcard after OR: database OR *Configuration
     // Should match "Database" OR anything ending with "Configuration"
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM or_wildcard_test
       WHERE message indexquery 'database OR *Configuration'
-    """).collect()
+    """)
+      .collect()
 
     // Should match rows 1, 2, 4 (AppConfiguration, SystemConfiguration, Database)
     assert(results.length == 3, s"Expected 3 results for 'database OR *Configuration', got ${results.length}")
@@ -499,10 +520,12 @@ class WildcardQueryTest extends TestBase {
     df.createOrReplaceTempView("paren_wildcard_test")
 
     // Test leading wildcard inside parentheses: (started OR *Service)
-    val results = spark.sql("""
+    val results = spark
+      .sql("""
       SELECT id, message FROM paren_wildcard_test
       WHERE message indexquery '(started OR *Service)'
-    """).collect()
+    """)
+      .collect()
 
     // Should match rows 1 (started) and 2 (BrokerService)
     assert(results.length == 2, s"Expected 2 results for '(started OR *Service)', got ${results.length}")

@@ -105,7 +105,7 @@ class AvroPurgeStateDirectoryTest extends AnyFunSuite with BeforeAndAfterEach {
     assert(beforeRead.count() == 3)
 
     // Verify Avro state directory was created
-    val txLogPath = new File(tablePath, "_transaction_log")
+    val txLogPath        = new File(tablePath, "_transaction_log")
     val stateDirectories = txLogPath.listFiles().filter(_.getName.startsWith("state-v"))
     assert(stateDirectories.nonEmpty, "Should have created Avro state directory")
 
@@ -178,7 +178,7 @@ class AvroPurgeStateDirectoryTest extends AnyFunSuite with BeforeAndAfterEach {
       .save(tablePath)
 
     // Get state directory count before purge
-    val txLogPath = new File(tablePath, "_transaction_log")
+    val txLogPath              = new File(tablePath, "_transaction_log")
     val stateDirectoriesBefore = txLogPath.listFiles().filter(_.getName.startsWith("state-v"))
 
     // Run purge (no orphans expected)

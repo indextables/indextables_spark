@@ -84,31 +84,37 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       readDf.agg(Map("id" -> "sum")).collect()
 
       val readsAfterSubsequent = StateManifestIO.getReadCount()
-      assert(readsAfterSubsequent == 0,
-        s"Subsequent queries should cause ZERO StateManifest reads, but got $readsAfterSubsequent")
+      assert(
+        readsAfterSubsequent == 0,
+        s"Subsequent queries should cause ZERO StateManifest reads, but got $readsAfterSubsequent"
+      )
     }
   }
 
   test("filterEmptyObjectMappings should be cached per schema hash") {
     // Create a test schema
     val schema = """[{"name":"field1","type":"text"},{"name":"field2","type":"i64"}]"""
-    val hash = SchemaDeduplication.computeSchemaHash(schema)
+    val hash   = SchemaDeduplication.computeSchemaHash(schema)
 
     // Reset counter
     SchemaDeduplication.resetParseCounter()
 
     // First call - should parse JSON
-    val parseCountBefore = SchemaDeduplication.getParseCallCount()
-    val result1 = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
+    val parseCountBefore     = SchemaDeduplication.getParseCallCount()
+    val result1              = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
     val parseCountAfterFirst = SchemaDeduplication.getParseCallCount()
-    assert(parseCountAfterFirst == parseCountBefore + 1,
-      s"First call should parse JSON (expected ${parseCountBefore + 1}, got $parseCountAfterFirst)")
+    assert(
+      parseCountAfterFirst == parseCountBefore + 1,
+      s"First call should parse JSON (expected ${parseCountBefore + 1}, got $parseCountAfterFirst)"
+    )
 
     // Second call with same schema hash - should NOT parse (cache hit)
-    val result2 = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
+    val result2               = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
     val parseCountAfterSecond = SchemaDeduplication.getParseCallCount()
-    assert(parseCountAfterSecond == parseCountAfterFirst,
-      s"Second call should NOT re-parse cached schema (expected $parseCountAfterFirst, got $parseCountAfterSecond)")
+    assert(
+      parseCountAfterSecond == parseCountAfterFirst,
+      s"Second call should NOT re-parse cached schema (expected $parseCountAfterFirst, got $parseCountAfterSecond)"
+    )
 
     // Results should be identical
     assert(result1 == result2, "Cached and non-cached results should match")
@@ -117,7 +123,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
   test("partition-filtered queries should use cached StateManifest") {
     withTempPath { tempPath =>
       // Write partitioned test data
-      val df = spark.range(100)
+      val df = spark
+        .range(100)
         .selectExpr(
           "id",
           "concat('text_', id) as content",
@@ -150,25 +157,28 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       // Second filtered query with DIFFERENT filter - should NOT re-read StateManifest
       readDf.filter("partition_col = '2'").count()
       val readsAfterSecond = StateManifestIO.getReadCount()
-      assert(readsAfterSecond == 0,
-        s"Second filtered query should use cached StateManifest, but got $readsAfterSecond reads")
+      assert(
+        readsAfterSecond == 0,
+        s"Second filtered query should use cached StateManifest, but got $readsAfterSecond reads"
+      )
 
       // Third query with unfiltered - should still use cached StateManifest
       readDf.count()
       val readsAfterThird = StateManifestIO.getReadCount()
-      assert(readsAfterThird == 0,
-        s"Unfiltered query should use cached StateManifest, but got $readsAfterThird reads")
+      assert(readsAfterThird == 0, s"Unfiltered query should use cached StateManifest, but got $readsAfterThird reads")
     }
   }
 
   test("hotspot functions should not execute during cached query") {
     withTempPath { tempPath =>
       // Write test data with schema that has object fields
-      val df = spark.range(100).selectExpr(
-        "id",
-        "concat('text_', id) as content",
-        "struct(id as nested_id, concat('nested_', id) as nested_text) as nested_field"
-      )
+      val df = spark
+        .range(100)
+        .selectExpr(
+          "id",
+          "concat('text_', id) as content",
+          "struct(id as nested_id, concat('nested_', id) as nested_text) as nested_field"
+        )
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -193,10 +203,14 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       readDf.count()
 
       // Assert no hotspot execution
-      assert(StateManifestIO.getReadCount() == 0,
-        s"StateManifestIO.readStateManifest should not execute on cache hit, but got ${StateManifestIO.getReadCount()}")
-      assert(SchemaDeduplication.getParseCallCount() == 0,
-        s"filterEmptyObjectMappings should not execute on cache hit, but got ${SchemaDeduplication.getParseCallCount()}")
+      assert(
+        StateManifestIO.getReadCount() == 0,
+        s"StateManifestIO.readStateManifest should not execute on cache hit, but got ${StateManifestIO.getReadCount()}"
+      )
+      assert(
+        SchemaDeduplication.getParseCallCount() == 0,
+        s"filterEmptyObjectMappings should not execute on cache hit, but got ${SchemaDeduplication.getParseCallCount()}"
+      )
     }
   }
 
@@ -224,14 +238,14 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       StateManifestIO.resetReadCounter()
 
       // Perform 10 repeated queries
-      (1 to 10).foreach { _ =>
-        readDf.count()
-      }
+      (1 to 10).foreach(_ => readDf.count())
 
       // Should be zero additional reads (all cache hits)
       val additionalReads = StateManifestIO.getReadCount()
-      assert(additionalReads == 0,
-        s"Expected 0 additional StateManifest reads after cache warmup, but got $additionalReads")
+      assert(
+        additionalReads == 0,
+        s"Expected 0 additional StateManifest reads after cache warmup, but got $additionalReads"
+      )
     }
   }
 
@@ -269,15 +283,16 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       readDf2.count()
 
       val readsAfterSecond = StateManifestIO.getReadCount()
-      assert(readsAfterSecond == 0,
-        s"New DataFrame instance should reuse global cache, but got $readsAfterSecond reads")
+      assert(readsAfterSecond == 0, s"New DataFrame instance should reuse global cache, but got $readsAfterSecond reads")
     }
   }
 
   test("filtered schema cache should prevent repeated JSON parsing") {
     withTempPath { tempPath =>
       // Write test data with multiple files to trigger schema processing
-      spark.range(0, 50).selectExpr("id", "concat('text_', id) as content")
+      spark
+        .range(0, 50)
+        .selectExpr("id", "concat('text_', id) as content")
         .repartition(5)
         .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -287,7 +302,9 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         .save(tempPath)
 
       // Append more files to create multiple splits with same schema
-      spark.range(50, 100).selectExpr("id", "concat('text_', id) as content")
+      spark
+        .range(50, 100)
+        .selectExpr("id", "concat('text_', id) as content")
         .repartition(5)
         .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -308,8 +325,7 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       val parsesAfterFirst = SchemaDeduplication.getParseCallCount()
       // Should parse only unique schemas (likely 1-2), not once per file
-      assert(parsesAfterFirst <= 3,
-        s"Should parse only unique schemas, not per file. Got $parsesAfterFirst parses")
+      assert(parsesAfterFirst <= 3, s"Should parse only unique schemas, not per file. Got $parsesAfterFirst parses")
 
       // Reset counter
       SchemaDeduplication.resetParseCounter()
@@ -318,15 +334,18 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       readDf.count()
 
       val parsesAfterSecond = SchemaDeduplication.getParseCallCount()
-      assert(parsesAfterSecond == 0,
-        s"Second read should not parse any schemas (all cached), but got $parsesAfterSecond")
+      assert(
+        parsesAfterSecond == 0,
+        s"Second read should not parse any schemas (all cached), but got $parsesAfterSecond"
+      )
     }
   }
 
   test("Avro manifest files should be cached across partition-filtered queries") {
     withTempPath { tempPath =>
       // Write partitioned test data to create multiple manifests
-      val df = spark.range(100)
+      val df = spark
+        .range(100)
         .selectExpr(
           "id",
           "concat('text_', id) as content",
@@ -360,21 +379,26 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       // Second filtered query with DIFFERENT filter - should use cached Avro manifest files
       readDf.filter("partition_col = '2'").count()
       val avroReadsAfterSecond = AvroManifestReader.getReadCount()
-      assert(avroReadsAfterSecond == 0,
-        s"Second filtered query should use cached Avro manifest files, but got $avroReadsAfterSecond reads")
+      assert(
+        avroReadsAfterSecond == 0,
+        s"Second filtered query should use cached Avro manifest files, but got $avroReadsAfterSecond reads"
+      )
 
       // Third query - unfiltered - should also use cached Avro manifests
       readDf.count()
       val avroReadsAfterThird = AvroManifestReader.getReadCount()
-      assert(avroReadsAfterThird == 0,
-        s"Unfiltered query should use cached Avro manifest files, but got $avroReadsAfterThird reads")
+      assert(
+        avroReadsAfterThird == 0,
+        s"Unfiltered query should use cached Avro manifest files, but got $avroReadsAfterThird reads"
+      )
     }
   }
 
   test("repeated partition-filtered queries should cause zero cloud IO") {
     withTempPath { tempPath =>
       // Write partitioned test data
-      val df = spark.range(100)
+      val df = spark
+        .range(100)
         .selectExpr(
           "id",
           "concat('text_', id) as content",
@@ -404,17 +428,23 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // 10 repeated partition-filtered queries - should ALL be cache hits
       (1 to 10).foreach { i =>
-        val part = i % 3  // Cycle through partitions
+        val part = i % 3 // Cycle through partitions
         readDf.filter(s"part = '$part'").count()
       }
 
       // Assert ZERO cloud I/O for transaction log metadata
-      assert(StateManifestIO.getReadCount() == 0,
-        s"Repeated partition-filtered queries should NOT read StateManifest, but got ${StateManifestIO.getReadCount()}")
-      assert(AvroManifestReader.getReadCount() == 0,
-        s"Repeated partition-filtered queries should NOT read Avro manifest files, but got ${AvroManifestReader.getReadCount()}")
-      assert(SchemaDeduplication.getParseCallCount() == 0,
-        s"Repeated partition-filtered queries should NOT parse schemas, but got ${SchemaDeduplication.getParseCallCount()}")
+      assert(
+        StateManifestIO.getReadCount() == 0,
+        s"Repeated partition-filtered queries should NOT read StateManifest, but got ${StateManifestIO.getReadCount()}"
+      )
+      assert(
+        AvroManifestReader.getReadCount() == 0,
+        s"Repeated partition-filtered queries should NOT read Avro manifest files, but got ${AvroManifestReader.getReadCount()}"
+      )
+      assert(
+        SchemaDeduplication.getParseCallCount() == 0,
+        s"Repeated partition-filtered queries should NOT parse schemas, but got ${SchemaDeduplication.getParseCallCount()}"
+      )
     }
   }
 
@@ -424,13 +454,14 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     // causing double-filtering (and N schema parses instead of 1 for N files with 1 schema)
     withTempPath { tempPath =>
       // Write partitioned test data with 5 partitions, creating multiple splits
-      val df = spark.range(500)
+      val df = spark
+        .range(500)
         .selectExpr(
           "id",
           "concat('text_', id) as content",
           "CAST(id % 5 AS STRING) as part"
         )
-        .repartition(10)  // Create 10 splits to make N > 1
+        .repartition(10) // Create 10 splits to make N > 1
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -455,10 +486,12 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       // With 1 unique schema, should be EXACTLY 1 parse call:
       // - First file: cache miss → parse → cache
       // - Subsequent files: cache hit → no parse
-      assert(parseCalls == 1,
+      assert(
+        parseCalls == 1,
         s"Initial partition-filtered query should parse schema exactly once per unique schema, " +
           s"but got $parseCalls parses. This indicates the bug where restoreSchemas() was called " +
-          s"after Avro path already restored schemas, or caching is not working.")
+          s"after Avro path already restored schemas, or caching is not working."
+      )
     }
   }
 
@@ -466,9 +499,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     // Similar test for the listFilesOptimized() path
     withTempPath { tempPath =>
       // Write test data with multiple splits
-      val df = spark.range(500)
+      val df = spark
+        .range(500)
         .selectExpr("id", "concat('text_', id) as content")
-        .repartition(10)  // Create 10 splits
+        .repartition(10) // Create 10 splits
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -489,9 +523,11 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       val parseCalls = SchemaDeduplication.getParseCallCount()
       // With 1 unique schema, should be EXACTLY 1 parse call (cached filtering)
-      assert(parseCalls == 1,
+      assert(
+        parseCalls == 1,
         s"Initial unfiltered query should parse schema exactly once per unique schema, " +
-          s"but got $parseCalls parses. This indicates filterEmptyObjectMappings is not being cached.")
+          s"but got $parseCalls parses. This indicates filterEmptyObjectMappings is not being cached."
+      )
     }
   }
 
@@ -499,9 +535,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     // Stress test with 100 splits to catch any caching gaps
     withTempPath { tempPath =>
       // Write 100 splits with 1 unique schema
-      val df = spark.range(10000)
+      val df = spark
+        .range(10000)
         .selectExpr("id", "concat('text_', id) as content")
-        .repartition(100)  // Create 100 splits
+        .repartition(100) // Create 100 splits
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -524,15 +561,19 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // Verify schema filtering happens exactly once per unique schema
       val schemaParseCalls = SchemaDeduplication.getParseCallCount()
-      assert(schemaParseCalls == 1,
+      assert(
+        schemaParseCalls == 1,
         s"100 splits with 1 unique schema should parse schema exactly once, " +
-          s"but got $schemaParseCalls parses. This indicates a caching gap.")
+          s"but got $schemaParseCalls parses. This indicates a caching gap."
+      )
 
       // Verify StateManifest is parsed exactly once (cached)
       val manifestParseCalls = StateManifestIO.getParseCount()
-      assert(manifestParseCalls == 1,
+      assert(
+        manifestParseCalls == 1,
         s"StateManifest should be parsed exactly once (cached), " +
-          s"but got $manifestParseCalls parses.")
+          s"but got $manifestParseCalls parses."
+      )
     }
   }
 
@@ -545,9 +586,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     // - Subsequent queries: minimal parses (ideally 0, but some metadata access may occur)
     withTempPath { tempPath =>
       // Write test data with 10 splits and 1 unique schema
-      val df = spark.range(1000)
+      val df = spark
+        .range(1000)
         .selectExpr("id", "concat('text_', id) as content")
-        .repartition(10)  // Create 10 splits
+        .repartition(10) // Create 10 splits
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -570,9 +612,11 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       // The parse count should be O(1) - a small constant, not proportional to file count
       // Expected parses: _last_checkpoint (1), StateManifest metadata (1), metadata action (1),
       // schema filtering (1 per unique schema), DocMappingMetadata (1 per unique schema)
-      assert(globalParsesAfterRead <= 10,
+      assert(
+        globalParsesAfterRead <= 10,
         s"Initial read should trigger a small constant number of JSON parses (O(1)), " +
-          s"but got $globalParsesAfterRead. This may indicate per-file parsing.")
+          s"but got $globalParsesAfterRead. This may indicate per-file parsing."
+      )
 
       // Reset counters for subsequent query tracking
       EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
@@ -591,20 +635,26 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // Debug: identify which query causes parsing
       if (parsesAfterCount > 0) println(s"DEBUG: count() caused $parsesAfterCount parses")
-      if (parsesAfterFilter > parsesAfterCount) println(s"DEBUG: filter() caused ${parsesAfterFilter - parsesAfterCount} parses")
-      if (parsesAfterAgg > parsesAfterFilter) println(s"DEBUG: agg() caused ${parsesAfterAgg - parsesAfterFilter} parses")
+      if (parsesAfterFilter > parsesAfterCount)
+        println(s"DEBUG: filter() caused ${parsesAfterFilter - parsesAfterCount} parses")
+      if (parsesAfterAgg > parsesAfterFilter)
+        println(s"DEBUG: agg() caused ${parsesAfterAgg - parsesAfterFilter} parses")
 
       val globalParsesAfterQueries = parsesAfterAgg
       val schemaParsesAfterQueries = SchemaDeduplication.getParseCallCount()
 
       // STRICT: Subsequent queries must trigger ZERO JSON parses
-      assert(globalParsesAfterQueries == 0,
+      assert(
+        globalParsesAfterQueries == 0,
         s"Subsequent queries on same DataFrame should trigger ZERO JSON parses, " +
-          s"but got $globalParsesAfterQueries. This indicates a cache bypass.")
+          s"but got $globalParsesAfterQueries. This indicates a cache bypass."
+      )
 
       // Schema parsing must also be 0
-      assert(schemaParsesAfterQueries == 0,
-        s"Schema filtering should be fully cached - got $schemaParsesAfterQueries parses")
+      assert(
+        schemaParsesAfterQueries == 0,
+        s"Schema filtering should be fully cached - got $schemaParsesAfterQueries parses"
+      )
     }
   }
 
@@ -612,9 +662,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     // This test verifies that JSON parse count is O(1) not O(n) with respect to file count
     withTempPath { tempPath =>
       // Write 100 splits with 1 unique schema
-      val df = spark.range(10000)
+      val df = spark
+        .range(10000)
         .selectExpr("id", "concat('text_', id) as content")
-        .repartition(100)  // Create 100 splits
+        .repartition(100) // Create 100 splits
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -635,9 +686,11 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       val globalParsesFor100Splits = EnhancedTransactionLogCache.getGlobalJsonParseCount()
       // With 100 splits but 1 unique schema, parse count should still be small constant
       // If it were O(n), we'd see ~100 parses
-      assert(globalParsesFor100Splits <= 10,
+      assert(
+        globalParsesFor100Splits <= 10,
         s"100 splits with 1 schema should trigger <=10 JSON parses, but got $globalParsesFor100Splits. " +
-          s"This indicates per-file parsing instead of per-schema parsing.")
+          s"This indicates per-file parsing instead of per-schema parsing."
+      )
     }
   }
 
@@ -646,7 +699,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     // The key validation is that SCHEMA parsing (the expensive O(n) operation) is cached.
     withTempPath { tempPath =>
       // Write test data
-      val df = spark.range(500)
+      val df = spark
+        .range(500)
         .selectExpr("id", "concat('text_', id) as content")
         .repartition(5)
       df.write
@@ -667,13 +721,14 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         .load(tempPath)
       readDf1.count()
 
-      val parsesAfterFirst = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      val parsesAfterFirst       = EnhancedTransactionLogCache.getGlobalJsonParseCount()
       val schemaParsesAfterFirst = SchemaDeduplication.getParseCallCount()
       // First read requires parsing metadata structures - should be small constant
-      assert(parsesAfterFirst <= 10,
-        s"First read should parse a small constant number of JSON structures, got $parsesAfterFirst")
-      assert(schemaParsesAfterFirst == 1,
-        s"First read should parse schema exactly once, got $schemaParsesAfterFirst")
+      assert(
+        parsesAfterFirst <= 10,
+        s"First read should parse a small constant number of JSON structures, got $parsesAfterFirst"
+      )
+      assert(schemaParsesAfterFirst == 1, s"First read should parse schema exactly once, got $schemaParsesAfterFirst")
 
       // Reset counters
       EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
@@ -686,18 +741,22 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         .load(tempPath)
       readDf2.count()
 
-      val parsesAfterSecond = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      val parsesAfterSecond       = EnhancedTransactionLogCache.getGlobalJsonParseCount()
       val schemaParsesAfterSecond = SchemaDeduplication.getParseCallCount()
 
       // STRICT: New DataFrame on same table should trigger ZERO JSON parses
       // All metadata, protocol, version actions, and schemas are cached globally
-      assert(parsesAfterSecond == 0,
+      assert(
+        parsesAfterSecond == 0,
         s"New DataFrame on same table should trigger ZERO JSON parses (all cached globally), " +
-          s"but got $parsesAfterSecond. This indicates a cache bypass.")
+          s"but got $parsesAfterSecond. This indicates a cache bypass."
+      )
 
       // Schema parsing must also be 0
-      assert(schemaParsesAfterSecond == 0,
-        s"New DataFrame should NOT re-parse schemas (cached), but got $schemaParsesAfterSecond schema parses")
+      assert(
+        schemaParsesAfterSecond == 0,
+        s"New DataFrame should NOT re-parse schemas (cached), but got $schemaParsesAfterSecond schema parses"
+      )
     }
   }
 
@@ -708,9 +767,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
   test("DEBUG: capture stack traces for JSON parsing on subsequent queries") {
     withTempPath { tempPath =>
       // Write test data with multiple splits (matches failing test setup)
-      val df = spark.range(1000)
+      val df = spark
+        .range(1000)
         .selectExpr("id", "concat('text_', id) as content")
-        .repartition(10)  // Create 10 splits
+        .repartition(10) // Create 10 splits
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
@@ -721,7 +781,7 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       // Clear caches
       EnhancedTransactionLogCache.clearGlobalCaches()
       EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
-      EnhancedTransactionLogCache.disableThrowOnJsonParse()  // Ensure disabled for initial read
+      EnhancedTransactionLogCache.disableThrowOnJsonParse() // Ensure disabled for initial read
 
       // Initial read - populate caches
       val readDf = spark.read
@@ -729,7 +789,9 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         .load(tempPath)
       readDf.count()
 
-      println(s"=== Initial read completed, global JSON parses: ${EnhancedTransactionLogCache.getGlobalJsonParseCount()} ===")
+      println(
+        s"=== Initial read completed, global JSON parses: ${EnhancedTransactionLogCache.getGlobalJsonParseCount()} ==="
+      )
 
       // Test 1: count() on SAME DataFrame
       EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
@@ -744,9 +806,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
           println("=== JSON PARSING DETECTED ON count() ===")
           e.printStackTrace()
           fail(s"Unexpected JSON parsing on count(). See stack trace above.")
-      } finally {
+      } finally
         EnhancedTransactionLogCache.disableThrowOnJsonParse()
-      }
 
       // Test 2: filter() on SAME DataFrame - THIS IS THE ONE THAT FAILS
       EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
@@ -777,9 +838,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
               println(s"=== Non-debug exception: ${e.getClass.getName}: ${e.getMessage} ===")
               e.printStackTrace()
             }
-        } finally {
+        } finally
           EnhancedTransactionLogCache.disableThrowOnJsonParse()
-        }
         // Don't fail - we want to capture the info
         println(s"=== filter() caused $filterParseCount parse(s) - this needs investigation ===")
       } else {
@@ -802,9 +862,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
           println("=== JSON PARSING DETECTED ON NEW DATAFRAME ===")
           e.printStackTrace()
           fail(s"Unexpected JSON parsing on new DataFrame. See stack trace above.")
-      } finally {
+      } finally
         EnhancedTransactionLogCache.disableThrowOnJsonParse()
-      }
     }
   }
 
@@ -827,17 +886,14 @@ class AvroTransactionLogZeroIOTest extends TestBase {
   /**
    * PRODUCTION BUG REPRODUCTION: inferSchema causes O(n) DocMappingMetadata parses
    *
-   * In production with 10k splits, this takes 20+ seconds because DocMappingMetadata.parse
-   * is called once per AddAction instead of once per unique schema.
+   * In production with 10k splits, this takes 20+ seconds because DocMappingMetadata.parse is called once per AddAction
+   * instead of once per unique schema.
    *
-   * Stack trace 1 from production:
-   *   inferSchema -> getSchema -> getMetadata -> getCheckpointActionsCached
-   *   -> getActionsFromCheckpoint -> readAvroStateCheckpoint
-   *   -> StateManifestIO.readStateManifest -> parseStateManifest
+   * Stack trace 1 from production: inferSchema -> getSchema -> getMetadata -> getCheckpointActionsCached ->
+   * getActionsFromCheckpoint -> readAvroStateCheckpoint -> StateManifestIO.readStateManifest -> parseStateManifest
    *
-   * Stack trace 2 from production:
-   *   prewarmCache -> listFilesOptimized -> getOrComputeAvroFileList
-   *   -> (foreach AddAction) -> getDocMappingMetadata -> DocMappingMetadata.parse
+   * Stack trace 2 from production: prewarmCache -> listFilesOptimized -> getOrComputeAvroFileList -> (foreach
+   * AddAction) -> getDocMappingMetadata -> DocMappingMetadata.parse
    */
   test("PRODUCTION BUG: inferSchema with 100 splits should parse schema O(1) times, not O(n)") {
     withTempPath { tempPath =>
@@ -848,7 +904,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // Write 100 splits with the same schema
       val numSplits = 100
-      val df = spark.range(10000)
+      val df = spark
+        .range(10000)
         .selectExpr("id", "concat('text_', id) as content")
         .repartition(numSplits) // Create 100 partitions -> 100 splits
       df.write
@@ -911,7 +968,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // Write 100 splits with the same schema
       val numSplits = 100
-      val df = spark.range(10000)
+      val df = spark
+        .range(10000)
         .selectExpr("id", "concat('text_', id) as content")
         .repartition(numSplits)
       df.write
@@ -967,7 +1025,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // Write a table with multiple splits but same schema
       val numSplits = 50
-      val df = spark.range(5000)
+      val df = spark
+        .range(5000)
         .selectExpr("id", "concat('text_', id) as content")
         .repartition(numSplits)
       df.write
@@ -1006,8 +1065,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
   test("UNIT TEST: computeSchemaHash should normalize nested field_mappings arrays") {
     // Test that field_mappings arrays are sorted by "name" consistently
-    val schema1 = """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_a","type":"text"},{"name":"field_c","type":"bool"},{"name":"field_b","type":"u64"}]}]"""
-    val schema2 = """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_a","type":"text"},{"name":"field_b","type":"u64"},{"name":"field_c","type":"bool"}]}]"""
+    val schema1 =
+      """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_a","type":"text"},{"name":"field_c","type":"bool"},{"name":"field_b","type":"u64"}]}]"""
+    val schema2 =
+      """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_a","type":"text"},{"name":"field_b","type":"u64"},{"name":"field_c","type":"bool"}]}]"""
 
     // These two schemas are semantically identical (just different field ordering in field_mappings)
     // After normalization, they should produce the same hash
@@ -1020,10 +1081,12 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     println(s"Schema 2 (field_b before field_c): $schema2")
     println(s"Hash 2: $hash2")
 
-    assert(hash1 == hash2,
+    assert(
+      hash1 == hash2,
       s"computeSchemaHash should produce the same hash for semantically identical schemas! " +
         s"Hash1=$hash1, Hash2=$hash2. " +
-        s"This indicates nested field_mappings arrays are not being sorted correctly.")
+        s"This indicates nested field_mappings arrays are not being sorted correctly."
+    )
   }
 
   test("PRODUCTION BUG: 100 columns with struct/array should produce consistent hash across splits") {
@@ -1046,8 +1109,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       // - 5 array columns
       val numSimpleColumns = 90
       val numStructColumns = 5
-      val numArrayColumns = 5
-      val numSplits = 10
+      val numArrayColumns  = 5
+      val numSplits        = 10
 
       val simpleColumnExprs = (0 until numSimpleColumns).map(i => s"CAST(id + $i AS STRING) as col_$i")
       val structColumnExprs = (0 until numStructColumns).map(i =>
@@ -1058,7 +1121,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       )
 
       val allColumnExprs = simpleColumnExprs ++ structColumnExprs ++ arrayColumnExprs
-      val df = spark.range(1000)
+      val df = spark
+        .range(1000)
         .selectExpr(allColumnExprs: _*)
         .repartition(numSplits)
 
@@ -1079,9 +1143,11 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       StateManifestIO.resetParseCounter()
       SchemaDeduplication.resetParseCounter()
 
-      println(s"=== Before read: JSON parses=${EnhancedTransactionLogCache.getGlobalJsonParseCount()}, " +
-        s"StateManifest parses=${StateManifestIO.getParseCount()}, " +
-        s"SchemaDedup parses=${SchemaDeduplication.getParseCallCount()} ===")
+      println(
+        s"=== Before read: JSON parses=${EnhancedTransactionLogCache.getGlobalJsonParseCount()}, " +
+          s"StateManifest parses=${StateManifestIO.getParseCount()}, " +
+          s"SchemaDedup parses=${SchemaDeduplication.getParseCallCount()} ==="
+      )
 
       // Read and trigger table initialization
       val readDf = spark.read
@@ -1092,13 +1158,15 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       val count = readDf.count()
       println(s"=== Row count: $count ===")
 
-      val jsonParses = EnhancedTransactionLogCache.getGlobalJsonParseCount()
-      val manifestParses = StateManifestIO.getParseCount()
+      val jsonParses        = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      val manifestParses    = StateManifestIO.getParseCount()
       val schemaDedupParses = SchemaDeduplication.getParseCallCount()
 
-      println(s"=== After read: JSON parses=$jsonParses, " +
-        s"StateManifest parses=$manifestParses, " +
-        s"SchemaDedup parses=$schemaDedupParses ===")
+      println(
+        s"=== After read: JSON parses=$jsonParses, " +
+          s"StateManifest parses=$manifestParses, " +
+          s"SchemaDedup parses=$schemaDedupParses ==="
+      )
 
       // Check how many unique docMappingRefs exist in the file list
       val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
@@ -1106,8 +1174,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         spark,
         new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
       )
-      val files = txLog.listFiles()
-      val uniqueRefs = files.flatMap(_.docMappingRef).distinct
+      val files       = txLog.listFiles()
+      val uniqueRefs  = files.flatMap(_.docMappingRef).distinct
       val uniqueJsons = files.flatMap(_.docMappingJson).distinct
 
       println(s"=== File analysis: ${files.size} files, ${uniqueRefs.size} unique docMappingRefs, ${uniqueJsons.size} unique docMappingJsons ===")
@@ -1120,32 +1188,36 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
         // Print the struct/array portions of the JSON for debugging
         println(s"=== Comparing struct/array fields from first 2 files: ===")
-        uniqueJsons.take(2).zipWithIndex.foreach { case (json, idx) =>
-          // Find the struct fields (object types with field_mappings)
-          val structPattern = """"name":"struct_\d+"""".r
-          val structMatches = structPattern.findAllIn(json).toList
-          println(s"--- File $idx has ${structMatches.size} struct fields ---")
+        uniqueJsons.take(2).zipWithIndex.foreach {
+          case (json, idx) =>
+            // Find the struct fields (object types with field_mappings)
+            val structPattern = """"name":"struct_\d+"""".r
+            val structMatches = structPattern.findAllIn(json).toList
+            println(s"--- File $idx has ${structMatches.size} struct fields ---")
 
-          // Extract a struct field definition for comparison
-          val structStartIdx = json.indexOf(""""name":"struct_0""")
-          if (structStartIdx >= 0) {
-            val structSnippet = json.substring(structStartIdx, Math.min(structStartIdx + 800, json.length))
-            println(s"--- File $idx struct_0 snippet: ---")
-            println(structSnippet)
-          }
+            // Extract a struct field definition for comparison
+            val structStartIdx = json.indexOf(""""name":"struct_0""")
+            if (structStartIdx >= 0) {
+              val structSnippet = json.substring(structStartIdx, Math.min(structStartIdx + 800, json.length))
+              println(s"--- File $idx struct_0 snippet: ---")
+              println(structSnippet)
+            }
         }
 
         // Compare raw JSON lengths
         println(s"=== JSON lengths: ===")
-        uniqueJsons.take(3).zipWithIndex.foreach { case (json, idx) =>
-          println(s"   File $idx: ${json.length} chars")
+        uniqueJsons.take(3).zipWithIndex.foreach {
+          case (json, idx) =>
+            println(s"   File $idx: ${json.length} chars")
         }
 
         // Now test: if we re-hash the unique JSONs, do they produce the same hash?
         println(s"=== Re-hashing unique JSONs to test normalization: ===")
-        val recomputedHashes = uniqueJsons.map(json => SchemaDeduplication.computeSchemaHash(json))
+        val recomputedHashes       = uniqueJsons.map(json => SchemaDeduplication.computeSchemaHash(json))
         val uniqueRecomputedHashes = recomputedHashes.distinct
-        println(s"   ${uniqueJsons.size} unique JSONs -> ${uniqueRecomputedHashes.size} unique hashes after re-normalization")
+        println(
+          s"   ${uniqueJsons.size} unique JSONs -> ${uniqueRecomputedHashes.size} unique hashes after re-normalization"
+        )
         if (uniqueRecomputedHashes.size == 1) {
           println(s"   NORMALIZATION WORKS: All JSONs produce same hash ${uniqueRecomputedHashes.head}")
           println(s"   BUG IS IN REGISTRY: docMappingRef is not being reused during write!")
@@ -1186,7 +1258,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
 
       // Write 100 splits with the same schema
       val numSplits = 100
-      val df = spark.range(10000)
+      val df = spark
+        .range(10000)
         .selectExpr("id", "concat('text_', id) as content")
         .repartition(numSplits)
       df.write
@@ -1203,9 +1276,11 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       SchemaDeduplication.resetParseCounter()
 
       println(s"=== PRODUCTION BUG REPRO: createOrReplaceTempView with $numSplits splits ===")
-      println(s"=== Before view creation: JSON parses=${EnhancedTransactionLogCache.getGlobalJsonParseCount()}, " +
-        s"StateManifest parses=${StateManifestIO.getParseCount()}, " +
-        s"SchemaDedup parses=${SchemaDeduplication.getParseCallCount()} ===")
+      println(
+        s"=== Before view creation: JSON parses=${EnhancedTransactionLogCache.getGlobalJsonParseCount()}, " +
+          s"StateManifest parses=${StateManifestIO.getParseCount()}, " +
+          s"SchemaDedup parses=${SchemaDeduplication.getParseCallCount()} ==="
+      )
 
       // This is the EXACT production path that's slow:
       // spark.read.format(...).load(...).createOrReplaceTempView("view")
@@ -1214,13 +1289,15 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         .load(tempPath)
         .createOrReplaceTempView("testView")
 
-      val jsonParses = EnhancedTransactionLogCache.getGlobalJsonParseCount()
-      val manifestParses = StateManifestIO.getParseCount()
+      val jsonParses        = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      val manifestParses    = StateManifestIO.getParseCount()
       val schemaDedupParses = SchemaDeduplication.getParseCallCount()
 
-      println(s"=== After view creation: JSON parses=$jsonParses, " +
-        s"StateManifest parses=$manifestParses, " +
-        s"SchemaDedup parses=$schemaDedupParses ===")
+      println(
+        s"=== After view creation: JSON parses=$jsonParses, " +
+          s"StateManifest parses=$manifestParses, " +
+          s"SchemaDedup parses=$schemaDedupParses ==="
+      )
 
       // ASSERTION: Parse count should be O(1), not O(n)
       // With 100 splits and 1 unique schema:
@@ -1251,22 +1328,25 @@ class AvroTransactionLogZeroIOTest extends TestBase {
   /**
    * REGRESSION FIX VALIDATION: Re-checkpointing old tables consolidates redundant mappings
    *
-   * Before the fix in writeIncrementalAvroState, each executor could produce different hashes
-   * for the same schema because field ordering could vary from tantivy4java. This resulted in
-   * N unique schema entries in the registry for N splits, all pointing to semantically identical schemas.
+   * Before the fix in writeIncrementalAvroState, each executor could produce different hashes for the same schema
+   * because field ordering could vary from tantivy4java. This resulted in N unique schema entries in the registry for N
+   * splits, all pointing to semantically identical schemas.
    *
    * This test verifies that:
-   * 1. SchemaDeduplication.deduplicateSchemas correctly normalizes schemas before hashing
-   * 2. When re-checkpointing with the fix, redundant mappings are consolidated into one
+   *   1. SchemaDeduplication.deduplicateSchemas correctly normalizes schemas before hashing 2. When re-checkpointing
+   *      with the fix, redundant mappings are consolidated into one
    */
   test("REGRESSION FIX: re-checkpointing with redundant schema mappings consolidates them") {
     import io.indextables.spark.transaction.{AddAction, SchemaDeduplication}
 
     // Simulate the OLD bug: same schema with different field orderings -> different old hashes
     // The schemas are semantically identical but have different JSON representations
-    val schema1 = """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_a","type":"text"},{"name":"field_b","type":"u64"},{"name":"field_c","type":"bool"}]}]"""
-    val schema2 = """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_c","type":"bool"},{"name":"field_a","type":"text"},{"name":"field_b","type":"u64"}]}]"""
-    val schema3 = """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_b","type":"u64"},{"name":"field_c","type":"bool"},{"name":"field_a","type":"text"}]}]"""
+    val schema1 =
+      """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_a","type":"text"},{"name":"field_b","type":"u64"},{"name":"field_c","type":"bool"}]}]"""
+    val schema2 =
+      """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_c","type":"bool"},{"name":"field_a","type":"text"},{"name":"field_b","type":"u64"}]}]"""
+    val schema3 =
+      """[{"name":"struct_0","type":"object","field_mappings":[{"name":"field_b","type":"u64"},{"name":"field_c","type":"bool"},{"name":"field_a","type":"text"}]}]"""
 
     // Create AddActions with the different schema representations (simulating old bug)
     val addActions = Seq(
@@ -1276,7 +1356,7 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         size = 1000L,
         modificationTime = System.currentTimeMillis(),
         dataChange = true,
-        docMappingJson = Some(schema1)  // First ordering
+        docMappingJson = Some(schema1) // First ordering
       ),
       AddAction(
         path = "split2.split",
@@ -1284,7 +1364,7 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         size = 1000L,
         modificationTime = System.currentTimeMillis(),
         dataChange = true,
-        docMappingJson = Some(schema2)  // Second ordering
+        docMappingJson = Some(schema2) // Second ordering
       ),
       AddAction(
         path = "split3.split",
@@ -1292,7 +1372,7 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         size = 1000L,
         modificationTime = System.currentTimeMillis(),
         dataChange = true,
-        docMappingJson = Some(schema3)  // Third ordering
+        docMappingJson = Some(schema3) // Third ordering
       )
     )
 
@@ -1325,8 +1405,8 @@ class AvroTransactionLogZeroIOTest extends TestBase {
   }
 
   /**
-   * Additional verification: The same hash is produced regardless of field ordering.
-   * This tests the computeSchemaHash normalization directly.
+   * Additional verification: The same hash is produced regardless of field ordering. This tests the computeSchemaHash
+   * normalization directly.
    */
   test("REGRESSION FIX: computeSchemaHash produces identical hash for reordered schemas") {
     import io.indextables.spark.transaction.SchemaDeduplication
@@ -1342,8 +1422,9 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     val hashes = schemas.map(SchemaDeduplication.computeSchemaHash)
 
     println(s"=== HASH NORMALIZATION VERIFICATION ===")
-    schemas.zip(hashes).zipWithIndex.foreach { case ((schema, hash), idx) =>
-      println(s"Schema $idx: ${schema.take(80)}... -> Hash: $hash")
+    schemas.zip(hashes).zipWithIndex.foreach {
+      case ((schema, hash), idx) =>
+        println(s"Schema $idx: ${schema.take(80)}... -> Hash: $hash")
     }
 
     val uniqueHashes = hashes.toSet

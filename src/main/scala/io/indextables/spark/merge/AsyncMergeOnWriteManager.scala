@@ -17,31 +17,22 @@
 
 package io.indextables.spark.merge
 
-import java.util.UUID
-import java.util.concurrent.{
-  ConcurrentHashMap,
-  CountDownLatch,
-  ExecutorService,
-  Executors,
-  Semaphore,
-  TimeUnit
-}
+import java.util.concurrent.{ConcurrentHashMap, CountDownLatch, ExecutorService, Executors, Semaphore, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.UUID
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.hadoop.fs.Path
-
 import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.sql.MergeSplitsExecutor
 import io.indextables.spark.transaction.TransactionLog
-
 import org.slf4j.LoggerFactory
 
 /**
- * Manages asynchronous merge-on-write jobs on the driver. This is a JVM-wide singleton
- * that handles:
+ * Manages asynchronous merge-on-write jobs on the driver. This is a JVM-wide singleton that handles:
  *   - Concurrency limiting via Semaphore (max concurrent batches across all tables)
  *   - Job tracking (active and completed jobs)
  *   - Progress tracking via AtomicInteger for real-time visibility
@@ -56,19 +47,19 @@ object AsyncMergeOnWriteManager {
   // Configuration defaults
   private val DEFAULT_MAX_CONCURRENT_BATCHES = 3
   private val DEFAULT_COMPLETED_RETENTION_MS = 3600000L // 1 hour
-  private val DEFAULT_SHUTDOWN_TIMEOUT_MS = 300000L // 5 minutes
+  private val DEFAULT_SHUTDOWN_TIMEOUT_MS    = 300000L  // 5 minutes
 
   // Singleton state with volatile for visibility
-  @volatile private var maxConcurrentBatches: Int = DEFAULT_MAX_CONCURRENT_BATCHES
-  @volatile private var completedRetentionMs: Long = DEFAULT_COMPLETED_RETENTION_MS
-  @volatile private var shutdownTimeoutMs: Long = DEFAULT_SHUTDOWN_TIMEOUT_MS
-  @volatile private var batchSemaphore: Semaphore = new Semaphore(DEFAULT_MAX_CONCURRENT_BATCHES)
+  @volatile private var maxConcurrentBatches: Int        = DEFAULT_MAX_CONCURRENT_BATCHES
+  @volatile private var completedRetentionMs: Long       = DEFAULT_COMPLETED_RETENTION_MS
+  @volatile private var shutdownTimeoutMs: Long          = DEFAULT_SHUTDOWN_TIMEOUT_MS
+  @volatile private var batchSemaphore: Semaphore        = new Semaphore(DEFAULT_MAX_CONCURRENT_BATCHES)
   @volatile private var executorService: ExecutorService = _
-  @volatile private var initialized: Boolean = false
-  private val initLock = new Object
+  @volatile private var initialized: Boolean             = false
+  private val initLock                                   = new Object
 
   // Job tracking
-  private val activeJobs = new ConcurrentHashMap[String, AsyncMergeJob]()
+  private val activeJobs    = new ConcurrentHashMap[String, AsyncMergeJob]()
   private val completedJobs = new ConcurrentHashMap[String, AsyncMergeJobResult]()
 
   // Table-level lock to prevent duplicate jobs for the same table
@@ -76,13 +67,13 @@ object AsyncMergeOnWriteManager {
 
   // Cleanup tracking
   @volatile private var lastCleanupTime: Long = System.currentTimeMillis()
-  private val CLEANUP_INTERVAL_MS = 60000L // 1 minute
+  private val CLEANUP_INTERVAL_MS             = 60000L // 1 minute
 
   /**
-   * Configure the manager with specific settings. Should be called before starting jobs.
-   * Safe to call multiple times - will reconfigure if settings change.
+   * Configure the manager with specific settings. Should be called before starting jobs. Safe to call multiple times -
+   * will reconfigure if settings change.
    */
-  def configure(config: AsyncMergeOnWriteConfig): Unit = {
+  def configure(config: AsyncMergeOnWriteConfig): Unit =
     initLock.synchronized {
       val needsReconfigure = !initialized ||
         maxConcurrentBatches != config.maxConcurrentBatches ||
@@ -99,35 +90,43 @@ object AsyncMergeOnWriteManager {
         batchSemaphore = new Semaphore(maxConcurrentBatches)
 
         // Create daemon thread executor for background jobs
-        executorService = Executors.newCachedThreadPool(r => {
+        executorService = Executors.newCachedThreadPool { r =>
           val t = new Thread(r, s"async-merge-on-write-worker")
           t.setDaemon(true)
           t
-        })
+        }
 
         initialized = true
-        logger.info(s"AsyncMergeOnWriteManager configured: maxConcurrentBatches=$maxConcurrentBatches, " +
-          s"shutdownTimeoutMs=$shutdownTimeoutMs")
+        logger.info(
+          s"AsyncMergeOnWriteManager configured: maxConcurrentBatches=$maxConcurrentBatches, " +
+            s"shutdownTimeoutMs=$shutdownTimeoutMs"
+        )
       }
     }
-  }
 
   /**
-   * Submit an async merge job for a table. Returns Right(job) if started successfully,
-   * Left(reason) if rejected.
+   * Submit an async merge job for a table. Returns Right(job) if started successfully, Left(reason) if rejected.
    *
    * The job is rejected if:
    *   - A merge job is already in progress for the same table
    *   - The manager is shutting down
    *
-   * @param tablePath The table path to merge
-   * @param totalMergeGroups Total number of merge groups to process
-   * @param batchSize Number of merge groups per batch
-   * @param transactionLog Transaction log for the table
-   * @param writeOptions Write options (includes credentials, temp directories)
-   * @param serializedHadoopConf Serialized Hadoop configuration
-   * @param sparkSession Active Spark session
-   * @return Either the started job or a rejection reason
+   * @param tablePath
+   *   The table path to merge
+   * @param totalMergeGroups
+   *   Total number of merge groups to process
+   * @param batchSize
+   *   Number of merge groups per batch
+   * @param transactionLog
+   *   Transaction log for the table
+   * @param writeOptions
+   *   Write options (includes credentials, temp directories)
+   * @param serializedHadoopConf
+   *   Serialized Hadoop configuration
+   * @param sparkSession
+   *   Active Spark session
+   * @return
+   *   Either the started job or a rejection reason
    */
   def submitMergeJob(
     tablePath: String,
@@ -184,7 +183,7 @@ object AsyncMergeOnWriteManager {
 
     // Submit work to executor
     executorService.submit(new Runnable {
-      override def run(): Unit = {
+      override def run(): Unit =
         try {
           // Set the merge scheduler pool
           sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", mergeSchedulerPool)
@@ -196,28 +195,27 @@ object AsyncMergeOnWriteManager {
           case e: Exception =>
             logger.error(s"Async merge job ${job.jobId} failed: ${e.getMessage}", e)
             failJob(job, e.getMessage)
-        } finally {
+        } finally
           // Clear local property
           sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
-        }
-      }
     })
 
     Right(job)
   }
 
-  /**
-   * Check if a merge job is in progress for a table.
-   */
+  /** Check if a merge job is in progress for a table. */
   def isMergeInProgress(tablePath: String): Boolean =
     tableJobIds.containsKey(tablePath)
 
   /**
    * Await completion of a merge job for a table.
    *
-   * @param tablePath The table path
-   * @param timeoutMs Timeout in milliseconds
-   * @return true if completed within timeout, false otherwise
+   * @param tablePath
+   *   The table path
+   * @param timeoutMs
+   *   Timeout in milliseconds
+   * @return
+   *   true if completed within timeout, false otherwise
    */
   def awaitCompletion(tablePath: String, timeoutMs: Long): Boolean = {
     val jobId = tableJobIds.get(tablePath)
@@ -231,7 +229,7 @@ object AsyncMergeOnWriteManager {
     }
 
     // Wait for completion using a latch
-    val startTime = System.currentTimeMillis()
+    val startTime      = System.currentTimeMillis()
     val pollIntervalMs = 100L
     while (System.currentTimeMillis() - startTime < timeoutMs) {
       val status = job.status.get()
@@ -243,75 +241,74 @@ object AsyncMergeOnWriteManager {
     false
   }
 
-  /**
-   * Get an active job by ID.
-   */
+  /** Get an active job by ID. */
   def getActiveJob(jobId: String): Option[AsyncMergeJob] =
     Option(activeJobs.get(jobId))
 
-  /**
-   * Get a completed job result by ID.
-   */
+  /** Get a completed job result by ID. */
   def getCompletedJob(jobId: String): Option[AsyncMergeJobResult] =
     Option(completedJobs.get(jobId))
 
-  /**
-   * Get all job statuses (both active and recently completed).
-   * Used by DESCRIBE MERGE JOBS command.
-   */
+  /** Get all job statuses (both active and recently completed). Used by DESCRIBE MERGE JOBS command. */
   def getAllJobStatus: Seq[MergeJobStatus.MergeJobStatusReport] = {
     val now = System.currentTimeMillis()
 
     // Active jobs
-    val activeStatus = activeJobs.values().asScala.map { job =>
-      MergeJobStatus.MergeJobStatusReport(
-        jobId = job.jobId,
-        tablePath = job.tablePath,
-        status = job.status.get().toString,
-        totalGroups = job.totalMergeGroups,
-        completedGroups = job.completedGroups.get(),
-        totalBatches = job.totalBatches,
-        completedBatches = job.completedBatches.get(),
-        durationMs = now - job.startTime,
-        errorMessage = None
-      )
-    }.toSeq
+    val activeStatus = activeJobs
+      .values()
+      .asScala
+      .map { job =>
+        MergeJobStatus.MergeJobStatusReport(
+          jobId = job.jobId,
+          tablePath = job.tablePath,
+          status = job.status.get().toString,
+          totalGroups = job.totalMergeGroups,
+          completedGroups = job.completedGroups.get(),
+          totalBatches = job.totalBatches,
+          completedBatches = job.completedBatches.get(),
+          durationMs = now - job.startTime,
+          errorMessage = None
+        )
+      }
+      .toSeq
 
     // Completed jobs (within retention period)
-    val completedStatus = completedJobs.values().asScala.map { result =>
-      MergeJobStatus.MergeJobStatusReport(
-        jobId = result.jobId,
-        tablePath = result.tablePath,
-        status = if (result.success) "COMPLETED" else "FAILED",
-        totalGroups = result.totalMergeGroups,
-        completedGroups = result.completedGroups,
-        totalBatches = result.totalBatches,
-        completedBatches = result.completedBatches,
-        durationMs = result.durationMs,
-        errorMessage = result.errorMessage
-      )
-    }.toSeq
+    val completedStatus = completedJobs
+      .values()
+      .asScala
+      .map { result =>
+        MergeJobStatus.MergeJobStatusReport(
+          jobId = result.jobId,
+          tablePath = result.tablePath,
+          status = if (result.success) "COMPLETED" else "FAILED",
+          totalGroups = result.totalMergeGroups,
+          completedGroups = result.completedGroups,
+          totalBatches = result.totalBatches,
+          completedBatches = result.completedBatches,
+          durationMs = result.durationMs,
+          errorMessage = result.errorMessage
+        )
+      }
+      .toSeq
 
     activeStatus ++ completedStatus
   }
 
-  /**
-   * Get the number of active merge jobs.
-   */
+  /** Get the number of active merge jobs. */
   def getActiveJobCount: Int = activeJobs.size()
 
-  /**
-   * Get the number of available batch slots.
-   */
+  /** Get the number of available batch slots. */
   def getAvailableBatchSlots: Int = batchSemaphore.availablePermits()
 
   /**
    * Shutdown the manager with graceful timeout.
    *
-   * @param timeoutMs Timeout to wait for completion
-   * @return true if shutdown completed gracefully
+   * @param timeoutMs
+   *   Timeout to wait for completion
+   * @return
+   *   true if shutdown completed gracefully
    */
-  def shutdown(timeoutMs: Long = DEFAULT_SHUTDOWN_TIMEOUT_MS): Boolean = {
+  def shutdown(timeoutMs: Long = DEFAULT_SHUTDOWN_TIMEOUT_MS): Boolean =
     initLock.synchronized {
       if (executorService != null) {
         logger.info(s"Shutting down AsyncMergeOnWriteManager with ${activeJobs.size()} active jobs")
@@ -325,12 +322,9 @@ object AsyncMergeOnWriteManager {
       }
       true
     }
-  }
 
-  /**
-   * Reset the manager (for testing). Clears all jobs and resets state.
-   */
-  def reset(): Unit = {
+  /** Reset the manager (for testing). Clears all jobs and resets state. */
+  def reset(): Unit =
     initLock.synchronized {
       activeJobs.clear()
       completedJobs.clear()
@@ -346,18 +340,15 @@ object AsyncMergeOnWriteManager {
       initialized = false
       logger.info("AsyncMergeOnWriteManager reset")
     }
-  }
 
-  /**
-   * Execute a merge job. This runs in a background thread.
-   */
+  /** Execute a merge job. This runs in a background thread. */
   private def executeMergeJob(
     job: AsyncMergeJob,
     transactionLog: TransactionLog,
     writeOptions: Map[String, String],
     serializedHadoopConf: Map[String, String],
     sparkSession: SparkSession
-  ): Unit = {
+  ): Unit =
     try {
       logger.info(s"Executing async merge job ${job.jobId} for ${job.tablePath}")
 
@@ -388,9 +379,11 @@ object AsyncMergeOnWriteManager {
 
       // Job completed successfully
       completeJob(job, success = true, None)
-      logger.info(s"Async merge job ${job.jobId} completed successfully: " +
-        s"${job.completedGroups.get()}/${job.totalMergeGroups} groups, " +
-        s"${job.completedBatches.get()}/${job.totalBatches} batches")
+      logger.info(
+        s"Async merge job ${job.jobId} completed successfully: " +
+          s"${job.completedGroups.get()}/${job.totalMergeGroups} groups, " +
+          s"${job.completedBatches.get()}/${job.totalBatches} batches"
+      )
 
     } catch {
       case e: Exception =>
@@ -398,21 +391,19 @@ object AsyncMergeOnWriteManager {
         failJob(job, e.getMessage)
         throw e
     }
-  }
 
   /**
    * Execute merge with batching using configured concurrency.
    *
    * This method:
-   * 1. Configures batchSize (1/6 of cluster CPUs) for the executor
-   * 2. Configures maxConcurrentBatches (default 3) for parallel batch execution
-   * 3. Lets the MergeSplitsExecutor handle parallelism via its internal ForkJoinPool
-   * 4. Reports progress to the job
+   *   1. Configures batchSize (1/6 of cluster CPUs) for the executor 2. Configures maxConcurrentBatches (default 3) for
+   *      parallel batch execution 3. Lets the MergeSplitsExecutor handle parallelism via its internal ForkJoinPool 4.
+   *      Reports progress to the job
    *
    * With defaults on a 24-CPU cluster:
-   * - batchSize = 4 (24 × 0.167)
-   * - maxConcurrentBatches = 3
-   * - Total concurrent work = 4 × 3 = 12 merge groups (50% of cluster)
+   *   - batchSize = 4 (24 × 0.167)
+   *   - maxConcurrentBatches = 3
+   *   - Total concurrent work = 4 × 3 = 12 merge groups (50% of cluster)
    */
   private def executeMergeWithBatching(
     job: AsyncMergeJob,
@@ -423,7 +414,7 @@ object AsyncMergeOnWriteManager {
     // to process multiple batches concurrently
 
     // Set our batch size and concurrency in spark config for the executor to pick up
-    val originalBatchSize = sparkSession.conf.getOption("spark.indextables.merge.batchSize")
+    val originalBatchSize     = sparkSession.conf.getOption("spark.indextables.merge.batchSize")
     val originalMaxConcurrent = sparkSession.conf.getOption("spark.indextables.merge.maxConcurrentBatches")
 
     try {
@@ -432,8 +423,10 @@ object AsyncMergeOnWriteManager {
       // Configure max concurrent batches (default 3, so up to 50% of cluster used)
       sparkSession.conf.set("spark.indextables.merge.maxConcurrentBatches", maxConcurrentBatches.toString)
 
-      logger.info(s"Job ${job.jobId}: batchSize=${job.batchSize}, maxConcurrentBatches=$maxConcurrentBatches " +
-        s"(max concurrent groups: ${job.batchSize * maxConcurrentBatches})")
+      logger.info(
+        s"Job ${job.jobId}: batchSize=${job.batchSize}, maxConcurrentBatches=$maxConcurrentBatches " +
+          s"(max concurrent groups: ${job.batchSize * maxConcurrentBatches})"
+      )
 
       // Execute merge - the executor handles parallel batch execution internally
       executeMergeWithSemaphore(job, executor)
@@ -442,11 +435,11 @@ object AsyncMergeOnWriteManager {
       // Restore original config values
       originalBatchSize match {
         case Some(v) => sparkSession.conf.set("spark.indextables.merge.batchSize", v)
-        case None => sparkSession.conf.unset("spark.indextables.merge.batchSize")
+        case None    => sparkSession.conf.unset("spark.indextables.merge.batchSize")
       }
       originalMaxConcurrent match {
         case Some(v) => sparkSession.conf.set("spark.indextables.merge.maxConcurrentBatches", v)
-        case None => sparkSession.conf.unset("spark.indextables.merge.maxConcurrentBatches")
+        case None    => sparkSession.conf.unset("spark.indextables.merge.maxConcurrentBatches")
       }
     }
   }
@@ -454,9 +447,8 @@ object AsyncMergeOnWriteManager {
   /**
    * Execute merge with job-level semaphore control.
    *
-   * The semaphore limits concurrent merge JOBS (not batches).
-   * Within each job, the executor handles batch-level parallelism via ForkJoinPool
-   * using maxConcurrentBatches (default 3).
+   * The semaphore limits concurrent merge JOBS (not batches). Within each job, the executor handles batch-level
+   * parallelism via ForkJoinPool using maxConcurrentBatches (default 3).
    *
    * This prevents resource exhaustion when multiple tables trigger merges simultaneously.
    */
@@ -495,7 +487,11 @@ object AsyncMergeOnWriteManager {
     }
   }
 
-  private def completeJob(job: AsyncMergeJob, success: Boolean, errorMessage: Option[String]): Unit = {
+  private def completeJob(
+    job: AsyncMergeJob,
+    success: Boolean,
+    errorMessage: Option[String]
+  ): Unit = {
     val result = AsyncMergeJobResult(
       jobId = job.jobId,
       tablePath = job.tablePath,
@@ -515,21 +511,19 @@ object AsyncMergeOnWriteManager {
     completedJobs.put(job.jobId, result)
   }
 
-  private def failJob(job: AsyncMergeJob, error: String): Unit = {
+  private def failJob(job: AsyncMergeJob, error: String): Unit =
     completeJob(job, success = false, Some(error))
-  }
 
-  private def ensureInitialized(): Unit = {
+  private def ensureInitialized(): Unit =
     if (!initialized) {
       configure(AsyncMergeOnWriteConfig.default)
     }
-  }
 
   private def maybeCleanupOldJobs(): Unit = {
     val now = System.currentTimeMillis()
     if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
       lastCleanupTime = now
-      val cutoff = now - completedRetentionMs
+      val cutoff  = now - completedRetentionMs
       var removed = 0
       completedJobs.entrySet().removeIf { entry =>
         val shouldRemove = entry.getValue.completionTime.exists(_ < cutoff)
@@ -543,19 +537,15 @@ object AsyncMergeOnWriteManager {
   }
 }
 
-/**
- * Status of an async merge job.
- */
+/** Status of an async merge job. */
 sealed trait MergeJobStatus
 object MergeJobStatus {
-  case object Running extends MergeJobStatus { override def toString = "RUNNING" }
+  case object Running   extends MergeJobStatus { override def toString = "RUNNING"   }
   case object Completed extends MergeJobStatus { override def toString = "COMPLETED" }
-  case object Failed extends MergeJobStatus { override def toString = "FAILED" }
+  case object Failed    extends MergeJobStatus { override def toString = "FAILED"    }
   case object Cancelled extends MergeJobStatus { override def toString = "CANCELLED" }
 
-  /**
-   * Report object for job status queries.
-   */
+  /** Report object for job status queries. */
   case class MergeJobStatusReport(
     jobId: String,
     tablePath: String,
@@ -565,13 +555,11 @@ object MergeJobStatus {
     totalBatches: Int,
     completedBatches: Int,
     durationMs: Long,
-    errorMessage: Option[String]
-  ) extends Serializable
+    errorMessage: Option[String])
+      extends Serializable
 }
 
-/**
- * Represents an active async merge job.
- */
+/** Represents an active async merge job. */
 case class AsyncMergeJob(
   jobId: String,
   tablePath: String,
@@ -581,12 +569,9 @@ case class AsyncMergeJob(
   batchSize: Int,
   completedGroups: AtomicInteger,
   completedBatches: AtomicInteger,
-  status: AtomicReference[MergeJobStatus]
-)
+  status: AtomicReference[MergeJobStatus])
 
-/**
- * Result from a completed async merge job.
- */
+/** Result from a completed async merge job. */
 case class AsyncMergeJobResult(
   jobId: String,
   tablePath: String,
@@ -597,5 +582,4 @@ case class AsyncMergeJobResult(
   durationMs: Long,
   success: Boolean,
   errorMessage: Option[String],
-  completionTime: Option[Long] = None
-)
+  completionTime: Option[Long] = None)

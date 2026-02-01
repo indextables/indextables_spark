@@ -7,9 +7,8 @@ package io.indextables.spark.core
 import io.indextables.spark.TestBase
 
 /**
- * Tests that aggregate queries with IsNull/IsNotNull filters work correctly.
- * IsNull/IsNotNull filters are either pushed down to Tantivy (for FAST fields) or
- * handled by Spark's post-filtering (for non-FAST fields).
+ * Tests that aggregate queries with IsNull/IsNotNull filters work correctly. IsNull/IsNotNull filters are either pushed
+ * down to Tantivy (for FAST fields) or handled by Spark's post-filtering (for non-FAST fields).
  */
 class AggregateExceptionTest extends TestBase {
 

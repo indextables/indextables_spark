@@ -386,15 +386,12 @@ class IndexTables4SparkStandardWrite(
    * Evaluate if merge-on-write should run after transaction commit.
    *
    * This method:
-   *   1. Checks if merge-on-write is enabled
-   *   2. Checks if merge already in progress for this table
-   *   3. Calculates batch size and threshold using new formulas
-   *   4. Counts mergeable groups from the transaction log
-   *   5. If async enabled, submits to AsyncMergeOnWriteManager
-   *   6. Otherwise invokes MERGE SPLITS command synchronously
+   *   1. Checks if merge-on-write is enabled 2. Checks if merge already in progress for this table 3. Calculates batch
+   *      size and threshold using new formulas 4. Counts mergeable groups from the transaction log 5. If async enabled,
+   *      submits to AsyncMergeOnWriteManager 6. Otherwise invokes MERGE SPLITS command synchronously
    *
-   * New threshold formula: threshold = batchSize × minBatchesToTrigger
-   * Batch size formula: batchSize = max(1, totalClusterCpus × batchCpuFraction)
+   * New threshold formula: threshold = batchSize × minBatchesToTrigger Batch size formula: batchSize = max(1,
+   * totalClusterCpus × batchCpuFraction)
    */
   private def evaluateAndExecuteMergeOnWrite(
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -423,15 +420,17 @@ class IndexTables4SparkStandardWrite(
       }
 
       // Get Spark session for default parallelism (represents total cluster CPUs)
-      val spark = org.apache.spark.sql.SparkSession.active
+      val spark            = org.apache.spark.sql.SparkSession.active
       val totalClusterCpus = spark.sparkContext.defaultParallelism
 
       // Calculate batch size and threshold using new formulas
       val batchSize = config.calculateBatchSize(totalClusterCpus)
       val threshold = config.calculateMergeThreshold(totalClusterCpus)
 
-      logger.info(s"Merge config: batchSize=$batchSize (CPUs: $totalClusterCpus × fraction: ${config.batchCpuFraction}), " +
-        s"threshold=$threshold (batchSize: $batchSize × minBatches: ${config.minBatchesToTrigger})")
+      logger.info(
+        s"Merge config: batchSize=$batchSize (CPUs: $totalClusterCpus × fraction: ${config.batchCpuFraction}), " +
+          s"threshold=$threshold (batchSize: $batchSize × minBatches: ${config.minBatchesToTrigger})"
+      )
 
       // Count mergeable groups using MergeSplitsExecutor (dry-run to get accurate count)
       val mergeGroups = countMergeGroupsUsingExecutor(config.targetSizeString, writeOptions)
@@ -445,7 +444,7 @@ class IndexTables4SparkStandardWrite(
 
           // Convert writeOptions to Map and merge with hadoop config
           import scala.jdk.CollectionConverters._
-          val optionsMap = writeOptions.asCaseSensitiveMap().asScala.toMap
+          val optionsMap    = writeOptions.asCaseSensitiveMap().asScala.toMap
           val mergedOptions = serializedHadoopConf ++ optionsMap
 
           // Submit async job
@@ -468,7 +467,9 @@ class IndexTables4SparkStandardWrite(
 
         } else {
           // Synchronous execution (existing behavior)
-          logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS synchronously")
+          logger.info(
+            s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS synchronously"
+          )
           executeMergeSplitsCommand(writeOptions)
           true // Merge was executed
         }

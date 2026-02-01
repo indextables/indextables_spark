@@ -25,17 +25,15 @@ import io.indextables.spark.TestBase
  * Tests for Avro state format with large tables that would require multi-part handling.
  *
  * These tests verify:
- *   1. Avro state handles large numbers of files correctly
- *   2. Multiple manifest files are created when needed
- *   3. State can be read back correctly after checkpoint
- *   4. Incremental writes after checkpoint work correctly
- *   5. State compaction works properly
+ *   1. Avro state handles large numbers of files correctly 2. Multiple manifest files are created when needed 3. State
+ *      can be read back correctly after checkpoint 4. Incremental writes after checkpoint work correctly 5. State
+ *      compaction works properly
  *
  * This is the Avro equivalent of MultiPartCheckpointTest.
  */
 class AvroMultiPartStateTest extends TestBase {
 
-  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[AvroMultiPartStateTest])
+  private val logger   = org.slf4j.LoggerFactory.getLogger(classOf[AvroMultiPartStateTest])
   private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
 
   // ============================================================================
@@ -66,8 +64,8 @@ class AvroMultiPartStateTest extends TestBase {
       stateResult(0).getAs[Long]("num_files") should be >= 20L
 
       // Verify data integrity - use both count (pushdown) and collect (full read)
-      val result = spark.read.format(provider).load(path)
-      val countResult = result.count()
+      val result        = spark.read.format(provider).load(path)
+      val countResult   = result.count()
       val collectResult = result.limit(100000000).collect()
 
       countResult shouldBe 2000 // 20 * 100
@@ -102,8 +100,8 @@ class AvroMultiPartStateTest extends TestBase {
       numManifests should be >= 1
 
       // Verify data - use both count (pushdown) and collect (full read)
-      val result = spark.read.format(provider).load(path)
-      val countResult = result.count()
+      val result        = spark.read.format(provider).load(path)
+      val countResult   = result.count()
       val collectResult = result.limit(100000000).collect()
 
       countResult shouldBe 1500 // 30 * 50
@@ -134,8 +132,8 @@ class AvroMultiPartStateTest extends TestBase {
       val checkpointVersion = checkpointResult(0).getAs[Long]("checkpoint_version")
 
       // Read and verify - use both count (pushdown) and collect (full read)
-      val result = spark.read.format(provider).load(path)
-      val countResult = result.count()
+      val result        = spark.read.format(provider).load(path)
+      val countResult   = result.count()
       val collectResult = result.limit(100000000).collect()
 
       countResult shouldBe 5000 // 10 * 500
@@ -190,11 +188,13 @@ class AvroMultiPartStateTest extends TestBase {
       logger.info("Testing checkpoint with partitioned data")
 
       // Create partitioned data
-      val df = spark.range(0, 1000).selectExpr(
-        "id",
-        "CAST(id AS STRING) as text",
-        "CAST(id % 10 AS STRING) as partition_col"
-      )
+      val df = spark
+        .range(0, 1000)
+        .selectExpr(
+          "id",
+          "CAST(id AS STRING) as text",
+          "CAST(id % 10 AS STRING) as partition_col"
+        )
       df.write.format(provider).partitionBy("partition_col").mode("overwrite").save(path)
 
       // Create checkpoint
@@ -206,7 +206,9 @@ class AvroMultiPartStateTest extends TestBase {
       stateResult(0).getAs[String]("format") shouldBe "avro-state"
 
       // Read with partition filter
-      val filtered = spark.read.format(provider).load(path)
+      val filtered = spark.read
+        .format(provider)
+        .load(path)
         .filter("partition_col = '0'")
       filtered.count() shouldBe 100 // 1000 / 10 partitions
 
@@ -234,7 +236,7 @@ class AvroMultiPartStateTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Check state directory exists
-      val txLogDir = new File(s"$path/_transaction_log")
+      val txLogDir  = new File(s"$path/_transaction_log")
       val stateDirs = txLogDir.listFiles().filter(_.getName.startsWith("state-v"))
 
       stateDirs should not be empty
@@ -242,7 +244,7 @@ class AvroMultiPartStateTest extends TestBase {
 
       // Verify manifest exists in state directory
       val latestStateDir = stateDirs.maxBy(_.getName)
-      val manifestFile = new File(latestStateDir, "_manifest.avro")
+      val manifestFile   = new File(latestStateDir, "_manifest.avro")
       manifestFile.exists() shouldBe true
 
       logger.info("State directory structure test passed")
@@ -289,12 +291,14 @@ class AvroMultiPartStateTest extends TestBase {
       logger.info("Testing schema preservation in Avro state")
 
       // Create data with specific schema
-      val df = spark.range(0, 100).selectExpr(
-        "id",
-        "CAST(id AS STRING) as text",
-        "CAST(id * 1.5 AS DOUBLE) as score",
-        "CAST(id % 2 = 0 AS BOOLEAN) as is_even"
-      )
+      val df = spark
+        .range(0, 100)
+        .selectExpr(
+          "id",
+          "CAST(id AS STRING) as text",
+          "CAST(id * 1.5 AS DOUBLE) as score",
+          "CAST(id % 2 = 0 AS BOOLEAN) as is_even"
+        )
       df.write.format(provider).mode("overwrite").save(path)
 
       // Create checkpoint
@@ -304,7 +308,7 @@ class AvroMultiPartStateTest extends TestBase {
       val result = spark.read.format(provider).load(path)
       val schema = result.schema
 
-      schema.fieldNames should contain allOf("id", "text", "score", "is_even")
+      schema.fieldNames should contain allOf ("id", "text", "score", "is_even")
       result.count() shouldBe 100
 
       // Verify data types are preserved
@@ -356,11 +360,13 @@ class AvroMultiPartStateTest extends TestBase {
       logger.info("Testing aggregations with Avro state")
 
       // Create data
-      val df = spark.range(0, 1000).selectExpr(
-        "id",
-        "CAST(id AS STRING) as text",
-        "CAST(id AS DOUBLE) as value"
-      )
+      val df = spark
+        .range(0, 1000)
+        .selectExpr(
+          "id",
+          "CAST(id AS STRING) as text",
+          "CAST(id AS DOUBLE) as value"
+        )
       df.write
         .format(provider)
         .option("spark.indextables.indexing.fastfields", "value")
@@ -372,11 +378,13 @@ class AvroMultiPartStateTest extends TestBase {
 
       // Run aggregations
       val result = spark.read.format(provider).load(path)
-      val agg = result.agg(
-        org.apache.spark.sql.functions.count("*").as("cnt"),
-        org.apache.spark.sql.functions.sum("value").as("total"),
-        org.apache.spark.sql.functions.avg("value").as("avg_val")
-      ).collect()(0)
+      val agg = result
+        .agg(
+          org.apache.spark.sql.functions.count("*").as("cnt"),
+          org.apache.spark.sql.functions.sum("value").as("total"),
+          org.apache.spark.sql.functions.avg("value").as("avg_val")
+        )
+        .collect()(0)
 
       agg.getLong(0) shouldBe 1000
       agg.getDouble(1) shouldBe 499500.0 // sum of 0 to 999
@@ -391,11 +399,13 @@ class AvroMultiPartStateTest extends TestBase {
       logger.info("Testing filtered aggregations with Avro state")
 
       // Create data
-      val df = spark.range(0, 500).selectExpr(
-        "id",
-        "CAST(id AS STRING) as text",
-        "CAST(id AS DOUBLE) as value"
-      )
+      val df = spark
+        .range(0, 500)
+        .selectExpr(
+          "id",
+          "CAST(id AS STRING) as text",
+          "CAST(id AS DOUBLE) as value"
+        )
       df.write
         .format(provider)
         .option("spark.indextables.indexing.fastfields", "value")
@@ -406,7 +416,9 @@ class AvroMultiPartStateTest extends TestBase {
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
       // Run filtered aggregation
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter("value >= 100 AND value < 200")
         .agg(org.apache.spark.sql.functions.count("*").as("cnt"))
         .collect()(0)

@@ -29,14 +29,12 @@ import io.indextables.spark.RealS3TestBase
 /**
  * Real AWS S3 integration test for PURGE bug fix.
  *
- * This test reproduces the bug where PURGE incorrectly identifies newly written
- * files as orphaned when using the Avro state format. The bug was caused by
- * PurgeOrphanedSplitsExecutor not reading files from Avro state directories
+ * This test reproduces the bug where PURGE incorrectly identifies newly written files as orphaned when using the Avro
+ * state format. The bug was caused by PurgeOrphanedSplitsExecutor not reading files from Avro state directories
  * (state-v*) - it only read from JSON checkpoints.
  *
- * The fix adds getFilesFromAvroState() which reads file entries from all retained
- * Avro state directories, ensuring files referenced in the transaction log are
- * not marked as orphaned.
+ * The fix adds getFilesFromAvroState() which reads file entries from all retained Avro state directories, ensuring
+ * files referenced in the transaction log are not marked as orphaned.
  *
  * Credentials are loaded from ~/.aws/credentials file.
  */
@@ -139,13 +137,14 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // List the split files on S3
     val tableDir = new Path(tablePath)
-    val splitFiles = fs.listStatus(tableDir)
+    val splitFiles = fs
+      .listStatus(tableDir)
       .filter(_.getPath.getName.endsWith(".split"))
     println(s"Split files written: ${splitFiles.length}")
     splitFiles.foreach(f => println(s"  - ${f.getPath.getName}"))
 
     // Verify transaction log structure
-    val txLogPath = new Path(tablePath, "_transaction_log")
+    val txLogPath  = new Path(tablePath, "_transaction_log")
     val txLogFiles = fs.listStatus(txLogPath)
     println(s"\nTransaction log contents:")
     txLogFiles.foreach { f =>
@@ -171,18 +170,20 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN")
     purgeResult.show(false)
 
-    val purgeRows = purgeResult.collect()
-    val metrics = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
+    val purgeRows     = purgeResult.collect()
+    val metrics       = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
     val orphanedFiles = metrics.getAs[Long]("orphaned_files_found")
 
     println(s"\nOrphaned files identified: $orphanedFiles")
 
     // THIS IS THE KEY ASSERTION - no files should be orphaned in a brand new table
     // Before the fix, this would fail with orphanedFiles > 0
-    assert(orphanedFiles == 0,
+    assert(
+      orphanedFiles == 0,
       s"Expected 0 orphaned files but found $orphanedFiles - " +
-      "PURGE is incorrectly identifying valid files as orphaned! " +
-      "This indicates the bug where Avro state directories are not being read.")
+        "PURGE is incorrectly identifying valid files as orphaned! " +
+        "This indicates the bug where Avro state directories are not being read."
+    )
 
     println("✅ Test passed - no files incorrectly identified as orphaned on S3")
   }
@@ -210,7 +211,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Count valid split files
     val tableDir = new Path(tablePath)
-    val validSplitFiles = fs.listStatus(tableDir)
+    val validSplitFiles = fs
+      .listStatus(tableDir)
       .filter(_.getPath.getName.endsWith(".split"))
     println(s"Valid split files: ${validSplitFiles.length}")
 
@@ -228,16 +230,18 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN")
     purgeResult.show(false)
 
-    val purgeRows = purgeResult.collect()
-    val metrics = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
+    val purgeRows          = purgeResult.collect()
+    val metrics            = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
     val orphanedFilesFound = metrics.getAs[Long]("orphaned_files_found")
 
     println(s"\nOrphaned files identified: $orphanedFilesFound")
 
     // Should find exactly 2 orphaned files (the ones we created), not the valid ones
-    assert(orphanedFilesFound == 2,
+    assert(
+      orphanedFilesFound == 2,
       s"Expected exactly 2 orphaned files but found $orphanedFilesFound - " +
-      "PURGE should only identify the orphaned files we created, not valid files.")
+        "PURGE should only identify the orphaned files we created, not valid files."
+    )
 
     // Verify valid files are NOT being counted as orphaned
     // Total files = valid + orphans, only orphans should be identified
@@ -246,8 +250,7 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     println(s"Valid files: ${validSplitFiles.length}")
     println(s"Orphaned files: $orphanedFilesFound")
 
-    assert(totalSplitFiles == validSplitFiles.length + 2,
-      "Total files should equal valid + 2 orphans")
+    assert(totalSplitFiles == validSplitFiles.length + 2, "Total files should equal valid + 2 orphans")
 
     // Verify data integrity
     val readDf = spark.read
@@ -291,8 +294,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     assert(rowCount == 10, s"Expected 10 rows but got $rowCount")
 
     // Check transaction log structure
-    val txLogPath = new Path(tablePath, "_transaction_log")
-    val txLogFiles = fs.listStatus(txLogPath)
+    val txLogPath        = new Path(tablePath, "_transaction_log")
+    val txLogFiles       = fs.listStatus(txLogPath)
     val stateDirectories = txLogFiles.filter(_.getPath.getName.startsWith("state-v"))
     println(s"Avro state directories: ${stateDirectories.length}")
 
@@ -301,15 +304,14 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN")
     purgeResult.show(false)
 
-    val purgeRows = purgeResult.collect()
-    val metrics = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
+    val purgeRows     = purgeResult.collect()
+    val metrics       = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
     val orphanedFiles = metrics.getAs[Long]("orphaned_files_found")
 
     println(s"\nOrphaned files identified: $orphanedFiles")
 
     // No files should be orphaned - all are referenced in transaction log
-    assert(orphanedFiles == 0,
-      s"Expected 0 orphaned files after multiple writes but found $orphanedFiles")
+    assert(orphanedFiles == 0, s"Expected 0 orphaned files after multiple writes but found $orphanedFiles")
 
     println("✅ Test passed - multiple writes with Avro state handled correctly on S3")
   }
@@ -340,7 +342,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // List partitions
     val tableDir = new Path(tablePath)
-    val partitions = fs.listStatus(tableDir)
+    val partitions = fs
+      .listStatus(tableDir)
       .filter(s => s.isDirectory && s.getPath.getName.startsWith("date="))
     println(s"Partitions created: ${partitions.length}")
     partitions.foreach(p => println(s"  - ${p.getPath.getName}"))
@@ -358,15 +361,14 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN")
     purgeResult.show(false)
 
-    val purgeRows = purgeResult.collect()
-    val metrics = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
+    val purgeRows     = purgeResult.collect()
+    val metrics       = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
     val orphanedFiles = metrics.getAs[Long]("orphaned_files_found")
 
     println(s"\nOrphaned files identified: $orphanedFiles")
 
     // No files should be orphaned
-    assert(orphanedFiles == 0,
-      s"Expected 0 orphaned files in partitioned table but found $orphanedFiles")
+    assert(orphanedFiles == 0, s"Expected 0 orphaned files in partitioned table but found $orphanedFiles")
 
     println("✅ Test passed - partitioned table with Avro state handled correctly on S3")
   }
@@ -396,7 +398,7 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     }
 
     // Verify state directories were created
-    val txLogPath = new Path(tablePath, "_transaction_log")
+    val txLogPath     = new Path(tablePath, "_transaction_log")
     val txLogContents = fs.listStatus(txLogPath)
 
     println(s"\nTransaction log contents:")
@@ -434,15 +436,16 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Run PURGE with 0 hours retention - this should delete old transaction log files
     println("\n=== Running PURGE DRY RUN with 0 hours TX LOG retention ===")
-    val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS DRY RUN")
+    val purgeResult =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS DRY RUN")
     purgeResult.show(false)
 
-    val purgeRows = purgeResult.collect()
-    val metrics = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
-    val orphanedFiles = metrics.getAs[Long]("orphaned_files_found")
-    val expiredStatesFound = metrics.getAs[Long]("expired_states_found")
+    val purgeRows            = purgeResult.collect()
+    val metrics              = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
+    val orphanedFiles        = metrics.getAs[Long]("orphaned_files_found")
+    val expiredStatesFound   = metrics.getAs[Long]("expired_states_found")
     val expiredStatesDeleted = metrics.getAs[Long]("expired_states_deleted")
-    val isDryRun = metrics.getAs[Boolean]("dry_run")
+    val isDryRun             = metrics.getAs[Boolean]("dry_run")
 
     println(s"\nOrphaned files identified: $orphanedFiles")
     println(s"Expired states found: $expiredStatesFound")
@@ -450,19 +453,19 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     println(s"Is dry run: $isDryRun")
 
     // No valid files should be orphaned
-    assert(orphanedFiles == 0,
-      s"Expected 0 orphaned files but found $orphanedFiles")
+    assert(orphanedFiles == 0, s"Expected 0 orphaned files but found $orphanedFiles")
 
     // With 0 hour retention, old state directories should be marked for deletion
     // After 3 writes, we have state-v1, state-v2, state-v3 - the first 2 should be expired
-    assert(expiredStatesFound > 0,
+    assert(
+      expiredStatesFound > 0,
       s"Expected expired state directories to be found with 0 hour retention, " +
-      s"but found $expiredStatesFound. This indicates the state retention is not working correctly.")
+        s"but found $expiredStatesFound. This indicates the state retention is not working correctly."
+    )
 
     // In DRY RUN mode, expiredStatesDeleted should be 0
     assert(isDryRun, "Expected this to be a dry run")
-    assert(expiredStatesDeleted == 0,
-      s"Expected 0 states deleted in DRY RUN mode but got $expiredStatesDeleted")
+    assert(expiredStatesDeleted == 0, s"Expected 0 states deleted in DRY RUN mode but got $expiredStatesDeleted")
 
     // Reset config
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "true")
@@ -496,7 +499,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Count state directories BEFORE purge
     val txLogPath = new Path(tablePath, "_transaction_log")
-    val statesBefore = fs.listStatus(txLogPath)
+    val statesBefore = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
 
     println(s"\nState directories BEFORE purge: ${statesBefore.length}")
@@ -518,15 +522,15 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS")
     purgeResult.show(false)
 
-    val purgeRows = purgeResult.collect()
-    val metrics = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
-    val status = metrics.getAs[String]("status")
-    val orphanedFilesFound = metrics.getAs[Long]("orphaned_files_found")
+    val purgeRows            = purgeResult.collect()
+    val metrics              = purgeRows.head.getAs[org.apache.spark.sql.Row]("metrics")
+    val status               = metrics.getAs[String]("status")
+    val orphanedFilesFound   = metrics.getAs[Long]("orphaned_files_found")
     val orphanedFilesDeleted = metrics.getAs[Long]("orphaned_files_deleted")
-    val expiredStatesFound = metrics.getAs[Long]("expired_states_found")
+    val expiredStatesFound   = metrics.getAs[Long]("expired_states_found")
     val expiredStatesDeleted = metrics.getAs[Long]("expired_states_deleted")
-    val isDryRun = metrics.getAs[Boolean]("dry_run")
-    val message = metrics.getAs[String]("message")
+    val isDryRun             = metrics.getAs[Boolean]("dry_run")
+    val message              = metrics.getAs[String]("message")
 
     println(s"\nStatus: $status")
     println(s"Orphaned files found: $orphanedFilesFound")
@@ -540,23 +544,26 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     assert(!isDryRun, "Expected this to NOT be a dry run")
 
     // No valid files should be orphaned
-    assert(orphanedFilesFound == 0,
-      s"Expected 0 orphaned files but found $orphanedFilesFound")
+    assert(orphanedFilesFound == 0, s"Expected 0 orphaned files but found $orphanedFilesFound")
 
     // With 4 writes we have 4 state versions, the old ones should be expired
-    assert(expiredStatesFound > 0,
-      s"Expected expired state directories to be found, but found $expiredStatesFound")
+    assert(expiredStatesFound > 0, s"Expected expired state directories to be found, but found $expiredStatesFound")
 
     // In NON-dry run mode, the expired states should actually be deleted
-    assert(expiredStatesDeleted > 0,
-      s"Expected states to actually be deleted but expiredStatesDeleted=$expiredStatesDeleted")
+    assert(
+      expiredStatesDeleted > 0,
+      s"Expected states to actually be deleted but expiredStatesDeleted=$expiredStatesDeleted"
+    )
 
     // expiredStatesDeleted should equal expiredStatesFound (all found should be deleted)
-    assert(expiredStatesDeleted == expiredStatesFound,
-      s"Expected all found states to be deleted: found=$expiredStatesFound, deleted=$expiredStatesDeleted")
+    assert(
+      expiredStatesDeleted == expiredStatesFound,
+      s"Expected all found states to be deleted: found=$expiredStatesFound, deleted=$expiredStatesDeleted"
+    )
 
     // Count state directories AFTER purge
-    val statesAfter = fs.listStatus(txLogPath)
+    val statesAfter = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
 
     println(s"\nState directories AFTER purge: ${statesAfter.length}")
@@ -564,8 +571,10 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Verify fewer state directories exist after purge
     val expectedStatesAfter = statesBefore.length - expiredStatesDeleted.toInt
-    assert(statesAfter.length == expectedStatesAfter,
-      s"Expected $expectedStatesAfter state directories after purge but found ${statesAfter.length}")
+    assert(
+      statesAfter.length == expectedStatesAfter,
+      s"Expected $expectedStatesAfter state directories after purge but found ${statesAfter.length}"
+    )
 
     // Most importantly: verify data is STILL readable after purge
     println("\n=== Verifying data integrity AFTER purge ===")
@@ -610,9 +619,14 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Count split files BEFORE drop
     val tableDir = new Path(tablePath)
-    val splitsBefore = fs.listStatus(tableDir, new org.apache.hadoop.fs.PathFilter {
-      override def accept(path: Path): Boolean = path.getName.endsWith(".split")
-    }).toSeq ++ fs.listStatus(tableDir).filter(_.isDirectory).flatMap { partition =>
+    val splitsBefore = fs
+      .listStatus(
+        tableDir,
+        new org.apache.hadoop.fs.PathFilter {
+          override def accept(path: Path): Boolean = path.getName.endsWith(".split")
+        }
+      )
+      .toSeq ++ fs.listStatus(tableDir).filter(_.isDirectory).flatMap { partition =>
       fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split"))
     }
 
@@ -629,7 +643,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Count files in partition to be dropped
     val partition2Drop = new Path(tablePath, "date=2024-01-02")
-    val filesInDroppedPartition = fs.listStatus(partition2Drop)
+    val filesInDroppedPartition = fs
+      .listStatus(partition2Drop)
       .filter(_.getPath.getName.endsWith(".split"))
       .length
     println(s"\nFiles in partition 'date=2024-01-02': $filesInDroppedPartition")
@@ -659,18 +674,22 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS")
     purgeResult.show(false)
 
-    val metrics = purgeResult.collect().head.getAs[org.apache.spark.sql.Row]("metrics")
-    val orphanedFilesFound = metrics.getAs[Long]("orphaned_files_found")
+    val metrics              = purgeResult.collect().head.getAs[org.apache.spark.sql.Row]("metrics")
+    val orphanedFilesFound   = metrics.getAs[Long]("orphaned_files_found")
     val orphanedFilesDeleted = metrics.getAs[Long]("orphaned_files_deleted")
 
     println(s"\nOrphaned files found: $orphanedFilesFound")
     println(s"Orphaned files deleted: $orphanedFilesDeleted")
 
     // Files from dropped partition should be identified and deleted as orphaned
-    assert(orphanedFilesFound >= filesInDroppedPartition,
-      s"Expected at least $filesInDroppedPartition orphaned files (from dropped partition), but found $orphanedFilesFound")
-    assert(orphanedFilesDeleted == orphanedFilesFound,
-      s"All orphaned files should be deleted: found=$orphanedFilesFound, deleted=$orphanedFilesDeleted")
+    assert(
+      orphanedFilesFound >= filesInDroppedPartition,
+      s"Expected at least $filesInDroppedPartition orphaned files (from dropped partition), but found $orphanedFilesFound"
+    )
+    assert(
+      orphanedFilesDeleted == orphanedFilesFound,
+      s"All orphaned files should be deleted: found=$orphanedFilesFound, deleted=$orphanedFilesDeleted"
+    )
 
     // Verify dropped partition files are actually deleted from disk
     val droppedPartitionExists = fs.exists(partition2Drop) &&
@@ -678,11 +697,17 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     println(s"Dropped partition files still exist: $droppedPartitionExists")
 
     // Count remaining split files
-    val splitsAfterPurge = fs.listStatus(tableDir, new org.apache.hadoop.fs.PathFilter {
-      override def accept(path: Path): Boolean = path.getName.endsWith(".split")
-    }).toSeq ++ fs.listStatus(tableDir).filter(s => s.isDirectory && s.getPath.getName.startsWith("date=")).flatMap { partition =>
-      if (fs.exists(partition.getPath)) fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split"))
-      else Seq.empty
+    val splitsAfterPurge = fs
+      .listStatus(
+        tableDir,
+        new org.apache.hadoop.fs.PathFilter {
+          override def accept(path: Path): Boolean = path.getName.endsWith(".split")
+        }
+      )
+      .toSeq ++ fs.listStatus(tableDir).filter(s => s.isDirectory && s.getPath.getName.startsWith("date=")).flatMap {
+      partition =>
+        if (fs.exists(partition.getPath)) fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split"))
+        else Seq.empty
     }
     println(s"Total split files AFTER purge: ${splitsAfterPurge.length}")
 
@@ -712,9 +737,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     // Write multiple small batches to create many small splits
     println("=== Writing 5 batches of data (small splits) ===")
     (1 to 5).foreach { batch =>
-      val df = (1 to 10).map { i =>
-        (batch * 100 + i, s"User_${batch}_$i", batch * 1000 + i)
-      }.toDF("id", "name", "value")
+      val df =
+        (1 to 10).map(i => (batch * 100 + i, s"User_${batch}_$i", batch * 1000 + i)).toDF("id", "name", "value")
 
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -726,7 +750,8 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
 
     // Count split files BEFORE merge
     val tableDir = new Path(tablePath)
-    val splitsBefore = fs.listStatus(tableDir)
+    val splitsBefore = fs
+      .listStatus(tableDir)
       .filter(_.getPath.getName.endsWith(".split"))
 
     println(s"\nSplit files BEFORE merge: ${splitsBefore.length}")
@@ -747,15 +772,18 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     // Count split files AFTER merge (on disk)
     // NOTE: Merge creates new merged files but does NOT delete old files immediately
     // Old files are marked with RemoveAction in transaction log but stay on disk until PURGE
-    val splitsAfterMergeOnDisk = fs.listStatus(tableDir)
+    val splitsAfterMergeOnDisk = fs
+      .listStatus(tableDir)
       .filter(_.getPath.getName.endsWith(".split"))
 
     println(s"\nSplit files on disk AFTER merge: ${splitsAfterMergeOnDisk.length}")
     println(s"(Old files still exist on disk - merge just marks them for removal)")
 
     // After merge, we should have MORE files on disk (old + merged) until purge
-    assert(splitsAfterMergeOnDisk.length >= splitsBefore.length,
-      s"Expected at least ${splitsBefore.length} files on disk after merge (old files not deleted yet)")
+    assert(
+      splitsAfterMergeOnDisk.length >= splitsBefore.length,
+      s"Expected at least ${splitsBefore.length} files on disk after merge (old files not deleted yet)"
+    )
 
     // Verify data integrity after merge
     val rowCountAfterMerge = spark.read
@@ -777,7 +805,7 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val dryRunResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS DRY RUN")
     dryRunResult.show(false)
 
-    val dryRunMetrics = dryRunResult.collect().head.getAs[org.apache.spark.sql.Row]("metrics")
+    val dryRunMetrics      = dryRunResult.collect().head.getAs[org.apache.spark.sql.Row]("metrics")
     val orphanedFilesFound = dryRunMetrics.getAs[Long]("orphaned_files_found")
     println(s"Orphaned files to be deleted: $orphanedFilesFound")
 
@@ -786,26 +814,31 @@ class RealS3PurgeBugReproTest extends RealS3TestBase {
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS")
     purgeResult.show(false)
 
-    val metrics = purgeResult.collect().head.getAs[org.apache.spark.sql.Row]("metrics")
+    val metrics              = purgeResult.collect().head.getAs[org.apache.spark.sql.Row]("metrics")
     val orphanedFilesDeleted = metrics.getAs[Long]("orphaned_files_deleted")
 
     println(s"\nOrphaned files deleted: $orphanedFilesDeleted")
 
     // After merge, there should be orphaned source splits to delete
     // (The original splits that were merged into larger ones)
-    assert(orphanedFilesDeleted == orphanedFilesFound,
-      s"All found orphans should be deleted: found=$orphanedFilesFound, deleted=$orphanedFilesDeleted")
+    assert(
+      orphanedFilesDeleted == orphanedFilesFound,
+      s"All found orphans should be deleted: found=$orphanedFilesFound, deleted=$orphanedFilesDeleted"
+    )
 
     // Count split files AFTER purge
-    val splitsAfterPurge = fs.listStatus(tableDir)
+    val splitsAfterPurge = fs
+      .listStatus(tableDir)
       .filter(_.getPath.getName.endsWith(".split"))
 
     println(s"Split files AFTER purge: ${splitsAfterPurge.length}")
 
     // After purge, only the merged (referenced) splits should remain
     // Should have fewer files than before purge
-    assert(splitsAfterPurge.length < splitsAfterMergeOnDisk.length,
-      s"Expected fewer splits after purge: had ${splitsAfterMergeOnDisk.length} on disk, now ${splitsAfterPurge.length}")
+    assert(
+      splitsAfterPurge.length < splitsAfterMergeOnDisk.length,
+      s"Expected fewer splits after purge: had ${splitsAfterMergeOnDisk.length} on disk, now ${splitsAfterPurge.length}"
+    )
 
     // Most importantly: verify data integrity after purge
     println("\n=== Verifying data integrity AFTER purge ===")

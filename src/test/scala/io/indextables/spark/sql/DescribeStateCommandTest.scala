@@ -17,12 +17,13 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateWriter}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateWriter}
+import io.indextables.spark.TestBase
 
 class DescribeStateCommandTest extends TestBase {
 
@@ -46,11 +47,10 @@ class DescribeStateCommandTest extends TestBase {
         spark.sparkContext.hadoopConfiguration
       )
 
-      try {
+      try
         cloudProvider.createDirectory(txLogPath.toString)
-      } finally {
+      finally
         cloudProvider.close()
-      }
 
       val result = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tempPath'").collect()
 
@@ -74,8 +74,8 @@ class DescribeStateCommandTest extends TestBase {
 
         // Create Avro state
         val stateWriter = StateWriter(cloudProvider, txLogPath.toString)
-        val manifestIO = StateManifestIO(cloudProvider)
-        val files = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
+        val manifestIO  = StateManifestIO(cloudProvider)
+        val files       = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
         val stateDir = stateWriter.writeState(
           currentVersion = 1,
           newFiles = files,
@@ -98,9 +98,8 @@ class DescribeStateCommandTest extends TestBase {
              |  "stateDir": "${manifestIO.formatStateDir(actualVersion)}"
              |}""".stripMargin
         cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
-      } finally {
+      } finally
         cloudProvider.close()
-      }
 
       val result = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tempPath'").collect()
 
@@ -130,7 +129,7 @@ class DescribeStateCommandTest extends TestBase {
 
         // Create Avro state with files
         val stateWriter = StateWriter(cloudProvider, txLogPath.toString)
-        val files = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
+        val files       = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
         stateWriter.writeState(
           currentVersion = 1,
           newFiles = files,
@@ -146,7 +145,7 @@ class DescribeStateCommandTest extends TestBase {
         )
 
         // Write _last_checkpoint
-        val manifestIO = StateManifestIO(cloudProvider)
+        val manifestIO         = StateManifestIO(cloudProvider)
         val lastCheckpointPath = new Path(txLogPath, "_last_checkpoint")
         val lastCheckpointJson =
           s"""{
@@ -159,9 +158,8 @@ class DescribeStateCommandTest extends TestBase {
              |  "stateDir": "${manifestIO.formatStateDir(2)}"
              |}""".stripMargin
         cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
-      } finally {
+      } finally
         cloudProvider.close()
-      }
 
       val result = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tempPath'").collect()
 
@@ -187,9 +185,10 @@ class DescribeStateCommandTest extends TestBase {
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -210,5 +209,4 @@ class DescribeStateCommandTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

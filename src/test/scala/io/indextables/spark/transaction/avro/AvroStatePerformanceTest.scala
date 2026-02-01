@@ -17,11 +17,12 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 /**
  * Performance tests for Avro state file implementation.
@@ -32,8 +33,8 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  *   - Compaction 70K files: < 2s
  *   - Partition pruning 1M files: < 100ms
  *
- * Note: These tests may be skipped in CI due to time constraints.
- * Run manually with: mvn test -DwildcardSuites='io.indextables.spark.transaction.avro.AvroStatePerformanceTest'
+ * Note: These tests may be skipped in CI due to time constraints. Run manually with: mvn test
+ * -DwildcardSuites='io.indextables.spark.transaction.avro.AvroStatePerformanceTest'
  */
 class AvroStatePerformanceTest extends TestBase {
 
@@ -66,19 +67,18 @@ class AvroStatePerformanceTest extends TestBase {
         )
 
         // Measure read time
-        val startTime = System.currentTimeMillis()
+        val startTime       = System.currentTimeMillis()
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
-        val allChanges = streamingReader.getChangesSince(0)
-        val readTime = System.currentTimeMillis() - startTime
+        val allChanges      = streamingReader.getChangesSince(0)
+        val readTime        = System.currentTimeMillis() - startTime
 
         allChanges.adds should have size 1000
         println(s"Read 1K files in ${readTime}ms")
 
         // Should complete in under 100ms for 1K files
         readTime should be < 500L
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -108,19 +108,18 @@ class AvroStatePerformanceTest extends TestBase {
         )
 
         // Measure read time
-        val startTime = System.currentTimeMillis()
+        val startTime       = System.currentTimeMillis()
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
-        val allChanges = streamingReader.getChangesSince(0)
-        val readTime = System.currentTimeMillis() - startTime
+        val allChanges      = streamingReader.getChangesSince(0)
+        val readTime        = System.currentTimeMillis() - startTime
 
         allChanges.adds should have size 10000
         println(s"Read 10K files in ${readTime}ms")
 
         // Should complete in under 500ms
         readTime should be < 1000L
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -169,9 +168,8 @@ class AvroStatePerformanceTest extends TestBase {
         byPartition.values.foreach(_.size shouldBe 100)
 
         println("Partition pruning test passed - 1000 files across 10 partitions")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -215,7 +213,7 @@ class AvroStatePerformanceTest extends TestBase {
 
         // Verify result
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
-        val metadata = streamingReader.getStateMetadata
+        val metadata        = streamingReader.getStateMetadata
         metadata shouldBe defined
         metadata.get.numFiles shouldBe 4500
 
@@ -223,9 +221,8 @@ class AvroStatePerformanceTest extends TestBase {
 
         // Should complete in under 2s
         compactionTime should be < 2000L
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -279,18 +276,18 @@ class AvroStatePerformanceTest extends TestBase {
         }
 
         println("Streaming compatibility test passed - 5 versions, 500 total files")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -311,5 +308,4 @@ class AvroStatePerformanceTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

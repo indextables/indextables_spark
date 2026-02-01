@@ -124,20 +124,28 @@ class IndexTables4SparkInputPartition(
 }
 
 /**
- * InputPartition holding multiple splits for batch processing.
- * All splits share the same preferredHost for cache locality.
+ * InputPartition holding multiple splits for batch processing. All splits share the same preferredHost for cache
+ * locality.
  *
- * This reduces Spark scheduler overhead by processing multiple splits in a single task
- * while honoring cache locality assignments from DriverSplitLocalityManager.
+ * This reduces Spark scheduler overhead by processing multiple splits in a single task while honoring cache locality
+ * assignments from DriverSplitLocalityManager.
  *
- * @param addActions Multiple splits to process in this partition
- * @param readSchema Schema for reading data
- * @param fullTableSchema Full table schema for type lookup (filters may reference non-projected columns)
- * @param filters Pushed-down filters to apply
- * @param partitionId Partition index for logging/debugging
- * @param limit Optional pushed-down limit
- * @param indexQueryFilters IndexQuery filters for full-text search
- * @param preferredHost Preferred host for all splits in this partition
+ * @param addActions
+ *   Multiple splits to process in this partition
+ * @param readSchema
+ *   Schema for reading data
+ * @param fullTableSchema
+ *   Full table schema for type lookup (filters may reference non-projected columns)
+ * @param filters
+ *   Pushed-down filters to apply
+ * @param partitionId
+ *   Partition index for logging/debugging
+ * @param limit
+ *   Optional pushed-down limit
+ * @param indexQueryFilters
+ *   IndexQuery filters for full-text search
+ * @param preferredHost
+ *   Preferred host for all splits in this partition
  */
 class IndexTables4SparkMultiSplitInputPartition(
   val addActions: Seq[AddAction],
@@ -166,7 +174,9 @@ class IndexTables4SparkReaderFactory(
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] =
     partition match {
       case multi: IndexTables4SparkMultiSplitInputPartition =>
-        logger.info(s"Creating multi-split reader for partition ${multi.partitionId} with ${multi.addActions.length} splits")
+        logger.info(
+          s"Creating multi-split reader for partition ${multi.partitionId} with ${multi.addActions.length} splits"
+        )
         new IndexTables4SparkMultiSplitPartitionReader(
           multi.addActions,
           readSchema,
@@ -707,24 +717,33 @@ class IndexTables4SparkPartitionReader(
 }
 
 /**
- * PartitionReader that processes multiple splits sequentially.
- * Stops early if pushed limit is satisfied before querying all splits.
+ * PartitionReader that processes multiple splits sequentially. Stops early if pushed limit is satisfied before querying
+ * all splits.
  *
  * This reader iterates through multiple splits, maintaining running state to:
- * - Track total rows returned across all splits
- * - Apply remaining limit to each subsequent split
- * - Skip remaining splits once limit is satisfied (early termination)
- * - Close each split's search engine before moving to the next
+ *   - Track total rows returned across all splits
+ *   - Apply remaining limit to each subsequent split
+ *   - Skip remaining splits once limit is satisfied (early termination)
+ *   - Close each split's search engine before moving to the next
  *
- * @param addActions Multiple splits to process
- * @param readSchema Schema for reading data
- * @param fullTableSchema Full table schema for type lookup
- * @param filters Pushed-down filters to apply
- * @param limit Optional pushed-down limit
- * @param config Configuration options
- * @param tablePath Base table path for resolving relative paths
- * @param indexQueryFilters IndexQuery filters for full-text search
- * @param metricsAccumulator Optional accumulator for batch optimization metrics
+ * @param addActions
+ *   Multiple splits to process
+ * @param readSchema
+ *   Schema for reading data
+ * @param fullTableSchema
+ *   Full table schema for type lookup
+ * @param filters
+ *   Pushed-down filters to apply
+ * @param limit
+ *   Optional pushed-down limit
+ * @param config
+ *   Configuration options
+ * @param tablePath
+ *   Base table path for resolving relative paths
+ * @param indexQueryFilters
+ *   IndexQuery filters for full-text search
+ * @param metricsAccumulator
+ *   Optional accumulator for batch optimization metrics
  */
 class IndexTables4SparkMultiSplitPartitionReader(
   addActions: Seq[AddAction],
@@ -748,10 +767,10 @@ class IndexTables4SparkMultiSplitPartitionReader(
   private val effectiveLimit: Int = limit.getOrElse(configuredDefaultLimit)
 
   // Multi-split iteration state
-  private var currentSplitIndex = 0
+  private var currentSplitIndex                                       = 0
   private var currentReader: Option[IndexTables4SparkPartitionReader] = None
-  private var totalRowsReturned = 0L
-  private var initialized = false
+  private var totalRowsReturned                                       = 0L
+  private var initialized                                             = false
 
   // Capture baseline metrics at partition reader creation for delta computation
   private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =
@@ -780,7 +799,9 @@ class IndexTables4SparkMultiSplitPartitionReader(
     // Check if we've satisfied the limit
     val remainingLimit = effectiveLimit - totalRowsReturned.toInt
     if (remainingLimit <= 0) {
-      logger.debug(s"MultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), skipping remaining ${addActions.length - currentSplitIndex} splits")
+      logger.debug(
+        s"MultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), skipping remaining ${addActions.length - currentSplitIndex} splits"
+      )
       return false
     }
 
@@ -789,7 +810,9 @@ class IndexTables4SparkMultiSplitPartitionReader(
       val addAction = addActions(currentSplitIndex)
       currentSplitIndex += 1
 
-      logger.debug(s"MultiSplitPartitionReader: initializing split ${currentSplitIndex}/${addActions.length}: ${addAction.path}")
+      logger.debug(
+        s"MultiSplitPartitionReader: initializing split $currentSplitIndex/${addActions.length}: ${addAction.path}"
+      )
 
       // Create a new single-split reader with the remaining limit
       val singleSplitReader = new IndexTables4SparkPartitionReader(
@@ -817,7 +840,7 @@ class IndexTables4SparkMultiSplitPartitionReader(
     false
   }
 
-  override def get(): InternalRow = {
+  override def get(): InternalRow =
     currentReader match {
       case Some(reader) =>
         val row = reader.get()
@@ -826,13 +849,12 @@ class IndexTables4SparkMultiSplitPartitionReader(
       case None =>
         throw new IllegalStateException("get() called without successful next()")
     }
-  }
 
   private def closeCurrentReader(): Unit = {
     currentReader.foreach { reader =>
-      try {
+      try
         reader.close()
-      } catch {
+      catch {
         case ex: Exception =>
           logger.warn(s"Error closing split reader: ${ex.getMessage}")
       }
@@ -875,7 +897,7 @@ class IndexTables4SparkMultiSplitPartitionReader(
       logger.debug(s"Reported input metrics for multi-split partition: $bytesRead bytes from $currentSplitIndex splits")
     }
 
-    logger.info(s"MultiSplitPartitionReader closed: processed ${currentSplitIndex}/${addActions.length} splits, returned $totalRowsReturned rows")
+    logger.info(s"MultiSplitPartitionReader closed: processed $currentSplitIndex/${addActions.length} splits, returned $totalRowsReturned rows")
   }
 }
 

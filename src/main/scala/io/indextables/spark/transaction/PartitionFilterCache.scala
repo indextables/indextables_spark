@@ -19,24 +19,22 @@ package io.indextables.spark.transaction
 
 import java.util.concurrent.atomic.AtomicLong
 
-import com.google.common.cache.{Cache, CacheBuilder}
-
 import org.apache.spark.sql.sources.Filter
 
+import com.google.common.cache.{Cache, CacheBuilder}
 import org.slf4j.LoggerFactory
 
 /**
- * Cache for partition filter evaluation results. Reduces redundant evaluations by caching
- * the result of filter evaluations against partition values.
+ * Cache for partition filter evaluation results. Reduces redundant evaluations by caching the result of filter
+ * evaluations against partition values.
  *
  * Uses Guava's Cache with LRU eviction for efficient memory management.
  *
- * Key: Combined hash of filter set and partition values
- * Value: Boolean evaluation result
+ * Key: Combined hash of filter set and partition values Value: Boolean evaluation result
  *
  * This cache dramatically improves performance when:
- * - Multiple files share the same partition values
- * - The same filters are evaluated repeatedly
+ *   - Multiple files share the same partition values
+ *   - The same filters are evaluated repeatedly
  */
 object PartitionFilterCache {
 
@@ -46,22 +44,27 @@ object PartitionFilterCache {
   private val MAX_CACHE_SIZE = 100000L
 
   // Guava cache with LRU eviction
-  private val cache: Cache[java.lang.Long, java.lang.Boolean] = CacheBuilder.newBuilder()
+  private val cache: Cache[java.lang.Long, java.lang.Boolean] = CacheBuilder
+    .newBuilder()
     .maximumSize(MAX_CACHE_SIZE)
     .recordStats()
     .build[java.lang.Long, java.lang.Boolean]()
 
   // Statistics (supplementary to Guava stats)
-  private val hitCount = new AtomicLong(0)
+  private val hitCount  = new AtomicLong(0)
   private val missCount = new AtomicLong(0)
 
   /**
    * Get cached evaluation result or compute and cache it.
    *
-   * @param filters The filters being evaluated
-   * @param partitionValues The partition values to evaluate against
-   * @param compute Lazy computation of the result if not cached
-   * @return The evaluation result
+   * @param filters
+   *   The filters being evaluated
+   * @param partitionValues
+   *   The partition values to evaluate against
+   * @param compute
+   *   Lazy computation of the result if not cached
+   * @return
+   *   The evaluation result
    */
   def getOrCompute(
     filters: Array[Filter],
@@ -83,13 +86,11 @@ object PartitionFilterCache {
   }
 
   /**
-   * Compute a cache key from filters and partition values.
-   * Uses a combined hash of both to create a unique Long key.
+   * Compute a cache key from filters and partition values. Uses a combined hash of both to create a unique Long key.
    *
-   * Note: We use toString instead of hashCode for filters because Spark's
-   * Filter classes (And, Or, etc.) may have hash collisions when they contain
-   * the same children but different operators. toString includes the class name
-   * and full structure, ensuring And(a, b) and Or(a, b) produce different hashes.
+   * Note: We use toString instead of hashCode for filters because Spark's Filter classes (And, Or, etc.) may have hash
+   * collisions when they contain the same children but different operators. toString includes the class name and full
+   * structure, ensuring And(a, b) and Or(a, b) produce different hashes.
    */
   private def computeCacheKey(filters: Array[Filter], partitionValues: Map[String, String]): Long = {
     // Compute hash of filters using toString to capture full structure including filter type
@@ -100,13 +101,10 @@ object PartitionFilterCache {
     val partitionHash = partitionValues.toSeq.sortBy(_._1).hashCode()
 
     // Combine into a Long key to minimize collisions
-    (filterHash.toLong << 32) | (partitionHash.toLong & 0xFFFFFFFFL)
+    (filterHash.toLong << 32) | (partitionHash.toLong & 0xffffffffL)
   }
 
-  /**
-   * Invalidate all cached results.
-   * Should be called when the file list changes.
-   */
+  /** Invalidate all cached results. Should be called when the file list changes. */
   def invalidate(): Unit = {
     cache.invalidateAll()
     hitCount.set(0)
@@ -117,31 +115,26 @@ object PartitionFilterCache {
   /**
    * Get cache statistics for monitoring.
    *
-   * @return Tuple of (hits, misses, hitRate)
+   * @return
+   *   Tuple of (hits, misses, hitRate)
    */
   def getStats(): (Long, Long, Double) = {
-    val hits = hitCount.get()
-    val misses = missCount.get()
-    val total = hits + misses
+    val hits    = hitCount.get()
+    val misses  = missCount.get()
+    val total   = hits + misses
     val hitRate = if (total > 0) hits.toDouble / total else 0.0
     (hits, misses, hitRate)
   }
 
-  /**
-   * Get current cache size.
-   */
+  /** Get current cache size. */
   def size(): Int = cache.size().toInt
 
-  /**
-   * Reset statistics without clearing cache.
-   */
+  /** Reset statistics without clearing cache. */
   def resetStats(): Unit = {
     hitCount.set(0)
     missCount.set(0)
   }
 
-  /**
-   * Get detailed cache statistics from Guava.
-   */
+  /** Get detailed cache statistics from Guava. */
   def getDetailedStats(): String = cache.stats().toString
 }

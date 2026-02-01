@@ -98,7 +98,7 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_MERGE_ON_WRITE_BATCH_CPU_FRACTION_DEFAULT = 0.167
 
   /** Maximum number of merge batches running simultaneously (default: 3) */
-  val TANTIVY4SPARK_MERGE_ON_WRITE_MAX_CONCURRENT_BATCHES         = "spark.indextables.mergeOnWrite.maxConcurrentBatches"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_MAX_CONCURRENT_BATCHES = "spark.indextables.mergeOnWrite.maxConcurrentBatches"
   val TANTIVY4SPARK_MERGE_ON_WRITE_MAX_CONCURRENT_BATCHES_DEFAULT = 3
 
   /** Minimum batches worth of merge groups required to trigger merge (default: 1) */
@@ -146,9 +146,8 @@ object IndexTables4SparkSQLConf {
   /////////////////////
 
   /**
-   * Filter out object fields with empty field_mappings from docMappingJson during schema restoration.
-   * This fixes aggregation failures on tables with always-null struct/array fields.
-   * Default: true (enabled)
+   * Filter out object fields with empty field_mappings from docMappingJson during schema restoration. This fixes
+   * aggregation failures on tables with always-null struct/array fields. Default: true (enabled)
    */
   val TANTIVY4SPARK_SCHEMA_FILTER_EMPTY_OBJECTS         = "spark.indextables.schema.filterEmptyObjects"
   val TANTIVY4SPARK_SCHEMA_FILTER_EMPTY_OBJECTS_DEFAULT = true
@@ -169,6 +168,6 @@ object IndexTables4SparkSQLConf {
   /////////////////////
 
   /** Maximum fields for unqualified _indexall queries (default: 10, 0 = disabled) */
-  val TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS         = "spark.indextables.indexquery.indexall.maxUnqualifiedFields"
+  val TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS = "spark.indextables.indexquery.indexall.maxUnqualifiedFields"
   val TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT = 10
 }

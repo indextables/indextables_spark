@@ -79,9 +79,9 @@ object ConfigUtils {
     // This is essential for Unity Catalog and other custom credential providers
     // that don't store credentials directly in config but resolve them dynamically.
     val resolvedAwsCreds = tablePathOpt.flatMap { tablePath =>
-      try {
+      try
         io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(configMap, tablePath)
-      } catch {
+      catch {
         case ex: Exception =>
           logger.warn(s"Failed to resolve AWS credentials from provider: ${ex.getMessage}")
           None
@@ -132,7 +132,8 @@ object ConfigUtils {
       // Falls back to direct config lookup if no provider or explicit credentials are present
       awsAccessKey = resolvedAwsCreds.map(_.accessKey).orElse(getConfigOption("spark.indextables.aws.accessKey")),
       awsSecretKey = resolvedAwsCreds.map(_.secretKey).orElse(getConfigOption("spark.indextables.aws.secretKey")),
-      awsSessionToken = resolvedAwsCreds.flatMap(_.sessionToken).orElse(getConfigOption("spark.indextables.aws.sessionToken")),
+      awsSessionToken =
+        resolvedAwsCreds.flatMap(_.sessionToken).orElse(getConfigOption("spark.indextables.aws.sessionToken")),
       awsRegion = getConfigOption("spark.indextables.aws.region"),
       awsEndpoint = getConfigOption("spark.indextables.s3.endpoint"),
       awsPathStyleAccess = getConfigOption("spark.indextables.s3.pathStyleAccess").map(_.toBoolean),
@@ -285,13 +286,11 @@ object ConfigUtils {
   /**
    * Creates a Hadoop Configuration populated with spark.indextables.* keys from the config map.
    *
-   * This is essential for executor-side credential resolution where credential providers
-   * (e.g., UnityCatalogAWSCredentialProvider) need access to configuration properties
-   * like workspace URLs and API tokens.
+   * This is essential for executor-side credential resolution where credential providers (e.g.,
+   * UnityCatalogAWSCredentialProvider) need access to configuration properties like workspace URLs and API tokens.
    *
-   * IMPORTANT: This was introduced to fix a regression from PR #100 which removed driver-side
-   * credential resolution. Without populating the Hadoop config, credential providers would
-   * fail with "not configured" errors on executors.
+   * IMPORTANT: This was introduced to fix a regression from PR #100 which removed driver-side credential resolution.
+   * Without populating the Hadoop config, credential providers would fail with "not configured" errors on executors.
    *
    * @param config
    *   Configuration map containing spark.indextables.* keys
@@ -311,9 +310,9 @@ object ConfigUtils {
   /**
    * JVM-wide cache for Hadoop Configuration objects to avoid repeated creation.
    *
-   * PERFORMANCE OPTIMIZATION: Creating Hadoop Configuration is expensive due to XML parsing
-   * and class loading. This cache reduces overhead for non-UC providers that still need
-   * Hadoop Configuration by reusing instances with the same config map content.
+   * PERFORMANCE OPTIMIZATION: Creating Hadoop Configuration is expensive due to XML parsing and class loading. This
+   * cache reduces overhead for non-UC providers that still need Hadoop Configuration by reusing instances with the same
+   * config map content.
    *
    * Cache characteristics:
    *   - Maximum 50 entries (typical cluster has few distinct config combinations)
@@ -329,22 +328,23 @@ object ConfigUtils {
   /**
    * Get or create a Hadoop Configuration from a config map with caching.
    *
-   * This method is the preferred way to obtain Hadoop Configuration objects when working
-   * with config maps, as it reuses cached configurations to avoid the expensive creation
-   * of new Configuration objects.
+   * This method is the preferred way to obtain Hadoop Configuration objects when working with config maps, as it reuses
+   * cached configurations to avoid the expensive creation of new Configuration objects.
    *
-   * IMPORTANT: For UnityCatalogAWSCredentialProvider, prefer using the Map-based factory
-   * method directly to avoid Hadoop Configuration entirely. This cached method is for
-   * other credential providers that require Hadoop Configuration.
+   * IMPORTANT: For UnityCatalogAWSCredentialProvider, prefer using the Map-based factory method directly to avoid
+   * Hadoop Configuration entirely. This cached method is for other credential providers that require Hadoop
+   * Configuration.
    *
-   * @param config Configuration map containing spark.indextables.* keys
-   * @return Cached or newly created Hadoop Configuration
+   * @param config
+   *   Configuration map containing spark.indextables.* keys
+   * @return
+   *   Cached or newly created Hadoop Configuration
    */
   def getOrCreateHadoopConfiguration(config: Map[String, String]): org.apache.hadoop.conf.Configuration = {
     // Extract only relevant keys for the cache key computation
     // This ensures that unrelated config changes don't invalidate the cache
     val relevantConfig = config.filter(_._1.startsWith("spark.indextables."))
-    val cacheKey = relevantConfig.hashCode()
+    val cacheKey       = relevantConfig.hashCode()
 
     // Try to get from cache first
     var cached = hadoopConfigCache.getIfPresent(cacheKey)
@@ -370,9 +370,7 @@ object ConfigUtils {
     newConf
   }
 
-  /**
-   * Clear the Hadoop Configuration cache. Useful for testing.
-   */
+  /** Clear the Hadoop Configuration cache. Useful for testing. */
   def clearHadoopConfigCache(): Unit = {
     hadoopConfigCache.invalidateAll()
     logger.debug("Cleared Hadoop Configuration cache")

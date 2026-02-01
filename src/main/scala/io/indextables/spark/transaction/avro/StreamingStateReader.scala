@@ -19,7 +19,6 @@ package io.indextables.spark.transaction.avro
 
 import io.indextables.spark.io.CloudStorageProvider
 import io.indextables.spark.transaction.AddAction
-
 import org.slf4j.LoggerFactory
 
 /**
@@ -32,15 +31,15 @@ import org.slf4j.LoggerFactory
  */
 class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPath: String) {
 
-  private val log = LoggerFactory.getLogger(getClass)
-  private val manifestIO = StateManifestIO(cloudProvider)
+  private val log            = LoggerFactory.getLogger(getClass)
+  private val manifestIO     = StateManifestIO(cloudProvider)
   private val manifestReader = AvroManifestReader(cloudProvider)
 
   /**
    * Get files added since a specific version.
    *
-   * This is the primary method for Spark Structured Streaming integration, allowing efficient
-   * incremental processing of new data without rescanning existing files.
+   * This is the primary method for Spark Structured Streaming integration, allowing efficient incremental processing of
+   * new data without rescanning existing files.
    *
    * @param sinceVersion
    *   The version after which to look for changes (exclusive)
@@ -113,12 +112,11 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
    * @return
    *   Current version, or 0 if no state exists
    */
-  def getCurrentVersion: Long = {
+  def getCurrentVersion: Long =
     findLatestState() match {
       case Some((_, manifest)) => manifest.stateVersion
-      case None => 0L
+      case None                => 0L
     }
-  }
 
   /**
    * Get state metadata for the current version.
@@ -126,18 +124,16 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
    * @return
    *   StateManifest if state exists, None otherwise
    */
-  def getStateMetadata: Option[StateManifest] = {
+  def getStateMetadata: Option[StateManifest] =
     findLatestState().map(_._2)
-  }
 
-  /**
-   * Internal implementation of version range query.
-   */
+  /** Internal implementation of version range query. */
   private def getChangesBetweenVersions(
-      fromVersion: Long,
-      toVersion: Long,
-      stateDir: String,
-      manifest: StateManifest): ChangeSet = {
+    fromVersion: Long,
+    toVersion: Long,
+    stateDir: String,
+    manifest: StateManifest
+  ): ChangeSet = {
 
     log.debug(s"Getting changes from version $fromVersion to $toVersion")
 
@@ -152,7 +148,7 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
     // Read all relevant manifests - resolve paths for both shared and legacy manifests
     val relevantManifestInfos = relevantManifests
     val manifestPaths = relevantManifestInfos.map(m => manifestIO.resolveManifestPath(m, transactionLogPath, stateDir))
-    val allEntries = manifestReader.readManifestsParallel(manifestPaths)
+    val allEntries    = manifestReader.readManifestsParallel(manifestPaths)
 
     // Filter by version range
     val addedFiles = allEntries
@@ -208,8 +204,8 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
   /**
    * Convert FileEntries to AddActions for compatibility with existing code.
    *
-   * This overload automatically retrieves the schema registry from the current state
-   * to restore docMappingJson from docMappingRef.
+   * This overload automatically retrieves the schema registry from the current state to restore docMappingJson from
+   * docMappingRef.
    */
   def toAddActions(entries: Seq[FileEntry]): Seq[AddAction] = {
     val schemaRegistry = getStateMetadata.map(_.schemaRegistry).getOrElse(Map.empty)
@@ -219,8 +215,8 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
   /**
    * Convert FileEntries to AddActions with explicit schema registry.
    *
-   * Use this overload when you have the schema registry available (e.g., from a
-   * StateManifest you've already read) to avoid an extra state lookup.
+   * Use this overload when you have the schema registry available (e.g., from a StateManifest you've already read) to
+   * avoid an extra state lookup.
    *
    * @param entries
    *   FileEntries to convert
@@ -229,14 +225,11 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
    * @return
    *   AddAction representations with docMappingJson restored
    */
-  def toAddActions(entries: Seq[FileEntry], schemaRegistry: Map[String, String]): Seq[AddAction] = {
+  def toAddActions(entries: Seq[FileEntry], schemaRegistry: Map[String, String]): Seq[AddAction] =
     manifestReader.toAddActions(entries, schemaRegistry)
-  }
 
-  /**
-   * Find the latest state directory.
-   */
-  private def findLatestState(): Option[(String, StateManifest)] = {
+  /** Find the latest state directory. */
+  private def findLatestState(): Option[(String, StateManifest)] =
     try {
       val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
       val manifestFiles = files
@@ -273,7 +266,6 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
         log.debug(s"No state found: ${e.getMessage}")
         None
     }
-  }
 }
 
 object StreamingStateReader {
@@ -288,7 +280,6 @@ object StreamingStateReader {
    * @return
    *   StreamingStateReader instance
    */
-  def apply(cloudProvider: CloudStorageProvider, transactionLogPath: String): StreamingStateReader = {
+  def apply(cloudProvider: CloudStorageProvider, transactionLogPath: String): StreamingStateReader =
     new StreamingStateReader(cloudProvider, transactionLogPath)
-  }
 }

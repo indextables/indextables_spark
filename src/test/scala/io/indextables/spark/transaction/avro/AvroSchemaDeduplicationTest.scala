@@ -17,19 +17,18 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.SchemaDeduplication
-
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import io.indextables.spark.TestBase
 
 /**
  * Tests for schema deduplication in Avro state format.
  *
  * These tests validate that:
- * 1. schemaRegistry is properly populated in _manifest.avro
- * 2. docMappingRef is correctly resolved to docMappingJson when reading
- * 3. Schema deduplication works correctly across incremental writes
+ *   1. schemaRegistry is properly populated in _manifest.avro 2. docMappingRef is correctly resolved to docMappingJson
+ *      when reading 3. Schema deduplication works correctly across incremental writes
  */
 class AvroSchemaDeduplicationTest extends TestBase {
 
@@ -75,16 +74,15 @@ class AvroSchemaDeduplicationTest extends TestBase {
 
         // Verify schema registry was written to _manifest.avro
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
+        val manifest   = manifestIO.readStateManifest(stateDir)
 
         manifest.schemaRegistry should have size 2
         manifest.schemaRegistry should contain key schemaHash1
         manifest.schemaRegistry should contain key schemaHash2
         manifest.schemaRegistry(schemaHash1) shouldBe smallSchema
         manifest.schemaRegistry(schemaHash2) shouldBe largeSchema
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -97,7 +95,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter    = StateWriter(cloudProvider, tempPath)
         val manifestReader = AvroManifestReader(cloudProvider)
 
         // Create files with docMappingRef
@@ -120,10 +118,10 @@ class AvroSchemaDeduplicationTest extends TestBase {
 
         // Read back the manifest and files
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir)
+        val manifest   = manifestIO.readStateManifest(stateDir)
 
         val manifestPaths = manifestIO.resolveManifestPaths(manifest, tempPath, stateDir)
-        val readEntries = manifestReader.readManifestsParallel(manifestPaths)
+        val readEntries   = manifestReader.readManifestsParallel(manifestPaths)
 
         // Verify entries have docMappingRef
         readEntries should have size 3
@@ -139,9 +137,8 @@ class AvroSchemaDeduplicationTest extends TestBase {
           add.docMappingJson shouldBe Some(largeSchema)
           add.docMappingRef shouldBe Some(schemaHash) // Preserved for traceability
         }
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -154,16 +151,14 @@ class AvroSchemaDeduplicationTest extends TestBase {
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter    = StateWriter(cloudProvider, tempPath)
         val manifestReader = AvroManifestReader(cloudProvider)
 
-        val schemaHash = SchemaDeduplication.computeSchemaHash(largeSchema)
+        val schemaHash     = SchemaDeduplication.computeSchemaHash(largeSchema)
         val schemaRegistry = Map(schemaHash -> largeSchema)
 
         // First write - initial state with 50 files
-        val initialFiles = (1 to 50).map(i =>
-          createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash))
-        )
+        val initialFiles = (1 to 50).map(i => createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash)))
 
         val stateDir1 = stateWriter.writeState(
           currentVersion = 1,
@@ -178,37 +173,34 @@ class AvroSchemaDeduplicationTest extends TestBase {
         manifest1.numFiles shouldBe 50
 
         // Second write - incremental with same schema
-        val newFiles = (51 to 75).map(i =>
-          createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash))
-        )
+        val newFiles = (51 to 75).map(i => createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash)))
 
         val stateDir2 = stateWriter.writeState(
           currentVersion = 2,
           newFiles = newFiles,
           removedPaths = Set.empty,
           schemaRegistry = schemaRegistry, // Same schema registry
-          forceCompaction = true // Force compaction to ensure all files are in the new state dir
+          forceCompaction = true           // Force compaction to ensure all files are in the new state dir
         )
 
         // Verify incremental state
         val manifestIO2 = StateManifestIO(cloudProvider)
-        val manifest2 = manifestIO2.readStateManifest(stateDir2)
+        val manifest2   = manifestIO2.readStateManifest(stateDir2)
         manifest2.schemaRegistry should have size 1 // Still only 1 schema
         manifest2.numFiles shouldBe 75
 
         // Read all files and verify docMappingJson is resolved
         val manifestPaths = manifestIO2.resolveManifestPaths(manifest2, tempPath, stateDir2)
-        val readEntries = manifestReader.readManifestsParallel(manifestPaths)
-        val addActions = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
+        val readEntries   = manifestReader.readManifestsParallel(manifestPaths)
+        val addActions    = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
 
         addActions should have size 75
         addActions.foreach { add =>
           add.docMappingJson shouldBe Some(largeSchema)
           add.docMappingRef shouldBe Some(schemaHash) // Preserved for traceability
         }
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -221,16 +213,14 @@ class AvroSchemaDeduplicationTest extends TestBase {
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter    = StateWriter(cloudProvider, tempPath)
         val manifestReader = AvroManifestReader(cloudProvider)
 
         val schemaHash1 = SchemaDeduplication.computeSchemaHash(smallSchema)
         val schemaHash2 = SchemaDeduplication.computeSchemaHash(largeSchema)
 
         // First write with schema 1
-        val files1 = (1 to 30).map(i =>
-          createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash1))
-        )
+        val files1 = (1 to 30).map(i => createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash1)))
 
         val stateDir1 = stateWriter.writeState(
           currentVersion = 1,
@@ -240,9 +230,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
         )
 
         // Second write adds schema 2 (merged registry)
-        val files2 = (31 to 60).map(i =>
-          createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash2))
-        )
+        val files2 = (31 to 60).map(i => createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash2)))
 
         // With forceCompaction, we must pass the full registry since compaction doesn't auto-merge
         val stateDir2 = stateWriter.writeState(
@@ -255,15 +243,15 @@ class AvroSchemaDeduplicationTest extends TestBase {
 
         // Verify merged schema registry
         val manifestIO2 = StateManifestIO(cloudProvider)
-        val manifest2 = manifestIO2.readStateManifest(stateDir2)
+        val manifest2   = manifestIO2.readStateManifest(stateDir2)
         manifest2.schemaRegistry should have size 2
         manifest2.schemaRegistry should contain key schemaHash1
         manifest2.schemaRegistry should contain key schemaHash2
 
         // Read all files and verify correct schema resolution
         val manifestPaths = manifestIO2.resolveManifestPaths(manifest2, tempPath, stateDir2)
-        val readEntries = manifestReader.readManifestsParallel(manifestPaths)
-        val addActions = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
+        val readEntries   = manifestReader.readManifestsParallel(manifestPaths)
+        val addActions    = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
 
         addActions should have size 60
 
@@ -274,9 +262,8 @@ class AvroSchemaDeduplicationTest extends TestBase {
         // Last 30 should have largeSchema
         val secondBatch = addActions.filter(_.path.matches("file(3[1-9]|4[0-9]|5[0-9]|60).split"))
         secondBatch.foreach(_.docMappingJson shouldBe Some(largeSchema))
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -293,16 +280,14 @@ class AvroSchemaDeduplicationTest extends TestBase {
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter    = StateWriter(cloudProvider, tempPath)
         val manifestReader = AvroManifestReader(cloudProvider)
 
-        val schemaHash = SchemaDeduplication.computeSchemaHash(largeSchema)
+        val schemaHash     = SchemaDeduplication.computeSchemaHash(largeSchema)
         val schemaRegistry = Map(schemaHash -> largeSchema)
 
         // Write initial state with 100 files
-        val initialFiles = (1 to 100).map(i =>
-          createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash))
-        )
+        val initialFiles = (1 to 100).map(i => createTestFileEntry(s"file$i.split", docMappingRef = Some(schemaHash)))
 
         stateWriter.writeState(
           currentVersion = 1,
@@ -324,7 +309,7 @@ class AvroSchemaDeduplicationTest extends TestBase {
 
         // Verify state after compaction
         val manifestIO2 = StateManifestIO(cloudProvider)
-        val manifest2 = manifestIO2.readStateManifest(stateDir2)
+        val manifest2   = manifestIO2.readStateManifest(stateDir2)
         manifest2.numFiles shouldBe 80
         manifest2.tombstones shouldBe empty // Compacted - no tombstones
 
@@ -334,26 +319,24 @@ class AvroSchemaDeduplicationTest extends TestBase {
 
         // Read files and verify docMappingJson resolution still works
         val manifestPaths = manifestIO2.resolveManifestPaths(manifest2, tempPath, stateDir2)
-        val readEntries = manifestReader.readManifestsParallel(manifestPaths)
-        val addActions = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
+        val readEntries   = manifestReader.readManifestsParallel(manifestPaths)
+        val addActions    = manifestReader.toAddActions(readEntries, manifest2.schemaRegistry)
 
         addActions should have size 80
-        addActions.foreach { add =>
-          add.docMappingJson shouldBe Some(largeSchema)
-        }
-      } finally {
+        addActions.foreach(add => add.docMappingJson shouldBe Some(largeSchema))
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty,
-      docMappingRef: Option[String] = None): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty,
+    docMappingRef: Option[String] = None
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -374,5 +357,4 @@ class AvroSchemaDeduplicationTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }
