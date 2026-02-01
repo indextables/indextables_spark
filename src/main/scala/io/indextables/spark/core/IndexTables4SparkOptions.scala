@@ -26,7 +26,8 @@ case class FieldIndexingConfig(
   isStoreOnly: Boolean = false,             // Store but don't index
   isIndexOnly: Boolean = false,             // Index but don't store
   tokenizerOverride: Option[String] = None, // Custom tokenizer for text fields
-  indexRecordOption: Option[String] = None  // "basic", "freq", or "position" for text fields
+  indexRecordOption: Option[String] = None, // "basic", "freq", or "position" for text fields
+  maxTokenLength: Option[Int] = None        // Maximum token length for text fields (1-65530)
 )
 
 /** Utilities for handling IndexTables4Spark write and read options. Similar to Delta Lake's DeltaOptions. */
@@ -48,6 +49,17 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
   /** Valid tokenizer names for list-based syntax detection. */
   private val ValidTokenizers = Set("default", "raw", "whitespace", "en_stem")
+
+  /**
+   * Token length constants matching tantivy4java's TokenLength class.
+   * Used for detecting list-based syntax (e.g., tokenLength.255 = "field1,field2").
+   */
+  private val TokenLengthConstants = Map(
+    "tantivy_max" -> 65530, // Maximum supported by Tantivy (u16::MAX - 5)
+    "default"     -> 255,   // Quickwit-compatible default
+    "legacy"      -> 40,    // Original tantivy4java default
+    "min"         -> 1      // Minimum valid limit
+  )
 
   /**
    * Parse dual-syntax configuration options into a field-to-value map.
@@ -161,6 +173,120 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def getIndexRecordOptionOverrides: Map[String, String] =
     parseDualSyntaxConfig("spark.indextables.indexing.indexrecordoption.", ValidIndexRecordOptions)
 
+  /**
+   * Get the default maximum token length for text fields. Tokens longer than this limit are filtered out (not
+   * truncated) during indexing.
+   *
+   * Valid values: 1 to 65530 (Tantivy's maximum)
+   *
+   * Named constants supported:
+   *   - "tantivy_max" or "65530": Maximum supported by Tantivy (u16::MAX - 5)
+   *   - "default" or "255": Quickwit-compatible default (recommended)
+   *   - "legacy" or "40": Original tantivy4java default for backward compatibility
+   *   - "min" or "1": Minimum valid limit
+   *
+   * Default: 255 (Quickwit-compatible)
+   */
+  def getDefaultMaxTokenLength: Int = {
+    val rawValue = Option(options.get("spark.indextables.indexing.text.maxTokenLength"))
+      .map(_.trim.toLowerCase)
+    rawValue match {
+      case None        => 255 // Default: Quickwit-compatible
+      case Some(value) => parseTokenLengthValue(value, "spark.indextables.indexing.text.maxTokenLength")
+    }
+  }
+
+  /**
+   * Parse a token length value, supporting both numeric values and named constants.
+   *
+   * @param value
+   *   The raw value from configuration
+   * @param configKey
+   *   The configuration key (for error messages)
+   * @return
+   *   The parsed integer value
+   * @throws IllegalArgumentException
+   *   if the value is invalid
+   */
+  private def parseTokenLengthValue(value: String, configKey: String): Int =
+    TokenLengthConstants.get(value) match {
+      case Some(intVal) => intVal
+      case None =>
+        try {
+          val intVal = value.toInt
+          validateTokenLength(intVal, configKey)
+          intVal
+        } catch {
+          case _: NumberFormatException =>
+            throw new IllegalArgumentException(
+              s"Invalid token length value for '$configKey': '$value'. " +
+                s"Must be an integer 1-65530 or one of: ${TokenLengthConstants.keys.mkString(", ")}"
+            )
+        }
+    }
+
+  /**
+   * Validate that a token length value is within the valid range.
+   *
+   * @param value
+   *   The value to validate
+   * @param configKey
+   *   The configuration key (for error messages)
+   * @throws IllegalArgumentException
+   *   if the value is out of range
+   */
+  private def validateTokenLength(value: Int, configKey: String): Unit =
+    if (value < 1 || value > 65530) {
+      throw new IllegalArgumentException(
+        s"Token length value for '$configKey' must be between 1 and 65530, got: $value"
+      )
+    }
+
+  /**
+   * Get per-field maximum token length overrides. Maps field names to their maximum token length.
+   *
+   * Supports two syntaxes:
+   *   - Per-field (old): `tokenLength.content` = "255" → content uses 255-byte limit
+   *   - Per-value (new): `tokenLength.255` = "content,body" → content and body both use 255-byte limit
+   *
+   * Also supports named constants in per-field syntax:
+   *   - `tokenLength.content` = "legacy" → content uses 40-byte limit
+   *   - `tokenLength.content` = "tantivy_max" → content uses 65530-byte limit
+   */
+  def getMaxTokenLengthOverrides: Map[String, Int] = {
+    import scala.jdk.CollectionConverters._
+    val result = scala.collection.mutable.Map[String, Int]()
+    val prefix = "spark.indextables.indexing.tokenlength."
+
+    options
+      .asCaseSensitiveMap()
+      .asScala
+      .toMap
+      .filter { case (key, _) => key.toLowerCase.startsWith(prefix) }
+      .foreach {
+        case (key, value) =>
+          val suffix     = key.substring(prefix.length).toLowerCase
+          val valueLower = value.toLowerCase.trim
+
+          // Check if suffix is a known constant or numeric (new syntax: value as key)
+          val suffixAsInt = TokenLengthConstants.get(suffix).orElse(scala.util.Try(suffix.toInt).toOption)
+
+          suffixAsInt match {
+            case Some(lengthValue) =>
+              // New syntax: key is the token length, value is comma-separated field list
+              value.split(",").map(_.trim).filterNot(_.isEmpty).foreach { fieldName =>
+                result += (fieldName.toLowerCase -> lengthValue)
+              }
+            case None =>
+              // Old syntax: key is the field name, value is the token length
+              val lengthValue = parseTokenLengthValue(valueLower, key)
+              result += (suffix -> lengthValue)
+          }
+      }
+
+    result.toMap
+  }
+
   // ===== Batch Optimization Configuration =====
 
   /** Whether to enable batch retrieval optimization (reduces S3 requests by 90-95%). */
@@ -232,6 +358,8 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     val tokenizerOverrides       = getTokenizerOverrides
     val indexRecordOverrides     = getIndexRecordOptionOverrides
     val defaultIndexRecordOption = getDefaultIndexRecordOption
+    val tokenLengthOverrides     = getMaxTokenLengthOverrides
+    val defaultTokenLength       = getDefaultMaxTokenLength
 
     // DEBUG: Log what we're checking
     import org.slf4j.LoggerFactory
@@ -243,13 +371,17 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     // Get index record option: per-field override, or default
     val indexRecord = indexRecordOverrides.get(fieldName.toLowerCase).orElse(Some(defaultIndexRecordOption))
 
+    // Get max token length: per-field override, or default
+    val tokenLength = tokenLengthOverrides.get(fieldName.toLowerCase).orElse(Some(defaultTokenLength))
+
     FieldIndexingConfig(
       fieldType = fieldTypeMapping.get(fieldName),
       isFast = fastFields.contains(fieldName),
       isStoreOnly = storeOnlyFields.contains(fieldName),
       isIndexOnly = indexOnlyFields.contains(fieldName),
       tokenizerOverride = tokenizerOverrides.get(fieldName),
-      indexRecordOption = indexRecord
+      indexRecordOption = indexRecord,
+      maxTokenLength = tokenLength
     )
   }
 
@@ -312,6 +444,9 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     // Check indexrecordoption fields
     getIndexRecordOptionOverrides.keys.foreach(fieldName => checkField(fieldName, "indexrecordoption"))
 
+    // Check tokenLength fields
+    getMaxTokenLengthOverrides.keys.foreach(fieldName => checkField(fieldName, "tokenLength"))
+
     if (errors.nonEmpty) {
       val availableFields = schema.fieldNames.sorted.mkString(", ")
       throw new IllegalArgumentException(
@@ -338,13 +473,21 @@ object IndexTables4SparkOptions {
   val FORCE_STANDARD_STORAGE = "forceStandardStorage"
 
   // Indexing configuration keys
-  val INDEXING_TYPEMAP_PREFIX   = "spark.indextables.indexing.typemap."
-  val INDEXING_FASTFIELDS       = "spark.indextables.indexing.fastfields"
-  val INDEXING_NONFASTFIELDS    = "spark.indextables.indexing.nonfastfields"
-  val INDEXING_STOREONLY_FIELDS = "spark.indextables.indexing.storeonlyfields"
-  val INDEXING_INDEXONLY_FIELDS = "spark.indextables.indexing.indexonlyfields"
-  val INDEXING_TOKENIZER_PREFIX = "spark.indextables.indexing.tokenizer."
-  val INDEXING_JSON_MODE        = "spark.indextables.indexing.json.mode"
+  val INDEXING_TYPEMAP_PREFIX            = "spark.indextables.indexing.typemap."
+  val INDEXING_FASTFIELDS                = "spark.indextables.indexing.fastfields"
+  val INDEXING_NONFASTFIELDS             = "spark.indextables.indexing.nonfastfields"
+  val INDEXING_STOREONLY_FIELDS          = "spark.indextables.indexing.storeonlyfields"
+  val INDEXING_INDEXONLY_FIELDS          = "spark.indextables.indexing.indexonlyfields"
+  val INDEXING_TOKENIZER_PREFIX          = "spark.indextables.indexing.tokenizer."
+  val INDEXING_JSON_MODE                 = "spark.indextables.indexing.json.mode"
+  val INDEXING_TEXT_MAX_TOKEN_LENGTH     = "spark.indextables.indexing.text.maxTokenLength"
+  val INDEXING_TOKEN_LENGTH_PREFIX       = "spark.indextables.indexing.tokenlength."
+
+  // Token length constants (matching tantivy4java's TokenLength class)
+  val TOKEN_LENGTH_TANTIVY_MAX = 65530 // Maximum supported by Tantivy (u16::MAX - 5)
+  val TOKEN_LENGTH_DEFAULT     = 255   // Quickwit-compatible default
+  val TOKEN_LENGTH_LEGACY      = 40    // Original tantivy4java default
+  val TOKEN_LENGTH_MIN         = 1     // Minimum valid limit
 
   // Batch optimization configuration keys
   val BATCH_OPTIMIZATION_ENABLED                 = "spark.indextables.read.batchOptimization.enabled"

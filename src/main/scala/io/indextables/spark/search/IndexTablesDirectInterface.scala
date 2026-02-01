@@ -241,9 +241,10 @@ object TantivyDirectInterface {
                   logger.debug(s"CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
                   builder.addStringField(fieldName, stored, indexed, fast)
                 case "text" =>
-                  val tokenizer    = indexingConfig.tokenizerOverride.getOrElse("default")
-                  val recordOption = indexingConfig.indexRecordOption.getOrElse("position")
-                  builder.addTextField(fieldName, stored, fast, tokenizer, recordOption)
+                  val tokenizer      = indexingConfig.tokenizerOverride.getOrElse("default")
+                  val recordOption   = indexingConfig.indexRecordOption.getOrElse("position")
+                  val maxTokenLength = indexingConfig.maxTokenLength.getOrElse(255) // Default: Quickwit-compatible
+                  builder.addTextField(fieldName, stored, fast, tokenizer, recordOption, maxTokenLength)
                 case "ip" =>
                   // IP address fields require fast=true for range queries
                   // IP addresses support: term queries, range queries, IN queries
