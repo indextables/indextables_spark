@@ -19,22 +19,21 @@ package io.indextables.spark.transaction.avro
 
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.RealS3TestBase
 import io.indextables.spark.transaction.EnhancedTransactionLogCache
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Real S3 integration tests for reproducing Avro state bugs.
  *
  * These tests attempt to reproduce bugs that occur on S3 but not locally:
- *   1. MERGE SPLITS visibility bug - second transaction's splits invisible to merge
- *   2. DROP PARTITIONS bug - incorrect 'table is empty' error
+ *   1. MERGE SPLITS visibility bug - second transaction's splits invisible to merge 2. DROP PARTITIONS bug - incorrect
+ *      'table is empty' error
  *
  * Prerequisites:
  *   - AWS credentials configured via ~/.aws/credentials or environment variables
  *   - S3 bucket accessible for testing (default: test-tantivy4sparkbucket in us-east-2)
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.RealS3AvroStateBugReproTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.RealS3AvroStateBugReproTest'
  */
 class RealS3AvroStateBugReproTest extends RealS3TestBase {
 
@@ -79,7 +78,7 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
       import java.util.Properties
       import scala.util.Using
 
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
 
       if (!credFile.exists()) {
@@ -88,9 +87,7 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
       }
 
       val props = new Properties()
-      Using(new FileInputStream(credFile)) { stream =>
-        props.load(stream)
-      }
+      Using(new FileInputStream(credFile))(stream => props.load(stream))
 
       // Try to get credentials from [default] profile
       val accessKey = Option(props.getProperty("aws_access_key_id"))
@@ -127,9 +124,9 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
   private def getWriteOptions(): Map[String, String] = {
     val (accessKey, secretKey) = awsCredentials.get
     Map(
-      "spark.indextables.aws.accessKey" -> accessKey,
-      "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region"    -> S3_REGION,
+      "spark.indextables.aws.accessKey"       -> accessKey,
+      "spark.indextables.aws.secretKey"       -> secretKey,
+      "spark.indextables.aws.region"          -> S3_REGION,
       "spark.indextables.indexing.fastfields" -> "id,score"
     )
   }
@@ -152,7 +149,7 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
 
   test("S3 BUG REPRO: MERGE SPLITS should see ALL files from multiple append transactions") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/merge-visibility-bug-$testId"
+    val path   = s"s3a://$S3_BUCKET/merge-visibility-bug-$testId"
 
     println(s"=== S3 BUG REPRO: MERGE SPLITS visibility test at: $path ===")
 
@@ -165,8 +162,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     println("\n--- First append: writing 3 batches (should create 3 splits) ---")
     (1 to 3).foreach { batch =>
       val data = (1 to 10).map(i => (batch * 100 + i, s"Batch1-$batch-$i", batch * 10))
-      spark.createDataFrame(data).toDF("id", "name", "score")
-        .write.format(provider)
+      spark
+        .createDataFrame(data)
+        .toDF("id", "name", "score")
+        .write
+        .format(provider)
         .options(getWriteOptions())
         .mode("append")
         .save(path)
@@ -193,8 +193,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     println("\n--- Second append: writing 4 batches (should create 4 splits) ---")
     (4 to 7).foreach { batch =>
       val data = (1 to 10).map(i => (batch * 100 + i, s"Batch2-$batch-$i", batch * 10))
-      spark.createDataFrame(data).toDF("id", "name", "score")
-        .write.format(provider)
+      spark
+        .createDataFrame(data)
+        .toDF("id", "name", "score")
+        .write
+        .format(provider)
         .options(getWriteOptions())
         .mode("append")
         .save(path)
@@ -227,8 +230,8 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     val mergeResult = spark.sql(s"MERGE SPLITS '$path' TARGET SIZE 100M").collect()
 
     // Check merge result
-    val metricsRow = mergeResult(0).getStruct(1)
-    val status = metricsRow.getAs[String]("status")
+    val metricsRow  = mergeResult(0).getStruct(1)
+    val status      = metricsRow.getAs[String]("status")
     val mergedFiles = Option(metricsRow.getAs[java.lang.Long]("merged_files")).map(_.toLong).getOrElse(0L)
     println(s"Merge status: $status")
     println(s"Merged files: $mergedFiles")
@@ -237,9 +240,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     // If only 3 files were merged (from first append), this indicates the bug
     if (status == "success") {
       // We expect at least 6-7 files to be merged (from both appends)
-      assert(mergedFiles >= 6L,
+      assert(
+        mergedFiles >= 6L,
         s"BUG DETECTED: MERGE only saw $mergedFiles files, but expected at least 6 from both appends. " +
-          "This indicates the second append's files are not visible to MERGE.")
+          "This indicates the second append's files are not visible to MERGE."
+      )
     }
 
     // Verify data integrity after merge
@@ -249,10 +254,18 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     afterMergeCount shouldBe 70
 
     // Verify files from both appends are represented in the data
-    val batch1Count = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("id") < 400).count()
-    val batch2Count = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("id") >= 400).count()
+    val batch1Count = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("id") < 400)
+      .count()
+    val batch2Count = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("id") >= 400)
+      .count()
 
     println(s"Batch1 rows (id < 400): $batch1Count (expected 30)")
     println(s"Batch2 rows (id >= 400): $batch2Count (expected 40)")
@@ -272,7 +285,7 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
 
   test("S3 BUG REPRO: DROP PARTITIONS should work with separate inserts to different partitions") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/drop-partitions-bug-$testId"
+    val path   = s"s3a://$S3_BUCKET/drop-partitions-bug-$testId"
 
     println(s"=== S3 BUG REPRO: DROP PARTITIONS test at: $path ===")
 
@@ -287,8 +300,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
       (1, "Alice", "01", 100),
       (2, "Bob", "01", 200)
     )
-    spark.createDataFrame(data1).toDF("id", "name", "partition_key", "score")
-      .write.format(provider)
+    spark
+      .createDataFrame(data1)
+      .toDF("id", "name", "partition_key", "score")
+      .write
+      .format(provider)
       .options(getWriteOptions())
       .partitionBy("partition_key")
       .mode("overwrite")
@@ -314,8 +330,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
       (3, "Charlie", "02", 150),
       (4, "Diana", "02", 250)
     )
-    spark.createDataFrame(data2).toDF("id", "name", "partition_key", "score")
-      .write.format(provider)
+    spark
+      .createDataFrame(data2)
+      .toDF("id", "name", "partition_key", "score")
+      .write
+      .format(provider)
       .options(getWriteOptions())
       .partitionBy("partition_key")
       .mode("append")
@@ -327,10 +346,18 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     println(s"After insert 2: count=$count2 (expected 4)")
     count2 shouldBe 4
 
-    val partition01Count = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "01").count()
-    val partition02Count = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "02").count()
+    val partition01Count = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "01")
+      .count()
+    val partition02Count = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "02")
+      .count()
     println(s"Partition counts: 01=$partition01Count, 02=$partition02Count")
     partition01Count shouldBe 2
     partition02Count shouldBe 2
@@ -352,22 +379,32 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     // BUG: User reports getting "no_action" "table is empty"
     // ========================================
     println("\n--- Drop partition 02 ---")
-    val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE partition_key = '02'").collect()
-    val dropStatus = dropResult(0).getAs[String]("status")
+    val dropResult  = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE partition_key = '02'").collect()
+    val dropStatus  = dropResult(0).getAs[String]("status")
     val dropMessage = dropResult(0).getAs[String]("message")
     println(s"Drop result: status=$dropStatus, message=$dropMessage")
 
     // CRITICAL ASSERTION: Drop should succeed, not return "table is empty"
-    assert(dropStatus == "success",
+    assert(
+      dropStatus == "success",
       s"BUG DETECTED: Expected 'success' but got '$dropStatus' with message '$dropMessage'. " +
-        "This indicates partition 02 files are not visible.")
+        "This indicates partition 02 files are not visible."
+    )
 
     // Verify partition 01 still readable
     EnhancedTransactionLogCache.clearGlobalCaches()
-    val afterDrop01 = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "01").count()
-    val afterDrop02 = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "02").count()
+    val afterDrop01 = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "01")
+      .count()
+    val afterDrop02 = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "02")
+      .count()
     println(s"After drop: partition 01=$afterDrop01 (expected 2), partition 02=$afterDrop02 (expected 0)")
 
     afterDrop01 shouldBe 2
@@ -378,7 +415,7 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
 
   test("S3 BUG REPRO: DROP PARTITIONS with explicit Avro checkpoints between inserts") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/drop-partitions-checkpoint-bug-$testId"
+    val path   = s"s3a://$S3_BUCKET/drop-partitions-checkpoint-bug-$testId"
 
     println(s"=== S3 BUG REPRO: DROP PARTITIONS with checkpoints at: $path ===")
 
@@ -393,8 +430,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
       (1, "Alice", "01", 100),
       (2, "Bob", "01", 200)
     )
-    spark.createDataFrame(data1).toDF("id", "name", "partition_key", "score")
-      .write.format(provider)
+    spark
+      .createDataFrame(data1)
+      .toDF("id", "name", "partition_key", "score")
+      .write
+      .format(provider)
       .options(getWriteOptions())
       .partitionBy("partition_key")
       .mode("overwrite")
@@ -424,8 +464,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
       (3, "Charlie", "02", 150),
       (4, "Diana", "02", 250)
     )
-    spark.createDataFrame(data2).toDF("id", "name", "partition_key", "score")
-      .write.format(provider)
+    spark
+      .createDataFrame(data2)
+      .toDF("id", "name", "partition_key", "score")
+      .write
+      .format(provider)
       .options(getWriteOptions())
       .partitionBy("partition_key")
       .mode("append")
@@ -445,10 +488,18 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     println(s"After insert 2: count=$count2")
     count2 shouldBe 4
 
-    val p01 = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "01").count()
-    val p02 = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "02").count()
+    val p01 = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "01")
+      .count()
+    val p02 = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "02")
+      .count()
     println(s"Partition counts: 01=$p01, 02=$p02")
     p01 shouldBe 2
     p02 shouldBe 2
@@ -461,20 +512,27 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     // Drop partition 02
     // ========================================
     println("\n--- Drop partition 02 ---")
-    val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE partition_key = '02'").collect()
-    val dropStatus = dropResult(0).getAs[String]("status")
+    val dropResult  = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE partition_key = '02'").collect()
+    val dropStatus  = dropResult(0).getAs[String]("status")
     val dropMessage = dropResult(0).getAs[String]("message")
     println(s"Drop result: status=$dropStatus, message=$dropMessage")
 
-    assert(dropStatus == "success",
-      s"BUG DETECTED: Expected 'success' but got '$dropStatus': $dropMessage")
+    assert(dropStatus == "success", s"BUG DETECTED: Expected 'success' but got '$dropStatus': $dropMessage")
 
     // Verify partition 01 still readable
     EnhancedTransactionLogCache.clearGlobalCaches()
-    val afterDrop01 = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "01").count()
-    val afterDrop02 = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("partition_key") === "02").count()
+    val afterDrop01 = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "01")
+      .count()
+    val afterDrop02 = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("partition_key") === "02")
+      .count()
     println(s"After drop: partition 01=$afterDrop01, partition 02=$afterDrop02")
 
     afterDrop01 shouldBe 2
@@ -485,7 +543,7 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
 
   test("S3 BUG REPRO: Transaction log state version tracking across sessions") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/state-tracking-bug-$testId"
+    val path   = s"s3a://$S3_BUCKET/state-tracking-bug-$testId"
 
     println(s"=== S3 BUG REPRO: State version tracking at: $path ===")
 
@@ -497,8 +555,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     // ========================================
     println("\n--- First write ---")
     val data1 = (1 to 5).map(i => (i, s"First-$i", i * 10))
-    spark.createDataFrame(data1).toDF("id", "name", "score")
-      .write.format(provider)
+    spark
+      .createDataFrame(data1)
+      .toDF("id", "name", "score")
+      .write
+      .format(provider)
       .options(getWriteOptions())
       .mode("overwrite")
       .save(path)
@@ -515,8 +576,11 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     // ========================================
     println("\n--- Second write (append) ---")
     val data2 = (6 to 10).map(i => (i, s"Second-$i", i * 10))
-    spark.createDataFrame(data2).toDF("id", "name", "score")
-      .write.format(provider)
+    spark
+      .createDataFrame(data2)
+      .toDF("id", "name", "score")
+      .write
+      .format(provider)
       .options(getWriteOptions())
       .mode("append")
       .save(path)
@@ -529,8 +593,10 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     println(s"_last_checkpoint content: $lastCheckpoint")
 
     // Verify state version incremented
-    assert(filesAfterWrite2.size >= 2,
-      s"Expected at least 2 state directories after two writes, got ${filesAfterWrite2.size}")
+    assert(
+      filesAfterWrite2.size >= 2,
+      s"Expected at least 2 state directories after two writes, got ${filesAfterWrite2.size}"
+    )
 
     // Clear caches and read with fresh state
     EnhancedTransactionLogCache.clearGlobalCaches()
@@ -541,10 +607,18 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     totalCount shouldBe 10
 
     // Verify data from both writes
-    val firstCount = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("id") <= 5).count()
-    val secondCount = spark.read.format(provider).options(getReadOptions()).load(path)
-      .filter(col("id") > 5).count()
+    val firstCount = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("id") <= 5)
+      .count()
+    val secondCount = spark.read
+      .format(provider)
+      .options(getReadOptions())
+      .load(path)
+      .filter(col("id") > 5)
+      .count()
 
     println(s"First write rows (id <= 5): $firstCount (expected 5)")
     println(s"Second write rows (id > 5): $secondCount (expected 5)")
@@ -564,17 +638,19 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
     import scala.jdk.CollectionConverters._
 
-    val txLogPath = s"$tablePath/_transaction_log"
+    val txLogPath              = s"$tablePath/_transaction_log"
     val (accessKey, secretKey) = awsCredentials.get
 
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.aws.accessKey" -> accessKey,
-      "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region" -> S3_REGION
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.aws.accessKey" -> accessKey,
+        "spark.indextables.aws.secretKey" -> secretKey,
+        "spark.indextables.aws.region"    -> S3_REGION
+      ).asJava
+    )
 
-    val provider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
-      txLogPath, options, spark.sparkContext.hadoopConfiguration)
+    val provider = io.indextables.spark.io.CloudStorageProviderFactory
+      .createProvider(txLogPath, options, spark.sparkContext.hadoopConfiguration)
 
     try {
       val files = provider.listFiles(txLogPath, recursive = false)
@@ -582,9 +658,8 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
         .filter(f => f.path.contains("state-v") && f.isDirectory)
         .map(_.path)
         .sorted
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   /** Read _last_checkpoint content from S3. */
@@ -592,26 +667,27 @@ class RealS3AvroStateBugReproTest extends RealS3TestBase {
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
     import scala.jdk.CollectionConverters._
 
-    val lastCheckpointPath = s"$tablePath/_transaction_log/_last_checkpoint"
+    val lastCheckpointPath     = s"$tablePath/_transaction_log/_last_checkpoint"
     val (accessKey, secretKey) = awsCredentials.get
 
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.aws.accessKey" -> accessKey,
-      "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region" -> S3_REGION
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.aws.accessKey" -> accessKey,
+        "spark.indextables.aws.secretKey" -> secretKey,
+        "spark.indextables.aws.region"    -> S3_REGION
+      ).asJava
+    )
 
-    val provider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
-      lastCheckpointPath, options, spark.sparkContext.hadoopConfiguration)
+    val provider = io.indextables.spark.io.CloudStorageProviderFactory
+      .createProvider(lastCheckpointPath, options, spark.sparkContext.hadoopConfiguration)
 
-    try {
+    try
       if (provider.exists(lastCheckpointPath)) {
         new String(provider.readFile(lastCheckpointPath), "UTF-8")
       } else {
         "<not found>"
       }
-    } finally {
+    finally
       provider.close()
-    }
   }
 }

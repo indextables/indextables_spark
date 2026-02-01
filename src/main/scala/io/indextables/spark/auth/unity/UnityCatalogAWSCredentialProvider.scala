@@ -37,9 +37,9 @@ import org.slf4j.LoggerFactory
  * This provider fetches temporary AWS credentials from Unity Catalog's temporary path credentials API. It implements
  * intelligent caching with expiration tracking and automatic fallback from READ_WRITE to READ permissions.
  *
- * IMPORTANT: This provider MUST be created using the fromConfig() factory method or by passing
- * a Map[String, String] config. The Hadoop Configuration constructor has been removed to enforce
- * the fast path that avoids expensive Hadoop Configuration creation.
+ * IMPORTANT: This provider MUST be created using the fromConfig() factory method or by passing a Map[String, String]
+ * config. The Hadoop Configuration constructor has been removed to enforce the fast path that avoids expensive Hadoop
+ * Configuration creation.
  *
  * Configuration:
  *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
@@ -58,7 +58,8 @@ import org.slf4j.LoggerFactory
  * // Resolve credentials on driver, pass actual keys to executors
  * }}}
  */
-class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[String, String]) extends AWSCredentialsProvider {
+class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[String, String])
+    extends AWSCredentialsProvider {
   import UnityCatalogAWSCredentialProvider._
 
   // Resolve all configuration from the Map
@@ -75,11 +76,11 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   logger.info("UnityCatalogAWSCredentialProvider initialized successfully")
 
   // Accessors for resolved config (for cleaner code below)
-  private def workspaceUrl: String = _workspaceUrl
-  private def token: String = _token
+  private def workspaceUrl: String      = _workspaceUrl
+  private def token: String             = _token
   private def refreshBufferMinutes: Int = _refreshBufferMinutes
-  private def fallbackEnabled: Boolean = _fallbackEnabled
-  private def retryAttempts: Int = _retryAttempts
+  private def fallbackEnabled: Boolean  = _fallbackEnabled
+  private def retryAttempts: Int        = _retryAttempts
 
   /**
    * Get AWS credentials for the configured URI.
@@ -321,16 +322,18 @@ object UnityCatalogAWSCredentialProvider {
   /**
    * Fast factory method that creates a provider from a config Map without creating Hadoop Configuration.
    *
-   * This is the preferred method for creating providers when you already have config as a Map,
-   * as it bypasses the expensive Hadoop Configuration creation that happens tens of thousands
-   * of times during scan operations.
+   * This is the preferred method for creating providers when you already have config as a Map, as it bypasses the
+   * expensive Hadoop Configuration creation that happens tens of thousands of times during scan operations.
    *
-   * IMPORTANT: The URI should be normalized to the table root path before calling this method
-   * to ensure consistent cache keys. Use TablePathNormalizer.normalizeToTablePath().
+   * IMPORTANT: The URI should be normalized to the table root path before calling this method to ensure consistent
+   * cache keys. Use TablePathNormalizer.normalizeToTablePath().
    *
-   * @param uri The URI for the table (should be normalized to table root)
-   * @param config Map containing spark.indextables.databricks.* configuration
-   * @return A new UnityCatalogAWSCredentialProvider instance
+   * @param uri
+   *   The URI for the table (should be normalized to table root)
+   * @param config
+   *   Map containing spark.indextables.databricks.* configuration
+   * @return
+   *   A new UnityCatalogAWSCredentialProvider instance
    */
   def fromConfig(uri: URI, config: Map[String, String]): UnityCatalogAWSCredentialProvider = {
     logger.debug(s"Creating UnityCatalogAWSCredentialProvider from config Map for URI: $uri")
@@ -338,8 +341,8 @@ object UnityCatalogAWSCredentialProvider {
   }
 
   /**
-   * Resolve Databricks configuration from a Map[String, String].
-   * This is the fast path that avoids Hadoop Configuration creation.
+   * Resolve Databricks configuration from a Map[String, String]. This is the fast path that avoids Hadoop Configuration
+   * creation.
    */
   private def resolveConfigFromMap(config: Map[String, String]): (String, String, Int, Boolean, Int) = {
     val sources: Seq[ConfigSource] = Seq(

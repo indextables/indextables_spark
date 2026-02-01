@@ -210,8 +210,8 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
         val directException = intercept[Exception] {
           import io.indextables.spark.util.ConfigNormalization
           val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-          val uri      = new java.net.URI(testS3Path)
-          val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
+          val uri          = new java.net.URI(testS3Path)
+          val provider     = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
           provider.getCredentials()
         }
         // This proves the configs are properly set up for the provider
@@ -277,8 +277,8 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
         val directException = intercept[Exception] {
           import io.indextables.spark.util.ConfigNormalization
           val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-          val uri      = new java.net.URI(testS3Path)
-          val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
+          val uri          = new java.net.URI(testS3Path)
+          val provider     = UnityCatalogAWSCredentialProvider.fromConfig(uri, sparkConfigs)
           provider.getCredentials()
         }
         // This proves the configs are properly set up for the provider
@@ -454,8 +454,8 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   /**
    * REGRESSION TEST for PR #100: Demonstrates the BROKEN behavior when config map is empty.
    *
-   * This test simulates what happens when the provider is instantiated without the required
-   * Databricks configuration - it should fail with a "not configured" error.
+   * This test simulates what happens when the provider is instantiated without the required Databricks configuration -
+   * it should fail with a "not configured" error.
    *
    * This test verifies that empty config causes proper error handling.
    */
@@ -497,10 +497,10 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
    * REGRESSION TEST for PR #100: Demonstrates the FIXED behavior when config map is populated.
    *
    * This test simulates what IndexTables4SparkPartitionReader does with proper config propagation:
-   * - Config map has all the Databricks credentials
+   *   - Config map has all the Databricks credentials
    *
-   * With a properly populated config map, the credential provider receives the Databricks config
-   * and fails with "Connection refused" (proving config was received) instead of "not configured".
+   * With a properly populated config map, the credential provider receives the Databricks config and fails with
+   * "Connection refused" (proving config was received) instead of "not configured".
    *
    * This test MUST PASS after the fix is applied.
    */
@@ -519,7 +519,9 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     configMap should contain key "spark.indextables.databricks.apiToken"
     configMap should contain key "spark.indextables.aws.credentialsProviderClass"
 
-    logger.info(s"FIXED: config map has ${configMap.count(_._1.startsWith("spark.indextables."))} spark.indextables.* keys")
+    logger.info(
+      s"FIXED: config map has ${configMap.count(_._1.startsWith("spark.indextables."))} spark.indextables.* keys"
+    )
 
     // Step 2: Try to create credential provider with the populated config map
     val uri = new java.net.URI(testS3Path)

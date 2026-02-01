@@ -296,8 +296,8 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getString(0) == "SUCCESS")
-    assert(metrics.getLong(1) == 0)                                  // Found 0 orphaned files
-    assert(metrics.getLong(2) == 0)                                  // Deleted 0 files
+    assert(metrics.getLong(1) == 0)                                   // Found 0 orphaned files
+    assert(metrics.getLong(2) == 0)                                   // Deleted 0 files
     assert(metrics.getString(10).contains("No orphaned files found")) // message field is at index 10
   }
 

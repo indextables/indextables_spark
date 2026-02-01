@@ -20,7 +20,6 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.merge.AsyncMergeOnWriteManager
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -177,7 +176,7 @@ class DescribeMergeJobsCommandTest extends AnyFunSuite with Matchers with Before
 
     // Sum progress
     val totalProgress = spark.sql("SELECT SUM(completed_groups) as total_completed FROM merge_jobs")
-    val rows = totalProgress.collect()
+    val rows          = totalProgress.collect()
     rows.length shouldBe 1
     // NULL sum when no rows
     rows(0).isNullAt(0) shouldBe true

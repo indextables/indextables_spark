@@ -25,13 +25,21 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
+import org.apache.spark.sql.sources.Filter
+
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.avro.{AvroManifestReader, FileEntry, PartitionPruner, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
+import io.indextables.spark.transaction.avro.{
+  AvroManifestReader,
+  FileEntry,
+  PartitionPruner,
+  StateConfig,
+  StateManifestIO,
+  StateRetryConfig,
+  StateWriter
+}
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
-
-import org.apache.spark.sql.sources.Filter
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -51,10 +59,10 @@ case class LastCheckpointInfo(
   sizeInBytes: Long,
   numFiles: Long,
   createdTime: Long,
-  parts: Option[Int] = None,          // Number of parts for multi-part checkpoint (None = single file)
+  parts: Option[Int] = None,           // Number of parts for multi-part checkpoint (None = single file)
   checkpointId: Option[String] = None, // Unique ID for multi-part checkpoint
-  format: Option[String] = None,      // Checkpoint format: "json", "json-multipart", "avro-state"
-  stateDir: Option[String] = None     // State directory name for avro-state format (e.g., "state-v00000000000000000100")
+  format: Option[String] = None,       // Checkpoint format: "json", "json-multipart", "avro-state"
+  stateDir: Option[String] = None // State directory name for avro-state format (e.g., "state-v00000000000000000100")
 )
 
 /**
@@ -164,9 +172,7 @@ class TransactionLogCheckpoint(
     }
   }
 
-  /**
-   * Create checkpoint in JSON format (legacy and multi-part).
-   */
+  /** Create checkpoint in JSON format (legacy and multi-part). */
   private def createJsonCheckpoint(
     currentVersion: Long,
     allActions: Seq[Action]
@@ -208,8 +214,8 @@ class TransactionLogCheckpoint(
   /**
    * Create checkpoint in Avro state format with retry support for concurrent write conflicts.
    *
-   * This writes a compacted state with all live files sorted by partition values for optimal pruning.
-   * Uses conditional writes and retry logic to handle concurrent checkpoint creation.
+   * This writes a compacted state with all live files sorted by partition values for optimal pruning. Uses conditional
+   * writes and retry logic to handle concurrent checkpoint creation.
    */
   private def createAvroStateCheckpoint(
     currentVersion: Long,
@@ -249,7 +255,7 @@ class TransactionLogCheckpoint(
     val manifestIO = StateManifestIO(cloudProvider)
 
     // Extract AddActions and MetadataAction from allActions
-    val allFiles = allActions.collect { case add: AddAction => add }
+    val allFiles       = allActions.collect { case add: AddAction => add }
     val metadataAction = allActions.collectFirst { case m: MetadataAction => m }
 
     // Serialize MetadataAction to JSON for storage in state manifest
@@ -270,7 +276,7 @@ class TransactionLogCheckpoint(
     val renormalizeThreshold = Option(options.get(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_KEY))
       .map(_.toInt)
       .getOrElse(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT)
-    val existingRefCount = allFiles.flatMap(_.docMappingRef).toSet.size
+    val existingRefCount  = allFiles.flatMap(_.docMappingRef).toSet.size
     val shouldRenormalize = existingRefCount > renormalizeThreshold
 
     if (shouldRenormalize) {
@@ -307,11 +313,13 @@ class TransactionLogCheckpoint(
 
     // Extract the actual version and state directory from the write result
     val actualVersion = writeResult.version
-    val stateDir = manifestIO.formatStateDir(actualVersion)
+    val stateDir      = manifestIO.formatStateDir(actualVersion)
 
     if (writeResult.conflictDetected) {
-      logger.info(s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
-        s"(original version $currentVersion had concurrent conflict)")
+      logger.info(
+        s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
+          s"(original version $currentVersion had concurrent conflict)"
+      )
     }
 
     // Update _last_checkpoint to point to new Avro state
@@ -338,8 +346,10 @@ class TransactionLogCheckpoint(
     if (checkpointUpdated) {
       logger.info(s"Avro state checkpoint created successfully at version $actualVersion (format=avro-state)")
     } else {
-      logger.info(s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
-        s"(a newer checkpoint already exists)")
+      logger.info(
+        s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
+          s"(a newer checkpoint already exists)"
+      )
     }
   }
 
@@ -527,9 +537,9 @@ class TransactionLogCheckpoint(
   /**
    * Get actions from checkpoint with optional partition filters for Avro state format.
    *
-   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
-   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
-   * for large tables with many partitions.
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can prune entire
+   * manifest files that don't contain matching partitions, significantly reducing I/O for large tables with many
+   * partitions.
    *
    * @param partitionFilters
    *   Partition filters to apply for manifest pruning (only used with Avro state format)
@@ -585,19 +595,17 @@ class TransactionLogCheckpoint(
   /**
    * Read checkpoint data from Avro state format.
    *
-   * The Avro state format stores file entries in binary Avro manifests, providing 10x faster reads than JSON and enabling
-   * partition pruning for gigantic tables.
+   * The Avro state format stores file entries in binary Avro manifests, providing 10x faster reads than JSON and
+   * enabling partition pruning for gigantic tables.
    */
-  private def readAvroStateCheckpoint(info: LastCheckpointInfo): Seq[Action] = {
+  private def readAvroStateCheckpoint(info: LastCheckpointInfo): Seq[Action] =
     readAvroStateCheckpoint(info, partitionFilters = Seq.empty)
-  }
 
   /**
    * Read checkpoint data from Avro state format with partition filtering.
    *
-   * When partition filters are provided, the pruner can skip entire manifests that are known
-   * not to contain matching files based on partition bounds, providing significant speedup
-   * for partition-filtered queries on large tables.
+   * When partition filters are provided, the pruner can skip entire manifests that are known not to contain matching
+   * files based on partition bounds, providing significant speedup for partition-filtered queries on large tables.
    *
    * Uses the global StateManifest cache to avoid repeated cloud storage reads across queries.
    *
@@ -616,12 +624,14 @@ class TransactionLogCheckpoint(
     val stateDirPath = new Path(transactionLogPath, stateDir).toString
     logger.debug(s"Reading Avro state checkpoint: version=${info.version}, stateDir=$stateDir")
 
-    val manifestIO = StateManifestIO(cloudProvider)
+    val manifestIO     = StateManifestIO(cloudProvider)
     val manifestReader = AvroManifestReader(cloudProvider)
 
     // Use GLOBAL StateManifest cache to avoid repeated cloud storage reads
     // The StateManifest is immutable once written, so safe to cache indefinitely
-    val stateManifest = Option(EnhancedTransactionLogCache.globalAvroStateManifestCache.getIfPresent(stateDirPath)) match {
+    val stateManifest = Option(
+      EnhancedTransactionLogCache.globalAvroStateManifestCache.getIfPresent(stateDirPath)
+    ) match {
       case Some(cached) =>
         logger.debug(s"StateManifest cache HIT for $stateDirPath (version ${cached.stateVersion})")
         cached
@@ -629,15 +639,16 @@ class TransactionLogCheckpoint(
         logger.debug(s"StateManifest cache MISS for $stateDirPath - reading from storage")
         val manifest = manifestIO.readStateManifest(stateDirPath)
         EnhancedTransactionLogCache.globalAvroStateManifestCache.put(stateDirPath, manifest)
-        logger.info(s"Cached StateManifest for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)")
+        logger.info(
+          s"Cached StateManifest for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)"
+        )
         manifest
     }
 
     // Apply partition pruning if filters are provided
     val manifestsToRead = if (partitionFilters.nonEmpty) {
       val prunedManifests = PartitionPruner.pruneManifests(stateManifest.manifests, partitionFilters)
-      logger.info(
-        s"Partition pruning: reading ${prunedManifests.size} of ${stateManifest.manifests.size} manifests")
+      logger.info(s"Partition pruning: reading ${prunedManifests.size} of ${stateManifest.manifests.size} manifests")
       prunedManifests
     } else {
       stateManifest.manifests
@@ -645,7 +656,8 @@ class TransactionLogCheckpoint(
 
     // Read selected Avro manifests in parallel
     // Resolve manifest paths - handles both shared manifests (manifests/xxx.avro) and legacy state-local
-    val manifestPaths = manifestsToRead.map(m => manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath))
+    val manifestPaths =
+      manifestsToRead.map(m => manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath))
     val fileEntries = manifestReader.readManifestsParallel(manifestPaths)
 
     // Apply tombstones to filter out removed files
@@ -692,7 +704,8 @@ class TransactionLogCheckpoint(
 
     logger.info(
       s"Read Avro state checkpoint: version=${info.version}, " +
-        s"files=${liveEntries.size}, tombstones=${stateManifest.tombstones.size}")
+        s"files=${liveEntries.size}, tombstones=${stateManifest.tombstones.size}"
+    )
 
     actions.toSeq
   }
@@ -953,20 +966,18 @@ class TransactionLogCheckpoint(
   /**
    * Get last checkpoint info with verification for Avro state format.
    *
-   * This method ensures readers see the authoritative latest state by probing
-   * for version N+1 to detect if `_last_checkpoint` has regressed due to a
-   * rare TOCTOU race condition between concurrent writers.
+   * This method ensures readers see the authoritative latest state by probing for version N+1 to detect if
+   * `_last_checkpoint` has regressed due to a rare TOCTOU race condition between concurrent writers.
    *
-   * The verification is cheap: just one existence check (HEAD request) in the
-   * common case where the hint is correct. Only in the rare regression case
-   * do we probe further (O(k) checks where k is typically 1-2).
+   * The verification is cheap: just one existence check (HEAD request) in the common case where the hint is correct.
+   * Only in the rare regression case do we probe further (O(k) checks where k is typically 1-2).
    *
-   * The key insight (matching the old JSON implementation): The state directories
-   * themselves are the source of truth, using monotonically incrementing versions
-   * with conditional writes for coordination. The `_last_checkpoint` file is just
-   * an optimization hint.
+   * The key insight (matching the old JSON implementation): The state directories themselves are the source of truth,
+   * using monotonically incrementing versions with conditional writes for coordination. The `_last_checkpoint` file is
+   * just an optimization hint.
    *
-   * @return Last checkpoint info pointing to the actual latest state
+   * @return
+   *   Last checkpoint info pointing to the actual latest state
    */
   def getLastCheckpointInfoVerified(): Option[LastCheckpointInfo] = {
     val hint = getLastCheckpointInfo()
@@ -974,7 +985,7 @@ class TransactionLogCheckpoint(
     // Only verify for Avro state format (JSON format doesn't use state directories)
     hint match {
       case Some(info) if info.format.contains(StateConfig.Format.AVRO_STATE) =>
-        val manifestIO = StateManifestIO(cloudProvider)
+        val manifestIO      = StateManifestIO(cloudProvider)
         val verifiedVersion = manifestIO.verifyCheckpointVersion(transactionLogPath.toString, info.version)
 
         if (verifiedVersion > info.version) {

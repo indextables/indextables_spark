@@ -17,17 +17,16 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.AddAction
-
-import org.apache.avro.file.{CodecFactory, DataFileWriter}
-import org.apache.avro.generic.{GenericDatumWriter, GenericRecord}
-
-import org.slf4j.LoggerFactory
-
 import java.io.{ByteArrayOutputStream, OutputStream}
 import java.util.UUID
+
 import scala.util.{Failure, Success, Try}
+
+import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.AddAction
+import org.apache.avro.file.{CodecFactory, DataFileWriter}
+import org.apache.avro.generic.{GenericDatumWriter, GenericRecord}
+import org.slf4j.LoggerFactory
 
 /**
  * Writer for Avro manifest files containing FileEntry records.
@@ -57,10 +56,11 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    *   Number of bytes written
    */
   def writeManifest(
-      manifestPath: String,
-      entries: Seq[FileEntry],
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Long = {
+    manifestPath: String,
+    entries: Seq[FileEntry],
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Long = {
 
     log.debug(s"Writing Avro manifest: $manifestPath (${entries.size} entries, compression=$compression)")
     val startTime = System.currentTimeMillis()
@@ -89,14 +89,15 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    *   Some(bytes written) if successful, None if file already exists
    */
   def writeManifestIfNotExists(
-      manifestPath: String,
-      entries: Seq[FileEntry],
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Option[Long] = {
+    manifestPath: String,
+    entries: Seq[FileEntry],
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Option[Long] = {
 
     log.debug(s"Writing Avro manifest (if not exists): $manifestPath")
 
-    val bytes = writeToBytes(entries, compression, compressionLevel)
+    val bytes   = writeToBytes(entries, compression, compressionLevel)
     val written = cloudProvider.writeFileIfNotExists(manifestPath, bytes)
 
     if (written) {
@@ -121,9 +122,10 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    *   Byte array containing Avro data
    */
   def writeToBytes(
-      entries: Seq[FileEntry],
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Array[Byte] = {
+    entries: Seq[FileEntry],
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Array[Byte] = {
 
     val baos = new ByteArrayOutputStream()
     writeToStream(entries, baos, compression, compressionLevel)
@@ -143,13 +145,14 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    *   Compression level
    */
   def writeToStream(
-      entries: Seq[FileEntry],
-      outputStream: OutputStream,
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Unit = {
+    entries: Seq[FileEntry],
+    outputStream: OutputStream,
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Unit = {
 
-    val schema = AvroSchemas.FILE_ENTRY_SCHEMA
-    val datumWriter = new GenericDatumWriter[GenericRecord](schema)
+    val schema         = AvroSchemas.FILE_ENTRY_SCHEMA
+    val datumWriter    = new GenericDatumWriter[GenericRecord](schema)
     val dataFileWriter = new DataFileWriter[GenericRecord](datumWriter)
 
     try {
@@ -169,12 +172,9 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
       dataFileWriter.setCodec(codec)
       dataFileWriter.create(schema, outputStream)
 
-      entries.foreach { entry =>
-        dataFileWriter.append(AvroSchemas.toGenericRecord(entry))
-      }
-    } finally {
+      entries.foreach(entry => dataFileWriter.append(AvroSchemas.toGenericRecord(entry)))
+    } finally
       dataFileWriter.close()
-    }
   }
 
   /**
@@ -189,9 +189,12 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    * @return
    *   FileEntry representation
    */
-  def convertFromAddAction(add: AddAction, version: Long, timestamp: Long): FileEntry = {
+  def convertFromAddAction(
+    add: AddAction,
+    version: Long,
+    timestamp: Long
+  ): FileEntry =
     FileEntry.fromAddAction(add, version, timestamp)
-  }
 
   /**
    * Convert multiple AddActions to FileEntries.
@@ -205,9 +208,12 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    * @return
    *   FileEntry representations
    */
-  def convertFromAddActions(adds: Seq[AddAction], version: Long, timestamp: Long): Seq[FileEntry] = {
+  def convertFromAddActions(
+    adds: Seq[AddAction],
+    version: Long,
+    timestamp: Long
+  ): Seq[FileEntry] =
     adds.map(add => FileEntry.fromAddAction(add, version, timestamp))
-  }
 
   /**
    * Generate a unique manifest ID.
@@ -215,9 +221,8 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    * @return
    *   8-character hex string
    */
-  def generateManifestId(): String = {
+  def generateManifestId(): String =
     UUID.randomUUID().toString.replace("-", "").take(8)
-  }
 
   /**
    * Compute partition bounds for a set of file entries.
@@ -261,7 +266,7 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
    * @return
    *   ManifestInfo with computed bounds and version range
    */
-  def createManifestInfo(path: String, entries: Seq[FileEntry]): ManifestInfo = {
+  def createManifestInfo(path: String, entries: Seq[FileEntry]): ManifestInfo =
     if (entries.isEmpty) {
       ManifestInfo(
         path = path,
@@ -279,7 +284,6 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
         partitionBounds = computePartitionBounds(entries)
       )
     }
-  }
 }
 
 object AvroManifestWriter {
@@ -292,7 +296,6 @@ object AvroManifestWriter {
    * @return
    *   AvroManifestWriter instance
    */
-  def apply(cloudProvider: CloudStorageProvider): AvroManifestWriter = {
+  def apply(cloudProvider: CloudStorageProvider): AvroManifestWriter =
     new AvroManifestWriter(cloudProvider)
-  }
 }

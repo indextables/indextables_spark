@@ -353,8 +353,8 @@ object PreWarmManager {
   }
 
   /**
-   * Extract field names from AddAction metadata (docMappingJson).
-   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
+   * Extract field names from AddAction metadata (docMappingJson). Uses cached DocMappingMetadata to avoid repeated JSON
+   * parsing.
    */
   private def extractFieldsFromMetadata(addAction: AddAction): Set[String] = {
     import io.indextables.spark.transaction.EnhancedTransactionLogCache

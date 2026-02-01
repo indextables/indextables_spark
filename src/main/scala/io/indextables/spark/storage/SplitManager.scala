@@ -79,11 +79,10 @@ object SplitConversionThrottle {
     }
 
     sem.acquire()
-    try {
+    try
       block
-    } finally {
+    finally
       sem.release()
-    }
   }
 
   /** Get the current max parallelism setting. */
@@ -249,15 +248,21 @@ object SplitManager {
   /**
    * Create a split file from a tantivy index directory (Map-based FAST PATH).
    *
-   * This overload avoids creating Hadoop Configuration objects on executors.
-   * Use this when you have the config already serialized as a Map.
+   * This overload avoids creating Hadoop Configuration objects on executors. Use this when you have the config already
+   * serialized as a Map.
    *
-   * @param indexPath Local path to the tantivy index directory
-   * @param outputPath Destination path for the split file (local, S3, or Azure)
-   * @param partitionId Spark partition ID
-   * @param nodeId Node identifier
-   * @param configMap Configuration map containing spark.indextables.* keys
-   * @return Metadata about the created split
+   * @param indexPath
+   *   Local path to the tantivy index directory
+   * @param outputPath
+   *   Destination path for the split file (local, S3, or Azure)
+   * @param partitionId
+   *   Spark partition ID
+   * @param nodeId
+   *   Node identifier
+   * @param configMap
+   *   Configuration map containing spark.indextables.* keys
+   * @return
+   *   Metadata about the created split
    */
   def createSplit(
     indexPath: String,
@@ -297,8 +302,15 @@ object SplitManager {
     // Generate unique identifiers
     val indexUid = s"tantivy4spark-${UUID.randomUUID().toString}"
     val config = new QuickwitSplit.SplitConfig(
-      indexUid, "tantivy4spark", nodeId, "default",
-      partitionId, Instant.now(), Instant.now(), null, null
+      indexUid,
+      "tantivy4spark",
+      nodeId,
+      "default",
+      partitionId,
+      Instant.now(),
+      Instant.now(),
+      null,
+      null
     )
 
     // Determine protocol
@@ -317,17 +329,19 @@ object SplitManager {
         val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, configMap)
         try {
           val splitFile = Paths.get(tempSplitPath)
-          val fileSize = Files.size(splitFile)
+          val fileSize  = Files.size(splitFile)
 
-          val streamingThreshold = configMap.get("spark.indextables.s3.streamingThreshold")
-            .map(_.toLong).getOrElse(100L * 1024 * 1024)
+          val streamingThreshold = configMap
+            .get("spark.indextables.s3.streamingThreshold")
+            .map(_.toLong)
+            .getOrElse(100L * 1024 * 1024)
 
           if (fileSize > streamingThreshold) {
             logger.info(s"Using streaming upload for large split: $outputPath (${fileSize / (1024 * 1024)} MB)")
             val inputStream = Files.newInputStream(splitFile)
-            try {
+            try
               cloudProvider.writeFileFromStream(outputPath, inputStream, Some(fileSize))
-            } finally
+            finally
               inputStream.close()
           } else {
             val splitContent = Files.readAllBytes(splitFile)

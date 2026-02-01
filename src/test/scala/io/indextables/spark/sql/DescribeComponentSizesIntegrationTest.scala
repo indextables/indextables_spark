@@ -32,7 +32,7 @@ import org.scalatest.BeforeAndAfterAll
  */
 class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
-  private var spark: SparkSession = _
+  private var spark: SparkSession         = _
   private var testDir: java.nio.file.Path = _
 
   override def beforeAll(): Unit = {
@@ -102,7 +102,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val tablePath = createTestTable("single_split")
 
     val result = spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$tablePath'")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     // Should return at least some component sizes
     rows.length should be >= 1
@@ -122,9 +122,11 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val result = spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$tablePath'")
     result.createOrReplaceTempView("components_fastfield")
 
-    val fastfieldComponents = spark.sql(
-      "SELECT * FROM components_fastfield WHERE component_type = 'fastfield'"
-    ).collect()
+    val fastfieldComponents = spark
+      .sql(
+        "SELECT * FROM components_fastfield WHERE component_type = 'fastfield'"
+      )
+      .collect()
 
     // Should have at least one fastfield component (for the configured fast field)
     fastfieldComponents.length should be >= 1
@@ -142,9 +144,11 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     result.createOrReplaceTempView("components_segment")
 
     // Look for segment-level components (those starting with _)
-    val segmentComponents = spark.sql(
-      "SELECT * FROM components_segment WHERE component_key LIKE '\\_%'"
-    ).collect()
+    val segmentComponents = spark
+      .sql(
+        "SELECT * FROM components_segment WHERE component_key LIKE '\\_%'"
+      )
+      .collect()
 
     // Segment-level components should exist
     segmentComponents.length should be >= 1
@@ -163,9 +167,13 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val result = spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$tablePath'")
     result.createOrReplaceTempView("components_types")
 
-    val componentTypes = spark.sql(
-      "SELECT DISTINCT component_type FROM components_types"
-    ).collect().map(_.getString(0)).toSet
+    val componentTypes = spark
+      .sql(
+        "SELECT DISTINCT component_type FROM components_types"
+      )
+      .collect()
+      .map(_.getString(0))
+      .toSet
 
     // Should have at least some recognized component types
     val knownTypes = Set("fastfield", "fieldnorm", "term", "postings", "positions", "store")
@@ -179,7 +187,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
 
     // Get all components
     val allResult = spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$tablePath'")
-    val allRows = allResult.collect()
+    val allRows   = allResult.collect()
 
     // Get filtered components
     val filteredResult = spark.sql(
@@ -216,7 +224,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val tablePath = createTestTable("unpartitioned")
 
     val result = spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$tablePath'")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     rows.length should be >= 1
 
@@ -239,15 +247,20 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     totalSize should be >= 0L
 
     // Should be able to filter
-    val filteredCount = spark.sql(
-      "SELECT COUNT(*) FROM components_query WHERE size_bytes > 0"
-    ).head().getLong(0)
+    val filteredCount = spark
+      .sql(
+        "SELECT COUNT(*) FROM components_query WHERE size_bytes > 0"
+      )
+      .head()
+      .getLong(0)
     filteredCount should be >= 0L
 
     // Should be able to group
-    val groupedResult = spark.sql(
-      "SELECT component_type, COUNT(*) as cnt FROM components_query GROUP BY component_type"
-    ).collect()
+    val groupedResult = spark
+      .sql(
+        "SELECT component_type, COUNT(*) as cnt FROM components_query GROUP BY component_type"
+      )
+      .collect()
     groupedResult.length should be >= 1
   }
 

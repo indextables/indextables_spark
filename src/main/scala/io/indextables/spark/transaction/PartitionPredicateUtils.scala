@@ -17,14 +17,21 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
-import org.apache.spark.sql.catalyst.expressions.{And => CatalystAnd, Or => CatalystOr, Not => CatalystNot}
-import org.apache.spark.sql.catalyst.expressions.{EqualTo => CatalystEqualTo, GreaterThan => CatalystGreaterThan}
-import org.apache.spark.sql.catalyst.expressions.{GreaterThanOrEqual => CatalystGreaterThanOrEqual}
-import org.apache.spark.sql.catalyst.expressions.{LessThan => CatalystLessThan, LessThanOrEqual => CatalystLessThanOrEqual}
-import org.apache.spark.sql.catalyst.expressions.{In => CatalystIn, IsNull => CatalystIsNull, IsNotNull => CatalystIsNotNull}
-import org.apache.spark.sql.catalyst.expressions.{StartsWith => CatalystStartsWith}
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.expressions.{And => CatalystAnd, Not => CatalystNot, Or => CatalystOr}
+import org.apache.spark.sql.catalyst.expressions.{EqualTo => CatalystEqualTo, GreaterThan => CatalystGreaterThan}
+import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{GreaterThanOrEqual => CatalystGreaterThanOrEqual}
+import org.apache.spark.sql.catalyst.expressions.{
+  In => CatalystIn,
+  IsNotNull => CatalystIsNotNull,
+  IsNull => CatalystIsNull
+}
+import org.apache.spark.sql.catalyst.expressions.{
+  LessThan => CatalystLessThan,
+  LessThanOrEqual => CatalystLessThanOrEqual
+}
+import org.apache.spark.sql.catalyst.expressions.{StartsWith => CatalystStartsWith}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}

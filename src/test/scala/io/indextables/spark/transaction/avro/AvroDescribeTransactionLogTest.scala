@@ -219,7 +219,7 @@ class AvroDescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach
     assert(logPaths.nonEmpty, "Should have log file paths")
 
     // Check if Avro state is being used
-    val txLogDir = new File(tablePath, "_transaction_log")
+    val txLogDir     = new File(tablePath, "_transaction_log")
     val hasAvroState = txLogDir.listFiles().exists(_.getName.startsWith("state-v"))
     if (hasAvroState) {
       // If Avro state exists, some paths should reference it

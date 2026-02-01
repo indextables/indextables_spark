@@ -17,25 +17,22 @@
 
 package io.indextables.spark.indexquery
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.exceptions.IndexQueryParseException
+import io.indextables.spark.TestBase
 
 /**
  * Test cases for IndexQuery behavior with invalid query syntax in aggregate operations.
  *
  * These tests verify that:
- * 1. Invalid query syntax throws IndexQueryParseException on the DRIVER (pre-scan validation)
- * 2. Error messages are user-friendly
- * 3. No Spark tasks are created/failed (validation happens before task scheduling)
- * 4. Both SimpleAggregateScan and GroupByAggregateScan paths are covered
+ *   1. Invalid query syntax throws IndexQueryParseException on the DRIVER (pre-scan validation) 2. Error messages are
+ *      user-friendly 3. No Spark tasks are created/failed (validation happens before task scheduling) 4. Both
+ *      SimpleAggregateScan and GroupByAggregateScan paths are covered
  */
 class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
 
-  /**
-   * Helper to get full error message chain from an exception
-   */
+  /** Helper to get full error message chain from an exception */
   private def getFullErrorMessage(e: Throwable): String = {
-    val messages = scala.collection.mutable.ArrayBuffer[String]()
+    val messages           = scala.collection.mutable.ArrayBuffer[String]()
     var current: Throwable = e
     while (current != null) {
       if (current.getMessage != null) {
@@ -46,9 +43,7 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     messages.mkString(" -> ")
   }
 
-  /**
-   * Check if exception chain contains IndexQueryParseException.
-   */
+  /** Check if exception chain contains IndexQueryParseException. */
   private def containsIndexQueryParseException(e: Throwable): Boolean = {
     var current: Throwable = e
     while (current != null) {
@@ -60,10 +55,7 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     false
   }
 
-  /**
-   * Verify that an exception was thrown during driver-side validation,
-   * NOT during task execution.
-   */
+  /** Verify that an exception was thrown during driver-side validation, NOT during task execution. */
   private def assertDriverSideValidation(e: Throwable): Unit = {
     val errorMessage = getFullErrorMessage(e)
 
@@ -71,14 +63,14 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     assert(
       !errorMessage.contains("Task") || !errorMessage.contains("failed"),
       s"Exception appears to be from task execution, not driver-side validation. " +
-      s"Error: $errorMessage"
+        s"Error: $errorMessage"
     )
 
     // Should contain IndexQueryParseException in the chain
     assert(
       containsIndexQueryParseException(e),
       s"Exception chain should contain IndexQueryParseException. " +
-      s"Got: ${e.getClass.getName}: $errorMessage"
+        s"Got: ${e.getClass.getName}: $errorMessage"
     )
   }
 
@@ -108,20 +100,24 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
 
     // First test with a VALID query to see if it works
     println("=== TEST 1: Valid IndexQuery with COUNT ===")
-    val validResult = spark.sql("""
+    val validResult = spark
+      .sql("""
       SELECT COUNT(*) as cnt FROM debug_count_test
       WHERE content indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
     println(s"Valid query result: count = ${validResult(0).getLong(0)}")
     assert(validResult(0).getLong(0) == 2, "Valid query should return 2 documents")
 
     // Now test with an INVALID query
     println("\n=== TEST 2: Invalid IndexQuery with COUNT ===")
     try {
-      val invalidResult = spark.sql("""
+      val invalidResult = spark
+        .sql("""
         SELECT COUNT(*) as cnt FROM debug_count_test
         WHERE content indexquery '((('
-      """).collect()
+      """)
+        .collect()
       println(s"Invalid query result: count = ${invalidResult(0).getLong(0)}")
       println("WARNING: No exception was thrown for invalid syntax!")
       fail(s"Expected exception for invalid syntax, but got count = ${invalidResult(0).getLong(0)}")
@@ -131,9 +127,9 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
         println(s"Exception caught: $errorMessage")
         assert(
           errorMessage.contains("IndexQuery") ||
-          errorMessage.contains("syntax") ||
-          errorMessage.contains("parse") ||
-          errorMessage.contains("Parse error"),
+            errorMessage.contains("syntax") ||
+            errorMessage.contains("parse") ||
+            errorMessage.contains("Parse error"),
           s"Error message should describe the syntax problem. Got: $errorMessage"
         )
     }
@@ -165,10 +161,12 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
 
     // Invalid syntax in simple COUNT aggregation should throw on driver
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT COUNT(*) FROM simple_count_invalid_test
         WHERE content indexquery '((('
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -177,9 +175,9 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -210,10 +208,12 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
 
     // Invalid syntax in SUM aggregation should throw on driver
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT SUM(score) FROM sum_invalid_test
         WHERE content indexquery '((('
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -222,9 +222,9 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -256,11 +256,13 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
 
     // Invalid syntax in GROUP BY aggregation should throw on driver
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT category, COUNT(*) FROM groupby_invalid_test
         WHERE content indexquery '((('
         GROUP BY category
-      """).collect()
+      """)
+        .collect()
     }
 
     // Verify driver-side validation (not task failure)
@@ -269,9 +271,9 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     val errorMessage = getFullErrorMessage(exception)
     assert(
       errorMessage.contains("IndexQuery") ||
-      errorMessage.contains("syntax") ||
-      errorMessage.contains("parse") ||
-      errorMessage.contains("Parse error"),
+        errorMessage.contains("syntax") ||
+        errorMessage.contains("parse") ||
+        errorMessage.contains("Parse error"),
       s"Error message should describe the syntax problem. Got: $errorMessage"
     )
   }
@@ -302,17 +304,21 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     df.createOrReplaceTempView("valid_agg_test")
 
     // Valid IndexQuery with COUNT
-    val countResult = spark.sql("""
+    val countResult = spark
+      .sql("""
       SELECT COUNT(*) FROM valid_agg_test
       WHERE content indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
     assert(countResult(0).getLong(0) == 2, s"Expected 2, got ${countResult(0).getLong(0)}")
 
     // Valid IndexQuery with SUM
-    val sumResult = spark.sql("""
+    val sumResult = spark
+      .sql("""
       SELECT SUM(score) FROM valid_agg_test
       WHERE content indexquery 'learning'
-    """).collect()
+    """)
+      .collect()
     assert(sumResult(0).getDouble(0) == 300.0, s"Expected 300.0, got ${sumResult(0).getDouble(0)}")
   }
 }

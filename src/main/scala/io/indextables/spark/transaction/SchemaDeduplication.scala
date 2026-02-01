@@ -217,15 +217,15 @@ object SchemaDeduplication {
   /**
    * Filter out object fields with empty field_mappings from a docMappingJson string.
    *
-   * When a StructType/ArrayType field is always null during writes, the docMappingJson
-   * ends up with an empty field_mappings array for that field. Quickwit's DocMapperBuilder
-   * rejects such schemas with "object must have at least one field mapping".
+   * When a StructType/ArrayType field is always null during writes, the docMappingJson ends up with an empty
+   * field_mappings array for that field. Quickwit's DocMapperBuilder rejects such schemas with "object must have at
+   * least one field mapping".
    *
-   * This filter removes those problematic fields so aggregation queries can succeed.
-   * The removed fields have no indexed data anyway (all values were null).
+   * This filter removes those problematic fields so aggregation queries can succeed. The removed fields have no indexed
+   * data anyway (all values were null).
    *
-   * NOTE: This method parses JSON which is expensive. For repeated calls with the same
-   * schema, use filterEmptyObjectMappingsCached instead.
+   * NOTE: This method parses JSON which is expensive. For repeated calls with the same schema, use
+   * filterEmptyObjectMappingsCached instead.
    *
    * @param docMappingJson
    *   The original docMappingJson string (array of field mappings)
@@ -271,9 +271,7 @@ object SchemaDeduplication {
         docMappingJson
     }
 
-  /**
-   * Check if a field mapping is an object type with empty field_mappings.
-   */
+  /** Check if a field mapping is an object type with empty field_mappings. */
   private def isEmptyObjectField(node: JsonNode): Boolean = {
     val fieldType = Option(node.get("type")).map(_.asText()).getOrElse("")
 
@@ -292,10 +290,9 @@ object SchemaDeduplication {
   /**
    * Cached version of filterEmptyObjectMappings that uses the global schema cache.
    *
-   * The filterEmptyObjectMappings function parses JSON which is expensive (~1ms per call).
-   * Since the same schema hash always produces the same filtered result, we cache based
-   * on the schema hash. This provides a massive performance improvement when reading
-   * tables with thousands of files that all share the same schema.
+   * The filterEmptyObjectMappings function parses JSON which is expensive (~1ms per call). Since the same schema hash
+   * always produces the same filtered result, we cache based on the schema hash. This provides a massive performance
+   * improvement when reading tables with thousands of files that all share the same schema.
    *
    * @param schemaHash
    *   The schema hash (from docMappingRef) - used as cache key
@@ -313,8 +310,8 @@ object SchemaDeduplication {
   /**
    * Pre-filter an entire schema registry to remove empty object fields.
    *
-   * This should be called ONCE when loading a StateManifest, NOT per file entry.
-   * The filtered registry can then be passed to toAddActions for simple lookups.
+   * This should be called ONCE when loading a StateManifest, NOT per file entry. The filtered registry can then be
+   * passed to toAddActions for simple lookups.
    *
    * Uses cached filtering so each unique schema is only parsed once.
    *
@@ -328,8 +325,9 @@ object SchemaDeduplication {
       return schemaRegistry
     }
     logger.debug(s"Pre-filtering schema registry with ${schemaRegistry.size} schemas")
-    schemaRegistry.map { case (hash, schema) =>
-      hash -> filterEmptyObjectMappingsCached(hash, schema)
+    schemaRegistry.map {
+      case (hash, schema) =>
+        hash -> filterEmptyObjectMappingsCached(hash, schema)
     }
   }
 
@@ -357,7 +355,7 @@ object SchemaDeduplication {
     // Use CACHED filtering to avoid repeated JSON parsing for same schema
     val schemaMap = registry.collect {
       case (key, value) if key.startsWith(SCHEMA_KEY_PREFIX) =>
-        val hash = key.stripPrefix(SCHEMA_KEY_PREFIX)
+        val hash   = key.stripPrefix(SCHEMA_KEY_PREFIX)
         val schema = if (filterEmptyObjects) filterEmptyObjectMappingsCached(hash, value) else value
         hash -> schema
     }
@@ -378,8 +376,8 @@ object SchemaDeduplication {
       // Also filter inline docMappingJson (legacy format without deduplication)
       // Use docMappingRef as hash if available to avoid expensive JSON normalization
       case add: AddAction if add.docMappingJson.isDefined && filterEmptyObjects =>
-        val schema = add.docMappingJson.get
-        val hash = add.docMappingRef.getOrElse(computeSchemaHash(schema))
+        val schema         = add.docMappingJson.get
+        val hash           = add.docMappingRef.getOrElse(computeSchemaHash(schema))
         val filteredSchema = filterEmptyObjectMappingsCached(hash, schema)
         if (filteredSchema != schema) {
           add.copy(docMappingJson = Some(filteredSchema))

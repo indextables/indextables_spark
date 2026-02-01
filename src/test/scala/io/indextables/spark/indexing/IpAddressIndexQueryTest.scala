@@ -27,12 +27,12 @@ import io.indextables.spark.TestBase
  *   - Range: ip_field:[192.168.1.1 TO 192.168.1.10]
  *   - Multiple terms (IN): ip_field:192.168.1.1 OR ip_field:10.0.0.1
  *
- * Note: Wildcard queries (like 192.168.1.*) are NOT supported on IP address fields.
- * Use range queries for subnet-style matching.
+ * Note: Wildcard queries (like 192.168.1.*) are NOT supported on IP address fields. Use range queries for subnet-style
+ * matching.
  */
 class IpAddressIndexQueryTest extends TestBase {
 
-  private var testDataPath: String = _
+  private var testDataPath: String              = _
   private var sharedTempDir: java.nio.file.Path = _
 
   override def beforeAll(): Unit = {
@@ -54,8 +54,8 @@ class IpAddressIndexQueryTest extends TestBase {
       (5, "server5", "192.168.1.100", "eu-west", 300),
       (6, "server6", "10.0.0.1", "eu-west", 50),
       (7, "server7", "10.0.0.2", "ap-south", 75),
-      (8, "server8", "2001:db8::1", "ap-south", 125),  // IPv6
-      (9, "server9", "2001:db8::2", "us-east", 175),   // IPv6
+      (8, "server8", "2001:db8::1", "ap-south", 125), // IPv6
+      (9, "server9", "2001:db8::2", "us-east", 175),  // IPv6
       (10, "server10", "172.16.0.1", "us-west", 225)
     ).toDF("id", "name", "ip", "region", "requests")
 
@@ -101,9 +101,11 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test multiple IPs using OR in IndexQuery
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.1 OR 10.0.0.1'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.1 OR 10.0.0.1'"
+      )
+      .collect()
 
     result.length shouldBe 2
     val names = result.map(_.getAs[String]("name")).toSet
@@ -114,9 +116,11 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test IP range using Tantivy range syntax [inclusive TO inclusive]
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '[192.168.1.1 TO 192.168.1.3]'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '[192.168.1.1 TO 192.168.1.3]'"
+      )
+      .collect()
 
     result.length shouldBe 3
     val names = result.map(_.getAs[String]("name")).toSet
@@ -127,9 +131,11 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test IP range using Tantivy range syntax {exclusive TO exclusive}
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '{192.168.1.1 TO 192.168.1.3}'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '{192.168.1.1 TO 192.168.1.3}'"
+      )
+      .collect()
 
     // Only 192.168.1.2 should match (1 and 3 are excluded)
     result.length shouldBe 1
@@ -140,9 +146,11 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test IP range [inclusive TO exclusive}
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '[192.168.1.1 TO 192.168.1.3}'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '[192.168.1.1 TO 192.168.1.3}'"
+      )
+      .collect()
 
     // 192.168.1.1 and 192.168.1.2 should match (3 is excluded)
     result.length shouldBe 2
@@ -154,9 +162,11 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test IPv6 address matching - need to quote due to colons
-    val result = spark.sql(
-      """SELECT * FROM ip_servers WHERE ip indexquery '"2001:db8::1"'"""
-    ).collect()
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers WHERE ip indexquery '"2001:db8::1"'"""
+      )
+      .collect()
 
     result.length shouldBe 1
     result(0).getAs[String]("name") shouldBe "server8"
@@ -168,9 +178,11 @@ class IpAddressIndexQueryTest extends TestBase {
     // Test IPv6 multiple addresses using OR
     // Note: IPv6 range queries via IndexQuery are not supported due to Tantivy parser limitations
     // Use Spark filter syntax ($"ip".between(...)) for IPv6 ranges instead
-    val result = spark.sql(
-      """SELECT * FROM ip_servers WHERE ip indexquery '"2001:db8::1" OR "2001:db8::2"'"""
-    ).collect()
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers WHERE ip indexquery '"2001:db8::1" OR "2001:db8::2"'"""
+      )
+      .collect()
 
     result.length shouldBe 2
     val names = result.map(_.getAs[String]("name")).toSet
@@ -182,28 +194,30 @@ class IpAddressIndexQueryTest extends TestBase {
 
     // Test IndexQuery combined with regular SQL filters
     // Use range query to match 192.168.1.x subnet
-    val result = spark.sql(
-      """SELECT * FROM ip_servers
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers
          WHERE ip indexquery '[192.168.1.0 TO 192.168.1.255]'
          AND region = 'us-east'"""
-    ).collect()
+      )
+      .collect()
 
     // 192.168.1.1 and 192.168.1.2 are in us-east
     result.length shouldBe 2
-    result.foreach { row =>
-      row.getAs[String]("region") shouldBe "us-east"
-    }
+    result.foreach(row => row.getAs[String]("region") shouldBe "us-east")
   }
 
   test("IP address IndexQuery - with aggregation") {
     val spark = this.spark
 
     // Test IndexQuery with aggregation using range for subnet
-    val result = spark.sql(
-      """SELECT COUNT(*) as cnt, SUM(requests) as total_requests
+    val result = spark
+      .sql(
+        """SELECT COUNT(*) as cnt, SUM(requests) as total_requests
          FROM ip_servers
          WHERE ip indexquery '[192.168.1.0 TO 192.168.1.255]'"""
-    ).collect()
+      )
+      .collect()
 
     result.length shouldBe 1
     result(0).getAs[Long]("cnt") shouldBe 5
@@ -215,9 +229,11 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test matching 10.0.0.x addresses using range
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '[10.0.0.0 TO 10.0.0.255]'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '[10.0.0.0 TO 10.0.0.255]'"
+      )
+      .collect()
 
     result.length shouldBe 2
     val names = result.map(_.getAs[String]("name")).toSet
@@ -228,10 +244,12 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test matching multiple subnets using OR with ranges
-    val result = spark.sql(
-      """SELECT * FROM ip_servers
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers
          WHERE ip indexquery '[10.0.0.0 TO 10.0.0.255] OR [172.16.0.0 TO 172.16.0.255]'"""
-    ).collect()
+      )
+      .collect()
 
     result.length shouldBe 3
     val names = result.map(_.getAs[String]("name")).toSet
@@ -242,10 +260,12 @@ class IpAddressIndexQueryTest extends TestBase {
     val spark = this.spark
 
     // Test NOT query - match range but exclude specific IP
-    val result = spark.sql(
-      """SELECT * FROM ip_servers
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers
          WHERE ip indexquery '[192.168.1.1 TO 192.168.1.3] AND NOT 192.168.1.1'"""
-    ).collect()
+      )
+      .collect()
 
     // Should match 192.168.1.2, 192.168.1.3 (excluding 192.168.1.1)
     result.length shouldBe 2
@@ -259,30 +279,34 @@ class IpAddressIndexQueryTest extends TestBase {
     // Test greater than using open-ended range {value TO *]
     // In Tantivy IP ordering, this matches IPs > 192.168.1.3
     // which includes 192.168.1.10, 192.168.1.100, and IPv6 addresses
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '{192.168.1.3 TO *]'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '{192.168.1.3 TO *]'"
+      )
+      .collect()
 
     // Should match IPs > 192.168.1.3 in Tantivy's IP ordering
     // This includes: 192.168.1.10, 192.168.1.100, and IPv6 addresses (2001:db8::1, 2001:db8::2)
-    result.length should be >= 2  // At least the 192.168.1.x addresses
+    result.length should be >= 2 // At least the 192.168.1.x addresses
     val names = result.map(_.getAs[String]("name")).toSet
-    names should contain("server4")  // 192.168.1.10
-    names should contain("server5")  // 192.168.1.100
+    names should contain("server4") // 192.168.1.10
+    names should contain("server5") // 192.168.1.100
   }
 
   test("IP address IndexQuery - less than using open range") {
     val spark = this.spark
 
     // Test less than using open-ended range [* TO value}
-    val result = spark.sql(
-      "SELECT * FROM ip_servers WHERE ip indexquery '[* TO 192.168.1.2}'"
-    ).collect()
+    val result = spark
+      .sql(
+        "SELECT * FROM ip_servers WHERE ip indexquery '[* TO 192.168.1.2}'"
+      )
+      .collect()
 
     // Should match IPs < 192.168.1.2 in Tantivy's IP ordering
     // Note: Tantivy may normalize IPs to IPv6-mapped format (::ffff:10.0.0.1)
     result.length should be >= 1
     val names = result.map(_.getAs[String]("name")).toSet
-    names should contain("server1")  // 192.168.1.1
+    names should contain("server1") // 192.168.1.1
   }
 }

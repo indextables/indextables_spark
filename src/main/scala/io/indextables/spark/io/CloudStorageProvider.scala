@@ -146,17 +146,17 @@ trait CloudStorageProvider extends Closeable {
 }
 
 /**
- * Companion object providing global request counters for monitoring and testing.
- * These counters track all CloudStorageProvider operations across the JVM and are
- * useful for validating caching effectiveness and diagnosing performance issues.
+ * Companion object providing global request counters for monitoring and testing. These counters track all
+ * CloudStorageProvider operations across the JVM and are useful for validating caching effectiveness and diagnosing
+ * performance issues.
  */
 object CloudStorageProvider {
   // Global atomic counters for all CloudStorageProvider operations
-  private val existsCount = new AtomicLong(0)
-  private val readFileCount = new AtomicLong(0)
-  private val listFilesCount = new AtomicLong(0)
-  private val writeFileCount = new AtomicLong(0)
-  private val deleteFileCount = new AtomicLong(0)
+  private val existsCount      = new AtomicLong(0)
+  private val readFileCount    = new AtomicLong(0)
+  private val listFilesCount   = new AtomicLong(0)
+  private val writeFileCount   = new AtomicLong(0)
+  private val deleteFileCount  = new AtomicLong(0)
   private val getFileInfoCount = new AtomicLong(0)
 
   /** Increment exists (headObject) call counter */
@@ -317,19 +317,24 @@ object CloudStorageProviderFactory {
     // Build a complete config map from options + Spark session config (for UC provider fast path)
     // All keys are lowercased for case-insensitive matching
     // Options take precedence over Spark session config
-    val optionsMap: Map[String, String] = options.asCaseSensitiveMap().asScala.toMap
+    val optionsMap: Map[String, String] = options
+      .asCaseSensitiveMap()
+      .asScala
+      .toMap
       .map { case (k, v) => (k.toLowerCase, v) }
-    val sparkConfigMap: Map[String, String] = try {
-      import org.apache.spark.sql.SparkSession
-      SparkSession.getActiveSession match {
-        case Some(session) =>
-          io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromSpark(session)
-            .map { case (k, v) => (k.toLowerCase, v) }
-        case None => Map.empty[String, String]
+    val sparkConfigMap: Map[String, String] =
+      try {
+        import org.apache.spark.sql.SparkSession
+        SparkSession.getActiveSession match {
+          case Some(session) =>
+            io.indextables.spark.util.ConfigNormalization
+              .extractTantivyConfigsFromSpark(session)
+              .map { case (k, v) => (k.toLowerCase, v) }
+          case None => Map.empty[String, String]
+        }
+      } catch {
+        case _: Exception => Map.empty[String, String]
       }
-    } catch {
-      case _: Exception => Map.empty[String, String]
-    }
     // Merge: Spark config first, then options (options take precedence)
     val combinedConfigMap = sparkConfigMap ++ optionsMap
 
@@ -359,15 +364,18 @@ object CloudStorageProviderFactory {
   /**
    * Create appropriate cloud storage provider from a config Map (FAST PATH).
    *
-   * This overload avoids creating Hadoop Configuration objects, which is expensive.
-   * Use this method on executors when you have the config already serialized as a Map.
+   * This overload avoids creating Hadoop Configuration objects, which is expensive. Use this method on executors when
+   * you have the config already serialized as a Map.
    *
-   * For HDFS/local protocols, this will create a Hadoop Configuration internally since
-   * Hadoop FileSystem API requires it. For S3/Azure, no Hadoop Configuration is created.
+   * For HDFS/local protocols, this will create a Hadoop Configuration internally since Hadoop FileSystem API requires
+   * it. For S3/Azure, no Hadoop Configuration is created.
    *
-   * @param path   The storage path (e.g., s3://bucket/path)
-   * @param config Configuration map containing spark.indextables.* keys
-   * @return CloudStorageProvider appropriate for the path protocol
+   * @param path
+   *   The storage path (e.g., s3://bucket/path)
+   * @param config
+   *   Configuration map containing spark.indextables.* keys
+   * @return
+   *   CloudStorageProvider appropriate for the path protocol
    */
   def createProvider(
     path: String,
@@ -381,7 +389,9 @@ object CloudStorageProviderFactory {
     // Extract cloud config directly from the Map (no Hadoop Configuration needed for S3/Azure)
     val cloudConfig = extractCloudConfigFromMap(config, protocol)
 
-    logger.info(s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path (fast path)")
+    logger.info(
+      s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path (fast path)"
+    )
 
     protocol match {
       case ProtocolBasedIOFactory.S3Protocol =>
@@ -800,8 +810,8 @@ object CloudStorageProviderFactory {
   /**
    * Extract cloud storage configuration directly from a Map (FAST PATH).
    *
-   * This avoids creating Hadoop Configuration objects, which is expensive.
-   * Uses MapConfigSource and EnvironmentConfigSource for config resolution.
+   * This avoids creating Hadoop Configuration objects, which is expensive. Uses MapConfigSource and
+   * EnvironmentConfigSource for config resolution.
    */
   def extractCloudConfigFromMap(
     config: Map[String, String],
@@ -888,17 +898,22 @@ object CloudStorageProviderFactory {
       awsPathStyleAccess = pathStyleAccess,
 
       // Azure configuration
-      azureAccountName = ConfigurationResolver.resolveString("accountName", azureSources, logMask = false)
+      azureAccountName = ConfigurationResolver
+        .resolveString("accountName", azureSources, logMask = false)
         .orElse(Option(System.getenv("AZURE_STORAGE_ACCOUNT"))),
-      azureAccountKey = ConfigurationResolver.resolveString("accountKey", azureSources, logMask = true)
+      azureAccountKey = ConfigurationResolver
+        .resolveString("accountKey", azureSources, logMask = true)
         .orElse(Option(System.getenv("AZURE_STORAGE_KEY"))),
       azureConnectionString = ConfigurationResolver.resolveString("connectionString", azureSources, logMask = true),
       azureBearerToken = ConfigurationResolver.resolveString("bearerToken", azureSources, logMask = true),
-      azureTenantId = ConfigurationResolver.resolveString("tenantId", azureSources, logMask = false)
+      azureTenantId = ConfigurationResolver
+        .resolveString("tenantId", azureSources, logMask = false)
         .orElse(Option(System.getenv("AZURE_TENANT_ID"))),
-      azureClientId = ConfigurationResolver.resolveString("clientId", azureSources, logMask = false)
+      azureClientId = ConfigurationResolver
+        .resolveString("clientId", azureSources, logMask = false)
         .orElse(Option(System.getenv("AZURE_CLIENT_ID"))),
-      azureClientSecret = ConfigurationResolver.resolveString("clientSecret", azureSources, logMask = true)
+      azureClientSecret = ConfigurationResolver
+        .resolveString("clientSecret", azureSources, logMask = true)
         .orElse(Option(System.getenv("AZURE_CLIENT_SECRET"))),
       azureEndpoint = ConfigurationResolver.resolveString("endpoint", azureSources, logMask = false),
       azureContainerName = ConfigurationResolver.resolveString("containerName", azureSources, logMask = false),
@@ -975,8 +990,8 @@ object CloudStorageProviderFactory {
   /**
    * Static method to normalize a path for tantivy4java compatibility (Map-based FAST PATH).
    *
-   * This overload avoids creating or using Hadoop Configuration objects.
-   * Use this on executors when you have the config already serialized as a Map.
+   * This overload avoids creating or using Hadoop Configuration objects. Use this on executors when you have the config
+   * already serialized as a Map.
    */
   def normalizePathForTantivy(
     path: String,

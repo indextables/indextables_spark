@@ -17,10 +17,10 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 class CompactionTest extends TestBase {
 
@@ -44,8 +44,8 @@ class CompactionTest extends TestBase {
         )
 
         // Get initial manifest
-        val manifestIO = StateManifestIO(cloudProvider)
-        val initialManifest = manifestIO.readStateManifest(s"$tempPath/state-v00000000000000000001")
+        val manifestIO           = StateManifestIO(cloudProvider)
+        val initialManifest      = manifestIO.readStateManifest(s"$tempPath/state-v00000000000000000001")
         val initialManifestCount = initialManifest.manifests.size
 
         // Remove 15 files (15% tombstone ratio > 10% threshold, should compact)
@@ -63,15 +63,14 @@ class CompactionTest extends TestBase {
 
         // Verify data integrity after compaction
         val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifestIO.resolveManifestPaths(compactedManifest, tempPath, stateDir2)
-        val readFiles = manifestReader.readManifestsParallel(manifestPaths)
+        val manifestPaths  = manifestIO.resolveManifestPaths(compactedManifest, tempPath, stateDir2)
+        val readFiles      = manifestReader.readManifestsParallel(manifestPaths)
 
         readFiles should have size 85
         readFiles.map(_.path) should not contain "file1.split"
         readFiles.map(_.path) should contain("file16.split")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -104,13 +103,12 @@ class CompactionTest extends TestBase {
 
         // After incremental write, tombstones should be present
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        val manifest   = manifestIO.readStateManifest(stateDir2)
 
         manifest.tombstones should have size 5
         manifest.numFiles shouldBe 195
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -146,13 +144,12 @@ class CompactionTest extends TestBase {
 
         // After compaction, tombstones should be empty
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        val manifest   = manifestIO.readStateManifest(stateDir2)
 
         manifest.tombstones shouldBe empty
         manifest.numFiles shouldBe 48999
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -186,20 +183,19 @@ class CompactionTest extends TestBase {
 
         // Read back and verify sorted order
         val manifestIO = StateManifestIO(cloudProvider)
-        val stateDir = s"$tempPath/state-v00000000000000000001"
-        val manifest = manifestIO.readStateManifest(stateDir)
+        val stateDir   = s"$tempPath/state-v00000000000000000001"
+        val manifest   = manifestIO.readStateManifest(stateDir)
 
         val manifestReader = AvroManifestReader(cloudProvider)
-        val manifestPaths = manifestIO.resolveManifestPaths(manifest, tempPath, stateDir)
-        val readFiles = manifestReader.readManifestsParallel(manifestPaths)
+        val manifestPaths  = manifestIO.resolveManifestPaths(manifest, tempPath, stateDir)
+        val readFiles      = manifestReader.readManifestsParallel(manifestPaths)
 
         readFiles should have size 5
         // Files should be sorted by partition value
         val dates = readFiles.map(_.partitionValues("date"))
         dates shouldBe Seq("2024-01-01", "2024-01-05", "2024-01-10", "2024-01-15", "2024-01-20")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -231,7 +227,7 @@ class CompactionTest extends TestBase {
 
         // Verify partition bounds are computed correctly
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(s"$tempPath/state-v00000000000000000001")
+        val manifest   = manifestIO.readStateManifest(s"$tempPath/state-v00000000000000000001")
 
         manifest.manifests.head.partitionBounds shouldBe defined
         val bounds = manifest.manifests.head.partitionBounds.get
@@ -243,9 +239,8 @@ class CompactionTest extends TestBase {
         bounds should contain key "region"
         bounds("region").min shouldBe Some("eu-west")
         bounds("region").max shouldBe Some("us-west")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -285,14 +280,13 @@ class CompactionTest extends TestBase {
 
         // Verify schema registry is preserved after compaction
         val manifestIO = StateManifestIO(cloudProvider)
-        val manifest = manifestIO.readStateManifest(stateDir2)
+        val manifest   = manifestIO.readStateManifest(stateDir2)
 
         manifest.schemaRegistry should have size 2
         manifest.schemaRegistry should contain key "_schema_abc123"
         manifest.schemaRegistry should contain key "_schema_def456"
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -368,9 +362,8 @@ class CompactionTest extends TestBase {
 
       // > 20 manifests triggers compaction
       stateWriter.needsCompaction(manifestManyParts, 0) shouldBe true
-    } finally {
+    } finally
       cloudProvider.close()
-    }
   }
 
   test("selective compaction only rewrites dirty manifests (partition-aware)") {
@@ -383,18 +376,18 @@ class CompactionTest extends TestBase {
 
       try {
         val stateWriter = StateWriter(cloudProvider, tempPath, entriesPerManifest = 50)
-        val manifestIO = StateManifestIO(cloudProvider)
+        val manifestIO  = StateManifestIO(cloudProvider)
 
         // Create 3 manifests with different partitions:
         // - January: 50 files (manifest 1)
         // - February: 50 files (manifest 2)
         // - March: 50 files (manifest 3)
-        val januaryFiles = (1 to 50).map(i =>
-          createTestFileEntry(s"date=2024-01/file$i.split", version = 1, Map("date" -> "2024-01")))
-        val februaryFiles = (1 to 50).map(i =>
-          createTestFileEntry(s"date=2024-02/file$i.split", version = 1, Map("date" -> "2024-02")))
-        val marchFiles = (1 to 50).map(i =>
-          createTestFileEntry(s"date=2024-03/file$i.split", version = 1, Map("date" -> "2024-03")))
+        val januaryFiles =
+          (1 to 50).map(i => createTestFileEntry(s"date=2024-01/file$i.split", version = 1, Map("date" -> "2024-01")))
+        val februaryFiles =
+          (1 to 50).map(i => createTestFileEntry(s"date=2024-02/file$i.split", version = 1, Map("date" -> "2024-02")))
+        val marchFiles =
+          (1 to 50).map(i => createTestFileEntry(s"date=2024-03/file$i.split", version = 1, Map("date" -> "2024-03")))
 
         // Write initial state (creates 3 manifests due to entriesPerManifest=50)
         val initialResult = stateWriter.writeIncrementalWithRetry(
@@ -457,18 +450,18 @@ class CompactionTest extends TestBase {
         janFileCount shouldBe 50
         febFileCount shouldBe 50
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -489,5 +482,4 @@ class CompactionTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

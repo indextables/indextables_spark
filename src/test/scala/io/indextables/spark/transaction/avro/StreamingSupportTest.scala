@@ -17,10 +17,10 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 class StreamingSupportTest extends TestBase {
 
@@ -52,9 +52,8 @@ class StreamingSupportTest extends TestBase {
         // Request changes since version 10 (future version) - should also be empty
         val futureChanges = streamingReader.getChangesSince(10)
         futureChanges.adds shouldBe empty
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -86,7 +85,7 @@ class StreamingSupportTest extends TestBase {
         // Get changes since version 1 - should return files from version 5
         val changes = streamingReader.getChangesSince(1)
         changes.adds should have size 5
-        changes.adds.map(_.path) should contain allOf(
+        changes.adds.map(_.path) should contain allOf (
           "file11.split", "file12.split", "file13.split", "file14.split", "file15.split"
         )
         changes.newVersion shouldBe 5
@@ -94,9 +93,8 @@ class StreamingSupportTest extends TestBase {
         // Get changes since version 0 - should return all files
         val allChanges = streamingReader.getChangesSince(0)
         allChanges.adds should have size 15
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -109,7 +107,7 @@ class StreamingSupportTest extends TestBase {
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter     = StateWriter(cloudProvider, tempPath)
         val streamingReader = StreamingStateReader(cloudProvider, tempPath)
 
         // No state yet
@@ -124,9 +122,8 @@ class StreamingSupportTest extends TestBase {
         )
 
         streamingReader.getCurrentVersion shouldBe 42
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -161,7 +158,7 @@ class StreamingSupportTest extends TestBase {
         // Get files at version 5
         val filesAtV5 = streamingReader.getFilesAtVersion(5)
         filesAtV5 should have size 5
-        filesAtV5.map(_.path) should contain allOf(
+        filesAtV5.map(_.path) should contain allOf (
           "file6.split", "file7.split", "file8.split", "file9.split", "file10.split"
         )
 
@@ -172,9 +169,8 @@ class StreamingSupportTest extends TestBase {
         // Get files at non-existent version
         val filesAtV99 = streamingReader.getFilesAtVersion(99)
         filesAtV99 shouldBe empty
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -187,7 +183,7 @@ class StreamingSupportTest extends TestBase {
       )
 
       try {
-        val stateWriter = StateWriter(cloudProvider, tempPath)
+        val stateWriter     = StateWriter(cloudProvider, tempPath)
         val streamingReader = StreamingStateReader(cloudProvider, tempPath)
 
         // No state yet
@@ -205,9 +201,8 @@ class StreamingSupportTest extends TestBase {
         metadata shouldBe defined
         metadata.get.stateVersion shouldBe 42
         metadata.get.numFiles shouldBe 100
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -240,15 +235,14 @@ class StreamingSupportTest extends TestBase {
         // Get changes between version 5 and 15 (exclusive-inclusive)
         val changes = streamingReader.getChangesBetween(5, 15)
         changes.adds should have size 10 // versions 10 and 15
-        changes.adds.map(_.addedAtVersion).distinct should contain allOf(10L, 15L)
+        changes.adds.map(_.addedAtVersion).distinct should contain allOf (10L, 15L)
         changes.adds.map(_.addedAtVersion).distinct should not contain 5L
 
         // Get changes between version 0 and 5
         val earlyChanges = streamingReader.getChangesBetween(0, 5)
         earlyChanges.adds should have size 10 // versions 1 and 5
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -281,18 +275,18 @@ class StreamingSupportTest extends TestBase {
         addActions.head.path shouldBe "test.split"
         addActions.head.partitionValues shouldBe Map("date" -> "2024-01-01")
         addActions.head.size shouldBe 1000L
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -313,5 +307,4 @@ class StreamingSupportTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

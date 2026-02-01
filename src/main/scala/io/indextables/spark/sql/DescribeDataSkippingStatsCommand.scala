@@ -29,18 +29,15 @@ import org.slf4j.LoggerFactory
 /**
  * SQL command to describe data skipping statistics.
  *
- * Syntax:
- *   DESCRIBE INDEXTABLES DATA SKIPPING STATS
- *   DESCRIBE TANTIVY4SPARK DATA SKIPPING STATS
+ * Syntax: DESCRIBE INDEXTABLES DATA SKIPPING STATS DESCRIBE TANTIVY4SPARK DATA SKIPPING STATS
  *
  * Returns statistics about:
- * - Data skipping effectiveness (files scanned vs skipped)
- * - Filter expression cache hit rates
- * - Partition filter cache hit rates
- * - Per-filter-type skip counts
+ *   - Data skipping effectiveness (files scanned vs skipped)
+ *   - Filter expression cache hit rates
+ *   - Partition filter cache hit rates
+ *   - Per-filter-type skip counts
  *
- * Note: All stats are collected on the driver since scan planning
- * (where data skipping occurs) happens on the driver.
+ * Note: All stats are collected on the driver since scan planning (where data skipping occurs) happens on the driver.
  */
 case class DescribeDataSkippingStatsCommand() extends LeafRunnableCommand {
 
@@ -72,8 +69,9 @@ case class DescribeDataSkippingStatsCommand() extends LeafRunnableCommand {
 
     // Per-filter-type stats (sorted by count descending)
     if (globalStats.filterTypes.nonEmpty) {
-      globalStats.filterTypes.toSeq.sortBy(-_._2).foreach { case (filterType, count) =>
-        rows += Row("filter_type_skips", filterType, count.toString)
+      globalStats.filterTypes.toSeq.sortBy(-_._2).foreach {
+        case (filterType, count) =>
+          rows += Row("filter_type_skips", filterType, count.toString)
       }
     }
 
@@ -81,8 +79,8 @@ case class DescribeDataSkippingStatsCommand() extends LeafRunnableCommand {
     // Filter expression cache stats
     // ========================================================================
     val (simplifiedHits, simplifiedMisses, inRangeHits, inRangeMisses) = FilterExpressionCache.getStats()
-    val (simplifiedHitRate, inRangeHitRate) = FilterExpressionCache.getHitRates()
-    val (simplifiedCacheSize, inRangeCacheSize) = FilterExpressionCache.getCacheSizes()
+    val (simplifiedHitRate, inRangeHitRate)                            = FilterExpressionCache.getHitRates()
+    val (simplifiedCacheSize, inRangeCacheSize)                        = FilterExpressionCache.getCacheSizes()
 
     rows += Row("filter_expr_cache", "simplified_hits", simplifiedHits.toString)
     rows += Row("filter_expr_cache", "simplified_misses", simplifiedMisses.toString)
@@ -110,11 +108,8 @@ case class DescribeDataSkippingStatsCommand() extends LeafRunnableCommand {
 /**
  * SQL command to reset/flush data skipping statistics.
  *
- * Syntax:
- *   FLUSH INDEXTABLES DATA SKIPPING STATS
- *   FLUSH TANTIVY4SPARK DATA SKIPPING STATS
- *   RESET INDEXTABLES DATA SKIPPING STATS
- *   RESET TANTIVY4SPARK DATA SKIPPING STATS
+ * Syntax: FLUSH INDEXTABLES DATA SKIPPING STATS FLUSH TANTIVY4SPARK DATA SKIPPING STATS RESET INDEXTABLES DATA SKIPPING
+ * STATS RESET TANTIVY4SPARK DATA SKIPPING STATS
  */
 case class FlushDataSkippingStatsCommand() extends LeafRunnableCommand {
 
@@ -150,9 +145,7 @@ case class FlushDataSkippingStatsCommand() extends LeafRunnableCommand {
 /**
  * SQL command to invalidate data skipping caches (clears both stats AND cached entries).
  *
- * Syntax:
- *   INVALIDATE INDEXTABLES DATA SKIPPING CACHE
- *   INVALIDATE TANTIVY4SPARK DATA SKIPPING CACHE
+ * Syntax: INVALIDATE INDEXTABLES DATA SKIPPING CACHE INVALIDATE TANTIVY4SPARK DATA SKIPPING CACHE
  */
 case class InvalidateDataSkippingCacheCommand() extends LeafRunnableCommand {
 
@@ -170,7 +163,7 @@ case class InvalidateDataSkippingCacheCommand() extends LeafRunnableCommand {
 
     // Get sizes before clearing
     val (simplifiedSize, inRangeSize) = FilterExpressionCache.getCacheSizes()
-    val partitionSize = PartitionFilterCache.size()
+    val partitionSize                 = PartitionFilterCache.size()
 
     // Reset data skipping metrics
     DataSkippingMetrics.resetAll()
@@ -184,9 +177,11 @@ case class InvalidateDataSkippingCacheCommand() extends LeafRunnableCommand {
     PartitionFilterCache.invalidate()
     rows += Row("partition_filter_cache", partitionSize.toLong)
 
-    logger.info(s"Data skipping caches invalidated: " +
-      s"filter_expr=${simplifiedSize + inRangeSize} entries, " +
-      s"partition_filter=$partitionSize entries")
+    logger.info(
+      s"Data skipping caches invalidated: " +
+        s"filter_expr=${simplifiedSize + inRangeSize} entries, " +
+        s"partition_filter=$partitionSize entries"
+    )
 
     rows.toSeq
   }

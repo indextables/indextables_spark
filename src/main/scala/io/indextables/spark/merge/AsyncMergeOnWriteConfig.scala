@@ -38,8 +38,8 @@ import org.slf4j.LoggerFactory
  *   - spark.indextables.mergeOnWrite.targetSize: Target size for merged splits (default: 4G)
  *   - spark.indextables.mergeOnWrite.shutdownTimeoutMs: Graceful shutdown wait (default: 300000 = 5 min)
  *
- * Threshold formula: threshold = batchSize * minBatchesToTrigger
- * Batch size formula: batchSize = max(1, totalClusterCpus * batchCpuFraction)
+ * Threshold formula: threshold = batchSize * minBatchesToTrigger Batch size formula: batchSize = max(1,
+ * totalClusterCpus * batchCpuFraction)
  *
  * @param enabled
  *   Whether merge-on-write is enabled
@@ -131,25 +131,25 @@ object AsyncMergeOnWriteConfig {
   private val logger = LoggerFactory.getLogger(getClass)
 
   // Configuration key constants
-  val KEY_ENABLED              = "spark.indextables.mergeOnWrite.enabled"
-  val KEY_ASYNC_ENABLED        = "spark.indextables.mergeOnWrite.async.enabled"
-  val KEY_BATCH_CPU_FRACTION   = "spark.indextables.mergeOnWrite.batchCpuFraction"
+  val KEY_ENABLED                = "spark.indextables.mergeOnWrite.enabled"
+  val KEY_ASYNC_ENABLED          = "spark.indextables.mergeOnWrite.async.enabled"
+  val KEY_BATCH_CPU_FRACTION     = "spark.indextables.mergeOnWrite.batchCpuFraction"
   val KEY_MAX_CONCURRENT_BATCHES = "spark.indextables.mergeOnWrite.maxConcurrentBatches"
   val KEY_MIN_BATCHES_TO_TRIGGER = "spark.indextables.mergeOnWrite.minBatchesToTrigger"
-  val KEY_TARGET_SIZE          = "spark.indextables.mergeOnWrite.targetSize"
-  val KEY_SHUTDOWN_TIMEOUT_MS  = "spark.indextables.mergeOnWrite.shutdownTimeoutMs"
+  val KEY_TARGET_SIZE            = "spark.indextables.mergeOnWrite.targetSize"
+  val KEY_SHUTDOWN_TIMEOUT_MS    = "spark.indextables.mergeOnWrite.shutdownTimeoutMs"
 
   // Legacy key for backwards compatibility
   val KEY_MERGE_GROUP_MULTIPLIER = "spark.indextables.mergeOnWrite.mergeGroupMultiplier"
 
   // Default values
-  val DEFAULT_ENABLED: Boolean              = false
-  val DEFAULT_ASYNC_ENABLED: Boolean        = true
-  val DEFAULT_BATCH_CPU_FRACTION: Double    = 0.167 // 1/6
-  val DEFAULT_MAX_CONCURRENT_BATCHES: Int   = 3
-  val DEFAULT_MIN_BATCHES_TO_TRIGGER: Int   = 1
-  val DEFAULT_TARGET_SIZE_BYTES: Long       = 4L * 1024 * 1024 * 1024 // 4GB
-  val DEFAULT_SHUTDOWN_TIMEOUT_MS: Long     = 300000L // 5 minutes
+  val DEFAULT_ENABLED: Boolean            = false
+  val DEFAULT_ASYNC_ENABLED: Boolean      = true
+  val DEFAULT_BATCH_CPU_FRACTION: Double  = 0.167                   // 1/6
+  val DEFAULT_MAX_CONCURRENT_BATCHES: Int = 3
+  val DEFAULT_MIN_BATCHES_TO_TRIGGER: Int = 1
+  val DEFAULT_TARGET_SIZE_BYTES: Long     = 4L * 1024 * 1024 * 1024 // 4GB
+  val DEFAULT_SHUTDOWN_TIMEOUT_MS: Long   = 300000L                 // 5 minutes
 
   /** Create default configuration. */
   def default: AsyncMergeOnWriteConfig = AsyncMergeOnWriteConfig()
@@ -163,23 +163,32 @@ object AsyncMergeOnWriteConfig {
    *   Parsed configuration
    */
   def fromOptions(options: CaseInsensitiveStringMap): AsyncMergeOnWriteConfig = {
-    val enabled = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
+    val enabled      = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
     val asyncEnabled = getBooleanOption(options, KEY_ASYNC_ENABLED, DEFAULT_ASYNC_ENABLED)
     val batchCpuFraction = getDoubleOption(
-      options, KEY_BATCH_CPU_FRACTION, DEFAULT_BATCH_CPU_FRACTION,
-      minExclusive = Some(0.0), maxInclusive = Some(1.0)
+      options,
+      KEY_BATCH_CPU_FRACTION,
+      DEFAULT_BATCH_CPU_FRACTION,
+      minExclusive = Some(0.0),
+      maxInclusive = Some(1.0)
     )
     val maxConcurrentBatches = getIntOption(
-      options, KEY_MAX_CONCURRENT_BATCHES, DEFAULT_MAX_CONCURRENT_BATCHES,
+      options,
+      KEY_MAX_CONCURRENT_BATCHES,
+      DEFAULT_MAX_CONCURRENT_BATCHES,
       mustBePositive = true
     )
     val minBatchesToTrigger = getIntOption(
-      options, KEY_MIN_BATCHES_TO_TRIGGER, DEFAULT_MIN_BATCHES_TO_TRIGGER,
+      options,
+      KEY_MIN_BATCHES_TO_TRIGGER,
+      DEFAULT_MIN_BATCHES_TO_TRIGGER,
       mustBePositive = true
     )
     val targetSizeBytes = parseBytes(options.getOrDefault(KEY_TARGET_SIZE, formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
     val shutdownTimeoutMs = getLongOption(
-      options, KEY_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      options,
+      KEY_SHUTDOWN_TIMEOUT_MS,
+      DEFAULT_SHUTDOWN_TIMEOUT_MS,
       mustBePositive = true
     )
 
@@ -216,7 +225,7 @@ object AsyncMergeOnWriteConfig {
    */
   def fromMap(configs: Map[String, String]): AsyncMergeOnWriteConfig = {
     // Build a case-insensitive lookup map
-    val lowerCaseConfigs = configs.map { case (k, v) => k.toLowerCase -> v }
+    val lowerCaseConfigs                 = configs.map { case (k, v) => k.toLowerCase -> v }
     def get(key: String): Option[String] = lowerCaseConfigs.get(key.toLowerCase)
 
     AsyncMergeOnWriteConfig(
@@ -238,9 +247,9 @@ object AsyncMergeOnWriteConfig {
     val value = options.get(key)
     if (value == null || value.isEmpty) default
     else {
-      try {
+      try
         value.toBoolean
-      } catch {
+      catch {
         case e: IllegalArgumentException =>
           logger.warn(s"Invalid boolean value for $key: '$value', using default: $default")
           default
@@ -309,15 +318,15 @@ object AsyncMergeOnWriteConfig {
     if (value == null || value.isEmpty) default
     else {
       try {
-        val parsed = value.toDouble
-        val tooLow = minExclusive.exists(min => parsed <= min)
+        val parsed  = value.toDouble
+        val tooLow  = minExclusive.exists(min => parsed <= min)
         val tooHigh = maxInclusive.exists(max => parsed > max)
         if (tooLow || tooHigh) {
           val range = (minExclusive, maxInclusive) match {
             case (Some(min), Some(max)) => s"must be > $min and <= $max"
-            case (Some(min), None) => s"must be > $min"
-            case (None, Some(max)) => s"must be <= $max"
-            case _ => "out of range"
+            case (Some(min), None)      => s"must be > $min"
+            case (None, Some(max))      => s"must be <= $max"
+            case _                      => "out of range"
           }
           logger.warn(s"Invalid value for $key: '$value' ($range), using default: $default")
           default

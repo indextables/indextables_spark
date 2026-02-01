@@ -51,9 +51,12 @@ import org.slf4j.LoggerFactory
  *   - duration_ms: Total duration in milliseconds
  *   - error_message: Error message if failed (null otherwise)
  *
- * @param tablePath Optional table path to filter jobs
- * @param jobId Optional job ID to filter jobs
- * @param timeoutSeconds Maximum time to wait (default: 3600 seconds = 1 hour)
+ * @param tablePath
+ *   Optional table path to filter jobs
+ * @param jobId
+ *   Optional job ID to filter jobs
+ * @param timeoutSeconds
+ *   Maximum time to wait (default: 3600 seconds = 1 hour)
  */
 case class WaitForPrewarmJobsCommand(
   tablePath: Option[String] = None,
@@ -61,7 +64,7 @@ case class WaitForPrewarmJobsCommand(
   timeoutSeconds: Int = 3600)
     extends LeafRunnableCommand {
 
-  private val logger = LoggerFactory.getLogger(classOf[WaitForPrewarmJobsCommand])
+  private val logger         = LoggerFactory.getLogger(classOf[WaitForPrewarmJobsCommand])
   private val pollIntervalMs = 5000L // Poll every 5 seconds
 
   override val output: Seq[Attribute] = Seq(
@@ -79,21 +82,22 @@ case class WaitForPrewarmJobsCommand(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     logger.info(s"Waiting for async prewarm jobs (tablePath=$tablePath, jobId=$jobId, timeout=${timeoutSeconds}s)")
 
-    val sc = sparkSession.sparkContext
+    val sc        = sparkSession.sparkContext
     val startTime = System.currentTimeMillis()
     val timeoutMs = timeoutSeconds * 1000L
 
     // Get driver info
     val driverBlockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
-    val driverHostPort = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
+    val driverHostPort       = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
 
     while (System.currentTimeMillis() - startTime < timeoutMs) {
       // Poll all executors for job status
       val allJobs = collectJobStatusFromCluster(sc, driverHostPort)
 
       // Filter to relevant jobs based on tablePath/jobId
-      val relevantJobs = allJobs.filter { case (_, _, job) =>
-        tablePath.forall(_ == job.tablePath) && jobId.forall(_ == job.jobId)
+      val relevantJobs = allJobs.filter {
+        case (_, _, job) =>
+          tablePath.forall(_ == job.tablePath) && jobId.forall(_ == job.jobId)
       }
 
       if (relevantJobs.isEmpty) {
@@ -120,26 +124,29 @@ case class WaitForPrewarmJobsCommand(
       if (runningJobs.isEmpty) {
         // All jobs complete - return final status
         logger.info(s"All ${relevantJobs.size} async prewarm jobs completed")
-        return relevantJobs.map { case (executorId, host, job) =>
-          Row(
-            executorId,
-            host,
-            job.jobId,
-            job.tablePath,
-            job.status,
-            job.totalSplits,
-            job.completedSplits,
-            job.durationMs,
-            job.errorMessage.orNull
-          )
+        return relevantJobs.map {
+          case (executorId, host, job) =>
+            Row(
+              executorId,
+              host,
+              job.jobId,
+              job.tablePath,
+              job.status,
+              job.totalSplits,
+              job.completedSplits,
+              job.durationMs,
+              job.errorMessage.orNull
+            )
         }
       }
 
       // Still running - log progress and sleep
-      val totalSplits = relevantJobs.map(_._3.totalSplits).sum
+      val totalSplits     = relevantJobs.map(_._3.totalSplits).sum
       val completedSplits = relevantJobs.map(_._3.completedSplits).sum
-      val progressPct = if (totalSplits > 0) (completedSplits.toDouble / totalSplits) * 100 else 0
-      logger.debug(f"Waiting for ${runningJobs.size} jobs, progress: $progressPct%.1f%% ($completedSplits/$totalSplits splits)")
+      val progressPct     = if (totalSplits > 0) (completedSplits.toDouble / totalSplits) * 100 else 0
+      logger.debug(
+        f"Waiting for ${runningJobs.size} jobs, progress: $progressPct%.1f%% ($completedSplits/$totalSplits splits)"
+      )
 
       Thread.sleep(pollIntervalMs)
     }
@@ -147,30 +154,29 @@ case class WaitForPrewarmJobsCommand(
     // Timeout reached - return current status with timeout indication
     logger.warn(s"Timeout waiting for async prewarm jobs after ${timeoutSeconds}s")
     val finalJobs = collectJobStatusFromCluster(sc, driverHostPort)
-    val relevantJobs = finalJobs.filter { case (_, _, job) =>
-      tablePath.forall(_ == job.tablePath) && jobId.forall(_ == job.jobId)
+    val relevantJobs = finalJobs.filter {
+      case (_, _, job) =>
+        tablePath.forall(_ == job.tablePath) && jobId.forall(_ == job.jobId)
     }
 
-    relevantJobs.map { case (executorId, host, job) =>
-      val finalStatus = if (job.status == "RUNNING") s"TIMEOUT (was: ${job.status})" else job.status
-      Row(
-        executorId,
-        host,
-        job.jobId,
-        job.tablePath,
-        finalStatus,
-        job.totalSplits,
-        job.completedSplits,
-        job.durationMs,
-        job.errorMessage.orNull
-      )
+    relevantJobs.map {
+      case (executorId, host, job) =>
+        val finalStatus = if (job.status == "RUNNING") s"TIMEOUT (was: ${job.status})" else job.status
+        Row(
+          executorId,
+          host,
+          job.jobId,
+          job.tablePath,
+          finalStatus,
+          job.totalSplits,
+          job.completedSplits,
+          job.durationMs,
+          job.errorMessage.orNull
+        )
     }
   }
 
-  /**
-   * Collect job status from all executors in the cluster.
-   * Returns tuples of (executorId, host, PrewarmJobStatus).
-   */
+  /** Collect job status from all executors in the cluster. Returns tuples of (executorId, host, PrewarmJobStatus). */
   private def collectJobStatusFromCluster(
     sc: SparkContext,
     driverHostPort: String
@@ -183,21 +189,17 @@ case class WaitForPrewarmJobsCommand(
       val executorJobs = sc
         .parallelize(1 to numExecutors, numExecutors)
         .mapPartitionsWithIndex { (index, _) =>
-          val executorId = s"executor-$index"
+          val executorId     = s"executor-$index"
           val blockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
-          val host = s"${blockManagerId.host}:${blockManagerId.port}"
+          val host           = s"${blockManagerId.host}:${blockManagerId.port}"
 
-          AsyncPrewarmJobManager.getAllJobStatus.map { job =>
-            (executorId, host, job)
-          }.iterator
+          AsyncPrewarmJobManager.getAllJobStatus.map(job => (executorId, host, job)).iterator
         }
         .collect()
         .toSeq
 
       // Also get driver jobs
-      val driverJobs = AsyncPrewarmJobManager.getAllJobStatus.map { job =>
-        ("driver", driverHostPort, job)
-      }
+      val driverJobs = AsyncPrewarmJobManager.getAllJobStatus.map(job => ("driver", driverHostPort, job))
 
       driverJobs ++ executorJobs
 
@@ -205,9 +207,7 @@ case class WaitForPrewarmJobsCommand(
       case e: Exception =>
         logger.warn(s"Failed to collect executor job status: ${e.getMessage}")
         // Fallback to driver-only
-        AsyncPrewarmJobManager.getAllJobStatus.map { job =>
-          ("driver", driverHostPort, job)
-        }
+        AsyncPrewarmJobManager.getAllJobStatus.map(job => ("driver", driverHostPort, job))
     }
   }
 }

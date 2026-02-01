@@ -25,32 +25,32 @@ import scala.util.Random
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.BeforeAndAfterAll
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.avro.StateManifestIO
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-
-import io.indextables.spark.transaction.avro.StateManifestIO
-import io.indextables.spark.io.CloudStorageProviderFactory
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Scale test to validate schema deduplication works correctly with:
- * - Multiple columns including a struct column with 10 fields
- * - Several thousand rows with random values
- * - 200+ splits
- * - Validates exactly 1 schema ref after checkpoint
+ *   - Multiple columns including a struct column with 10 fields
+ *   - Several thousand rows with random values
+ *   - 200+ splits
+ *   - Validates exactly 1 schema ref after checkpoint
  *
- * This test catches the bug where different JSON field orderings from tantivy4java
- * would produce different schema hashes, leading to N schema registry entries
- * instead of 1.
+ * This test catches the bug where different JSON field orderings from tantivy4java would produce different schema
+ * hashes, leading to N schema registry entries instead of 1.
  */
 class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
-  private var spark: SparkSession = _
+  private var spark: SparkSession         = _
   private var tempDir: java.nio.file.Path = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .master("local[4]")
       .appName("SchemaDeduplicationScaleTest")
       .config("spark.ui.enabled", "false")
@@ -84,14 +84,12 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
     file.delete()
   }
 
-  /**
-   * Read the _manifest.avro directly to count schema refs.
-   */
+  /** Read the _manifest.avro directly to count schema refs. */
   private def countSchemaRefs(tablePath: String): (Int, Long) = {
     val transactionLogPath = s"$tablePath/_transaction_log"
 
     // Find state directories and read _manifest.avro
-    val txLogDir = new java.io.File(transactionLogPath)
+    val txLogDir  = new java.io.File(transactionLogPath)
     val stateDirs = txLogDir.listFiles().filter(f => f.isDirectory && f.getName.startsWith("state-v"))
 
     if (stateDirs.isEmpty) {
@@ -107,11 +105,11 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
       spark.sparkContext.hadoopConfiguration
     )
     val manifestIO = StateManifestIO(cloudProvider)
-    val manifest = manifestIO.readStateManifest(latestStateDir.getAbsolutePath)
+    val manifest   = manifestIO.readStateManifest(latestStateDir.getAbsolutePath)
     cloudProvider.close()
 
     val schemaRefCount = manifest.schemaRegistry.size
-    val numFiles = manifest.numFiles
+    val numFiles       = manifest.numFiles
 
     (schemaRefCount, numFiles)
   }
@@ -120,36 +118,40 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
    * SCALE TEST: 200+ splits with struct column should produce exactly 1 schema ref.
    *
    * This test validates that:
-   * 1. Schema normalization correctly handles struct fields with multiple sub-fields
-   * 2. All 200+ splits consolidate to a single schema entry in the registry
-   * 3. The checkpoint correctly deduplicates schemas regardless of JSON field ordering
+   *   1. Schema normalization correctly handles struct fields with multiple sub-fields 2. All 200+ splits consolidate
+   *      to a single schema entry in the registry 3. The checkpoint correctly deduplicates schemas regardless of JSON
+   *      field ordering
    */
   test("200+ splits with struct column should produce exactly 1 schema ref after checkpoint") {
     val tablePath = tempDir.resolve("scale-test-table").toString
-    val random = new Random(42) // Fixed seed for reproducibility
+    val random    = new Random(42) // Fixed seed for reproducibility
 
     // Define schema with struct column containing 10 fields
-    val structType = StructType(Seq(
-      StructField("field_01_string", StringType, nullable = true),
-      StructField("field_02_int", IntegerType, nullable = true),
-      StructField("field_03_long", LongType, nullable = true),
-      StructField("field_04_double", DoubleType, nullable = true),
-      StructField("field_05_boolean", BooleanType, nullable = true),
-      StructField("field_06_string", StringType, nullable = true),
-      StructField("field_07_int", IntegerType, nullable = true),
-      StructField("field_08_long", LongType, nullable = true),
-      StructField("field_09_double", DoubleType, nullable = true),
-      StructField("field_10_string", StringType, nullable = true)
-    ))
+    val structType = StructType(
+      Seq(
+        StructField("field_01_string", StringType, nullable = true),
+        StructField("field_02_int", IntegerType, nullable = true),
+        StructField("field_03_long", LongType, nullable = true),
+        StructField("field_04_double", DoubleType, nullable = true),
+        StructField("field_05_boolean", BooleanType, nullable = true),
+        StructField("field_06_string", StringType, nullable = true),
+        StructField("field_07_int", IntegerType, nullable = true),
+        StructField("field_08_long", LongType, nullable = true),
+        StructField("field_09_double", DoubleType, nullable = true),
+        StructField("field_10_string", StringType, nullable = true)
+      )
+    )
 
-    val schema = StructType(Seq(
-      StructField("id", StringType, nullable = false),
-      StructField("timestamp", LongType, nullable = false),
-      StructField("category", StringType, nullable = true),
-      StructField("value", DoubleType, nullable = true),
-      StructField("metadata", structType, nullable = true),
-      StructField("tags", StringType, nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType, nullable = false),
+        StructField("timestamp", LongType, nullable = false),
+        StructField("category", StringType, nullable = true),
+        StructField("value", DoubleType, nullable = true),
+        StructField("metadata", structType, nullable = true),
+        StructField("tags", StringType, nullable = true)
+      )
+    )
 
     // Generate 10,000 rows with random values
     val numRows = 10000
@@ -176,7 +178,7 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
     }
 
     val rdd = spark.sparkContext.parallelize(rows, 200) // Force 200 partitions
-    val df = spark.createDataFrame(rdd, schema)
+    val df  = spark.createDataFrame(rdd, schema)
 
     // Write to 200+ splits
     df.write
@@ -211,28 +213,35 @@ class SchemaDeduplicationScaleTest extends AnyFunSuite with Matchers with Before
   /**
    * SCALE TEST: Multiple writes should still produce exactly 1 schema ref.
    *
-   * This test validates that incremental writes (append mode) also correctly
-   * deduplicate schemas across all splits.
+   * This test validates that incremental writes (append mode) also correctly deduplicate schemas across all splits.
    */
   test("multiple append writes should still produce exactly 1 schema ref after checkpoint") {
     val tablePath = tempDir.resolve("incremental-test-table").toString
-    val random = new Random(123)
+    val random    = new Random(123)
 
-    val schema = StructType(Seq(
-      StructField("id", StringType, nullable = false),
-      StructField("data", StructType(Seq(
-        StructField("name", StringType),
-        StructField("value", IntegerType),
-        StructField("score", DoubleType),
-        StructField("active", BooleanType),
-        StructField("count", LongType),
-        StructField("label", StringType),
-        StructField("priority", IntegerType),
-        StructField("weight", DoubleType),
-        StructField("enabled", BooleanType),
-        StructField("description", StringType)
-      )), nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType, nullable = false),
+        StructField(
+          "data",
+          StructType(
+            Seq(
+              StructField("name", StringType),
+              StructField("value", IntegerType),
+              StructField("score", DoubleType),
+              StructField("active", BooleanType),
+              StructField("count", LongType),
+              StructField("label", StringType),
+              StructField("priority", IntegerType),
+              StructField("weight", DoubleType),
+              StructField("enabled", BooleanType),
+              StructField("description", StringType)
+            )
+          ),
+          nullable = true
+        )
+      )
+    )
 
     def generateRows(count: Int, partitions: Int): org.apache.spark.sql.DataFrame = {
       val rows = (0 until count).map { _ =>

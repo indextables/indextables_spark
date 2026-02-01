@@ -17,21 +17,19 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 /**
  * Tests for ManifestGarbageCollector.
  *
  * These tests verify:
- *   1. Reachable manifests are correctly identified from retained state versions
- *   2. Orphaned manifests are identified and deleted
- *   3. Age-based protection prevents deleting recent manifests
- *   4. Dry-run mode previews without deleting
+ *   1. Reachable manifests are correctly identified from retained state versions 2. Orphaned manifests are identified
+ *      and deleted 3. Age-based protection prevents deleting recent manifests 4. Dry-run mode previews without deleting
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.ManifestGarbageCollectorTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.ManifestGarbageCollectorTest'
  */
 class ManifestGarbageCollectorTest extends TestBase {
 
@@ -82,8 +80,8 @@ class ManifestGarbageCollectorTest extends TestBase {
         manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 3L, checkpointJson)
 
         // Create GC with retention of 2 versions
-        val gc = ManifestGarbageCollector(cloudProvider, transactionLogPath)
-        val gcConfig = GCConfig(retentionVersions = 2)
+        val gc        = ManifestGarbageCollector(cloudProvider, transactionLogPath)
+        val gcConfig  = GCConfig(retentionVersions = 2)
         val reachable = gc.findReachableManifests(gcConfig)
 
         // Should find manifests from versions 3, 2, and 1 (within retention + buffer)
@@ -91,9 +89,8 @@ class ManifestGarbageCollectorTest extends TestBase {
         reachable should contain(s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-v2.avro")
         reachable should contain(s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-v1.avro")
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -116,7 +113,7 @@ class ManifestGarbageCollectorTest extends TestBase {
 
         // Create dummy manifest files
         val referencedManifest = s"$sharedDir/manifest-referenced.avro"
-        val orphanedManifest = s"$sharedDir/manifest-orphaned.avro"
+        val orphanedManifest   = s"$sharedDir/manifest-orphaned.avro"
 
         cloudProvider.writeFile(referencedManifest, "dummy content".getBytes)
         cloudProvider.writeFile(orphanedManifest, "dummy content".getBytes)
@@ -152,9 +149,9 @@ class ManifestGarbageCollectorTest extends TestBase {
         manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 1L, checkpointJson)
 
         // Run GC with 0 hour age requirement (for testing)
-        val gc = ManifestGarbageCollector(cloudProvider, transactionLogPath)
+        val gc       = ManifestGarbageCollector(cloudProvider, transactionLogPath)
         val gcConfig = GCConfig(retentionVersions = 2, minManifestAgeHours = 0)
-        val result = gc.collectGarbage(gcConfig, dryRun = false)
+        val result   = gc.collectGarbage(gcConfig, dryRun = false)
 
         // Should have found orphaned manifest and deleted it
         result.orphanedManifests shouldBe 1
@@ -166,9 +163,8 @@ class ManifestGarbageCollectorTest extends TestBase {
         // Verify referenced manifest still exists
         cloudProvider.exists(referencedManifest) shouldBe true
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -213,9 +209,9 @@ class ManifestGarbageCollectorTest extends TestBase {
         manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 1L, checkpointJson)
 
         // Run GC in dry-run mode
-        val gc = ManifestGarbageCollector(cloudProvider, transactionLogPath)
+        val gc       = ManifestGarbageCollector(cloudProvider, transactionLogPath)
         val gcConfig = GCConfig(retentionVersions = 2, minManifestAgeHours = 0)
-        val result = gc.collectGarbage(gcConfig, dryRun = true)
+        val result   = gc.collectGarbage(gcConfig, dryRun = true)
 
         // Should report orphaned manifest
         result.orphanedManifests shouldBe 1
@@ -224,9 +220,8 @@ class ManifestGarbageCollectorTest extends TestBase {
         // But file should still exist
         cloudProvider.exists(orphanedManifest) shouldBe true
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -271,9 +266,9 @@ class ManifestGarbageCollectorTest extends TestBase {
         manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 1L, checkpointJson)
 
         // Run GC with 1 hour age requirement - manifest is too recent
-        val gc = ManifestGarbageCollector(cloudProvider, transactionLogPath)
+        val gc       = ManifestGarbageCollector(cloudProvider, transactionLogPath)
         val gcConfig = GCConfig(retentionVersions = 2, minManifestAgeHours = 1)
-        val result = gc.collectGarbage(gcConfig, dryRun = false)
+        val result   = gc.collectGarbage(gcConfig, dryRun = false)
 
         // Should not delete the recent manifest due to age protection
         result.deletedManifests shouldBe 0
@@ -281,9 +276,8 @@ class ManifestGarbageCollectorTest extends TestBase {
         // Manifest should still exist
         cloudProvider.exists(orphanedManifest) shouldBe true
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 }

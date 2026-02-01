@@ -28,7 +28,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider, CloudStorageCounters, HadoopCloudStorageProvider}
+import io.indextables.spark.io.{CloudFileInfo, CloudStorageCounters, CloudStorageProvider, HadoopCloudStorageProvider}
 import io.indextables.spark.TestBase
 
 /**
@@ -359,8 +359,11 @@ class CheckpointCacheBypassTest extends TestBase {
       EnhancedTransactionLogCache.clearGlobalCaches()
 
       // Get initial global cache stats
-      val (actionsStatsBefore, lastCheckpointStatsBefore, avroManifestStatsBefore, avroFileListStatsBefore, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
-      val missCountBefore = actionsStatsBefore.missCount() + lastCheckpointStatsBefore.missCount() + avroManifestStatsBefore.missCount() + avroFileListStatsBefore.missCount()
+      val (actionsStatsBefore, lastCheckpointStatsBefore, avroManifestStatsBefore, avroFileListStatsBefore, _, _) =
+        EnhancedTransactionLogCache.getGlobalCacheStats()
+      val missCountBefore =
+        actionsStatsBefore.missCount() + lastCheckpointStatsBefore.missCount() + avroManifestStatsBefore
+          .missCount() + avroFileListStatsBefore.missCount()
 
       println(s"\n=== Global cache before any reads ===")
       println(s"Checkpoint actions: hits=${actionsStatsBefore.hitCount()}, misses=${actionsStatsBefore.missCount()}")
@@ -375,7 +378,8 @@ class CheckpointCacheBypassTest extends TestBase {
       // Force schema resolution (this is what triggers the checkpoint read)
       val schema1 = readDf1.schema
 
-      val (actionsStatsAfterSchema, lastCheckpointStatsAfterSchema, _, _, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
+      val (actionsStatsAfterSchema, lastCheckpointStatsAfterSchema, _, _, _, _) =
+        EnhancedTransactionLogCache.getGlobalCacheStats()
 
       println(s"\n=== Global cache after schema inference ===")
       println(
@@ -391,7 +395,8 @@ class CheckpointCacheBypassTest extends TestBase {
 
       val schema2 = readDf2.schema
 
-      val (actionsStatsAfterSecond, lastCheckpointStatsAfterSecond, _, _, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
+      val (actionsStatsAfterSecond, lastCheckpointStatsAfterSecond, _, _, _, _) =
+        EnhancedTransactionLogCache.getGlobalCacheStats()
 
       println(s"\n=== Global cache after second schema read ===")
       println(
@@ -546,27 +551,27 @@ class CheckpointCacheBypassTest extends TestBase {
         println(s"Initial exists count: ${startCounters.exists}")
 
         // First call - should cause one exists() call (cache miss)
-        val checkpointInfo1 = txLog.getLastCheckpointInfo()
-        val afterFirstCall = CloudStorageProvider.getCountersSnapshot
+        val checkpointInfo1  = txLog.getLastCheckpointInfo()
+        val afterFirstCall   = CloudStorageProvider.getCountersSnapshot
         val existsAfterFirst = afterFirstCall.exists - startCounters.exists
         println(s"After first getLastCheckpointInfo(): exists calls = $existsAfterFirst")
 
         // Second call - should NOT cause additional exists() calls (cache hit)
-        val checkpointInfo2 = txLog.getLastCheckpointInfo()
-        val afterSecondCall = CloudStorageProvider.getCountersSnapshot
+        val checkpointInfo2   = txLog.getLastCheckpointInfo()
+        val afterSecondCall   = CloudStorageProvider.getCountersSnapshot
         val existsAfterSecond = afterSecondCall.exists - startCounters.exists
         println(s"After second getLastCheckpointInfo(): exists calls = $existsAfterSecond")
 
         // Third call - should still NOT cause additional exists() calls
-        val checkpointInfo3 = txLog.getLastCheckpointInfo()
-        val afterThirdCall = CloudStorageProvider.getCountersSnapshot
+        val checkpointInfo3  = txLog.getLastCheckpointInfo()
+        val afterThirdCall   = CloudStorageProvider.getCountersSnapshot
         val existsAfterThird = afterThirdCall.exists - startCounters.exists
         println(s"After third getLastCheckpointInfo(): exists calls = $existsAfterThird")
 
         // CRITICAL ASSERTION: After the first call, subsequent calls should cause
         // ZERO additional exists() calls. This was the bug we fixed.
         val additionalExistsSecond = existsAfterSecond - existsAfterFirst
-        val additionalExistsThird = existsAfterThird - existsAfterFirst
+        val additionalExistsThird  = existsAfterThird - existsAfterFirst
 
         assert(
           additionalExistsSecond == 0,
@@ -720,23 +725,23 @@ class CheckpointCacheBypassTest extends TestBase {
       // Now execute multiple queries on the same DataFrame
       // These should cause ZERO additional checkpoint-related storage calls
       val query1Result = readDf.count()
-      val afterQuery1 = CloudStorageProvider.getCountersSnapshot
+      val afterQuery1  = CloudStorageProvider.getCountersSnapshot
       val query1Exists = afterQuery1.exists - afterRead.exists
       println(s"After query 1 (count): exists=${afterQuery1.exists} (+$query1Exists), result=$query1Result")
 
       val query2Result = readDf.filter("id > 50").count()
-      val afterQuery2 = CloudStorageProvider.getCountersSnapshot
+      val afterQuery2  = CloudStorageProvider.getCountersSnapshot
       val query2Exists = afterQuery2.exists - afterQuery1.exists
       println(s"After query 2 (filter+count): exists=${afterQuery2.exists} (+$query2Exists), result=$query2Result")
 
       val query3Result = readDf.agg(org.apache.spark.sql.functions.sum("id")).collect()
-      val afterQuery3 = CloudStorageProvider.getCountersSnapshot
+      val afterQuery3  = CloudStorageProvider.getCountersSnapshot
       val query3Exists = afterQuery3.exists - afterQuery2.exists
       println(s"After query 3 (agg): exists=${afterQuery3.exists} (+$query3Exists)")
 
       // collect() is the most important one - it fetches all data
       val query4Result = readDf.collect()
-      val afterQuery4 = CloudStorageProvider.getCountersSnapshot
+      val afterQuery4  = CloudStorageProvider.getCountersSnapshot
       val query4Exists = afterQuery4.exists - afterQuery3.exists
       println(s"After query 4 (collect): exists=${afterQuery4.exists} (+$query4Exists), rows=${query4Result.length}")
 
@@ -744,7 +749,7 @@ class CheckpointCacheBypassTest extends TestBase {
       // Note: Query execution may need to re-read split data, but should NOT
       // need to check checkpoint info (that was done during schema resolution)
       // The exists() calls are specifically for checkpoint info (_last_checkpoint file)
-      val totalQueryExists = (afterQuery4.exists - afterRead.exists)
+      val totalQueryExists = afterQuery4.exists - afterRead.exists
 
       println(s"\n=== Summary ===")
       println(s"Read operation (cache miss): ${afterRead.exists} exists() calls")
@@ -794,8 +799,8 @@ class CheckpointCacheBypassTest extends TestBase {
       println(s"After initial read (cache warm-up): exists=${afterInitialRead.exists}")
 
       // Phase 2: Execute query - should cause ZERO exists calls (cache hit)
-      val result1 = readDf.collect()
-      val afterQuery1 = CloudStorageProvider.getCountersSnapshot
+      val result1      = readDf.collect()
+      val afterQuery1  = CloudStorageProvider.getCountersSnapshot
       val query1Exists = afterQuery1.exists - afterInitialRead.exists
       println(s"After first collect(): exists=${afterQuery1.exists} (+$query1Exists), rows=${result1.length}")
 
@@ -816,7 +821,7 @@ class CheckpointCacheBypassTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
       readDf2.schema
-      val afterSecondRead = CloudStorageProvider.getCountersSnapshot
+      val afterSecondRead  = CloudStorageProvider.getCountersSnapshot
       val secondReadExists = afterSecondRead.exists - afterInvalidation.exists
       println(s"After second read (post-invalidation): exists=${afterSecondRead.exists} (+$secondReadExists)")
 
@@ -828,20 +833,20 @@ class CheckpointCacheBypassTest extends TestBase {
       )
 
       // Phase 5: First collect after invalidation - this uses the schema which was just read
-      val result2 = readDf2.collect()
-      val afterCollect2 = CloudStorageProvider.getCountersSnapshot
+      val result2        = readDf2.collect()
+      val afterCollect2  = CloudStorageProvider.getCountersSnapshot
       val collect2Exists = afterCollect2.exists - afterSecondRead.exists
       println(s"After first collect (post-invalidation): exists=${afterCollect2.exists} (+$collect2Exists), rows=${result2.length}")
 
       // Phase 6: Another collect on the same DataFrame - should be ZERO (cache warm)
-      val result3 = readDf2.collect()
-      val afterCollect3 = CloudStorageProvider.getCountersSnapshot
+      val result3        = readDf2.collect()
+      val afterCollect3  = CloudStorageProvider.getCountersSnapshot
       val collect3Exists = afterCollect3.exists - afterCollect2.exists
       println(s"After second collect (same DataFrame): exists=${afterCollect3.exists} (+$collect3Exists), rows=${result3.length}")
 
       // Phase 7: Third collect to really prove the point
-      val result4 = readDf2.collect()
-      val afterCollect4 = CloudStorageProvider.getCountersSnapshot
+      val result4        = readDf2.collect()
+      val afterCollect4  = CloudStorageProvider.getCountersSnapshot
       val collect4Exists = afterCollect4.exists - afterCollect3.exists
       println(s"After third collect (same DataFrame): exists=${afterCollect4.exists} (+$collect4Exists), rows=${result4.length}")
 
@@ -902,8 +907,8 @@ class CheckpointCacheBypassTest extends TestBase {
       println(s"After initial read (cache warm-up): exists=${afterInitialRead.exists}")
 
       // Phase 2: Execute query - should cause ZERO exists calls (cache hit)
-      val result1 = readDf.collect()
-      val afterQuery1 = CloudStorageProvider.getCountersSnapshot
+      val result1      = readDf.collect()
+      val afterQuery1  = CloudStorageProvider.getCountersSnapshot
       val query1Exists = afterQuery1.exists - afterInitialRead.exists
       println(s"After first collect(): exists=${afterQuery1.exists} (+$query1Exists), rows=${result1.length}")
 
@@ -922,14 +927,17 @@ class CheckpointCacheBypassTest extends TestBase {
       // Verify the command succeeded
       val resultRow = invalidateResult.collect().head
       assert(resultRow.getString(0) == "GLOBAL", "Should be global invalidation")
-      assert(resultRow.getString(1).contains("cleared successfully"), s"Should report success: ${resultRow.getString(1)}")
+      assert(
+        resultRow.getString(1).contains("cleared successfully"),
+        s"Should report success: ${resultRow.getString(1)}"
+      )
 
       // Phase 4: Read again - this should cause exists calls (cache miss after global invalidation)
       val readDf2 = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
       readDf2.schema
-      val afterSecondRead = CloudStorageProvider.getCountersSnapshot
+      val afterSecondRead  = CloudStorageProvider.getCountersSnapshot
       val secondReadExists = afterSecondRead.exists - afterInvalidation.exists
       println(s"After second read (post-global-invalidation): exists=${afterSecondRead.exists} (+$secondReadExists)")
 
@@ -941,8 +949,8 @@ class CheckpointCacheBypassTest extends TestBase {
       )
 
       // Phase 5: Collect on the new DataFrame - should be zero (cache re-warmed)
-      val result2 = readDf2.collect()
-      val afterCollect2 = CloudStorageProvider.getCountersSnapshot
+      val result2        = readDf2.collect()
+      val afterCollect2  = CloudStorageProvider.getCountersSnapshot
       val collect2Exists = afterCollect2.exists - afterSecondRead.exists
       println(s"After collect (post-global-invalidation): exists=${afterCollect2.exists} (+$collect2Exists), rows=${result2.length}")
 

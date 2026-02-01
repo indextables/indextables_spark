@@ -20,16 +20,15 @@ package io.indextables.spark.core
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 
-import io.indextables.spark.transaction.AddAction
 import io.indextables.spark.stats.{DataSkippingMetrics, FilterExpressionCache}
-
-import org.scalatest.BeforeAndAfterEach
+import io.indextables.spark.transaction.AddAction
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /**
- * Pure unit tests for parallel data skipping functionality.
- * These tests don't require SparkSession and test the core filtering logic directly.
+ * Pure unit tests for parallel data skipping functionality. These tests don't require SparkSession and test the core
+ * filtering logic directly.
  */
 class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
@@ -57,14 +56,17 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     }
 
     // Query for id=7550 (should only match file 76: range 7501-7600)
-    val filter = EqualTo("id", 7550L)
+    val filter    = EqualTo("id", 7550L)
     val threshold = 50
     val config = Map(
       "spark.indextables.dataSkipping.parallelThreshold" -> threshold.toString
     )
 
     // Verify we will hit the parallel path
-    assert(files.length >= threshold, s"Test requires files (${files.length}) >= threshold ($threshold) to test parallel path")
+    assert(
+      files.length >= threshold,
+      s"Test requires files (${files.length}) >= threshold ($threshold) to test parallel path"
+    )
 
     // Use the filtering logic directly with tracking
     val (result, usedParallel) = applyMinMaxFilteringWithTracking(files, Array(filter), config, schema)
@@ -99,7 +101,8 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     val sequentialConfig = Map(
       "spark.indextables.dataSkipping.parallelThreshold" -> "1000"
     )
-    val (sequentialResult, sequentialUsedParallel) = applyMinMaxFilteringWithTracking(files, filters, sequentialConfig, schema)
+    val (sequentialResult, sequentialUsedParallel) =
+      applyMinMaxFilteringWithTracking(files, filters, sequentialConfig, schema)
 
     // Verify sequential path was used
     assert(!sequentialUsedParallel, "Expected sequential path but parallel was used")
@@ -117,7 +120,7 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     sequentialResult.length shouldBe parallelResult.length
 
     val sequentialPaths = sequentialResult.map(_.path).sorted
-    val parallelPaths = parallelResult.map(_.path).sorted
+    val parallelPaths   = parallelResult.map(_.path).sorted
 
     sequentialPaths shouldBe parallelPaths
 
@@ -135,7 +138,7 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     }
 
     // Query: id >= 10000 (should match files 100-150, since file 100 has range 9901-10000)
-    val filter = GreaterThanOrEqual("id", 10000L)
+    val filter    = GreaterThanOrEqual("id", 10000L)
     val threshold = 50
 
     val config = Map(
@@ -171,7 +174,7 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     }
 
     // Query: id > 1000 (skips files 1-100, keeps 101-200)
-    val filter = GreaterThan("id", 1000L)
+    val filter    = GreaterThan("id", 1000L)
     val threshold = 50
 
     val config = Map(
@@ -195,9 +198,10 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     val results = Await.result(Future.sequence(futures), 30.seconds)
 
     // All results should be the same and use parallel path
-    results.foreach { case (result, usedParallel) =>
-      result.length shouldBe 100 // files 101-200
-      assert(usedParallel, "Expected parallel path to be used in all runs")
+    results.foreach {
+      case (result, usedParallel) =>
+        result.length shouldBe 100 // files 101-200
+        assert(usedParallel, "Expected parallel path to be used in all runs")
     }
 
     println(s"✅ Thread safety test passed: All 10 concurrent runs returned 100 files (all used parallel)")
@@ -222,9 +226,9 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     )
 
   /**
-   * Apply min/max filtering logic directly, simulating what IndexTables4SparkScan.applyDataSkipping does.
-   * This allows testing the parallel code path without needing a full SparkSession.
-   * Returns (result, usedParallel) to verify the parallel path was actually used.
+   * Apply min/max filtering logic directly, simulating what IndexTables4SparkScan.applyDataSkipping does. This allows
+   * testing the parallel code path without needing a full SparkSession. Returns (result, usedParallel) to verify the
+   * parallel path was actually used.
    */
   private def applyMinMaxFilteringWithTracking(
     addActions: Seq[AddAction],
@@ -235,10 +239,12 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     if (filters.isEmpty) return (addActions, false)
 
     // Get threshold from config
-    val parallelThreshold = config.getOrElse(
-      "spark.indextables.dataSkipping.parallelThreshold",
-      config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100")
-    ).toInt
+    val parallelThreshold = config
+      .getOrElse(
+        "spark.indextables.dataSkipping.parallelThreshold",
+        config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100")
+      )
+      .toInt
 
     // Thread-safe counter for metrics
     val filterTypeSkips = new java.util.concurrent.ConcurrentHashMap[String, java.util.concurrent.atomic.AtomicLong]()
@@ -253,7 +259,9 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
           filters.foreach { filter =>
             if (!canFilterMatchFile(addAction, filter, schema)) {
               val filterType = getFilterTypeName(filter)
-              filterTypeSkips.computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L)).incrementAndGet()
+              filterTypeSkips
+                .computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L))
+                .incrementAndGet()
             }
           }
         }
@@ -266,7 +274,9 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
           filters.foreach { filter =>
             if (!canFilterMatchFile(addAction, filter, schema)) {
               val filterType = getFilterTypeName(filter)
-              filterTypeSkips.computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L)).incrementAndGet()
+              filterTypeSkips
+                .computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L))
+                .incrementAndGet()
             }
           }
         }
@@ -277,14 +287,22 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     (result, useParallel)
   }
 
-  private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter], schema: StructType): Boolean = {
+  private def canFileMatchFilters(
+    addAction: AddAction,
+    filters: Array[Filter],
+    schema: StructType
+  ): Boolean = {
     if (addAction.minValues.isEmpty || addAction.maxValues.isEmpty) {
       return true
     }
     filters.forall(filter => canFilterMatchFile(addAction, filter, schema))
   }
 
-  private def canFilterMatchFile(addAction: AddAction, filter: Filter, schema: StructType): Boolean = {
+  private def canFilterMatchFile(
+    addAction: AddAction,
+    filter: Filter,
+    schema: StructType
+  ): Boolean =
     filter match {
       case And(left, right) =>
         canFilterMatchFile(addAction, left, schema) && canFilterMatchFile(addAction, right, schema)
@@ -295,9 +313,12 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
       case _ =>
         !shouldSkipFile(addAction, filter, schema)
     }
-  }
 
-  private def shouldSkipFile(addAction: AddAction, filter: Filter, schema: StructType): Boolean = {
+  private def shouldSkipFile(
+    addAction: AddAction,
+    filter: Filter,
+    schema: StructType
+  ): Boolean =
     (addAction.minValues, addAction.maxValues) match {
       case (Some(minVals), Some(maxVals)) =>
         filter match {
@@ -306,7 +327,8 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
             val maxVal = maxVals.get(attribute)
             (minVal, maxVal) match {
               case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
-                val (convertedValue, convertedMin, convertedMax) = convertValuesForComparison(attribute, value, min, max, schema)
+                val (convertedValue, convertedMin, convertedMax) =
+                  convertValuesForComparison(attribute, value, min, max, schema)
                 convertedValue.compareTo(convertedMin) < 0 || convertedValue.compareTo(convertedMax) > 0
               case _ => false
             }
@@ -318,7 +340,8 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
               case (Some(fileMin), Some(fileMax)) if fileMin.nonEmpty && fileMax.nonEmpty =>
                 val inMin = values.map(_.toString).min
                 val inMax = values.map(_.toString).max
-                val (_, convertedFileMin, convertedFileMax) = convertValuesForComparison(attribute, inMin, fileMin, fileMax, schema)
+                val (_, convertedFileMin, convertedFileMax) =
+                  convertValuesForComparison(attribute, inMin, fileMin, fileMax, schema)
                 val (convertedInMin, _, _) = convertValuesForComparison(attribute, inMin, inMin, inMin, schema)
                 val (convertedInMax, _, _) = convertValuesForComparison(attribute, inMax, inMax, inMax, schema)
                 convertedFileMax.compareTo(convertedInMin) < 0 || convertedFileMin.compareTo(convertedInMax) > 0
@@ -361,7 +384,6 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
         }
       case _ => false
     }
-  }
 
   private def convertValuesForComparison(
     attribute: String,
@@ -376,8 +398,8 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
       case Some(LongType) | Some(IntegerType) =>
         try {
           val filterNum = filterValue.toString.toLong
-          val minNum = if (minValue.nonEmpty) minValue.toLong else Long.MinValue
-          val maxNum = if (maxValue.nonEmpty) maxValue.toLong else Long.MaxValue
+          val minNum    = if (minValue.nonEmpty) minValue.toLong else Long.MinValue
+          val maxNum    = if (maxValue.nonEmpty) maxValue.toLong else Long.MaxValue
           (
             Long.box(filterNum).asInstanceOf[Comparable[Any]],
             Long.box(minNum).asInstanceOf[Comparable[Any]],
@@ -400,15 +422,14 @@ class ParallelDataSkippingUnitTest extends AnyFunSuite with Matchers with Before
     }
   }
 
-  private def getFilterTypeName(filter: Filter): String = {
+  private def getFilterTypeName(filter: Filter): String =
     filter match {
-      case _: EqualTo => "EqualTo"
-      case _: In => "In"
+      case _: EqualTo     => "EqualTo"
+      case _: In          => "In"
       case _: GreaterThan => "GreaterThan"
-      case _: LessThan => "LessThan"
-      case _: And => "And"
-      case _: Or => "Or"
-      case _ => filter.getClass.getSimpleName
+      case _: LessThan    => "LessThan"
+      case _: And         => "And"
+      case _: Or          => "Or"
+      case _              => filter.getClass.getSimpleName
     }
-  }
 }

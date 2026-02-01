@@ -35,10 +35,9 @@ import io.indextables.tantivy4java.split.SplitCacheManager
  * Validates async prewarm functionality with real AWS S3 storage.
  *
  * This test suite validates:
- *   1. PREWARM ... ASYNC MODE returns immediately with job_id
- *   2. DESCRIBE INDEXTABLES PREWARM JOBS shows running/completed jobs
- *   3. WAIT FOR INDEXTABLES PREWARM JOBS blocks until completion
- *   4. After async prewarm, queries hit cache (no S3 access)
+ *   1. PREWARM ... ASYNC MODE returns immediately with job_id 2. DESCRIBE INDEXTABLES PREWARM JOBS shows
+ *      running/completed jobs 3. WAIT FOR INDEXTABLES PREWARM JOBS blocks until completion 4. After async prewarm,
+ *      queries hit cache (no S3 access)
  *
  * Prerequisites:
  *   - AWS credentials in ~/.aws/credentials file
@@ -199,8 +198,8 @@ class RealS3AsyncPrewarmValidationTest extends RealS3TestBase {
     val prewarmResult = spark.sql(
       s"PREWARM INDEXTABLES CACHE '$testPath' FOR SEGMENTS (TERM_DICT, FAST_FIELD, POSTINGS) ASYNC MODE"
     )
-    val prewarmRows   = prewarmResult.collect()
-    val returnTime    = System.currentTimeMillis() - startTime
+    val prewarmRows = prewarmResult.collect()
+    val returnTime  = System.currentTimeMillis() - startTime
 
     println(s"✅ Async prewarm returned in ${returnTime}ms")
     println(s"   Result: ${prewarmRows.map(_.toString()).mkString(", ")}")

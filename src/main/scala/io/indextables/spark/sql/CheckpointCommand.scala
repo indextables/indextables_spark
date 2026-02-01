@@ -25,7 +25,13 @@ import org.apache.spark.sql.types.{BooleanType, LongType, StringType}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{AddAction, LastCheckpointInfo, MetadataAction, TransactionLogCheckpoint, TransactionLogFactory}
+import io.indextables.spark.transaction.{
+  AddAction,
+  LastCheckpointInfo,
+  MetadataAction,
+  TransactionLogCheckpoint,
+  TransactionLogFactory
+}
 import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
@@ -194,17 +200,18 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
   /**
    * Create checkpoint in Avro state format with retry support for concurrent write conflicts.
    *
-   * This writes a compacted state with all live files sorted by partition values for optimal pruning.
-   * Uses conditional writes and retry logic to handle concurrent checkpoint creation.
+   * This writes a compacted state with all live files sorted by partition values for optimal pruning. Uses conditional
+   * writes and retry logic to handle concurrent checkpoint creation.
    */
   private def createAvroStateCheckpoint(
-      transactionLogPath: Path,
-      cloudProvider: io.indextables.spark.io.CloudStorageProvider,
-      currentVersion: Long,
-      allFiles: Seq[AddAction],
-      metadata: MetadataAction,
-      options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
-      resolvedPathStr: String): Seq[Row] = {
+    transactionLogPath: Path,
+    cloudProvider: io.indextables.spark.io.CloudStorageProvider,
+    currentVersion: Long,
+    allFiles: Seq[AddAction],
+    metadata: MetadataAction,
+    options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
+    resolvedPathStr: String
+  ): Seq[Row] = {
 
     val compression = Option(options.get(StateConfig.COMPRESSION_KEY))
       .getOrElse(StateConfig.COMPRESSION_DEFAULT)
@@ -251,7 +258,7 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
     val renormalizeThreshold = Option(options.get(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_KEY))
       .map(_.toInt)
       .getOrElse(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT)
-    val existingRefCount = allFiles.flatMap(_.docMappingRef).toSet.size
+    val existingRefCount  = allFiles.flatMap(_.docMappingRef).toSet.size
     val shouldRenormalize = existingRefCount > renormalizeThreshold
 
     if (shouldRenormalize) {
@@ -278,14 +285,15 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
 
     // Serialize MetadataAction to JSON for storage in state manifest
     // This enables fast getMetadata() without scanning version files
-    val metadataJson = try {
-      val metadataWrapper = Map("metaData" -> metadata)
-      Some(JsonUtil.mapper.writeValueAsString(metadataWrapper))
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to serialize MetadataAction: ${e.getMessage}")
-        None
-    }
+    val metadataJson =
+      try {
+        val metadataWrapper = Map("metaData" -> metadata)
+        Some(JsonUtil.mapper.writeValueAsString(metadataWrapper))
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to serialize MetadataAction: ${e.getMessage}")
+          None
+      }
 
     logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}, hasMetadata=${metadataJson.isDefined}")
 
@@ -300,11 +308,13 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
 
     // Extract the actual version and state directory from the write result
     val actualVersion = writeResult.version
-    val stateDir = manifestIO.formatStateDir(actualVersion)
+    val stateDir      = manifestIO.formatStateDir(actualVersion)
 
     if (writeResult.conflictDetected) {
-      logger.info(s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
-        s"(original version $currentVersion had concurrent conflict)")
+      logger.info(
+        s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
+          s"(original version $currentVersion had concurrent conflict)"
+      )
     }
 
     // Update _last_checkpoint to point to new Avro state
@@ -331,8 +341,10 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
     if (checkpointUpdated) {
       logger.info(s"Avro state checkpoint created successfully at version $actualVersion (format=avro-state)")
     } else {
-      logger.info(s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
-        s"(a newer checkpoint already exists)")
+      logger.info(
+        s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
+          s"(a newer checkpoint already exists)"
+      )
     }
 
     Seq(
@@ -342,7 +354,7 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
         actualVersion,
         fileEntries.size.toLong,
         fileEntries.size.toLong,
-        4L, // Protocol version 4 for Avro state
+        4L,   // Protocol version 4 for Avro state
         false // Not multi-part in the JSON sense
       )
     )

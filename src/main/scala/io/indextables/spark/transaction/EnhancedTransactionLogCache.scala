@@ -51,10 +51,10 @@ object EnhancedTransactionLogCache {
   def resetGlobalJsonParseCounter(): Unit = globalJsonParseCounter.set(0)
 
   /** Enable debug mode that throws on JSON parse (for stack trace capture) */
-  def enableThrowOnJsonParse(): Unit = { throwOnJsonParse = true }
+  def enableThrowOnJsonParse(): Unit = throwOnJsonParse = true
 
   /** Disable debug mode that throws on JSON parse */
-  def disableThrowOnJsonParse(): Unit = { throwOnJsonParse = false }
+  def disableThrowOnJsonParse(): Unit = throwOnJsonParse = false
 
   /** Increment the global JSON parse counter - call this from any ObjectMapper.readTree usage */
   def incrementGlobalJsonParseCounter(): Unit = {
@@ -70,17 +70,19 @@ object EnhancedTransactionLogCache {
 
   // Configurable TTL for global checkpoint caches (default 5 minutes)
   @volatile private var globalCheckpointCacheTTLMinutes: Long = 5
-  @volatile private var globalCheckpointCacheMaxSize: Long = 200
-  @volatile private var cachesInitialized: Boolean = false
+  @volatile private var globalCheckpointCacheMaxSize: Long    = 200
+  @volatile private var cachesInitialized: Boolean            = false
 
   /**
-   * Configure the global checkpoint cache TTL. Must be called before first cache access.
-   * Thread-safe but will log a warning if called after caches are already initialized.
+   * Configure the global checkpoint cache TTL. Must be called before first cache access. Thread-safe but will log a
+   * warning if called after caches are already initialized.
    */
   def configureGlobalCacheTTL(ttlMinutes: Long, maxSize: Long = 200): Unit = synchronized {
     if (cachesInitialized) {
-      logger.warn(s"Global checkpoint caches already initialized with TTL=${globalCheckpointCacheTTLMinutes}min. " +
-        s"New TTL=$ttlMinutes will take effect after cache rebuild (clearGlobalCaches + re-access).")
+      logger.warn(
+        s"Global checkpoint caches already initialized with TTL=${globalCheckpointCacheTTLMinutes}min. " +
+          s"New TTL=$ttlMinutes will take effect after cache rebuild (clearGlobalCaches + re-access)."
+      )
     }
     globalCheckpointCacheTTLMinutes = ttlMinutes
     globalCheckpointCacheMaxSize = maxSize
@@ -163,7 +165,7 @@ object EnhancedTransactionLogCache {
     CacheBuilder
       .newBuilder()
       .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
-      .maximumSize(1000)  // Typically few unique schemas even for large tables
+      .maximumSize(1000) // Typically few unique schemas even for large tables
       .recordStats()
       .build[String, String]()
   }
@@ -172,11 +174,13 @@ object EnhancedTransactionLogCache {
   // Avoids parsing docMappingJson multiple times to extract field names, fast fields, etc.
   private lazy val _globalDocMappingMetadataCache: Cache[String, DocMappingMetadata] = synchronized {
     cachesInitialized = true
-    logger.info(s"Initializing global doc mapping metadata cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=1000")
+    logger.info(
+      s"Initializing global doc mapping metadata cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=1000"
+    )
     CacheBuilder
       .newBuilder()
       .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
-      .maximumSize(1000)  // Typically few unique schemas
+      .maximumSize(1000) // Typically few unique schemas
       .recordStats()
       .build[String, DocMappingMetadata]()
   }
@@ -184,16 +188,19 @@ object EnhancedTransactionLogCache {
   // Global cache for Avro manifest file contents - keyed by manifest file path
   // Manifest files are immutable once written, so safe to cache indefinitely
   // This avoids re-reading .avro files on every partition-filtered query
-  private lazy val _globalAvroManifestFileCache: Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] = synchronized {
-    cachesInitialized = true
-    logger.info(s"Initializing global Avro manifest file cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=500")
-    CacheBuilder
-      .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
-      .maximumSize(500)  // Each manifest can be large, limit total cached manifests
-      .recordStats()
-      .build[String, Seq[io.indextables.spark.transaction.avro.FileEntry]]()
-  }
+  private lazy val _globalAvroManifestFileCache: Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] =
+    synchronized {
+      cachesInitialized = true
+      logger.info(
+        s"Initializing global Avro manifest file cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=500"
+      )
+      CacheBuilder
+        .newBuilder()
+        .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+        .maximumSize(500) // Each manifest can be large, limit total cached manifests
+        .recordStats()
+        .build[String, Seq[io.indextables.spark.transaction.avro.FileEntry]]()
+    }
 
   // Global cache for MetadataAction - keyed by table path
   // Metadata is immutable for a given table version, so safe to cache across TransactionLog instances
@@ -230,26 +237,30 @@ object EnhancedTransactionLogCache {
     CacheBuilder
       .newBuilder()
       .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
-      .maximumSize(500)  // Cache multiple versions across tables
+      .maximumSize(500) // Cache multiple versions across tables
       .recordStats()
       .build[VersionCacheKey, Seq[Action]]()
   }
 
   // Accessors for the lazy caches
-  private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = _globalCheckpointActionsCache
-  private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = _globalLastCheckpointInfoCache
+  private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] =
+    _globalCheckpointActionsCache
+  private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] =
+    _globalLastCheckpointInfoCache
   private[transaction] def globalAvroStateManifestCache: Cache[String, StateManifest] = _globalAvroStateManifestCache
   private[transaction] def globalAvroFileListCache: Cache[AvroFileListKey, Seq[AddAction]] = _globalAvroFileListCache
-  private[transaction] def globalFilteredSchemaCache: Cache[String, String] = _globalFilteredSchemaCache
-  private[transaction] def globalDocMappingMetadataCache: Cache[String, DocMappingMetadata] = _globalDocMappingMetadataCache
-  private[transaction] def globalAvroManifestFileCache: Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] = _globalAvroManifestFileCache
-  private[transaction] def globalMetadataCache: Cache[String, MetadataAction] = _globalMetadataCache
-  private[transaction] def globalProtocolCache: Cache[String, ProtocolAction] = _globalProtocolCache
+  private[transaction] def globalFilteredSchemaCache: Cache[String, String]                = _globalFilteredSchemaCache
+  private[transaction] def globalDocMappingMetadataCache: Cache[String, DocMappingMetadata] =
+    _globalDocMappingMetadataCache
+  private[transaction] def globalAvroManifestFileCache
+    : Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] = _globalAvroManifestFileCache
+  private[transaction] def globalMetadataCache: Cache[String, MetadataAction]      = _globalMetadataCache
+  private[transaction] def globalProtocolCache: Cache[String, ProtocolAction]      = _globalProtocolCache
   private[transaction] def globalVersionCache: Cache[VersionCacheKey, Seq[Action]] = _globalVersionCache
 
   /**
-   * Get or compute MetadataAction from global cache - shared across all TransactionLog instances.
-   * This avoids re-parsing transaction log JSON when creating new DataFrames on the same table.
+   * Get or compute MetadataAction from global cache - shared across all TransactionLog instances. This avoids
+   * re-parsing transaction log JSON when creating new DataFrames on the same table.
    */
   def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction =
     Option(globalMetadataCache.getIfPresent(tablePath)) match {
@@ -263,9 +274,7 @@ object EnhancedTransactionLogCache {
         metadata
     }
 
-  /**
-   * Get or compute ProtocolAction from global cache - shared across all TransactionLog instances.
-   */
+  /** Get or compute ProtocolAction from global cache - shared across all TransactionLog instances. */
   def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction =
     Option(globalProtocolCache.getIfPresent(tablePath)) match {
       case Some(protocol) =>
@@ -279,10 +288,14 @@ object EnhancedTransactionLogCache {
     }
 
   /**
-   * Get or compute version actions from global cache - shared across all TransactionLog instances.
-   * This avoids re-parsing transaction log JSON files when creating new DataFrames on the same table.
+   * Get or compute version actions from global cache - shared across all TransactionLog instances. This avoids
+   * re-parsing transaction log JSON files when creating new DataFrames on the same table.
    */
-  def getOrComputeGlobalVersionActions(tablePath: String, version: Long, compute: => Seq[Action]): Seq[Action] =
+  def getOrComputeGlobalVersionActions(
+    tablePath: String,
+    version: Long,
+    compute: => Seq[Action]
+  ): Seq[Action] =
     Option(globalVersionCache.getIfPresent(VersionCacheKey(tablePath, version))) match {
       case Some(actions) =>
         logger.debug(s"GLOBAL version cache HIT for $tablePath version $version")
@@ -297,12 +310,15 @@ object EnhancedTransactionLogCache {
   /**
    * Get or compute a filtered schema - caches the result of filterEmptyObjectMappings.
    *
-   * The filterEmptyObjectMappings function parses JSON which is expensive. Since the same
-   * schema hash always produces the same filtered result, we cache based on the schema hash.
+   * The filterEmptyObjectMappings function parses JSON which is expensive. Since the same schema hash always produces
+   * the same filtered result, we cache based on the schema hash.
    *
-   * @param schemaHash The schema hash (used as cache key)
-   * @param compute Lazy computation that returns the filtered schema
-   * @return Filtered schema string
+   * @param schemaHash
+   *   The schema hash (used as cache key)
+   * @param compute
+   *   Lazy computation that returns the filtered schema
+   * @return
+   *   Filtered schema string
    */
   def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String =
     Option(globalFilteredSchemaCache.getIfPresent(schemaHash)) match {
@@ -318,12 +334,15 @@ object EnhancedTransactionLogCache {
   /**
    * Get or compute DocMappingMetadata - parses docMappingJson once and caches the extracted metadata.
    *
-   * This avoids repeated JSON parsing to extract field names, fast fields, etc.
-   * The key can be either a schema hash (if available) or the raw JSON string.
+   * This avoids repeated JSON parsing to extract field names, fast fields, etc. The key can be either a schema hash (if
+   * available) or the raw JSON string.
    *
-   * @param key The cache key (schema hash or raw JSON)
-   * @param docMappingJson The raw JSON to parse if not cached
-   * @return Parsed DocMappingMetadata
+   * @param key
+   *   The cache key (schema hash or raw JSON)
+   * @param docMappingJson
+   *   The raw JSON to parse if not cached
+   * @return
+   *   Parsed DocMappingMetadata
    */
   def getOrComputeDocMappingMetadata(key: String, docMappingJson: String): DocMappingMetadata =
     Option(globalDocMappingMetadataCache.getIfPresent(key)) match {
@@ -335,9 +354,7 @@ object EnhancedTransactionLogCache {
         metadata
     }
 
-  /**
-   * Get DocMappingMetadata for an AddAction, using the schema hash as cache key when available.
-   */
+  /** Get DocMappingMetadata for an AddAction, using the schema hash as cache key when available. */
   def getDocMappingMetadata(addAction: AddAction): DocMappingMetadata =
     addAction.docMappingJson match {
       case Some(json) =>
@@ -351,14 +368,20 @@ object EnhancedTransactionLogCache {
   /**
    * Get or compute Avro manifest file entries - caches the parsed FileEntry records.
    *
-   * Avro manifest files (.avro) are immutable once written. Caching their contents
-   * avoids re-reading from cloud storage on every partition-filtered query.
+   * Avro manifest files (.avro) are immutable once written. Caching their contents avoids re-reading from cloud storage
+   * on every partition-filtered query.
    *
-   * @param manifestPath Full path to the manifest file (used as cache key)
-   * @param compute Lazy computation that reads and parses the manifest file
-   * @return Sequence of FileEntry records
+   * @param manifestPath
+   *   Full path to the manifest file (used as cache key)
+   * @param compute
+   *   Lazy computation that reads and parses the manifest file
+   * @return
+   *   Sequence of FileEntry records
    */
-  def getOrComputeAvroManifestFile(manifestPath: String, compute: => Seq[io.indextables.spark.transaction.avro.FileEntry]): Seq[io.indextables.spark.transaction.avro.FileEntry] =
+  def getOrComputeAvroManifestFile(
+    manifestPath: String,
+    compute: => Seq[io.indextables.spark.transaction.avro.FileEntry]
+  ): Seq[io.indextables.spark.transaction.avro.FileEntry] =
     Option(globalAvroManifestFileCache.getIfPresent(manifestPath)) match {
       case Some(entries) =>
         logger.debug(s"GLOBAL Avro manifest file cache HIT for $manifestPath (${entries.size} entries)")
@@ -413,8 +436,16 @@ object EnhancedTransactionLogCache {
   }
 
   /** Get global cache statistics */
-  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
-    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats(), globalAvroStateManifestCache.stats(), globalAvroFileListCache.stats(), globalFilteredSchemaCache.stats(), globalAvroManifestFileCache.stats())
+  def getGlobalCacheStats()
+    : (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
+    (
+      globalCheckpointActionsCache.stats(),
+      globalLastCheckpointInfoCache.stats(),
+      globalAvroStateManifestCache.stats(),
+      globalAvroFileListCache.stats(),
+      globalFilteredSchemaCache.stats(),
+      globalAvroManifestFileCache.stats()
+    )
 }
 
 /**
@@ -575,29 +606,26 @@ class EnhancedTransactionLogCache(
   def getOrComputeMetadata(
     tablePath: String,
     compute: => MetadataAction
-  ): MetadataAction = {
+  ): MetadataAction =
     // Delegate to GLOBAL cache for cross-TransactionLog caching
     EnhancedTransactionLogCache.getOrComputeGlobalMetadata(tablePath, compute)
-  }
 
   /** Get or compute protocol */
   def getOrComputeProtocol(
     tablePath: String,
     compute: => ProtocolAction
-  ): ProtocolAction = {
+  ): ProtocolAction =
     // Delegate to GLOBAL cache for cross-TransactionLog caching
     EnhancedTransactionLogCache.getOrComputeGlobalProtocol(tablePath, compute)
-  }
 
   /** Get or compute version actions */
   def getOrComputeVersionActions(
     tablePath: String,
     version: Long,
     compute: => Seq[Action]
-  ): Seq[Action] = {
+  ): Seq[Action] =
     // Delegate to GLOBAL cache for cross-TransactionLog caching
     EnhancedTransactionLogCache.getOrComputeGlobalVersionActions(tablePath, version, compute)
-  }
 
   /** Get or compute checkpoint info */
   def getOrComputeCheckpoint(
@@ -687,9 +715,9 @@ class EnhancedTransactionLogCache(
   }
 
   /**
-   * Get or compute Avro state manifest - caches the StateManifest read from _manifest.avro.
-   * Uses GLOBAL cache shared across all TransactionLog instances.
-   * Key is the full state directory path (e.g., "s3://bucket/table/_transaction_log/state-v00000000000000000100")
+   * Get or compute Avro state manifest - caches the StateManifest read from _manifest.avro. Uses GLOBAL cache shared
+   * across all TransactionLog instances. Key is the full state directory path (e.g.,
+   * "s3://bucket/table/_transaction_log/state-v00000000000000000100")
    */
   def getOrComputeAvroStateManifest(
     stateDirPath: String,
@@ -714,12 +742,12 @@ class EnhancedTransactionLogCache(
   }
 
   /**
-   * Get or compute Avro file list - caches the Seq[AddAction] after expensive schema processing.
-   * Uses GLOBAL cache shared across all TransactionLog instances.
-   * Key is (tablePath, avroVersion) to ensure cache is invalidated when new checkpoints are written.
+   * Get or compute Avro file list - caches the Seq[AddAction] after expensive schema processing. Uses GLOBAL cache
+   * shared across all TransactionLog instances. Key is (tablePath, avroVersion) to ensure cache is invalidated when new
+   * checkpoints are written.
    *
-   * This is critical for performance: the toAddActions() conversion calls filterEmptyObjectMappings()
-   * which parses JSON for every file entry. Without this global cache, every query would re-parse.
+   * This is critical for performance: the toAddActions() conversion calls filterEmptyObjectMappings() which parses JSON
+   * for every file entry. Without this global cache, every query would re-parse.
    */
   def getOrComputeAvroFileList(
     tablePath: String,
@@ -733,7 +761,9 @@ class EnhancedTransactionLogCache(
         logger.debug(s"GLOBAL Avro file list cache HIT for $tablePath version $avroVersion (${files.size} files)")
         files
       case None =>
-        logger.debug(s"GLOBAL Avro file list cache MISS for $tablePath version $avroVersion - computing with schema processing")
+        logger.debug(
+          s"GLOBAL Avro file list cache MISS for $tablePath version $avroVersion - computing with schema processing"
+        )
         val files = compute
         EnhancedTransactionLogCache.globalAvroFileListCache.put(key, files)
         logger.info(s"Cached Avro file list in GLOBAL cache for $tablePath version $avroVersion (${files.size} files)")

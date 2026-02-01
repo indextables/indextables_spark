@@ -110,7 +110,7 @@ class IndexTables4SparkGroupByAggregateScan(
       schema,
       pushedFilters,
       options,
-      resolvedConfig,  // Use resolved config with driver-side credentials
+      resolvedConfig, // Use resolved config with driver-side credentials
       aggregation,
       groupByColumns,
       indexQueryFilters,
@@ -119,11 +119,13 @@ class IndexTables4SparkGroupByAggregateScan(
     )
 
   /**
-   * Resolve AWS credentials on the driver and return a modified config.
-   * See IndexTables4SparkScan.resolveCredentialsOnDriver for detailed documentation.
+   * Resolve AWS credentials on the driver and return a modified config. See
+   * IndexTables4SparkScan.resolveCredentialsOnDriver for detailed documentation.
    */
-  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path): Map[String, String] = {
-    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path)
+    : Map[String, String] = {
+    val providerClass = config
+      .get("spark.indextables.aws.credentialsProviderClass")
       .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
 
     providerClass match {
@@ -131,7 +133,8 @@ class IndexTables4SparkGroupByAggregateScan(
         try {
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath.toString)
           val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config, normalizedPath
+            config,
+            normalizedPath
           )
 
           credentials match {
@@ -418,36 +421,49 @@ class IndexTables4SparkGroupByAggregateBatch(
     val partitions = if (splitsPerTask == 1) {
       // Fallback to single-split behavior for backward compatibility
       // Still interleave by host for better distribution
-      val batchesByHost = splitsByHost.map { case (host, hostSplits) =>
-        host -> hostSplits.map { split =>
-          val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
-          new IndexTables4SparkGroupByAggregatePartition(
-            split, pushedFilters, config, aggregation, groupByColumns,
-            transactionLog.getTablePath(), schema, indexQueryFilters,
-            if (host == "unknown") None else Some(host),
-            bucketConfig, partitionColumns, splitPartitionValues
-          )
-        }
+      val batchesByHost = splitsByHost.map {
+        case (host, hostSplits) =>
+          host -> hostSplits.map { split =>
+            val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
+            new IndexTables4SparkGroupByAggregatePartition(
+              split,
+              pushedFilters,
+              config,
+              aggregation,
+              groupByColumns,
+              transactionLog.getTablePath(),
+              schema,
+              indexQueryFilters,
+              if (host == "unknown") None else Some(host),
+              bucketConfig,
+              partitionColumns,
+              splitPartitionValues
+            )
+          }
       }
       PartitionUtils.interleaveByHost(batchesByHost)
     } else {
       // Group splits by host and batch them
-      val batchesByHost = splitsByHost.map { case (host, hostSplits) =>
-        host -> hostSplits.grouped(splitsPerTask).map { batch =>
-          new IndexTables4SparkMultiSplitGroupByAggregatePartition(
-            splits = batch,
-            pushedFilters = pushedFilters,
-            config = config,
-            aggregation = aggregation,
-            groupByColumns = groupByColumns,
-            tablePath = transactionLog.getTablePath(),
-            schema = schema,
-            indexQueryFilters = indexQueryFilters,
-            preferredHost = if (host == "unknown") None else Some(host),
-            bucketConfig = bucketConfig,
-            partitionColumns = partitionColumns
-          )
-        }.toSeq
+      val batchesByHost = splitsByHost.map {
+        case (host, hostSplits) =>
+          host -> hostSplits
+            .grouped(splitsPerTask)
+            .map { batch =>
+              new IndexTables4SparkMultiSplitGroupByAggregatePartition(
+                splits = batch,
+                pushedFilters = pushedFilters,
+                config = config,
+                aggregation = aggregation,
+                groupByColumns = groupByColumns,
+                tablePath = transactionLog.getTablePath(),
+                schema = schema,
+                indexQueryFilters = indexQueryFilters,
+                preferredHost = if (host == "unknown") None else Some(host),
+                bucketConfig = bucketConfig,
+                partitionColumns = partitionColumns
+              )
+            }
+            .toSeq
       }
       PartitionUtils.interleaveByHost(batchesByHost)
     }
@@ -509,9 +525,9 @@ class IndexTables4SparkGroupByAggregatePartition(
 }
 
 /**
- * Input partition holding multiple splits for batch GROUP BY aggregation processing.
- * All splits share the same preferredHost for cache locality.
- * The reader will execute GROUP BY aggregations on each split and merge results by group key.
+ * Input partition holding multiple splits for batch GROUP BY aggregation processing. All splits share the same
+ * preferredHost for cache locality. The reader will execute GROUP BY aggregations on each split and merge results by
+ * group key.
  */
 class IndexTables4SparkMultiSplitGroupByAggregatePartition(
   val splits: Seq[io.indextables.spark.transaction.AddAction],
@@ -558,7 +574,9 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
       case multiSplitPartition: IndexTables4SparkMultiSplitGroupByAggregatePartition =>
-        logger.debug(s"GROUP BY READER FACTORY: Creating multi-split reader with ${multiSplitPartition.splits.length} splits")
+        logger.debug(
+          s"GROUP BY READER FACTORY: Creating multi-split reader with ${multiSplitPartition.splits.length} splits"
+        )
 
         new IndexTables4SparkMultiSplitGroupByAggregateReader(
           multiSplitPartition,
@@ -1283,17 +1301,20 @@ class IndexTables4SparkGroupByAggregateReader(
 
   /** Add sub-aggregations to a nested TermsAggregation (for multi-key bucket aggregations). */
   /**
-   * Build recursively nested TermsAggregations for multiple additional GROUP BY columns.
-   * The structure is: Terms(col1) -> Terms(col2) -> ... -> Terms(colN) -> metric sub-aggregations
+   * Build recursively nested TermsAggregations for multiple additional GROUP BY columns. The structure is: Terms(col1)
+   * -> Terms(col2) -> ... -> Terms(colN) -> metric sub-aggregations
    *
-   * @param columns The additional GROUP BY column names
-   * @param depth The current nesting depth (used for naming)
-   * @return The root TermsAggregation with nested children
+   * @param columns
+   *   The additional GROUP BY column names
+   * @param depth
+   *   The current nesting depth (used for naming)
+   * @return
+   *   The root TermsAggregation with nested children
    */
   private def buildNestedTermsAggregation(columns: List[String], depth: Int): TermsAggregation = {
     val columnName = columns.head
-    val aggName = if (depth == 0) "nested_terms" else s"nested_terms_$depth"
-    val termsAgg = new TermsAggregation(aggName, columnName, 1000, 0)
+    val aggName    = if (depth == 0) "nested_terms" else s"nested_terms_$depth"
+    val termsAgg   = new TermsAggregation(aggName, columnName, 1000, 0)
 
     if (columns.tail.isEmpty) {
       // Last column - add the metric sub-aggregations here
@@ -1301,7 +1322,7 @@ class IndexTables4SparkGroupByAggregateReader(
       logger.debug(s"BUCKET EXECUTION: Created leaf TermsAggregation '$aggName' for column '$columnName' with metric sub-aggregations")
     } else {
       // More columns - add nested TermsAggregation
-      val nestedAgg = buildNestedTermsAggregation(columns.tail, depth + 1)
+      val nestedAgg     = buildNestedTermsAggregation(columns.tail, depth + 1)
       val nestedAggName = if (depth + 1 == 1) "nested_terms_1" else s"nested_terms_${depth + 1}"
       termsAgg.addSubAggregation(nestedAggName, nestedAgg)
       logger.debug(s"BUCKET EXECUTION: Created TermsAggregation '$aggName' for column '$columnName' with nested terms")
@@ -1401,11 +1422,13 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /**
-   * Process DateHistogram with nested TermsAggregation result into flattened InternalRows.
-   * Supports multiple levels of nested TermsAggregation for multi-key bucket aggregation.
+   * Process DateHistogram with nested TermsAggregation result into flattened InternalRows. Supports multiple levels of
+   * nested TermsAggregation for multi-key bucket aggregation.
    *
-   * @param result The DateHistogram aggregation result
-   * @param nestedColumnNames The list of additional GROUP BY column names (corresponds to nested terms levels)
+   * @param result
+   *   The DateHistogram aggregation result
+   * @param nestedColumnNames
+   *   The list of additional GROUP BY column names (corresponds to nested terms levels)
    */
   private def processDateHistogramWithNestedTermsResult(
     result: DateHistogramResult,
@@ -1433,10 +1456,11 @@ class IndexTables4SparkGroupByAggregateReader(
         } else {
           // Recursively flatten all nested terms levels
           flattenNestedTermsBuckets(nestedTermsResult, nestedColumnNames.tail, 0)
-            .map { case (termKeys, aggregationValues) =>
-              val allKeys = Seq(keyMicros) ++ termKeys
-              logger.debug(s"BUCKET EXECUTION: DateHistogram[$keyMicros] + Terms[${termKeys.mkString(", ")}] -> ${aggregationValues.mkString(", ")}")
-              InternalRow.fromSeq(allKeys ++ aggregationValues)
+            .map {
+              case (termKeys, aggregationValues) =>
+                val allKeys = Seq(keyMicros) ++ termKeys
+                logger.debug(s"BUCKET EXECUTION: DateHistogram[$keyMicros] + Terms[${termKeys.mkString(", ")}] -> ${aggregationValues.mkString(", ")}")
+                InternalRow.fromSeq(allKeys ++ aggregationValues)
             }
         }
       }
@@ -1444,8 +1468,8 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /**
-   * Recursively flatten nested TermsAggregation buckets into (keys, aggregationValues) tuples.
-   * Returns a sequence of (termKeys, aggregationValues) where termKeys has one value per nesting level.
+   * Recursively flatten nested TermsAggregation buckets into (keys, aggregationValues) tuples. Returns a sequence of
+   * (termKeys, aggregationValues) where termKeys has one value per nesting level.
    */
   private def flattenNestedTermsBuckets(
     termsResult: TermsResult,
@@ -1469,15 +1493,16 @@ class IndexTables4SparkGroupByAggregateReader(
           Seq((Seq(termKey), aggregationValues))
         } else {
           // More nesting levels - recurse into nested terms
-          val nestedAggName = s"nested_terms_${depth + 1}"
+          val nestedAggName     = s"nested_terms_${depth + 1}"
           val nestedTermsResult = termBucket.getSubAggregation(nestedAggName)
           if (nestedTermsResult == null) {
             logger.debug(s"BUCKET EXECUTION: No nested aggregation '$nestedAggName' found at depth $depth")
             Seq.empty[(Seq[Any], Array[Any])]
           } else {
             flattenNestedTermsBuckets(nestedTermsResult.asInstanceOf[TermsResult], remainingColumnNames.tail, depth + 1)
-              .map { case (nestedKeys, aggregationValues) =>
-                (Seq(termKey) ++ nestedKeys, aggregationValues)
+              .map {
+                case (nestedKeys, aggregationValues) =>
+                  (Seq(termKey) ++ nestedKeys, aggregationValues)
               }
           }
         }
@@ -1542,11 +1567,13 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /**
-   * Process Histogram with nested TermsAggregation result into flattened InternalRows.
-   * Supports multiple levels of nested TermsAggregation for multi-key bucket aggregation.
+   * Process Histogram with nested TermsAggregation result into flattened InternalRows. Supports multiple levels of
+   * nested TermsAggregation for multi-key bucket aggregation.
    *
-   * @param result The Histogram aggregation result
-   * @param nestedColumnNames The list of additional GROUP BY column names (corresponds to nested terms levels)
+   * @param result
+   *   The Histogram aggregation result
+   * @param nestedColumnNames
+   *   The list of additional GROUP BY column names (corresponds to nested terms levels)
    */
   private def processHistogramWithNestedTermsResult(
     result: HistogramResult,
@@ -1573,10 +1600,11 @@ class IndexTables4SparkGroupByAggregateReader(
         } else {
           // Recursively flatten all nested terms levels
           flattenNestedTermsBuckets(nestedTermsResult, nestedColumnNames.tail, 0)
-            .map { case (termKeys, aggregationValues) =>
-              val allKeys = Seq(histKey) ++ termKeys
-              logger.debug(s"BUCKET EXECUTION: Histogram[$histKey] + Terms[${termKeys.mkString(", ")}] -> ${aggregationValues.mkString(", ")}")
-              InternalRow.fromSeq(allKeys ++ aggregationValues)
+            .map {
+              case (termKeys, aggregationValues) =>
+                val allKeys = Seq(histKey) ++ termKeys
+                logger.debug(s"BUCKET EXECUTION: Histogram[$histKey] + Terms[${termKeys.mkString(", ")}] -> ${aggregationValues.mkString(", ")}")
+                InternalRow.fromSeq(allKeys ++ aggregationValues)
             }
         }
       }
@@ -2461,12 +2489,12 @@ class IndexTables4SparkGroupByAggregateReader(
 }
 
 /**
- * Reader for multi-split GROUP BY aggregation partitions.
- * Executes GROUP BY aggregations on each split and merges results by group key:
- * - Rows with same group key(s) are combined
- * - COUNT/SUM: adds values together
- * - MIN: takes the minimum across all splits
- * - MAX: takes the maximum across all splits
+ * Reader for multi-split GROUP BY aggregation partitions. Executes GROUP BY aggregations on each split and merges
+ * results by group key:
+ *   - Rows with same group key(s) are combined
+ *   - COUNT/SUM: adds values together
+ *   - MIN: takes the minimum across all splits
+ *   - MAX: takes the maximum across all splits
  */
 class IndexTables4SparkMultiSplitGroupByAggregateReader(
   partition: IndexTables4SparkMultiSplitGroupByAggregatePartition,
@@ -2476,7 +2504,7 @@ class IndexTables4SparkMultiSplitGroupByAggregateReader(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitGroupByAggregateReader])
   private var aggregateResults: Iterator[InternalRow] = _
-  private var isInitialized = false
+  private var isInitialized                           = false
 
   override def next(): Boolean = {
     if (!isInitialized) {
@@ -2530,13 +2558,11 @@ class IndexTables4SparkMultiSplitGroupByAggregateReader(
 
         // Collect all results from this split
         val results = scala.collection.mutable.ArrayBuffer[InternalRow]()
-        try {
-          while (singleReader.next()) {
+        try
+          while (singleReader.next())
             results += singleReader.get().copy()
-          }
-        } finally {
+        finally
           singleReader.close()
-        }
         results
       }
 
@@ -2565,11 +2591,10 @@ class IndexTables4SparkMultiSplitGroupByAggregateReader(
   }
 
   /**
-   * Merge GROUP BY results from multiple splits by group key.
-   * Rows with the same group key(s) are combined:
-   * - COUNT/SUM: adds values together
-   * - MIN: takes the minimum across all splits
-   * - MAX: takes the maximum across all splits
+   * Merge GROUP BY results from multiple splits by group key. Rows with the same group key(s) are combined:
+   *   - COUNT/SUM: adds values together
+   *   - MIN: takes the minimum across all splits
+   *   - MAX: takes the maximum across all splits
    */
   private def mergeGroupByResults(
     results: Seq[InternalRow],
@@ -2581,99 +2606,101 @@ class IndexTables4SparkMultiSplitGroupByAggregateReader(
     // Group rows by their group key(s)
     // Group key is the first numGroupByCols columns
     val groupedByKey = results.groupBy { row =>
-      (0 until numGroupByCols).map { i =>
-        if (row.isNullAt(i)) null else row.get(i, null)
-      }
+      (0 until numGroupByCols).map(i => if (row.isNullAt(i)) null else row.get(i, null))
     }
 
     // Merge each group
     val numAggCols = aggregation.aggregateExpressions.length
-    groupedByKey.map { case (groupKey, groupRows) =>
-      // Start with group key values
-      val mergedValues = new Array[Any](numGroupByCols + numAggCols)
+    groupedByKey.map {
+      case (groupKey, groupRows) =>
+        // Start with group key values
+        val mergedValues = new Array[Any](numGroupByCols + numAggCols)
 
-      // Copy group key values from first row
-      for (i <- 0 until numGroupByCols) {
-        mergedValues(i) = if (groupRows.head.isNullAt(i)) null else groupRows.head.get(i, null)
-      }
+        // Copy group key values from first row
+        for (i <- 0 until numGroupByCols)
+          mergedValues(i) = if (groupRows.head.isNullAt(i)) null else groupRows.head.get(i, null)
 
-      // Merge aggregation values
-      aggregation.aggregateExpressions.zipWithIndex.foreach { case (aggExpr, aggIdx) =>
-        val colIdx = numGroupByCols + aggIdx
+        // Merge aggregation values
+        aggregation.aggregateExpressions.zipWithIndex.foreach {
+          case (aggExpr, aggIdx) =>
+            val colIdx = numGroupByCols + aggIdx
 
-        aggExpr match {
-          case _: Count | _: CountStar =>
-            // COUNT: sum all counts
-            val totalCount = groupRows.filter(!_.isNullAt(colIdx)).map(_.getLong(colIdx)).sum
-            mergedValues(colIdx) = java.lang.Long.valueOf(totalCount)
+            aggExpr match {
+              case _: Count | _: CountStar =>
+                // COUNT: sum all counts
+                val totalCount = groupRows.filter(!_.isNullAt(colIdx)).map(_.getLong(colIdx)).sum
+                mergedValues(colIdx) = java.lang.Long.valueOf(totalCount)
 
-          case _: Sum =>
-            // SUM: sum all values
-            val firstValue = groupRows.find(r => !r.isNullAt(colIdx)).map(_.get(colIdx, null))
-            firstValue match {
-              case Some(_: java.lang.Long) =>
-                val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(_.getLong(colIdx)).sum
-                mergedValues(colIdx) = java.lang.Long.valueOf(totalSum)
-              case Some(_: java.lang.Double) =>
-                val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(_.getDouble(colIdx)).sum
-                mergedValues(colIdx) = java.lang.Double.valueOf(totalSum)
+              case _: Sum =>
+                // SUM: sum all values
+                val firstValue = groupRows.find(r => !r.isNullAt(colIdx)).map(_.get(colIdx, null))
+                firstValue match {
+                  case Some(_: java.lang.Long) =>
+                    val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(_.getLong(colIdx)).sum
+                    mergedValues(colIdx) = java.lang.Long.valueOf(totalSum)
+                  case Some(_: java.lang.Double) =>
+                    val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(_.getDouble(colIdx)).sum
+                    mergedValues(colIdx) = java.lang.Double.valueOf(totalSum)
+                  case _ =>
+                    val totalSum = groupRows
+                      .filter(!_.isNullAt(colIdx))
+                      .map { row =>
+                        try row.getLong(colIdx)
+                        catch { case _: ClassCastException => row.getDouble(colIdx).toLong }
+                      }
+                      .sum
+                    mergedValues(colIdx) = java.lang.Long.valueOf(totalSum)
+                }
+
+              case _: Min =>
+                // MIN: take the minimum
+                val validRows = groupRows.filter(!_.isNullAt(colIdx))
+                if (validRows.isEmpty) {
+                  mergedValues(colIdx) = null
+                } else {
+                  val firstValue = validRows.head.get(colIdx, null)
+                  firstValue match {
+                    case _: java.lang.Integer =>
+                      mergedValues(colIdx) = java.lang.Integer.valueOf(validRows.map(_.getInt(colIdx)).min)
+                    case _: java.lang.Long =>
+                      mergedValues(colIdx) = java.lang.Long.valueOf(validRows.map(_.getLong(colIdx)).min)
+                    case _: java.lang.Float =>
+                      mergedValues(colIdx) = java.lang.Float.valueOf(validRows.map(_.getFloat(colIdx)).min)
+                    case _: java.lang.Double =>
+                      mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).min)
+                    case _ =>
+                      mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).min)
+                  }
+                }
+
+              case _: Max =>
+                // MAX: take the maximum
+                val validRows = groupRows.filter(!_.isNullAt(colIdx))
+                if (validRows.isEmpty) {
+                  mergedValues(colIdx) = null
+                } else {
+                  val firstValue = validRows.head.get(colIdx, null)
+                  firstValue match {
+                    case _: java.lang.Integer =>
+                      mergedValues(colIdx) = java.lang.Integer.valueOf(validRows.map(_.getInt(colIdx)).max)
+                    case _: java.lang.Long =>
+                      mergedValues(colIdx) = java.lang.Long.valueOf(validRows.map(_.getLong(colIdx)).max)
+                    case _: java.lang.Float =>
+                      mergedValues(colIdx) = java.lang.Float.valueOf(validRows.map(_.getFloat(colIdx)).max)
+                    case _: java.lang.Double =>
+                      mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).max)
+                    case _ =>
+                      mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).max)
+                  }
+                }
+
               case _ =>
-                val totalSum = groupRows.filter(!_.isNullAt(colIdx)).map(row => {
-                  try { row.getLong(colIdx) }
-                  catch { case _: ClassCastException => row.getDouble(colIdx).toLong }
-                }).sum
-                mergedValues(colIdx) = java.lang.Long.valueOf(totalSum)
+                // Default: take from first row
+                mergedValues(colIdx) = if (groupRows.head.isNullAt(colIdx)) null else groupRows.head.get(colIdx, null)
             }
-
-          case _: Min =>
-            // MIN: take the minimum
-            val validRows = groupRows.filter(!_.isNullAt(colIdx))
-            if (validRows.isEmpty) {
-              mergedValues(colIdx) = null
-            } else {
-              val firstValue = validRows.head.get(colIdx, null)
-              firstValue match {
-                case _: java.lang.Integer =>
-                  mergedValues(colIdx) = java.lang.Integer.valueOf(validRows.map(_.getInt(colIdx)).min)
-                case _: java.lang.Long =>
-                  mergedValues(colIdx) = java.lang.Long.valueOf(validRows.map(_.getLong(colIdx)).min)
-                case _: java.lang.Float =>
-                  mergedValues(colIdx) = java.lang.Float.valueOf(validRows.map(_.getFloat(colIdx)).min)
-                case _: java.lang.Double =>
-                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).min)
-                case _ =>
-                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).min)
-              }
-            }
-
-          case _: Max =>
-            // MAX: take the maximum
-            val validRows = groupRows.filter(!_.isNullAt(colIdx))
-            if (validRows.isEmpty) {
-              mergedValues(colIdx) = null
-            } else {
-              val firstValue = validRows.head.get(colIdx, null)
-              firstValue match {
-                case _: java.lang.Integer =>
-                  mergedValues(colIdx) = java.lang.Integer.valueOf(validRows.map(_.getInt(colIdx)).max)
-                case _: java.lang.Long =>
-                  mergedValues(colIdx) = java.lang.Long.valueOf(validRows.map(_.getLong(colIdx)).max)
-                case _: java.lang.Float =>
-                  mergedValues(colIdx) = java.lang.Float.valueOf(validRows.map(_.getFloat(colIdx)).max)
-                case _: java.lang.Double =>
-                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).max)
-                case _ =>
-                  mergedValues(colIdx) = java.lang.Double.valueOf(validRows.map(_.getDouble(colIdx)).max)
-              }
-            }
-
-          case _ =>
-            // Default: take from first row
-            mergedValues(colIdx) = if (groupRows.head.isNullAt(colIdx)) null else groupRows.head.get(colIdx, null)
         }
-      }
 
-      InternalRow.fromSeq(mergedValues.toSeq)
+        InternalRow.fromSeq(mergedValues.toSeq)
     }.toArray
   }
 }

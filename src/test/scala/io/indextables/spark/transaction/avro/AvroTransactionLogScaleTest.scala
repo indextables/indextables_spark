@@ -35,7 +35,7 @@ import io.indextables.spark.TestBase
  */
 class AvroTransactionLogScaleTest extends TestBase {
 
-  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[AvroTransactionLogScaleTest])
+  private val logger   = org.slf4j.LoggerFactory.getLogger(classOf[AvroTransactionLogScaleTest])
   private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
 
   // ============================================================================
@@ -93,8 +93,8 @@ class AvroTransactionLogScaleTest extends TestBase {
       // Time the read operation
       val startTime = System.currentTimeMillis()
 
-      val result = spark.read.format(provider).load(path)
-      val count = result.count()
+      val result   = spark.read.format(provider).load(path)
+      val count    = result.count()
       val readTime = System.currentTimeMillis() - startTime
 
       count shouldBe 3000 // 30 * 100
@@ -131,7 +131,7 @@ class AvroTransactionLogScaleTest extends TestBase {
       val checkpointVersion = checkpointResult(0).getAs[Long]("checkpoint_version")
 
       // Verify state directory exists
-      val txLogDir = new File(s"$path/_transaction_log")
+      val txLogDir  = new File(s"$path/_transaction_log")
       val stateDirs = txLogDir.listFiles().filter(_.getName.startsWith("state-v"))
       stateDirs should not be empty
 
@@ -190,13 +190,13 @@ class AvroTransactionLogScaleTest extends TestBase {
 
       // First read - may need to load state
       val startTime1 = System.currentTimeMillis()
-      val result1 = spark.read.format(provider).load(path)
+      val result1    = spark.read.format(provider).load(path)
       result1.count()
       val time1 = System.currentTimeMillis() - startTime1
 
       // Second read - should use cached state
       val startTime2 = System.currentTimeMillis()
-      val result2 = spark.read.format(provider).load(path)
+      val result2    = spark.read.format(provider).load(path)
       result2.count()
       val time2 = System.currentTimeMillis() - startTime2
 
@@ -312,7 +312,7 @@ class AvroTransactionLogScaleTest extends TestBase {
       for (i <- 1 to 5) {
         // Read
         val readResult = spark.read.format(provider).load(path)
-        val count = readResult.count()
+        val count      = readResult.count()
         logger.info(s"Iteration $i: read $count rows")
 
         // Write
@@ -351,7 +351,7 @@ class AvroTransactionLogScaleTest extends TestBase {
       }
 
       // Verify state directories exist
-      val txLogDir = new File(s"$path/_transaction_log")
+      val txLogDir  = new File(s"$path/_transaction_log")
       val stateDirs = txLogDir.listFiles().filter(_.getName.startsWith("state-v"))
       stateDirs should not be empty
 

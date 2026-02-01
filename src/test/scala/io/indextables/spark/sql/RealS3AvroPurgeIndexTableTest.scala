@@ -132,7 +132,7 @@ class RealS3AvroPurgeIndexTableTest extends RealS3TestBase {
     }
 
     // Verify Avro state directory was created
-    val txLogPath = new Path(tablePath, "_transaction_log")
+    val txLogPath        = new Path(tablePath, "_transaction_log")
     val stateDirectories = fs.listStatus(txLogPath).filter(_.getPath.getName.startsWith("state-v"))
     assert(stateDirectories.nonEmpty, "Avro state directory should exist after checkpoint")
     println(s"✅ Found ${stateDirectories.length} Avro state directories on S3")
@@ -244,7 +244,7 @@ class RealS3AvroPurgeIndexTableTest extends RealS3TestBase {
     }
 
     // Verify Avro state directory exists
-    val txLogPath = new Path(tablePath, "_transaction_log")
+    val txLogPath        = new Path(tablePath, "_transaction_log")
     val stateDirectories = fs.listStatus(txLogPath).filter(_.getPath.getName.startsWith("state-v"))
     assert(stateDirectories.nonEmpty, "Avro state directory should exist")
     println(s"✅ Avro state directory created for partitioned table")
@@ -267,7 +267,10 @@ class RealS3AvroPurgeIndexTableTest extends RealS3TestBase {
     // Verify both orphaned files were found via recursive S3 listing in partitions
     // Note: With Avro state format, checkpointing may create additional orphaned files from old splits
     assert(metrics.getString(0) == "DRY_RUN", "Status should be DRY_RUN")
-    assert(metrics.getLong(1) >= 2, s"Expected at least 2 orphaned files found in S3 partitions, got ${metrics.getLong(1)}")
+    assert(
+      metrics.getLong(1) >= 2,
+      s"Expected at least 2 orphaned files found in S3 partitions, got ${metrics.getLong(1)}"
+    )
 
     // Verify both files still exist (DRY RUN doesn't delete)
     assert(fs.exists(orphan1), "Orphan 1 should still exist in S3 after DRY RUN")
@@ -305,11 +308,11 @@ class RealS3AvroPurgeIndexTableTest extends RealS3TestBase {
 
     // Verify Avro state structure
     val txLogPath = new Path(tablePath, "_transaction_log")
-    val allFiles = fs.listStatus(txLogPath)
+    val allFiles  = fs.listStatus(txLogPath)
 
     println(s"📁 Transaction log contents:")
     allFiles.foreach { status =>
-      val name = status.getPath.getName
+      val name     = status.getPath.getName
       val typeName = if (status.isDirectory) "DIR " else "FILE"
       println(s"   - [$typeName] $name")
     }

@@ -27,37 +27,37 @@ class SelectiveCompactionTest extends AnyFunSuite with Matchers {
   // ============================================================================
 
   test("extractPartitionValues parses single partition from path") {
-    val path = "s3://bucket/table/date=2024-01-15/file.split"
+    val path   = "s3://bucket/table/date=2024-01-15/file.split"
     val result = TombstoneDistributor.extractPartitionValues(path)
     result shouldBe Map("date" -> "2024-01-15")
   }
 
   test("extractPartitionValues parses multiple partitions from path") {
-    val path = "s3://bucket/table/year=2024/month=01/day=15/file.split"
+    val path   = "s3://bucket/table/year=2024/month=01/day=15/file.split"
     val result = TombstoneDistributor.extractPartitionValues(path)
     result shouldBe Map("year" -> "2024", "month" -> "01", "day" -> "15")
   }
 
   test("extractPartitionValues handles local paths") {
-    val path = "/local/path/region=us-east/category=electronics/file.split"
+    val path   = "/local/path/region=us-east/category=electronics/file.split"
     val result = TombstoneDistributor.extractPartitionValues(path)
     result shouldBe Map("region" -> "us-east", "category" -> "electronics")
   }
 
   test("extractPartitionValues returns empty map for unpartitioned path") {
-    val path = "s3://bucket/table/file.split"
+    val path   = "s3://bucket/table/file.split"
     val result = TombstoneDistributor.extractPartitionValues(path)
     result shouldBe Map.empty
   }
 
   test("extractPartitionValues handles Azure abfss paths") {
-    val path = "abfss://container@account.dfs.core.windows.net/table/date=2024-01-01/file.split"
+    val path   = "abfss://container@account.dfs.core.windows.net/table/date=2024-01-01/file.split"
     val result = TombstoneDistributor.extractPartitionValues(path)
     result shouldBe Map("date" -> "2024-01-01")
   }
 
   test("extractPartitionValues handles special characters in values") {
-    val path = "s3://bucket/table/name=hello_world/id=abc-123/file.split"
+    val path   = "s3://bucket/table/name=hello_world/id=abc-123/file.split"
     val result = TombstoneDistributor.extractPartitionValues(path)
     result shouldBe Map("name" -> "hello_world", "id" -> "abc-123")
   }
@@ -68,58 +68,60 @@ class SelectiveCompactionTest extends AnyFunSuite with Matchers {
 
   test("valuesWithinBounds returns true when value is within bounds") {
     val partitionValues = Map("date" -> "2024-01-15")
-    val bounds = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-31"))))
+    val bounds          = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-31"))))
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe true
   }
 
   test("valuesWithinBounds returns false when value is before min") {
     val partitionValues = Map("date" -> "2023-12-15")
-    val bounds = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-31"))))
+    val bounds          = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-31"))))
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe false
   }
 
   test("valuesWithinBounds returns false when value is after max") {
     val partitionValues = Map("date" -> "2024-02-15")
-    val bounds = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-31"))))
+    val bounds          = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), Some("2024-01-31"))))
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe false
   }
 
   test("valuesWithinBounds handles multiple partition columns") {
     val partitionValues = Map("year" -> "2024", "month" -> "06")
-    val bounds = Some(Map(
-      "year" -> PartitionBounds(Some("2024"), Some("2024")),
-      "month" -> PartitionBounds(Some("01"), Some("12"))
-    ))
+    val bounds = Some(
+      Map(
+        "year"  -> PartitionBounds(Some("2024"), Some("2024")),
+        "month" -> PartitionBounds(Some("01"), Some("12"))
+      )
+    )
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe true
   }
 
   test("valuesWithinBounds returns true when bounds have no min (unbounded lower)") {
     val partitionValues = Map("date" -> "2020-01-01")
-    val bounds = Some(Map("date" -> PartitionBounds(None, Some("2024-12-31"))))
+    val bounds          = Some(Map("date" -> PartitionBounds(None, Some("2024-12-31"))))
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe true
   }
 
   test("valuesWithinBounds returns true when bounds have no max (unbounded upper)") {
     val partitionValues = Map("date" -> "2030-01-01")
-    val bounds = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), None)))
+    val bounds          = Some(Map("date" -> PartitionBounds(Some("2024-01-01"), None)))
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe true
   }
 
   test("valuesWithinBounds returns true for unpartitioned manifest with unpartitioned tombstone") {
-    val partitionValues = Map.empty[String, String]
+    val partitionValues                              = Map.empty[String, String]
     val bounds: Option[Map[String, PartitionBounds]] = None
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe true
   }
 
   test("valuesWithinBounds returns false for partitioned tombstone with unpartitioned manifest") {
-    val partitionValues = Map("date" -> "2024-01-15")
+    val partitionValues                              = Map("date" -> "2024-01-15")
     val bounds: Option[Map[String, PartitionBounds]] = None
 
     TombstoneDistributor.valuesWithinBounds(partitionValues, bounds) shouldBe false
@@ -159,14 +161,14 @@ class SelectiveCompactionTest extends AnyFunSuite with Matchers {
 
     // Tombstones: 500 in January, 0 in February, 100 in March
     val januaryTombstones = (1 to 500).map(i => f"s3://bucket/table/date=2024-01-${(i % 28 + 1)}%02d/file$i.split")
-    val marchTombstones = (1 to 100).map(i => f"s3://bucket/table/date=2024-03-${(i % 28 + 1)}%02d/file$i.split")
+    val marchTombstones   = (1 to 100).map(i => f"s3://bucket/table/date=2024-03-${(i % 28 + 1)}%02d/file$i.split")
     val tombstones: Set[String] = (januaryTombstones ++ marchTombstones).toSet
 
     val result = TombstoneDistributor.distributeTombstones(Seq(manifest1, manifest2, manifest3), tombstones)
 
-    result(0).tombstoneCount shouldBe 500  // January manifest
-    result(1).tombstoneCount shouldBe 0    // February manifest (clean!)
-    result(2).tombstoneCount shouldBe 100  // March manifest
+    result(0).tombstoneCount shouldBe 500 // January manifest
+    result(1).tombstoneCount shouldBe 0   // February manifest (clean!)
+    result(2).tombstoneCount shouldBe 100 // March manifest
   }
 
   test("distributeTombstones returns zero counts when no tombstones") {
@@ -209,8 +211,7 @@ class SelectiveCompactionTest extends AnyFunSuite with Matchers {
       liveEntryCount = 800
     )
 
-    val (keep, rewrite) = TombstoneDistributor.selectivePartition(
-      Seq(cleanManifest, dirtyManifest), threshold = 0.10)
+    val (keep, rewrite) = TombstoneDistributor.selectivePartition(Seq(cleanManifest, dirtyManifest), threshold = 0.10)
 
     keep.size shouldBe 1
     keep.head.path shouldBe "manifests/clean.avro"
@@ -310,7 +311,7 @@ class SelectiveCompactionTest extends AnyFunSuite with Matchers {
     // Only manifest 50 has tombstones
     val manifests = (1 to 100).map { i =>
       val startDate = f"2024-${(i / 12) + 1}%02d-${(i % 28) + 1}%02d"
-      val endDate = f"2024-${(i / 12) + 1}%02d-${((i % 28) + 3).min(28)}%02d"
+      val endDate   = f"2024-${(i / 12) + 1}%02d-${((i % 28) + 3).min(28)}%02d"
       ManifestInfo(
         path = s"manifests/m$i.avro",
         numEntries = 100,
@@ -321,9 +322,7 @@ class SelectiveCompactionTest extends AnyFunSuite with Matchers {
     }
 
     // Tombstones only affect manifest 50's date range
-    val tombstones = (1 to 50).map { i =>
-      "s3://bucket/table/date=2024-05-15/file$i.split"
-    }.toSet
+    val tombstones = (1 to 50).map(i => "s3://bucket/table/date=2024-05-15/file$i.split").toSet
 
     val result = TombstoneDistributor.distributeTombstones(manifests, tombstones)
 

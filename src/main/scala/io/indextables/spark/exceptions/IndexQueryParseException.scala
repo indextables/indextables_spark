@@ -20,48 +20,53 @@ package io.indextables.spark.exceptions
 /**
  * Exception thrown when an IndexQuery string fails to parse.
  *
- * This exception is thrown when the tantivy query parser cannot parse
- * the provided query string due to syntax errors such as:
+ * This exception is thrown when the tantivy query parser cannot parse the provided query string due to syntax errors
+ * such as:
  *   - Unbalanced parentheses: `((machine learning`
  *   - Unclosed quotes: `"unclosed phrase`
  *   - Invalid boolean operators: `apple AND AND orange`
  *   - Empty field references: `field:`
  *   - Other malformed query syntax
  *
- * @param queryString The query string that failed to parse
- * @param fieldName Optional field name if this was a field-specific query
- * @param cause The underlying parsing exception from tantivy4java
+ * @param queryString
+ *   The query string that failed to parse
+ * @param fieldName
+ *   Optional field name if this was a field-specific query
+ * @param cause
+ *   The underlying parsing exception from tantivy4java
  */
 class IndexQueryParseException(
   val queryString: String,
   val fieldName: Option[String],
-  cause: Throwable
-) extends RuntimeException(
-  IndexQueryParseException.formatMessage(queryString, fieldName, cause),
-  cause
-)
+  cause: Throwable)
+    extends RuntimeException(
+      IndexQueryParseException.formatMessage(queryString, fieldName, cause),
+      cause
+    )
 
 object IndexQueryParseException {
 
-  /**
-   * Format a user-friendly error message for the parse exception.
-   */
-  def formatMessage(queryString: String, fieldName: Option[String], cause: Throwable): String = {
-    val fieldPart = fieldName.map(f => s" on field '$f'").getOrElse("")
+  /** Format a user-friendly error message for the parse exception. */
+  def formatMessage(
+    queryString: String,
+    fieldName: Option[String],
+    cause: Throwable
+  ): String = {
+    val fieldPart      = fieldName.map(f => s" on field '$f'").getOrElse("")
     val truncatedQuery = if (queryString.length > 100) queryString.take(100) + "..." else queryString
-    val causeMessage = Option(cause.getMessage).getOrElse("Unknown parse error")
+    val causeMessage   = Option(cause.getMessage).getOrElse("Unknown parse error")
     s"Invalid IndexQuery syntax$fieldPart: '$truncatedQuery'. Parse error: $causeMessage"
   }
 
-  /**
-   * Create an IndexQueryParseException for a field-specific query.
-   */
-  def forField(queryString: String, fieldName: String, cause: Throwable): IndexQueryParseException =
+  /** Create an IndexQueryParseException for a field-specific query. */
+  def forField(
+    queryString: String,
+    fieldName: String,
+    cause: Throwable
+  ): IndexQueryParseException =
     new IndexQueryParseException(queryString, Some(fieldName), cause)
 
-  /**
-   * Create an IndexQueryParseException for an all-fields query.
-   */
+  /** Create an IndexQueryParseException for an all-fields query. */
   def forAllFields(queryString: String, cause: Throwable): IndexQueryParseException =
     new IndexQueryParseException(queryString, None, cause)
 }

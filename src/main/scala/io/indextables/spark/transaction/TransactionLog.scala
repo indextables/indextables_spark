@@ -23,10 +23,10 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable.ListBuffer
 import scala.util.{Failure, Success, Try}
 
+import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.sources.Filter
 
 import org.apache.hadoop.fs.Path
 
@@ -468,12 +468,12 @@ class TransactionLog(
   /**
    * List files with partition filter pruning for Avro state format.
    *
-   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
-   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
-   * for large tables with many partitions.
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can prune entire
+   * manifest files that don't contain matching partitions, significantly reducing I/O for large tables with many
+   * partitions.
    *
-   * Note: This method bypasses the file cache since filtered results shouldn't be cached
-   * (different filters would produce different results).
+   * Note: This method bypasses the file cache since filtered results shouldn't be cached (different filters would
+   * produce different results).
    *
    * @param partitionFilters
    *   Partition filters for manifest pruning (only used with Avro state format)
@@ -582,9 +582,9 @@ class TransactionLog(
   }
 
   /**
-   * Filter inline docMappingJson to remove empty object fields.
-   * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
-   * Uses cached filtering to avoid repeated JSON parsing for files with the same schema.
+   * Filter inline docMappingJson to remove empty object fields. This handles legacy format AddActions that have
+   * docMappingJson directly (not via docMappingRef). Uses cached filtering to avoid repeated JSON parsing for files
+   * with the same schema.
    */
   private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
     addActions.map { add =>
@@ -592,7 +592,7 @@ class TransactionLog(
         val schema = add.docMappingJson.get
         // Use existing docMappingRef as hash if available, otherwise compute
         // This avoids expensive JSON normalization on every query
-        val hash = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
+        val hash     = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
         val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
         if (filtered != schema) {
           add.copy(docMappingJson = Some(filtered))

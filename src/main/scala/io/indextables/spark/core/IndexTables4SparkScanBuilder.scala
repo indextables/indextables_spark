@@ -28,11 +28,12 @@ import org.apache.spark.sql.connector.read.{
   SupportsPushDownRequiredColumns,
   SupportsPushDownV2Filters
 }
-import org.apache.spark.sql.sources.{Filter, IsNull, IsNotNull, StringContains, StringEndsWith, StringStartsWith}
+import org.apache.spark.sql.sources.{Filter, IsNotNull, IsNull, StringContains, StringEndsWith, StringStartsWith}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
+import io.indextables.spark.exceptions.IndexQueryParseException
 import io.indextables.spark.expressions.{
   BucketAggregationConfig,
   BucketExpression,
@@ -45,9 +46,18 @@ import io.indextables.spark.expressions.{
   RangeConfig,
   RangeExpression
 }
+import io.indextables.spark.filters.{
+  IndexQueryAllFilter,
+  IndexQueryFilter,
+  MixedAndFilter,
+  MixedBooleanFilter,
+  MixedIndexQuery,
+  MixedIndexQueryAll,
+  MixedNotFilter,
+  MixedOrFilter,
+  MixedSparkFilter
+}
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
-import io.indextables.spark.exceptions.IndexQueryParseException
-import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter, MixedIndexQuery, MixedIndexQueryAll, MixedAndFilter, MixedOrFilter, MixedNotFilter, MixedSparkFilter, MixedBooleanFilter}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
@@ -159,17 +169,21 @@ class IndexTables4SparkScanBuilder(
         //
         // Use explicit isInstanceOf checks to ensure proper filtering (pattern matching can
         // be tricky with Filter subclasses).
-        def isSafelyUnsupportedFilter(f: Filter): Boolean = {
+        def isSafelyUnsupportedFilter(f: Filter): Boolean =
           f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull]
-        }
 
-        val safelyUnsupportedFilters = effectiveUnsupportedFilters.filter(isSafelyUnsupportedFilter)
+        val safelyUnsupportedFilters   = effectiveUnsupportedFilters.filter(isSafelyUnsupportedFilter)
         val blockingUnsupportedFilters = effectiveUnsupportedFilters.filterNot(isSafelyUnsupportedFilter)
 
-        logger.debug(s"BUILD: effectiveUnsupportedFilters=${effectiveUnsupportedFilters.length}, " +
-          s"safelyUnsupported=${safelyUnsupportedFilters.length}, blocking=${blockingUnsupportedFilters.length}")
+        logger.debug(
+          s"BUILD: effectiveUnsupportedFilters=${effectiveUnsupportedFilters.length}, " +
+            s"safelyUnsupported=${safelyUnsupportedFilters.length}, blocking=${blockingUnsupportedFilters.length}"
+        )
         effectiveUnsupportedFilters.foreach(f =>
-          logger.debug(s"BUILD:   - Unsupported filter: $f (class=${f.getClass.getName}, isSafe=${isSafelyUnsupportedFilter(f)})"))
+          logger.debug(
+            s"BUILD:   - Unsupported filter: $f (class=${f.getClass.getName}, isSafe=${isSafelyUnsupportedFilter(f)})"
+          )
+        )
 
         val hasAggregateInPlan = detectAggregateInQueryPlan()
         logger.debug(s"BUILD: hasAggregateInPlan=$hasAggregateInPlan")
@@ -254,23 +268,25 @@ class IndexTables4SparkScanBuilder(
 
     // Check for bucket aggregation first (DateHistogram, Histogram, Range)
     // Try instance variable first, then check V2BucketExpressionRule storage
-    val effectiveBucketConfig: Option[BucketAggregationConfig] = _bucketConfig.orElse {
-      import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-      val relationForBucket = IndexTables4SparkScanBuilder.getCurrentRelation()
-      relationForBucket
-        .collect { case rel: DataSourceV2Relation => rel }
-        .flatMap(rel => V2BucketExpressionRule.getBucketConfig(rel))
-    }.filter { bucketCfg =>
-      // CRITICAL: Only use the bucket config if the bucket field is in the current query's GROUP BY
-      // This prevents stale bucket configs from previous queries (stored in WeakHashMap) from
-      // affecting non-bucket queries on the same view/relation (e.g., partition GROUP BY count(*))
-      val groupByColumns = _pushedGroupBy.getOrElse(Array.empty[String])
-      val bucketFieldInGroupBy = groupByColumns.contains(bucketCfg.fieldName)
-      if (!bucketFieldInGroupBy) {
-        logger.debug(s"AGGREGATE SCAN: Ignoring stale bucket config for field '${bucketCfg.fieldName}' - not in GROUP BY columns: ${groupByColumns.mkString(", ")}")
+    val effectiveBucketConfig: Option[BucketAggregationConfig] = _bucketConfig
+      .orElse {
+        import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+        val relationForBucket = IndexTables4SparkScanBuilder.getCurrentRelation()
+        relationForBucket
+          .collect { case rel: DataSourceV2Relation => rel }
+          .flatMap(rel => V2BucketExpressionRule.getBucketConfig(rel))
       }
-      bucketFieldInGroupBy
-    }
+      .filter { bucketCfg =>
+        // CRITICAL: Only use the bucket config if the bucket field is in the current query's GROUP BY
+        // This prevents stale bucket configs from previous queries (stored in WeakHashMap) from
+        // affecting non-bucket queries on the same view/relation (e.g., partition GROUP BY count(*))
+        val groupByColumns       = _pushedGroupBy.getOrElse(Array.empty[String])
+        val bucketFieldInGroupBy = groupByColumns.contains(bucketCfg.fieldName)
+        if (!bucketFieldInGroupBy) {
+          logger.debug(s"AGGREGATE SCAN: Ignoring stale bucket config for field '${bucketCfg.fieldName}' - not in GROUP BY columns: ${groupByColumns.mkString(", ")}")
+        }
+        bucketFieldInGroupBy
+      }
 
     effectiveBucketConfig match {
       case Some(bucketCfg) =>
@@ -378,7 +394,8 @@ class IndexTables4SparkScanBuilder(
     // - The bucket aggregation (DateHistogram/Histogram/Range) is the outer aggregation
     // - Additional GROUP BY columns use nested TermsAggregation as sub-aggregations
     // - Results are flattened: [bucket_key, term_key_1, term_key_2, ..., aggregation_values]
-    val additionalGroupByColumns = _pushedGroupBy.getOrElse(Array.empty[String])
+    val additionalGroupByColumns = _pushedGroupBy
+      .getOrElse(Array.empty[String])
       .filterNot(_ == bucketConfig.fieldName) // Remove bucket field if already present
     val groupByColumns = Array(bucketConfig.fieldName) ++ additionalGroupByColumns
 
@@ -943,9 +960,9 @@ class IndexTables4SparkScanBuilder(
           val result = storedQueries.toArray
           // CRITICAL: Validate IndexQuery syntax on driver before tasks are created
           // Clear cache on failure to prevent stale errors from persisting to future queries
-          try {
+          try
             validateIndexQueryFilters(result)
-          } catch {
+          catch {
             case e: Exception =>
               IndexTables4SparkScanBuilder.clearIndexQueries(relation)
               throw e
@@ -978,9 +995,8 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Validate IndexQuery filters on the driver using tantivy's query parser.
-   * This prevents invalid queries from causing task failures and retries.
-   * Throws IndexQueryParseException immediately if a query has invalid syntax.
+   * Validate IndexQuery filters on the driver using tantivy's query parser. This prevents invalid queries from causing
+   * task failures and retries. Throws IndexQueryParseException immediately if a query has invalid syntax.
    */
   private def validateIndexQueryFilters(indexQueryFilters: Array[Any]): Unit = {
     if (indexQueryFilters.isEmpty) return
@@ -989,13 +1005,14 @@ class IndexTables4SparkScanBuilder(
 
     // Create a minimal tantivy schema for query validation
     // We only need the field names and types for parseQuery to validate syntax
-    val tantivySchema = try {
-      createTantivySchemaForValidation()
-    } catch {
-      case e: Exception =>
-        logger.warn(s"VALIDATE: Could not create tantivy schema for validation: ${e.getMessage}")
-        return // Skip validation if we can't create a schema
-    }
+    val tantivySchema =
+      try
+        createTantivySchemaForValidation()
+      catch {
+        case e: Exception =>
+          logger.warn(s"VALIDATE: Could not create tantivy schema for validation: ${e.getMessage}")
+          return // Skip validation if we can't create a schema
+      }
 
     try {
       indexQueryFilters.foreach {
@@ -1023,17 +1040,16 @@ class IndexTables4SparkScanBuilder(
           logger.debug(s"VALIDATE: Skipping unknown filter type: ${other.getClass.getName}")
       }
       logger.debug(s"VALIDATE: All ${indexQueryFilters.length} IndexQuery filters passed validation")
-    } finally {
+    } finally
       tantivySchema.close()
-    }
   }
 
   /**
-   * Validate a single query string using tantivy's parseQuery.
-   * Throws IndexQueryParseException if the query has invalid syntax.
+   * Validate a single query string using tantivy's parseQuery. Throws IndexQueryParseException if the query has invalid
+   * syntax.
    *
-   * tantivy4java's SplitQuery.parseQuery() throws descriptive exceptions for parse failures,
-   * which we wrap in IndexQueryParseException for user-friendly error messages.
+   * tantivy4java's SplitQuery.parseQuery() throws descriptive exceptions for parse failures, which we wrap in
+   * IndexQueryParseException for user-friendly error messages.
    */
   private def validateSingleQuery(
     queryString: String,
@@ -1046,7 +1062,7 @@ class IndexTables4SparkScanBuilder(
     try {
       val defaultFields = fieldName match {
         case Some(field) => Array(field)
-        case None => tantivySchema.getFieldNames.asScala.toArray
+        case None        => tantivySchema.getFieldNames.asScala.toArray
       }
 
       // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
@@ -1062,9 +1078,11 @@ class IndexTables4SparkScanBuilder(
       // Use tantivy's parseQuery to validate syntax
       // tantivy4java throws descriptive exceptions on parse failures
       SplitQuery.parseQuery(queryToValidate, tantivySchema, defaultFields)
-      logger.debug(s"VALIDATE: Query '$queryString'" +
-        (if (queryToValidate != queryString) s" (transformed to '$queryToValidate')" else "") +
-        " validated successfully")
+      logger.debug(
+        s"VALIDATE: Query '$queryString'" +
+          (if (queryToValidate != queryString) s" (transformed to '$queryToValidate')" else "") +
+          " validated successfully"
+      )
     } catch {
       case e: IndexQueryParseException =>
         throw e // Re-throw our own exceptions
@@ -1073,19 +1091,19 @@ class IndexTables4SparkScanBuilder(
         // The exception message from tantivy4java contains descriptive parse error details
         throw fieldName match {
           case Some(field) => IndexQueryParseException.forField(queryString, field, e)
-          case None => IndexQueryParseException.forAllFields(queryString, e)
+          case None        => IndexQueryParseException.forAllFields(queryString, e)
         }
     }
   }
 
   /**
-   * Recursively validate all IndexQuery filters within a MixedBooleanFilter tree.
-   * This handles cases where IndexQuery is combined with Spark filters via AND/OR/NOT.
+   * Recursively validate all IndexQuery filters within a MixedBooleanFilter tree. This handles cases where IndexQuery
+   * is combined with Spark filters via AND/OR/NOT.
    */
   private def validateMixedBooleanTree(
     tree: MixedBooleanFilter,
     tantivySchema: io.indextables.tantivy4java.core.Schema
-  ): Unit = {
+  ): Unit =
     tree match {
       case MixedIndexQuery(filter) =>
         validateSingleQuery(filter.queryString, Some(filter.columnName), tantivySchema)
@@ -1103,11 +1121,10 @@ class IndexTables4SparkScanBuilder(
         // Spark filters don't contain IndexQuery - nothing to validate
         ()
     }
-  }
 
   /**
-   * Create a tantivy Schema from the docMappingJson in the transaction log.
-   * Uses tantivy4java's native Schema.fromDocMappingJson() for accurate field configuration.
+   * Create a tantivy Schema from the docMappingJson in the transaction log. Uses tantivy4java's native
+   * Schema.fromDocMappingJson() for accurate field configuration.
    */
   private def createTantivySchemaForValidation(): io.indextables.tantivy4java.core.Schema = {
     import io.indextables.tantivy4java.core.Schema
@@ -1450,8 +1467,9 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
-  /** Check if a field is marked as fast in the schema (without numeric type requirement).
-   *  Used for MIN/MAX which can operate on both numeric and string fast fields.
+  /**
+   * Check if a field is marked as fast in the schema (without numeric type requirement). Used for MIN/MAX which can
+   * operate on both numeric and string fast fields.
    */
   private def isFastField(fieldName: String): Boolean = {
     val fastFields = getActualFastFieldsFromSchema()
@@ -1476,7 +1494,9 @@ class IndexTables4SparkScanBuilder(
       logger.debug(s"FAST FIELD VALIDATION: ✓ Field '$fieldName' is marked as fast")
       true
     } else {
-      logger.debug(s"FAST FIELD VALIDATION: ✗ Field '$fieldName' is not marked as fast (available: ${fastFields.mkString(", ")})")
+      logger.debug(
+        s"FAST FIELD VALIDATION: ✗ Field '$fieldName' is not marked as fast (available: ${fastFields.mkString(", ")})"
+      )
       false
     }
   }
@@ -1541,8 +1561,8 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Validate that IndexQuery filter fields exist in the schema.
-   * Throws IllegalArgumentException if an IndexQuery references a non-existent field.
+   * Validate that IndexQuery filter fields exist in the schema. Throws IllegalArgumentException if an IndexQuery
+   * references a non-existent field.
    */
   private def validateIndexQueryFieldsExist(): Unit = {
     val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
@@ -1556,7 +1576,7 @@ class IndexTables4SparkScanBuilder(
     }
 
     // Helper to validate a single field name
-    def validateField(columnName: String): Unit = {
+    def validateField(columnName: String): Unit =
       if (!availableFields.contains(columnName)) {
         val availableFieldsList = availableFields.toSeq.sorted.mkString(", ")
         throw new IllegalArgumentException(
@@ -1564,7 +1584,6 @@ class IndexTables4SparkScanBuilder(
             s"Available fields are: [$availableFieldsList]"
         )
       }
-    }
 
     // Validate each IndexQuery filter field
     indexQueryFilters.foreach {
@@ -1584,23 +1603,23 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Validate that IS NULL / IS NOT NULL filter fields are configured as FAST fields.
-   * ExistsQuery requires FAST fields in Tantivy. This validation runs on the driver
-   * to provide clear error messages before task execution.
+   * Validate that IS NULL / IS NOT NULL filter fields are configured as FAST fields. ExistsQuery requires FAST fields
+   * in Tantivy. This validation runs on the driver to provide clear error messages before task execution.
    *
-   * @throws IllegalArgumentException if a null filter references a non-fast field
+   * @throws IllegalArgumentException
+   *   if a null filter references a non-fast field
    */
   private def validateNullFilterFieldsAreFast(): Unit = {
     import org.apache.spark.sql.sources.{IsNull, IsNotNull, And, Or, Not}
 
     // Helper to extract null filters from nested filter trees
     def extractNullFilters(filter: Filter): Seq[(String, String)] = filter match {
-      case IsNull(attr)       => Seq(("IS NULL", attr))
-      case IsNotNull(attr)    => Seq(("IS NOT NULL", attr))
-      case And(left, right)   => extractNullFilters(left) ++ extractNullFilters(right)
-      case Or(left, right)    => extractNullFilters(left) ++ extractNullFilters(right)
-      case Not(child)         => extractNullFilters(child)
-      case _                  => Seq.empty
+      case IsNull(attr)     => Seq(("IS NULL", attr))
+      case IsNotNull(attr)  => Seq(("IS NOT NULL", attr))
+      case And(left, right) => extractNullFilters(left) ++ extractNullFilters(right)
+      case Or(left, right)  => extractNullFilters(left) ++ extractNullFilters(right)
+      case Not(child)       => extractNullFilters(child)
+      case _                => Seq.empty
     }
 
     // Extract IsNull and IsNotNull filters from pushed filters
@@ -1609,47 +1628,48 @@ class IndexTables4SparkScanBuilder(
     if (nullFilters.isEmpty) return
 
     // Get actual fast fields from schema
-    val fastFields = getActualFastFieldsFromSchema()
+    val fastFields      = getActualFastFieldsFromSchema()
     val availableFields = getSchemaFieldNames()
 
-    nullFilters.foreach { case (filterType, fieldName) =>
-      // Check field exists
-      if (!availableFields.contains(fieldName)) {
-        val availableList = availableFields.toSeq.sorted.mkString(", ")
-        throw new IllegalArgumentException(
-          s"$filterType filter references non-existent field '$fieldName'. " +
-          s"Available fields: [$availableList]"
-        )
-      }
+    nullFilters.foreach {
+      case (filterType, fieldName) =>
+        // Check field exists
+        if (!availableFields.contains(fieldName)) {
+          val availableList = availableFields.toSeq.sorted.mkString(", ")
+          throw new IllegalArgumentException(
+            s"$filterType filter references non-existent field '$fieldName'. " +
+              s"Available fields: [$availableList]"
+          )
+        }
 
-      // Check field is fast
-      val isFast = if (fieldName.contains(".")) {
-        // For nested JSON fields, check both field and parent
-        val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
-        fastFields.contains(fieldName) || fastFields.contains(parentField)
-      } else {
-        fastFields.contains(fieldName)
-      }
+        // Check field is fast
+        val isFast = if (fieldName.contains(".")) {
+          // For nested JSON fields, check both field and parent
+          val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+          fastFields.contains(fieldName) || fastFields.contains(parentField)
+        } else {
+          fastFields.contains(fieldName)
+        }
 
-      if (!isFast) {
-        val fastFieldsList = fastFields.toSeq.sorted.mkString(", ")
-        throw new IllegalArgumentException(
-          s"$filterType filter on field '$fieldName' requires FAST field configuration. " +
-          s"ExistsQuery in Tantivy only works with FAST fields. " +
-          s"To fix: Add '$fieldName' to spark.indextables.indexing.fastfields configuration, " +
-          s"or for JSON fields use json.mode='full'. " +
-          s"Currently configured fast fields: [${if (fastFieldsList.isEmpty) "none" else fastFieldsList}]"
-        )
-      }
+        if (!isFast) {
+          val fastFieldsList = fastFields.toSeq.sorted.mkString(", ")
+          throw new IllegalArgumentException(
+            s"$filterType filter on field '$fieldName' requires FAST field configuration. " +
+              s"ExistsQuery in Tantivy only works with FAST fields. " +
+              s"To fix: Add '$fieldName' to spark.indextables.indexing.fastfields configuration, " +
+              s"or for JSON fields use json.mode='full'. " +
+              s"Currently configured fast fields: [${if (fastFieldsList.isEmpty) "none" else fastFieldsList}]"
+          )
+        }
     }
   }
 
   /** Get available field names from the schema. */
   private def getSchemaFieldNames(): Set[String] =
-    try {
+    try
       // Get field names from the Spark schema
       schema.fieldNames.toSet
-    } catch {
+    catch {
       case e: Exception =>
         logger.debug(s"SCHEMA FIELDS: Failed to get schema fields: ${e.getMessage}")
         Set.empty
@@ -1677,7 +1697,7 @@ class IndexTables4SparkScanBuilder(
       logger.debug("Reading actual fast fields from transaction log")
 
       // Read existing files from transaction log to get docMappingJson
-      val existingFiles = transactionLog.listFiles()
+      val existingFiles       = transactionLog.listFiles()
       val firstWithDocMapping = existingFiles.find(_.docMappingJson.isDefined)
 
       firstWithDocMapping match {
@@ -2004,9 +2024,10 @@ object IndexTables4SparkScanBuilder {
     currentRelationId.remove()
   }
 
-  /** Store IndexQuery expressions for a specific relation object.
-   *  IMPORTANT: This appends to existing entries to support multiple IndexQueries on the same relation
-   *  (e.g., IndexQuery in both inner CTE definition and outer query referencing the CTE).
+  /**
+   * Store IndexQuery expressions for a specific relation object. IMPORTANT: This appends to existing entries to support
+   * multiple IndexQueries on the same relation (e.g., IndexQuery in both inner CTE definition and outer query
+   * referencing the CTE).
    */
   def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit =
     relationIndexQueries.synchronized {

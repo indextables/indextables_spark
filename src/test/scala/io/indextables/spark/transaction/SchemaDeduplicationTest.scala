@@ -242,8 +242,8 @@ class SchemaDeduplicationTest extends TestBase {
         val restoredAdds = restoredActions.collect { case a: AddAction => a }
         restoredAdds.length shouldBe 5
         restoredAdds.foreach { add =>
-          add.docMappingJson shouldBe defined  // Schema should be restored from registry
-          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
+          add.docMappingJson shouldBe defined // Schema should be restored from registry
+          add.docMappingRef shouldBe defined  // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()
@@ -425,8 +425,10 @@ class SchemaDeduplicationTest extends TestBase {
       // Use JSON format for this test since it tests JSON checkpoint schema deduplication
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.checkpoint.enabled", "false",
-          "spark.indextables.state.format", "json"
+          "spark.indextables.checkpoint.enabled",
+          "false",
+          "spark.indextables.state.format",
+          "json"
         )
       )
 

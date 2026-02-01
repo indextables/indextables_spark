@@ -19,19 +19,18 @@ package io.indextables.spark.stats
 
 import java.util.concurrent.atomic.AtomicLong
 
-import com.google.common.cache.{Cache, CacheBuilder}
-
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
+import com.google.common.cache.{Cache, CacheBuilder}
 import org.slf4j.LoggerFactory
 
 /**
  * Cache for simplified filter expressions and IN filter range computations.
  *
  * Caches:
- * 1. Simplified filter arrays (expression simplification results)
- * 2. IN filter value ranges (min/max of IN list values)
+ *   1. Simplified filter arrays (expression simplification results) 2. IN filter value ranges (min/max of IN list
+ *      values)
  *
  * Uses Guava's Cache with LRU eviction for efficient memory management.
  */
@@ -43,7 +42,8 @@ object FilterExpressionCache {
   private val MAX_SIMPLIFIED_CACHE_SIZE = 10000L
 
   private val simplifiedFiltersCache: Cache[java.lang.Long, Array[Filter]] =
-    CacheBuilder.newBuilder()
+    CacheBuilder
+      .newBuilder()
       .maximumSize(MAX_SIMPLIFIED_CACHE_SIZE)
       .recordStats()
       .build[java.lang.Long, Array[Filter]]()
@@ -52,32 +52,33 @@ object FilterExpressionCache {
   private val MAX_IN_RANGE_CACHE_SIZE = 50000L
 
   private val inRangeCache: Cache[java.lang.Integer, InFilterRange] =
-    CacheBuilder.newBuilder()
+    CacheBuilder
+      .newBuilder()
       .maximumSize(MAX_IN_RANGE_CACHE_SIZE)
       .recordStats()
       .build[java.lang.Integer, InFilterRange]()
 
   // Statistics
-  private val simplifiedHits = new AtomicLong(0)
+  private val simplifiedHits   = new AtomicLong(0)
   private val simplifiedMisses = new AtomicLong(0)
-  private val inRangeHits = new AtomicLong(0)
-  private val inRangeMisses = new AtomicLong(0)
+  private val inRangeHits      = new AtomicLong(0)
+  private val inRangeMisses    = new AtomicLong(0)
 
-  /**
-   * Represents the min/max range of an IN filter's value list.
-   */
+  /** Represents the min/max range of an IN filter's value list. */
   case class InFilterRange(
     minValue: Comparable[Any],
     maxValue: Comparable[Any],
-    valueCount: Int
-  )
+    valueCount: Int)
 
   /**
    * Get or compute simplified filters.
    *
-   * @param filters Original filters
-   * @param schema Schema for simplification
-   * @return Simplified filters
+   * @param filters
+   *   Original filters
+   * @param schema
+   *   Schema for simplification
+   * @return
+   *   Simplified filters
    */
   def getOrSimplify(filters: Array[Filter], schema: StructType): Array[Filter] = {
     val cacheKey: java.lang.Long = computeSimplifiedCacheKey(filters, schema)
@@ -95,22 +96,25 @@ object FilterExpressionCache {
   }
 
   /**
-   * Get or compute simplified filters using pre-computed filter hash.
-   * More efficient when filter hash is already computed (e.g., in Scan constructor).
-   * This avoids recomputing O(filters) hash on every cache lookup.
+   * Get or compute simplified filters using pre-computed filter hash. More efficient when filter hash is already
+   * computed (e.g., in Scan constructor). This avoids recomputing O(filters) hash on every cache lookup.
    *
-   * @param filters Original filters
-   * @param schema Schema for simplification
-   * @param precomputedFilterHash Pre-computed hash of the filter array
-   * @return Simplified filters
+   * @param filters
+   *   Original filters
+   * @param schema
+   *   Schema for simplification
+   * @param precomputedFilterHash
+   *   Pre-computed hash of the filter array
+   * @return
+   *   Simplified filters
    */
   def getOrSimplifyWithHash(
     filters: Array[Filter],
     schema: StructType,
     precomputedFilterHash: Long
   ): Array[Filter] = {
-    val schemaHash = schema.hashCode()
-    val cacheKey: java.lang.Long = (precomputedFilterHash << 32) | (schemaHash.toLong & 0xFFFFFFFFL)
+    val schemaHash               = schema.hashCode()
+    val cacheKey: java.lang.Long = (precomputedFilterHash << 32) | (schemaHash.toLong & 0xffffffffL)
 
     val cached = simplifiedFiltersCache.getIfPresent(cacheKey)
     if (cached != null) {
@@ -127,9 +131,12 @@ object FilterExpressionCache {
   /**
    * Get or compute IN filter range (min/max of values in the IN list).
    *
-   * @param attribute Column name
-   * @param values Values in the IN list
-   * @return InFilterRange with min/max values
+   * @param attribute
+   *   Column name
+   * @param values
+   *   Values in the IN list
+   * @return
+   *   InFilterRange with min/max values
    */
   def getOrComputeInRange(attribute: String, values: Array[Any]): Option[InFilterRange] = {
     if (values.isEmpty) return None
@@ -148,9 +155,7 @@ object FilterExpressionCache {
     }
   }
 
-  /**
-   * Compute min/max from IN list values.
-   */
+  /** Compute min/max from IN list values. */
   private def computeInRange(values: Array[Any]): Option[InFilterRange] = {
     if (values.isEmpty) return None
 
@@ -173,70 +178,55 @@ object FilterExpressionCache {
     }
   }
 
-  /**
-   * Compute cache key for simplified filters.
-   */
+  /** Compute cache key for simplified filters. */
   private def computeSimplifiedCacheKey(filters: Array[Filter], schema: StructType): Long = {
-    val filterHash = filters.map(_.hashCode()).sorted.foldLeft(17) { (acc, h) =>
-      31 * acc + h
-    }
+    val filterHash = filters.map(_.hashCode()).sorted.foldLeft(17)((acc, h) => 31 * acc + h)
     val schemaHash = schema.hashCode()
-    (filterHash.toLong << 32) | (schemaHash.toLong & 0xFFFFFFFFL)
+    (filterHash.toLong << 32) | (schemaHash.toLong & 0xffffffffL)
   }
 
-  /**
-   * Compute cache key for IN filter range.
-   */
+  /** Compute cache key for IN filter range. */
   private def computeInRangeCacheKey(attribute: String, values: Array[Any]): Int = {
     var hash = attribute.hashCode()
-    values.foreach { v =>
-      hash = 31 * hash + (if (v == null) 0 else v.hashCode())
-    }
+    values.foreach(v => hash = 31 * hash + (if (v == null) 0 else v.hashCode()))
     hash
   }
 
   /**
    * Get cache statistics.
    *
-   * @return (simplifiedHits, simplifiedMisses, inRangeHits, inRangeMisses)
+   * @return
+   *   (simplifiedHits, simplifiedMisses, inRangeHits, inRangeMisses)
    */
-  def getStats(): (Long, Long, Long, Long) = {
+  def getStats(): (Long, Long, Long, Long) =
     (simplifiedHits.get(), simplifiedMisses.get(), inRangeHits.get(), inRangeMisses.get())
-  }
 
   /**
    * Get hit rates.
    *
-   * @return (simplifiedHitRate, inRangeHitRate)
+   * @return
+   *   (simplifiedHitRate, inRangeHitRate)
    */
   def getHitRates(): (Double, Double) = {
     val simplifiedTotal = simplifiedHits.get() + simplifiedMisses.get()
-    val inRangeTotal = inRangeHits.get() + inRangeMisses.get()
+    val inRangeTotal    = inRangeHits.get() + inRangeMisses.get()
 
     val simplifiedRate = if (simplifiedTotal > 0) simplifiedHits.get().toDouble / simplifiedTotal else 0.0
-    val inRangeRate = if (inRangeTotal > 0) inRangeHits.get().toDouble / inRangeTotal else 0.0
+    val inRangeRate    = if (inRangeTotal > 0) inRangeHits.get().toDouble / inRangeTotal else 0.0
 
     (simplifiedRate, inRangeRate)
   }
 
-  /**
-   * Get detailed Guava cache statistics.
-   */
-  def getDetailedStats(): String = {
+  /** Get detailed Guava cache statistics. */
+  def getDetailedStats(): String =
     s"SimplifiedFilters: ${simplifiedFiltersCache.stats()}\n" +
-    s"InFilterRanges: ${inRangeCache.stats()}"
-  }
+      s"InFilterRanges: ${inRangeCache.stats()}"
 
-  /**
-   * Get current cache sizes.
-   */
-  def getCacheSizes(): (Long, Long) = {
+  /** Get current cache sizes. */
+  def getCacheSizes(): (Long, Long) =
     (simplifiedFiltersCache.size(), inRangeCache.size())
-  }
 
-  /**
-   * Invalidate all cached data.
-   */
+  /** Invalidate all cached data. */
   def invalidateAll(): Unit = {
     simplifiedFiltersCache.invalidateAll()
     inRangeCache.invalidateAll()
@@ -247,9 +237,7 @@ object FilterExpressionCache {
     logger.debug("Invalidated FilterExpressionCache")
   }
 
-  /**
-   * Reset statistics without clearing cache.
-   */
+  /** Reset statistics without clearing cache. */
   def resetStats(): Unit = {
     simplifiedHits.set(0)
     simplifiedMisses.set(0)

@@ -105,13 +105,13 @@ class AsyncMergeOnWriteConfigTest extends AnyFunSuite with Matchers {
   test("fromOptions with custom values") {
     val options = new CaseInsensitiveStringMap(
       Map(
-        "spark.indextables.mergeOnWrite.enabled" -> "true",
-        "spark.indextables.mergeOnWrite.async.enabled" -> "false",
-        "spark.indextables.mergeOnWrite.batchCpuFraction" -> "0.25",
+        "spark.indextables.mergeOnWrite.enabled"              -> "true",
+        "spark.indextables.mergeOnWrite.async.enabled"        -> "false",
+        "spark.indextables.mergeOnWrite.batchCpuFraction"     -> "0.25",
         "spark.indextables.mergeOnWrite.maxConcurrentBatches" -> "5",
-        "spark.indextables.mergeOnWrite.minBatchesToTrigger" -> "2",
-        "spark.indextables.mergeOnWrite.targetSize" -> "8G",
-        "spark.indextables.mergeOnWrite.shutdownTimeoutMs" -> "600000"
+        "spark.indextables.mergeOnWrite.minBatchesToTrigger"  -> "2",
+        "spark.indextables.mergeOnWrite.targetSize"           -> "8G",
+        "spark.indextables.mergeOnWrite.shutdownTimeoutMs"    -> "600000"
       ).asJava
     )
 
@@ -128,15 +128,15 @@ class AsyncMergeOnWriteConfigTest extends AnyFunSuite with Matchers {
 
   test("fromOptions with default values when not specified") {
     val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
-    val config = AsyncMergeOnWriteConfig.fromOptions(options)
+    val config  = AsyncMergeOnWriteConfig.fromOptions(options)
 
     config shouldBe AsyncMergeOnWriteConfig.default
   }
 
   test("fromMap with custom values") {
     val configs = Map(
-      "spark.indextables.mergeOnWrite.enabled" -> "true",
-      "spark.indextables.mergeOnWrite.batchCpuFraction" -> "0.5",
+      "spark.indextables.mergeOnWrite.enabled"              -> "true",
+      "spark.indextables.mergeOnWrite.batchCpuFraction"     -> "0.5",
       "spark.indextables.mergeOnWrite.maxConcurrentBatches" -> "6"
     )
 
@@ -149,7 +149,7 @@ class AsyncMergeOnWriteConfigTest extends AnyFunSuite with Matchers {
 
   test("fromMap is case insensitive") {
     val configs = Map(
-      "SPARK.INDEXTABLES.MERGEONWRITE.ENABLED" -> "true",
+      "SPARK.INDEXTABLES.MERGEONWRITE.ENABLED"          -> "true",
       "SPARK.INDEXTABLES.MERGEONWRITE.BATCHCPUFRACTION" -> "0.3"
     )
 

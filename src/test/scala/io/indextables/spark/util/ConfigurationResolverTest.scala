@@ -253,7 +253,7 @@ class ConfigurationResolverTest extends AnyFunSuite with Matchers {
     val source = MapConfigSource(config, "prefix")
 
     source.get("key") shouldBe Some("value")
-    source.get("other") shouldBe None  // other is not prefixed with "prefix"
+    source.get("other") shouldBe None // other is not prefixed with "prefix"
   }
 
   test("MapConfigSource should find key with exact case match") {
@@ -276,7 +276,7 @@ class ConfigurationResolverTest extends AnyFunSuite with Matchers {
   test("MapConfigSource should work with ConfigurationResolver") {
     val config = Map(
       "spark.indextables.databricks.workspaceUrl" -> "https://example.databricks.com",
-      "spark.indextables.databricks.apiToken" -> "dapi12345"
+      "spark.indextables.databricks.apiToken"     -> "dapi12345"
     )
 
     val sources = Seq(

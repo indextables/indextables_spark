@@ -27,11 +27,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /**
- * Test to reproduce bug where PURGE INDEXTABLE ignores LOG RETENTION
- * and aggressively deletes state directories before they expire.
+ * Test to reproduce bug where PURGE INDEXTABLE ignores LOG RETENTION and aggressively deletes state directories before
+ * they expire.
  *
- * Bug report: State directories are being deleted even when they are
- * newer than the specified LOG RETENTION period.
+ * Bug report: State directories are being deleted even when they are newer than the specified LOG RETENTION period.
  */
 class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
 
@@ -85,7 +84,8 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     val txLogPath = new Path(s"$tablePath/_transaction_log")
 
     // List state directories before purge
-    val statesBefore = fs.listStatus(txLogPath)
+    val statesBefore = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
       .map(_.getPath.getName)
       .sorted
@@ -96,12 +96,14 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     // Run PURGE with 24 HOURS LOG RETENTION
     // All state directories are freshly created (< 1 minute old)
     // So with 24 HOURS retention, NONE should be deleted (except possibly the latest is always kept)
-    val result = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
-    ).collect()
+    val result = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
+      )
+      .collect()
 
-    val metrics = result(0).getStruct(1)
-    val expiredStatesFound = metrics.getLong(6)   // expired_states_found
+    val metrics              = result(0).getStruct(1)
+    val expiredStatesFound   = metrics.getLong(6) // expired_states_found
     val expiredStatesDeleted = metrics.getLong(7) // expired_states_deleted (should be 0 for DRY RUN)
 
     println(s"PURGE result: status=${metrics.getString(0)}, expiredStatesFound=$expiredStatesFound")
@@ -111,12 +113,13 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     assert(
       expiredStatesFound == 0,
       s"BUG REPRODUCED: PURGE found $expiredStatesFound 'expired' state directories, " +
-      s"but all state directories are < 1 minute old and should NOT be considered expired " +
-      s"with 24 HOURS LOG RETENTION. State directories: ${statesBefore.mkString(", ")}"
+        s"but all state directories are < 1 minute old and should NOT be considered expired " +
+        s"with 24 HOURS LOG RETENTION. State directories: ${statesBefore.mkString(", ")}"
     )
 
     // List state directories after purge (DRY RUN, so should be same)
-    val statesAfter = fs.listStatus(txLogPath)
+    val statesAfter = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
       .map(_.getPath.getName)
       .sorted
@@ -139,7 +142,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
         .save(tablePath)
     }
 
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath     = new Path(s"$tablePath/_transaction_log")
     val manifestsPath = new Path(txLogPath, "manifests")
 
     // Check if manifests directory exists
@@ -155,11 +158,13 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     // All manifests are freshly created (< 1 minute old)
     // Even if manifest GC uses 1 hour default, they should NOT be deleted
     // because they're still within any reasonable retention
-    val result = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
-    ).collect()
+    val result = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
+      )
+      .collect()
 
-    val metrics = result(0).getStruct(1)
+    val metrics            = result(0).getStruct(1)
     val expiredStatesFound = metrics.getLong(6)
 
     println(s"PURGE result: expiredStatesFound=$expiredStatesFound (includes manifests)")
@@ -169,8 +174,8 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     assert(
       expiredStatesFound == 0,
       s"BUG: PURGE found $expiredStatesFound 'expired' items, " +
-      s"but all states and manifests are < 1 minute old. " +
-      s"This suggests LOG RETENTION 24 HOURS is not being honored."
+        s"but all states and manifests are < 1 minute old. " +
+        s"This suggests LOG RETENTION 24 HOURS is not being honored."
     )
   }
 
@@ -191,7 +196,8 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     val txLogPath = new Path(s"$tablePath/_transaction_log")
 
     // List state directories before aging
-    val statesBefore = fs.listStatus(txLogPath)
+    val statesBefore = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
       .sortBy(_.getPath.getName)
 
@@ -199,9 +205,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Find the OLDEST state directory (not the latest) and age it to 25 hours ago
     // The latest should NEVER be deleted regardless of age
-    val latestVersion = statesBefore.map { s =>
-      s.getPath.getName.replace("state-v", "").toLong
-    }.max
+    val latestVersion = statesBefore.map(s => s.getPath.getName.replace("state-v", "").toLong).max
 
     val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000) // 25 hours ago
 
@@ -218,11 +222,13 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Run PURGE with 24 HOURS LOG RETENTION
     // Only aged states should be found as expired
-    val result = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
-    ).collect()
+    val result = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
+      )
+      .collect()
 
-    val metrics = result(0).getStruct(1)
+    val metrics            = result(0).getStruct(1)
     val expiredStatesFound = metrics.getLong(6)
 
     println(s"PURGE result: expiredStatesFound=$expiredStatesFound, agedCount=$agedCount")

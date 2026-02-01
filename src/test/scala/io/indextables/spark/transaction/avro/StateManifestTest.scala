@@ -17,10 +17,10 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 class StateManifestTest extends TestBase {
 
@@ -36,7 +36,7 @@ class StateManifestTest extends TestBase {
         |  "protocolVersion": 4
         |}""".stripMargin
 
-    val io = new StateManifestIO(null)
+    val io       = new StateManifestIO(null)
     val manifest = io.parseStateManifest(json)
 
     manifest.formatVersion shouldBe 1
@@ -75,7 +75,7 @@ class StateManifestTest extends TestBase {
         |  "protocolVersion": 4
         |}""".stripMargin
 
-    val io = new StateManifestIO(null)
+    val io       = new StateManifestIO(null)
     val manifest = io.parseStateManifest(json)
 
     manifest.manifests should have size 2
@@ -114,7 +114,7 @@ class StateManifestTest extends TestBase {
         |  "protocolVersion": 4
         |}""".stripMargin
 
-    val io = new StateManifestIO(null)
+    val io       = new StateManifestIO(null)
     val manifest = io.parseStateManifest(json)
 
     manifest.manifests should have size 1
@@ -146,7 +146,7 @@ class StateManifestTest extends TestBase {
         |  "protocolVersion": 4
         |}""".stripMargin
 
-    val io = new StateManifestIO(null)
+    val io       = new StateManifestIO(null)
     val manifest = io.parseStateManifest(json)
 
     manifest.tombstones should have size 2
@@ -170,7 +170,7 @@ class StateManifestTest extends TestBase {
         |  "protocolVersion": 4
         |}""".stripMargin
 
-    val io = new StateManifestIO(null)
+    val io       = new StateManifestIO(null)
     val manifest = io.parseStateManifest(json)
 
     manifest.schemaRegistry should have size 2
@@ -206,7 +206,7 @@ class StateManifestTest extends TestBase {
       protocolVersion = 4
     )
 
-    val io = new StateManifestIO(null)
+    val io   = new StateManifestIO(null)
     val json = io.serializeStateManifest(manifest)
 
     // Parse back and verify
@@ -234,13 +234,13 @@ class StateManifestTest extends TestBase {
 
     val tombstones = Seq("file2.split", "file4.split")
 
-    val io = new StateManifestIO(null)
+    val io     = new StateManifestIO(null)
     val result = io.applyTombstones(entries, tombstones)
 
     result should have size 3
-    result.map(_.path) should contain allOf("file1.split", "file3.split", "file5.split")
-    result.map(_.path) should not contain ("file2.split")
-    result.map(_.path) should not contain ("file4.split")
+    result.map(_.path) should contain allOf ("file1.split", "file3.split", "file5.split")
+    result.map(_.path) should not contain "file2.split"
+    result.map(_.path) should not contain "file4.split"
   }
 
   test("applyTombstones should return all entries when tombstones is empty") {
@@ -249,20 +249,20 @@ class StateManifestTest extends TestBase {
       createTestFileEntry("file2.split")
     )
 
-    val io = new StateManifestIO(null)
+    val io     = new StateManifestIO(null)
     val result = io.applyTombstones(entries, Seq.empty)
 
     result should have size 2
   }
 
   test("applyTombstones should handle large tombstone list efficiently") {
-    val entries = (1 to 10000).map(i => createTestFileEntry(s"file$i.split"))
+    val entries    = (1 to 10000).map(i => createTestFileEntry(s"file$i.split"))
     val tombstones = (1 to 5000 by 2).map(i => s"file$i.split") // Remove odd-numbered files
 
-    val io = new StateManifestIO(null)
+    val io        = new StateManifestIO(null)
     val startTime = System.currentTimeMillis()
-    val result = io.applyTombstones(entries, tombstones)
-    val duration = System.currentTimeMillis() - startTime
+    val result    = io.applyTombstones(entries, tombstones)
+    val duration  = System.currentTimeMillis() - startTime
 
     result should have size 7500 // 10000 - 2500 (every other file from 1-5000)
     // Should be efficient (< 100ms for 10K entries, 2.5K tombstones)
@@ -328,9 +328,8 @@ class StateManifestTest extends TestBase {
         read.manifests(1).partitionBounds shouldBe defined
         read.tombstones shouldBe original.tombstones
         read.schemaRegistry shouldBe original.schemaRegistry
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -363,9 +362,8 @@ class StateManifestTest extends TestBase {
         val read = io.readStateManifest(stateDir)
         read.stateVersion shouldBe 100
         read.numFiles shouldBe 100
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -392,15 +390,14 @@ class StateManifestTest extends TestBase {
 
         // Now exists
         io.stateExists(stateDir) shouldBe true
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
-  private def createTestFileEntry(path: String): FileEntry = {
+  private def createTestFileEntry(path: String): FileEntry =
     FileEntry(
       path = path,
       partitionValues = Map.empty,
@@ -410,5 +407,4 @@ class StateManifestTest extends TestBase {
       addedAtVersion = 1L,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

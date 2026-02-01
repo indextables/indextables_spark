@@ -97,13 +97,15 @@ object IndexTables4SparkStatistics {
    * Creates statistics from a collection of AddAction entries from the transaction log. This aggregates information
    * from all splits to provide table-level statistics.
    *
-   * @param addActions the split files to aggregate statistics from
-   * @param referencedColumns optional set of column names to compute statistics for (from WHERE clause filters).
-   *                          If empty, column statistics are skipped entirely (fast path for queries without filters).
+   * @param addActions
+   *   the split files to aggregate statistics from
+   * @param referencedColumns
+   *   optional set of column names to compute statistics for (from WHERE clause filters). If empty, column statistics
+   *   are skipped entirely (fast path for queries without filters).
    */
   def fromAddActions(
-      addActions: Seq[AddAction],
-      referencedColumns: Set[String] = Set.empty
+    addActions: Seq[AddAction],
+    referencedColumns: Set[String] = Set.empty
   ): IndexTables4SparkStatistics = {
     if (addActions.isEmpty) {
       return new IndexTables4SparkStatistics(Some(0L), Some(0L))
@@ -139,18 +141,21 @@ object IndexTables4SparkStatistics {
   /**
    * Aggregates column statistics from AddAction min/max values using single-pass algorithm.
    *
-   * Performance optimization: Only computes statistics for columns referenced in WHERE clause filters.
-   * Uses mutable accumulators for O(addActions × referencedColumns) complexity instead of
-   * O(addActions × allColumns) in the original two-pass algorithm.
+   * Performance optimization: Only computes statistics for columns referenced in WHERE clause filters. Uses mutable
+   * accumulators for O(addActions × referencedColumns) complexity instead of O(addActions × allColumns) in the original
+   * two-pass algorithm.
    *
-   * @param addActions the split files to aggregate statistics from
-   * @param totalRows total row count (unused but kept for API compatibility)
-   * @param referencedColumns columns to compute statistics for. If empty, returns empty Map (fast path).
+   * @param addActions
+   *   the split files to aggregate statistics from
+   * @param totalRows
+   *   total row count (unused but kept for API compatibility)
+   * @param referencedColumns
+   *   columns to compute statistics for. If empty, returns empty Map (fast path).
    */
   private def aggregateColumnStatistics(
-      addActions: Seq[AddAction],
-      totalRows: Long,
-      referencedColumns: Set[String]
+    addActions: Seq[AddAction],
+    totalRows: Long,
+    referencedColumns: Set[String]
   ): Map[String, ColumnStatistics] = {
     // Fast path: no filters = no column stats needed
     if (referencedColumns.isEmpty) {
@@ -194,12 +199,14 @@ object IndexTables4SparkStatistics {
       val min = Option(minAccum.get(col))
       val max = Option(maxAccum.get(col))
       if (min.isDefined && max.isDefined) {
-        Some(col -> new SimpleColumnStatistics(
-          nullCount = None,     // Not available from transaction log
-          distinctCount = None, // Not available from transaction log
-          minValue = min,
-          maxValue = max
-        ))
+        Some(
+          col -> new SimpleColumnStatistics(
+            nullCount = None,     // Not available from transaction log
+            distinctCount = None, // Not available from transaction log
+            minValue = min,
+            maxValue = max
+          )
+        )
       } else {
         None
       }

@@ -17,10 +17,11 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import scala.jdk.CollectionConverters._
+import io.indextables.spark.TestBase
 
 /**
  * Tests for configurable token length limits.
@@ -189,9 +190,9 @@ class TokenLengthConfigurationTest extends TestBase {
     val options = new IndexTables4SparkOptions(
       new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.indexing.tokenLength.255"     -> "content,title",        // new syntax
-          "spark.indextables.indexing.tokenLength.summary" -> "legacy",               // old syntax
-          "spark.indextables.indexing.tokenLength.40"      -> "short_field"           // new syntax with numeric
+          "spark.indextables.indexing.tokenLength.255"     -> "content,title", // new syntax
+          "spark.indextables.indexing.tokenLength.summary" -> "legacy",        // old syntax
+          "spark.indextables.indexing.tokenLength.40"      -> "short_field"    // new syntax with numeric
         ).asJava
       )
     )
@@ -367,8 +368,8 @@ class TokenLengthConfigurationTest extends TestBase {
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.text", "title,content")
-      .option("spark.indextables.indexing.text.maxTokenLength", "255")       // default
-      .option("spark.indextables.indexing.tokenLength.title", "40")          // legacy for title
+      .option("spark.indextables.indexing.text.maxTokenLength", "255")         // default
+      .option("spark.indextables.indexing.tokenLength.title", "40")            // legacy for title
       .option("spark.indextables.indexing.tokenLength.content", "tantivy_max") // max for content
       .mode("overwrite")
       .save(tablePath)
@@ -391,8 +392,8 @@ class TokenLengthConfigurationTest extends TestBase {
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.text", "title,content,body")
-      .option("spark.indextables.indexing.tokenLength.legacy", "title")           // 40 for title
-      .option("spark.indextables.indexing.tokenLength.255", "content,body")       // 255 for content and body
+      .option("spark.indextables.indexing.tokenLength.legacy", "title")     // 40 for title
+      .option("spark.indextables.indexing.tokenLength.255", "content,body") // 255 for content and body
       .mode("overwrite")
       .save(tablePath)
 
@@ -485,7 +486,7 @@ class TokenLengthConfigurationTest extends TestBase {
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.text", "title,content")
-      .option("spark.indextables.indexing.tokenLength.title", "40")   // legacy for title
+      .option("spark.indextables.indexing.tokenLength.title", "40")    // legacy for title
       .option("spark.indextables.indexing.tokenLength.content", "255") // default for content
       .mode("overwrite")
       .save(tablePath)

@@ -22,11 +22,11 @@ import org.slf4j.LoggerFactory
 /**
  * Distributes tombstones to manifests based on partition bounds.
  *
- * This enables selective compaction where only manifests with high tombstone ratios
- * are rewritten, while clean manifests are kept as-is.
+ * This enables selective compaction where only manifests with high tombstone ratios are rewritten, while clean
+ * manifests are kept as-is.
  *
- * For a table with 10,000 partitions where only 1 partition has high tombstone ratio,
- * this allows rewriting just 1 manifest instead of all 10,000 partitions worth of data.
+ * For a table with 10,000 partitions where only 1 partition has high tombstone ratio, this allows rewriting just 1
+ * manifest instead of all 10,000 partitions worth of data.
  */
 object TombstoneDistributor {
 
@@ -43,29 +43,31 @@ object TombstoneDistributor {
    *   - s3://bucket/table/date=2024-01-01/region=us-east/file.split
    *   - /local/path/year=2024/month=01/file.split
    *
-   * @param path File path to parse
-   * @return Map of partition column names to values, empty if no partitions found
+   * @param path
+   *   File path to parse
+   * @return
+   *   Map of partition column names to values, empty if no partitions found
    */
-  def extractPartitionValues(path: String): Map[String, String] = {
-    PartitionPattern.findAllMatchIn(path).map { m =>
-      m.group(1) -> m.group(2)
-    }.toMap
-  }
+  def extractPartitionValues(path: String): Map[String, String] =
+    PartitionPattern.findAllMatchIn(path).map(m => m.group(1) -> m.group(2)).toMap
 
   /**
    * Check if partition values fall within the given partition bounds.
    *
-   * A tombstone "matches" a manifest if its partition values fall within
-   * the manifest's partition bounds for all shared partition columns.
+   * A tombstone "matches" a manifest if its partition values fall within the manifest's partition bounds for all shared
+   * partition columns.
    *
-   * @param partitionValues Partition values from a tombstone path
-   * @param bounds Partition bounds from a manifest
-   * @return true if values could be in this manifest
+   * @param partitionValues
+   *   Partition values from a tombstone path
+   * @param bounds
+   *   Partition bounds from a manifest
+   * @return
+   *   true if values could be in this manifest
    */
   def valuesWithinBounds(
-      partitionValues: Map[String, String],
-      bounds: Option[Map[String, PartitionBounds]]): Boolean = {
-
+    partitionValues: Map[String, String],
+    bounds: Option[Map[String, PartitionBounds]]
+  ): Boolean =
     bounds match {
       case None =>
         // No partition bounds - manifest contains unpartitioned data
@@ -79,37 +81,41 @@ object TombstoneDistributor {
       case Some(boundsMap) =>
         // Check each partition column
         // Tombstone matches if its values fall within bounds for ALL columns present in bounds
-        boundsMap.forall { case (column, bound) =>
-          partitionValues.get(column) match {
-            case None =>
-              // Tombstone doesn't have this partition column
-              // This is unusual but could happen if manifest has more partition columns
-              // Be conservative and say it could match
-              true
+        boundsMap.forall {
+          case (column, bound) =>
+            partitionValues.get(column) match {
+              case None =>
+                // Tombstone doesn't have this partition column
+                // This is unusual but could happen if manifest has more partition columns
+                // Be conservative and say it could match
+                true
 
-            case Some(value) =>
-              // Check if value is within min/max bounds
-              val withinMin = bound.min.forall(min => value >= min)
-              val withinMax = bound.max.forall(max => value <= max)
-              withinMin && withinMax
-          }
+              case Some(value) =>
+                // Check if value is within min/max bounds
+                val withinMin = bound.min.forall(min => value >= min)
+                val withinMax = bound.max.forall(max => value <= max)
+                withinMin && withinMax
+            }
         }
     }
-  }
 
   /**
    * Distribute tombstones to manifests based on partition bounds.
    *
-   * For each manifest, counts how many tombstones fall within its partition bounds.
-   * Updates the manifest's tombstoneCount and liveEntryCount fields.
+   * For each manifest, counts how many tombstones fall within its partition bounds. Updates the manifest's
+   * tombstoneCount and liveEntryCount fields.
    *
-   * @param manifests Current manifests with partition bounds
-   * @param tombstones All tombstone paths (existing + new)
-   * @return Updated manifests with tombstone counts
+   * @param manifests
+   *   Current manifests with partition bounds
+   * @param tombstones
+   *   All tombstone paths (existing + new)
+   * @return
+   *   Updated manifests with tombstone counts
    */
   def distributeTombstones(
-      manifests: Seq[ManifestInfo],
-      tombstones: Set[String]): Seq[ManifestInfo] = {
+    manifests: Seq[ManifestInfo],
+    tombstones: Set[String]
+  ): Seq[ManifestInfo] = {
 
     if (tombstones.isEmpty) {
       // No tombstones - all manifests are clean
@@ -121,13 +127,14 @@ object TombstoneDistributor {
 
     // For each manifest, count tombstones that fall within its bounds
     manifests.map { manifest =>
-      val count = tombstonePartitions.count { case (_, partitionValues) =>
-        valuesWithinBounds(partitionValues, manifest.partitionBounds)
+      val count = tombstonePartitions.count {
+        case (_, partitionValues) =>
+          valuesWithinBounds(partitionValues, manifest.partitionBounds)
       }
 
       // Cap at numEntries (can't have more tombstones than entries)
       val cappedCount = math.min(count.toLong, manifest.numEntries)
-      val liveCount = manifest.numEntries - cappedCount
+      val liveCount   = manifest.numEntries - cappedCount
 
       if (count > 0) {
         log.debug(s"Manifest ${manifest.path}: $cappedCount tombstones, $liveCount live entries")
@@ -143,14 +150,17 @@ object TombstoneDistributor {
   /**
    * Partition manifests into "keep" (clean) and "rewrite" (dirty) based on tombstone ratio.
    *
-   * @param manifests Manifests with tombstone counts
-   * @param threshold Tombstone ratio threshold (e.g., 0.10 for 10%)
-   * @return (manifestsToKeep, manifestsToRewrite)
+   * @param manifests
+   *   Manifests with tombstone counts
+   * @param threshold
+   *   Tombstone ratio threshold (e.g., 0.10 for 10%)
+   * @return
+   *   (manifestsToKeep, manifestsToRewrite)
    */
   def selectivePartition(
-      manifests: Seq[ManifestInfo],
-      threshold: Double): (Seq[ManifestInfo], Seq[ManifestInfo]) = {
-
+    manifests: Seq[ManifestInfo],
+    threshold: Double
+  ): (Seq[ManifestInfo], Seq[ManifestInfo]) =
     manifests.partition { m =>
       if (m.numEntries == 0) {
         // Empty manifests - keep them (nothing to compact)
@@ -161,22 +171,24 @@ object TombstoneDistributor {
         tombstoneRatio <= threshold
       }
     }
-  }
 
   /**
    * Determine if selective compaction is beneficial.
    *
    * Selective compaction is worthwhile when:
-   * 1. There are manifests that can be kept (clean)
-   * 2. The manifests to rewrite have significant entries
+   *   1. There are manifests that can be kept (clean) 2. The manifests to rewrite have significant entries
    *
-   * @param keepManifests Manifests that would be kept as-is
-   * @param rewriteManifests Manifests that need rewriting
-   * @return true if selective compaction should be used
+   * @param keepManifests
+   *   Manifests that would be kept as-is
+   * @param rewriteManifests
+   *   Manifests that need rewriting
+   * @return
+   *   true if selective compaction should be used
    */
   def isSelectiveCompactionBeneficial(
-      keepManifests: Seq[ManifestInfo],
-      rewriteManifests: Seq[ManifestInfo]): Boolean = {
+    keepManifests: Seq[ManifestInfo],
+    rewriteManifests: Seq[ManifestInfo]
+  ): Boolean = {
 
     // If nothing to keep, full compaction is same as selective
     if (keepManifests.isEmpty) {
@@ -189,9 +201,9 @@ object TombstoneDistributor {
     }
 
     // Calculate savings
-    val entriesToKeep = keepManifests.map(_.numEntries).sum
+    val entriesToKeep    = keepManifests.map(_.numEntries).sum
     val entriesToRewrite = rewriteManifests.map(_.numEntries).sum
-    val totalEntries = entriesToKeep + entriesToRewrite
+    val totalEntries     = entriesToKeep + entriesToRewrite
 
     // Selective is beneficial if we're skipping at least 10% of entries
     val savingsRatio = entriesToKeep.toDouble / totalEntries
@@ -199,9 +211,11 @@ object TombstoneDistributor {
     val beneficial = savingsRatio >= 0.10
 
     if (beneficial) {
-      log.info(s"Selective compaction beneficial: keeping ${keepManifests.size} manifests " +
-        s"($entriesToKeep entries), rewriting ${rewriteManifests.size} manifests " +
-        s"($entriesToRewrite entries), savings=${(savingsRatio * 100).toInt}%")
+      log.info(
+        s"Selective compaction beneficial: keeping ${keepManifests.size} manifests " +
+          s"($entriesToKeep entries), rewriting ${rewriteManifests.size} manifests " +
+          s"($entriesToRewrite entries), savings=${(savingsRatio * 100).toInt}%"
+      )
     } else {
       log.debug(s"Selective compaction not beneficial: savings only ${(savingsRatio * 100).toInt}%")
     }

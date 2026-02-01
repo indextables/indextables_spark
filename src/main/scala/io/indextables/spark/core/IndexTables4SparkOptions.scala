@@ -51,8 +51,8 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   private val ValidTokenizers = Set("default", "raw", "whitespace", "en_stem")
 
   /**
-   * Token length constants matching tantivy4java's TokenLength class.
-   * Used for detecting list-based syntax (e.g., tokenLength.255 = "field1,field2").
+   * Token length constants matching tantivy4java's TokenLength class. Used for detecting list-based syntax (e.g.,
+   * tokenLength.255 = "field1,field2").
    */
   private val TokenLengthConstants = Map(
     "tantivy_max" -> 65530, // Maximum supported by Tantivy (u16::MAX - 5)
@@ -473,15 +473,15 @@ object IndexTables4SparkOptions {
   val FORCE_STANDARD_STORAGE = "forceStandardStorage"
 
   // Indexing configuration keys
-  val INDEXING_TYPEMAP_PREFIX            = "spark.indextables.indexing.typemap."
-  val INDEXING_FASTFIELDS                = "spark.indextables.indexing.fastfields"
-  val INDEXING_NONFASTFIELDS             = "spark.indextables.indexing.nonfastfields"
-  val INDEXING_STOREONLY_FIELDS          = "spark.indextables.indexing.storeonlyfields"
-  val INDEXING_INDEXONLY_FIELDS          = "spark.indextables.indexing.indexonlyfields"
-  val INDEXING_TOKENIZER_PREFIX          = "spark.indextables.indexing.tokenizer."
-  val INDEXING_JSON_MODE                 = "spark.indextables.indexing.json.mode"
-  val INDEXING_TEXT_MAX_TOKEN_LENGTH     = "spark.indextables.indexing.text.maxTokenLength"
-  val INDEXING_TOKEN_LENGTH_PREFIX       = "spark.indextables.indexing.tokenlength."
+  val INDEXING_TYPEMAP_PREFIX        = "spark.indextables.indexing.typemap."
+  val INDEXING_FASTFIELDS            = "spark.indextables.indexing.fastfields"
+  val INDEXING_NONFASTFIELDS         = "spark.indextables.indexing.nonfastfields"
+  val INDEXING_STOREONLY_FIELDS      = "spark.indextables.indexing.storeonlyfields"
+  val INDEXING_INDEXONLY_FIELDS      = "spark.indextables.indexing.indexonlyfields"
+  val INDEXING_TOKENIZER_PREFIX      = "spark.indextables.indexing.tokenizer."
+  val INDEXING_JSON_MODE             = "spark.indextables.indexing.json.mode"
+  val INDEXING_TEXT_MAX_TOKEN_LENGTH = "spark.indextables.indexing.text.maxTokenLength"
+  val INDEXING_TOKEN_LENGTH_PREFIX   = "spark.indextables.indexing.tokenlength."
 
   // Token length constants (matching tantivy4java's TokenLength class)
   val TOKEN_LENGTH_TANTIVY_MAX = 65530 // Maximum supported by Tantivy (u16::MAX - 5)

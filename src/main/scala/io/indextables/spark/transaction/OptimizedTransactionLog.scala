@@ -27,15 +27,23 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.util.Try
 
+import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.sources.Filter
 
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.avro.{CompactionConfig, FileEntry, StateConfig, StateManifest, StateManifestIO, StateRetryConfig, StateWriter}
+import io.indextables.spark.transaction.avro.{
+  CompactionConfig,
+  FileEntry,
+  StateConfig,
+  StateManifest,
+  StateManifestIO,
+  StateRetryConfig,
+  StateWriter
+}
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
@@ -149,28 +157,27 @@ class OptimizedTransactionLog(
 
   // Cache whether this table uses Avro format (detected once, cached)
   @volatile private var detectedAvroFormat: Option[Boolean] = None
-  private val avroFormatLock = new Object()
+  private val avroFormatLock                                = new Object()
 
   /**
    * Determine if this table should use Avro state format.
    *
    * Logic:
-   * 1. If an Avro state checkpoint already exists, continue with Avro (auto-detect)
-   * 2. If explicitly configured, use that setting
-   * 3. For new tables, default to Avro
+   *   1. If an Avro state checkpoint already exists, continue with Avro (auto-detect) 2. If explicitly configured, use
+   *      that setting 3. For new tables, default to Avro
    */
   private def isAvroFormatEnabled(): Boolean = {
     // Return cached result if available
     detectedAvroFormat match {
       case Some(result) => return result
-      case None => // Continue with detection
+      case None         => // Continue with detection
     }
 
     avroFormatLock.synchronized {
       // Double-check after acquiring lock
       detectedAvroFormat match {
         case Some(result) => return result
-        case None =>
+        case None         =>
           // Check explicit configuration first
           val explicitFormat = Option(options.get(StateConfig.FORMAT_KEY))
 
@@ -434,7 +441,7 @@ class OptimizedTransactionLog(
         )
       }
       val allActions: Seq[Action] = removeActions ++ addActions
-      val version = writeActionsToAvroState(allActions)
+      val version                 = writeActionsToAvroState(allActions)
 
       // Invalidate caches after overwrite
       enhancedCache.invalidateTable(tablePath.toString)
@@ -617,12 +624,12 @@ class OptimizedTransactionLog(
   /**
    * List files with partition filter pruning for Avro state format.
    *
-   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
-   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
-   * for large tables with many partitions.
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can prune entire
+   * manifest files that don't contain matching partitions, significantly reducing I/O for large tables with many
+   * partitions.
    *
-   * Note: This method bypasses the file cache since filtered results shouldn't be cached
-   * (different filters would produce different results).
+   * Note: This method bypasses the file cache since filtered results shouldn't be cached (different filters would
+   * produce different results).
    */
   override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = {
     // Check protocol before reading
@@ -657,8 +664,8 @@ class OptimizedTransactionLog(
         // Apply incremental changes since checkpoint (only for JSON checkpoints)
         // In Avro mode, the state IS the complete state - no JSON versions to apply
         if (!isAvroCheckpoint) {
-          val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
-          val allVersions = getVersions()
+          val checkpointVersion       = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+          val allVersions             = getVersions()
           val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion)
 
           if (versionsAfterCheckpoint.nonEmpty) {
@@ -700,7 +707,7 @@ class OptimizedTransactionLog(
     // Use cached version to avoid repeated storage calls during query execution
     val checkpointInfo = getLastCheckpointInfoCached()
     if (checkpointInfo.exists(_.format.contains(StateConfig.Format.AVRO_STATE))) {
-      val info = checkpointInfo.get
+      val info         = checkpointInfo.get
       val stateDirPath = s"${transactionLogPath.toString}/${info.stateDir.get}"
 
       try {
@@ -709,8 +716,7 @@ class OptimizedTransactionLog(
         // Using global cache ensures this expensive operation happens only once across all queries
         val cached = enhancedCache.getOrComputeAvroFileList(
           tablePath.toString,
-          info.version,
-          {
+          info.version, {
             // Before computing, check if checkpoint actions are already cached
             // (e.g., from getMetadata/getSchema calls during table initialization)
             // This avoids duplicate StateManifest reads and schema filtering
@@ -730,12 +736,15 @@ class OptimizedTransactionLog(
                   stateDirPath,
                   manifestIO.readStateManifest(stateDirPath)
                 )
-                logger.info(s"Avro mode: StateManifest has ${stateManifest.schemaRegistry.size} schemas, " +
-                  s"${stateManifest.numFiles} files, ${stateManifest.manifests.size} manifests")
+                logger.info(
+                  s"Avro mode: StateManifest has ${stateManifest.schemaRegistry.size} schemas, " +
+                    s"${stateManifest.numFiles} files, ${stateManifest.manifests.size} manifests"
+                )
 
                 // Use cached avroReader field to avoid object allocation per query
                 // Resolve manifest paths - handles both shared manifests (manifests/xxx.avro) and legacy state-local
-                val manifestPaths = manifestIO.resolveManifestPaths(stateManifest, transactionLogPath.toString, stateDirPath)
+                val manifestPaths =
+                  manifestIO.resolveManifestPaths(stateManifest, transactionLogPath.toString, stateDirPath)
                 val fileEntries = avroReader.readManifestsParallel(manifestPaths)
                 val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
                 // This toAddActions call is expensive (JSON parsing) - cached globally
@@ -744,9 +753,12 @@ class OptimizedTransactionLog(
 
                 // Pre-populate DocMappingMetadata cache to avoid JSON parsing on first filter operation
                 // Due to schema deduplication, many files share the same schema, so we only parse each unique schema once
-                val uniqueSchemas = result.flatMap(a => a.docMappingRef.orElse(a.docMappingJson.map(_.hashCode.toString))).toSet
+                val uniqueSchemas =
+                  result.flatMap(a => a.docMappingRef.orElse(a.docMappingJson.map(_.hashCode.toString))).toSet
                 result.foreach(EnhancedTransactionLogCache.getDocMappingMetadata)
-                logger.debug(s"Avro mode: pre-populated DocMappingMetadata cache for ${uniqueSchemas.size} unique schemas")
+                logger.debug(
+                  s"Avro mode: pre-populated DocMappingMetadata cache for ${uniqueSchemas.size} unique schemas"
+                )
 
                 result
             }
@@ -867,7 +879,7 @@ class OptimizedTransactionLog(
           val schema = add.docMappingJson.get
           // Use existing docMappingRef as hash if available, otherwise compute
           // This avoids expensive JSON normalization on every query
-          val hash = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
+          val hash     = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
           val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
           if (filtered != schema) {
             add.copy(docMappingJson = Some(filtered))
@@ -892,9 +904,8 @@ class OptimizedTransactionLog(
   }
 
   /**
-   * Filter inline docMappingJson to remove empty object fields.
-   * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
-   * Uses CACHED version to avoid repeated JSON parsing.
+   * Filter inline docMappingJson to remove empty object fields. This handles legacy format AddActions that have
+   * docMappingJson directly (not via docMappingRef). Uses CACHED version to avoid repeated JSON parsing.
    */
   private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
     addActions.map { add =>
@@ -902,7 +913,7 @@ class OptimizedTransactionLog(
         val schema = add.docMappingJson.get
         // Use existing docMappingRef as hash if available, otherwise compute
         // This avoids expensive JSON normalization on every query
-        val hash = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
+        val hash     = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
         val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
         if (filtered != schema) {
           add.copy(docMappingJson = Some(filtered))
@@ -1069,7 +1080,7 @@ class OptimizedTransactionLog(
 
         // Check if we're in Avro mode - checkpoint is complete source of truth
         val checkpointInfoOpt = getLastCheckpointInfoCached()
-        val isAvroMode = checkpointInfoOpt.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
+        val isAvroMode        = checkpointInfoOpt.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
 
         // Try checkpoint first if available - uses cached checkpoint actions
         getCheckpointActionsCached() match {
@@ -1079,10 +1090,10 @@ class OptimizedTransactionLog(
                 logger.info("Found protocol in checkpoint (cached)")
                 return protocol
               case None =>
-                // No protocol in checkpoint, continue searching in version files
+              // No protocol in checkpoint, continue searching in version files
             }
           case None =>
-            // No checkpoint, continue with version files
+          // No checkpoint, continue with version files
         }
 
         // In Avro mode with checkpoint, we already returned above if protocol was found
@@ -1260,13 +1271,13 @@ class OptimizedTransactionLog(
     getLastCheckpointInfoCached()
 
   /**
-   * Get last checkpoint info using global cache. This avoids repeated S3 calls for _last_checkpoint file.
-   * The cache is shared across all TransactionLog instances with configurable TTL (default 5 minutes).
-   * Configure via spark.indextables.cache.checkpoint.ttl
+   * Get last checkpoint info using global cache. This avoids repeated S3 calls for _last_checkpoint file. The cache is
+   * shared across all TransactionLog instances with configurable TTL (default 5 minutes). Configure via
+   * spark.indextables.cache.checkpoint.ttl
    *
-   * For Avro state format, uses verified discovery that probes for version N+1 to detect if
-   * `_last_checkpoint` has regressed due to a rare TOCTOU race between concurrent writers.
-   * This ensures readers (including merge operations) always see the authoritative latest state.
+   * For Avro state format, uses verified discovery that probes for version N+1 to detect if `_last_checkpoint` has
+   * regressed due to a rare TOCTOU race between concurrent writers. This ensures readers (including merge operations)
+   * always see the authoritative latest state.
    *
    * Verification cost: 1 HEAD request in the common case (hint is correct).
    */
@@ -1731,12 +1742,11 @@ class OptimizedTransactionLog(
    * Write actions to Avro state format with compacted writes.
    *
    * This method creates a complete Avro state by:
-   * 1. Reading the current live files (if any exist)
-   * 2. Applying the new adds and removes
-   * 3. Writing a new state version with all live files
+   *   1. Reading the current live files (if any exist) 2. Applying the new adds and removes 3. Writing a new state
+   *      version with all live files
    *
-   * Each write creates a self-contained state directory with all live files,
-   * ensuring reads never need to reference multiple state directories.
+   * Each write creates a self-contained state directory with all live files, ensuring reads never need to reference
+   * multiple state directories.
    *
    * @param actions
    *   The actions to write (AddAction, RemoveAction, etc.)
@@ -1753,9 +1763,9 @@ class OptimizedTransactionLog(
     currentSnapshot.set(None)
 
     // Extract different action types
-    val addActions = actions.collect { case add: AddAction => add }
+    val addActions    = actions.collect { case add: AddAction => add }
     val removeActions = actions.collect { case remove: RemoveAction => remove }
-    val removedPaths = removeActions.map(_.path).toSet
+    val removedPaths  = removeActions.map(_.path).toSet
 
     // Build schema registry from NEW AddActions only
     // Existing schemas are already in the base state's schema registry
@@ -1775,7 +1785,7 @@ class OptimizedTransactionLog(
         0L, // Version will be assigned by StateWriter based on actual write version
         timestamp
       )
-    }.toList  // Force strict evaluation - CRITICAL for schema registry population
+    }.toList // Force strict evaluation - CRITICAL for schema registry population
 
     // Build compaction config from options
     val compactionConfig = CompactionConfig(
@@ -1802,13 +1812,13 @@ class OptimizedTransactionLog(
 
     // Update _last_checkpoint to point to new Avro state
     val actualVersion = writeResult.version
-    val stateDir = manifestIO.formatStateDir(actualVersion)
+    val stateDir      = manifestIO.formatStateDir(actualVersion)
 
     // Read the actual state manifest to get accurate file counts
     val actualStateDir = s"${transactionLogPath.toString}/$stateDir"
-    val stateManifest = Try(manifestIO.readStateManifest(actualStateDir)).toOption
-    val totalFiles = stateManifest.map(_.numFiles).getOrElse(newFileEntries.size.toLong)
-    val totalBytes = stateManifest.map(_.totalBytes).getOrElse(newFileEntries.map(_.size).sum)
+    val stateManifest  = Try(manifestIO.readStateManifest(actualStateDir)).toOption
+    val totalFiles     = stateManifest.map(_.numFiles).getOrElse(newFileEntries.size.toLong)
+    val totalBytes     = stateManifest.map(_.totalBytes).getOrElse(newFileEntries.map(_.size).sum)
 
     val lastCheckpointInfo = LastCheckpointInfo(
       version = actualVersion,
@@ -1830,8 +1840,10 @@ class OptimizedTransactionLog(
     )
 
     if (checkpointUpdated) {
-      logger.info(s"Avro state written at version $actualVersion with $totalFiles total files " +
-        s"(new=${newFileEntries.size}, removed=${removedPaths.size})")
+      logger.info(
+        s"Avro state written at version $actualVersion with $totalFiles total files " +
+          s"(new=${newFileEntries.size}, removed=${removedPaths.size})"
+      )
     } else {
       logger.debug(s"Avro state written at version $actualVersion but _last_checkpoint not updated (newer exists)")
     }
@@ -2282,7 +2294,7 @@ class OptimizedTransactionLog(
     logger.info(s"Reconstructing state from versions: ${versions.sorted}")
 
     // Check if checkpoint is in Avro format (complete state, no JSON versions to read)
-    val checkpointInfo = getLastCheckpointInfoCached()
+    val checkpointInfo   = getLastCheckpointInfoCached()
     val isAvroCheckpoint = checkpointInfo.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
 
     // Try to start from checkpoint if available - this allows reading even when early versions are deleted

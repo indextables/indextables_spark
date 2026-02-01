@@ -1,7 +1,8 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions.col
+
+import io.indextables.spark.TestBase
 
 class DirectDataFrameIndexQueryTest extends TestBase {
 
@@ -134,9 +135,11 @@ class DirectDataFrameIndexQueryTest extends TestBase {
     // Scenario 1: Without pre-filter (should work - baseline)
     println("\n[Baseline] Direct view without pre-filter:")
     df.createOrReplaceTempView("baseline_view")
-    val baselineResults = spark.sql(
-      "SELECT id, content FROM baseline_view WHERE content indexquery 'machine' ORDER BY id"
-    ).collect()
+    val baselineResults = spark
+      .sql(
+        "SELECT id, content FROM baseline_view WHERE content indexquery 'machine' ORDER BY id"
+      )
+      .collect()
     println(s"  Results: ${baselineResults.length} (expected: 3)")
     baselineResults.foreach(row => println(s"    ID=${row.getInt(0)}: '${row.getString(1)}'"))
     assert(baselineResults.length == 3, "Baseline should return 3 'machine' documents")
@@ -146,9 +149,11 @@ class DirectDataFrameIndexQueryTest extends TestBase {
     val filteredDf = df.filter(col("load_date").between("2026-01-01", "2026-01-08"))
     filteredDf.createOrReplaceTempView("pre_filtered_view")
 
-    val filteredResults = spark.sql(
-      "SELECT id, content FROM pre_filtered_view WHERE content indexquery 'machine' ORDER BY id"
-    ).collect()
+    val filteredResults = spark
+      .sql(
+        "SELECT id, content FROM pre_filtered_view WHERE content indexquery 'machine' ORDER BY id"
+      )
+      .collect()
     println(s"  Results: ${filteredResults.length} (expected: 2 - only 'machine' docs within date range)")
     filteredResults.foreach(row => println(s"    ID=${row.getInt(0)}: '${row.getString(1)}'"))
 

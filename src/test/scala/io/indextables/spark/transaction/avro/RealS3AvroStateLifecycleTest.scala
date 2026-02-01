@@ -24,24 +24,17 @@ import io.indextables.spark.RealS3TestBase
 /**
  * Full lifecycle integration tests for Avro state format on real AWS S3.
  *
- * These tests validate the Avro transaction log format works correctly through
- * the complete table lifecycle:
- *   1. Write data and create Avro checkpoint
- *   2. Verify state format is "avro-state"
- *   3. Read data from Avro state
- *   4. Append data (incremental write after Avro checkpoint)
- *   5. Merge splits with Avro state
- *   6. Drop partition with Avro state
- *   7. Truncate time travel with Avro state
- *   8. Create new Avro checkpoint
- *   9. Verify final state and data integrity
+ * These tests validate the Avro transaction log format works correctly through the complete table lifecycle:
+ *   1. Write data and create Avro checkpoint 2. Verify state format is "avro-state" 3. Read data from Avro state 4.
+ *      Append data (incremental write after Avro checkpoint) 5. Merge splits with Avro state 6. Drop partition with
+ *      Avro state 7. Truncate time travel with Avro state 8. Create new Avro checkpoint 9. Verify final state and data
+ *      integrity
  *
  * Prerequisites:
  *   - AWS credentials configured via ~/.aws/credentials or environment variables
  *   - S3 bucket accessible for testing (default: test-tantivy4sparkbucket in us-east-2)
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.RealS3AvroStateLifecycleTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.RealS3AvroStateLifecycleTest'
  */
 class RealS3AvroStateLifecycleTest extends RealS3TestBase {
 
@@ -86,7 +79,7 @@ class RealS3AvroStateLifecycleTest extends RealS3TestBase {
       import java.util.Properties
       import scala.util.Using
 
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
 
       if (!credFile.exists()) {
@@ -95,9 +88,7 @@ class RealS3AvroStateLifecycleTest extends RealS3TestBase {
       }
 
       val props = new Properties()
-      Using(new FileInputStream(credFile)) { stream =>
-        props.load(stream)
-      }
+      Using(new FileInputStream(credFile))(stream => props.load(stream))
 
       // Try to get credentials from [default] profile
       val accessKey = Option(props.getProperty("aws_access_key_id"))
@@ -142,7 +133,7 @@ class RealS3AvroStateLifecycleTest extends RealS3TestBase {
 
   test("Avro state full lifecycle: write -> checkpoint -> read -> merge -> drop partition -> truncate -> checkpoint -> read") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/avro-test-lifecycle-$testId"
+    val path   = s"s3a://$S3_BUCKET/avro-test-lifecycle-$testId"
 
     println(s"🚀 Starting Avro state lifecycle test at: $path")
 
@@ -341,20 +332,20 @@ class RealS3AvroStateLifecycleTest extends RealS3TestBase {
     println(s"✅ Step 11 complete: Final count=$finalCount, sum(score)=$finalSum")
 
     println(s"""
-    |============================================
-    |🎉 AVRO STATE LIFECYCLE TEST COMPLETED
-    |============================================
-    |Path: $path
-    |Format: avro-state (verified at each checkpoint)
-    |Final records: $finalCount
-    |Final sum(score): $finalSum
-    |============================================
+               |============================================
+               |🎉 AVRO STATE LIFECYCLE TEST COMPLETED
+               |============================================
+               |Path: $path
+               |Format: avro-state (verified at each checkpoint)
+               |Final records: $finalCount
+               |Final sum(score): $finalSum
+               |============================================
     """.stripMargin)
   }
 
   test("Avro state: schema registry preserves docMappingJson across checkpoint") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/avro-test-schema-registry-$testId"
+    val path   = s"s3a://$S3_BUCKET/avro-test-schema-registry-$testId"
 
     println(s"🚀 Testing schema registry preservation at: $path")
 
@@ -397,7 +388,7 @@ class RealS3AvroStateLifecycleTest extends RealS3TestBase {
 
   test("Avro state: partition pruning with manifest bounds") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/avro-test-partition-pruning-$testId"
+    val path   = s"s3a://$S3_BUCKET/avro-test-partition-pruning-$testId"
 
     println(s"🚀 Testing partition pruning at: $path")
 
@@ -445,34 +436,46 @@ class RealS3AvroStateLifecycleTest extends RealS3TestBase {
 
   test("Avro state: streaming-aware version tracking") {
     val testId = generateTestId()
-    val path = s"s3a://$S3_BUCKET/avro-test-streaming-$testId"
+    val path   = s"s3a://$S3_BUCKET/avro-test-streaming-$testId"
 
     println(s"🚀 Testing streaming version tracking at: $path")
 
     // Write batch 1
     val batch1 = Seq((1, "doc1"), (2, "doc2"))
-    spark.createDataFrame(batch1).toDF("id", "content")
-      .write.format(provider).options(getWriteOptions()).mode("overwrite").save(path)
+    spark
+      .createDataFrame(batch1)
+      .toDF("id", "content")
+      .write
+      .format(provider)
+      .options(getWriteOptions())
+      .mode("overwrite")
+      .save(path)
 
     // Checkpoint
     spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
     // Get version after first checkpoint
-    val state1 = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+    val state1   = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
     val version1 = state1(0).getAs[Long]("version")
 
     println(s"✅ Version after batch 1: $version1")
 
     // Write batch 2
     val batch2 = Seq((3, "doc3"), (4, "doc4"))
-    spark.createDataFrame(batch2).toDF("id", "content")
-      .write.format(provider).options(getWriteOptions()).mode("append").save(path)
+    spark
+      .createDataFrame(batch2)
+      .toDF("id", "content")
+      .write
+      .format(provider)
+      .options(getWriteOptions())
+      .mode("append")
+      .save(path)
 
     // Checkpoint again
     spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
 
     // Get version after second checkpoint
-    val state2 = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+    val state2   = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
     val version2 = state2(0).getAs[Long]("version")
 
     println(s"✅ Version after batch 2: $version2")

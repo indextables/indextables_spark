@@ -17,25 +17,24 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.EnhancedTransactionLogCache
+import java.io.ByteArrayOutputStream
+
+import scala.jdk.CollectionConverters._
+import scala.util.{Failure, Success, Try}
 
 import com.fasterxml.jackson.databind.{DeserializationFeature, JsonNode, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.EnhancedTransactionLogCache
 import org.apache.avro.file.{CodecFactory, DataFileReader, DataFileWriter, SeekableByteArrayInput}
 import org.apache.avro.generic.{GenericDatumReader, GenericDatumWriter, GenericRecord}
-
 import org.slf4j.LoggerFactory
-
-import java.io.ByteArrayOutputStream
-import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success, Try}
 
 /**
  * IO operations for the state manifest (`_manifest.avro`) file.
  *
- * The state manifest is a binary Avro file that describes the complete table state, including references to Avro manifest
- * files and tombstones for removed files.
+ * The state manifest is a binary Avro file that describes the complete table state, including references to Avro
+ * manifest files and tombstones for removed files.
  */
 class StateManifestIO(cloudProvider: CloudStorageProvider) {
 
@@ -71,7 +70,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
         log.debug(
           s"Read state manifest: version=${manifest.stateVersion}, " +
             s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}, " +
-            s"tombstones=${manifest.tombstones.size}")
+            s"tombstones=${manifest.tombstones.size}"
+        )
         manifest
       case Failure(e) =>
         log.error(s"Failed to read state manifest: $manifestPath", e)
@@ -92,9 +92,9 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
     StateManifestIO.incrementParseCounter()
     EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
 
-    val schema = AvroSchemas.STATE_MANIFEST_SCHEMA
-    val datumReader = new GenericDatumReader[GenericRecord](schema)
-    val input = new SeekableByteArrayInput(bytes)
+    val schema         = AvroSchemas.STATE_MANIFEST_SCHEMA
+    val datumReader    = new GenericDatumReader[GenericRecord](schema)
+    val input          = new SeekableByteArrayInput(bytes)
     val dataFileReader = new DataFileReader[GenericRecord](input, datumReader)
 
     try {
@@ -103,9 +103,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       }
       val record = dataFileReader.next()
       AvroSchemas.genericRecordToStateManifest(record)
-    } finally {
+    } finally
       dataFileReader.close()
-    }
   }
 
   /**
@@ -141,17 +140,21 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       return Seq.empty
     }
 
-    node.elements().asScala.map { elem =>
-      ManifestInfo(
-        path = elem.get("path").asText(),
-        numEntries = elem.get("numEntries").asLong(),
-        minAddedAtVersion = elem.get("minAddedAtVersion").asLong(),
-        maxAddedAtVersion = elem.get("maxAddedAtVersion").asLong(),
-        partitionBounds = parsePartitionBounds(elem.get("partitionBounds")),
-        tombstoneCount = Option(elem.get("tombstoneCount")).map(_.asLong()).getOrElse(0L),
-        liveEntryCount = Option(elem.get("liveEntryCount")).map(_.asLong()).getOrElse(-1L)
-      )
-    }.toSeq
+    node
+      .elements()
+      .asScala
+      .map { elem =>
+        ManifestInfo(
+          path = elem.get("path").asText(),
+          numEntries = elem.get("numEntries").asLong(),
+          minAddedAtVersion = elem.get("minAddedAtVersion").asLong(),
+          maxAddedAtVersion = elem.get("maxAddedAtVersion").asLong(),
+          partitionBounds = parsePartitionBounds(elem.get("partitionBounds")),
+          tombstoneCount = Option(elem.get("tombstoneCount")).map(_.asLong()).getOrElse(0L),
+          liveEntryCount = Option(elem.get("liveEntryCount")).map(_.asLong()).getOrElse(-1L)
+        )
+      }
+      .toSeq
   }
 
   private def parsePartitionBounds(node: JsonNode): Option[Map[String, PartitionBounds]] = {
@@ -159,13 +162,17 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       return None
     }
 
-    val bounds = node.fields().asScala.map { entry =>
-      val column = entry.getKey
-      val boundsNode = entry.getValue
-      val min = Option(boundsNode.get("min")).filterNot(_.isNull).map(_.asText())
-      val max = Option(boundsNode.get("max")).filterNot(_.isNull).map(_.asText())
-      column -> PartitionBounds(min, max)
-    }.toMap
+    val bounds = node
+      .fields()
+      .asScala
+      .map { entry =>
+        val column     = entry.getKey
+        val boundsNode = entry.getValue
+        val min        = Option(boundsNode.get("min")).filterNot(_.isNull).map(_.asText())
+        val max        = Option(boundsNode.get("max")).filterNot(_.isNull).map(_.asText())
+        column -> PartitionBounds(min, max)
+      }
+      .toMap
 
     if (bounds.isEmpty) None else Some(bounds)
   }
@@ -183,9 +190,7 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       return Map.empty
     }
 
-    node.fields().asScala.map { entry =>
-      entry.getKey -> entry.getValue.asText()
-    }.toMap
+    node.fields().asScala.map(entry => entry.getKey -> entry.getValue.asText()).toMap
   }
 
   /**
@@ -201,10 +206,11 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   Compression level (default: 3)
    */
   def writeStateManifest(
-      stateDir: String,
-      manifest: StateManifest,
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Unit = {
+    stateDir: String,
+    manifest: StateManifest,
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Unit = {
     val manifestPath = s"$stateDir/$MANIFEST_FILE_NAME"
     log.debug(s"Writing Avro state manifest: $manifestPath")
 
@@ -214,7 +220,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
     log.debug(
       s"Wrote Avro state manifest: version=${manifest.stateVersion}, " +
         s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}, " +
-        s"size=${bytes.length} bytes")
+        s"size=${bytes.length} bytes"
+    )
   }
 
   /**
@@ -232,21 +239,23 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   true if written, false if already exists
    */
   def writeStateManifestIfNotExists(
-      stateDir: String,
-      manifest: StateManifest,
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Boolean = {
+    stateDir: String,
+    manifest: StateManifest,
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Boolean = {
     val manifestPath = s"$stateDir/$MANIFEST_FILE_NAME"
     log.debug(s"Writing Avro state manifest (if not exists): $manifestPath")
 
-    val bytes = serializeStateManifestAvro(manifest, compression, compressionLevel)
+    val bytes   = serializeStateManifestAvro(manifest, compression, compressionLevel)
     val written = cloudProvider.writeFileIfNotExists(manifestPath, bytes)
 
     if (written) {
       log.debug(
         s"Wrote Avro state manifest: version=${manifest.stateVersion}, " +
           s"files=${manifest.numFiles}, manifests=${manifest.manifests.size}, " +
-          s"size=${bytes.length} bytes")
+          s"size=${bytes.length} bytes"
+      )
     } else {
       log.debug(s"State manifest already exists: $manifestPath")
     }
@@ -267,15 +276,16 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   Avro binary bytes
    */
   def serializeStateManifestAvro(
-      manifest: StateManifest,
-      compression: String = StateConfig.COMPRESSION_DEFAULT,
-      compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT): Array[Byte] = {
+    manifest: StateManifest,
+    compression: String = StateConfig.COMPRESSION_DEFAULT,
+    compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT
+  ): Array[Byte] = {
 
     val schema = AvroSchemas.STATE_MANIFEST_SCHEMA
     val record = AvroSchemas.stateManifestToGenericRecord(manifest)
 
-    val baos = new ByteArrayOutputStream()
-    val datumWriter = new GenericDatumWriter[GenericRecord](schema)
+    val baos           = new ByteArrayOutputStream()
+    val datumWriter    = new GenericDatumWriter[GenericRecord](schema)
     val dataFileWriter = new DataFileWriter[GenericRecord](datumWriter)
 
     try {
@@ -295,9 +305,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       dataFileWriter.setCodec(codec)
       dataFileWriter.create(schema, baos)
       dataFileWriter.append(record)
-    } finally {
+    } finally
       dataFileWriter.close()
-    }
 
     baos.toByteArray
   }
@@ -330,10 +339,11 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
 
       info.partitionBounds.foreach { bounds =>
         val boundsNode = manifestNode.putObject("partitionBounds")
-        bounds.foreach { case (column, pb) =>
-          val colNode = boundsNode.putObject(column)
-          pb.min.foreach(colNode.put("min", _))
-          pb.max.foreach(colNode.put("max", _))
+        bounds.foreach {
+          case (column, pb) =>
+            val colNode = boundsNode.putObject(column)
+            pb.min.foreach(colNode.put("min", _))
+            pb.max.foreach(colNode.put("max", _))
         }
       }
 
@@ -355,8 +365,9 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
     // Schema registry
     if (manifest.schemaRegistry.nonEmpty) {
       val registryNode = root.putObject("schemaRegistry")
-      manifest.schemaRegistry.foreach { case (key, value) =>
-        registryNode.put(key, value)
+      manifest.schemaRegistry.foreach {
+        case (key, value) =>
+          registryNode.put(key, value)
       }
     }
 
@@ -378,14 +389,13 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    * @return
    *   Live file entries (not in tombstone set)
    */
-  def applyTombstones(entries: Seq[FileEntry], tombstones: Seq[String]): Seq[FileEntry] = {
+  def applyTombstones(entries: Seq[FileEntry], tombstones: Seq[String]): Seq[FileEntry] =
     if (tombstones.isEmpty) {
       entries
     } else {
       val tombstoneSet = tombstones.toSet
       entries.filterNot(e => tombstoneSet.contains(e.path))
     }
-  }
 
   /**
    * Check if a state directory exists.
@@ -395,9 +405,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    * @return
    *   true if state directory exists (contains _manifest.avro)
    */
-  def stateExists(stateDir: String): Boolean = {
+  def stateExists(stateDir: String): Boolean =
     cloudProvider.exists(s"$stateDir/$MANIFEST_FILE_NAME")
-  }
 
   /**
    * Format a version number as a state directory name.
@@ -407,9 +416,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    * @return
    *   State directory name (e.g., "state-v00000000000000000100")
    */
-  def formatStateDir(version: Long): String = {
+  def formatStateDir(version: Long): String =
     f"state-v$version%020d"
-  }
 
   /**
    * Extract version number from a state directory name.
@@ -447,9 +455,10 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   Full path to the manifest file
    */
   def resolveManifestPath(
-      manifestInfo: ManifestInfo,
-      transactionLogPath: String,
-      stateDir: String): String = {
+    manifestInfo: ManifestInfo,
+    transactionLogPath: String,
+    stateDir: String
+  ): String = {
     val path = manifestInfo.path
 
     if (path.startsWith(StateConfig.SHARED_MANIFEST_DIR + "/")) {
@@ -459,9 +468,11 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       // Normalized legacy format: includes state directory prefix
       // e.g., "state-v00000001/manifest-xxx.avro"
       s"$transactionLogPath/$path"
-    } else if (path.startsWith("s3://") || path.startsWith("abfss://") ||
-               path.startsWith("wasbs://") || path.startsWith("gs://") ||
-               path.startsWith("hdfs://") || path.startsWith("/")) {
+    } else if (
+      path.startsWith("s3://") || path.startsWith("abfss://") ||
+      path.startsWith("wasbs://") || path.startsWith("gs://") ||
+      path.startsWith("hdfs://") || path.startsWith("/")
+    ) {
       // Absolute path (shouldn't happen, but handle defensively)
       log.warn(s"Manifest has absolute path (unexpected): $path")
       path
@@ -485,11 +496,11 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   Sequence of full paths to manifest files
    */
   def resolveManifestPaths(
-      manifest: StateManifest,
-      transactionLogPath: String,
-      stateDir: String): Seq[String] = {
+    manifest: StateManifest,
+    transactionLogPath: String,
+    stateDir: String
+  ): Seq[String] =
     manifest.manifests.map(m => resolveManifestPath(m, transactionLogPath, stateDir))
-  }
 
   /**
    * Read current _last_checkpoint info from JSON file.
@@ -526,7 +537,7 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    * @return
    *   Current version if file exists and is valid, None otherwise
    */
-  def getCurrentCheckpointVersion(transactionLogPath: String): Option[Long] = {
+  def getCurrentCheckpointVersion(transactionLogPath: String): Option[Long] =
     readLastCheckpointJson(transactionLogPath).flatMap { json =>
       val versionNode = json.get("version")
       if (versionNode != null && !versionNode.isNull) {
@@ -535,14 +546,13 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
         None
       }
     }
-  }
 
   /**
    * Write _last_checkpoint only if the new version is greater than the existing version.
    *
-   * This provides a form of version-based conflict resolution for _last_checkpoint updates.
-   * If a concurrent writer has already advanced the checkpoint to a higher version, this
-   * write will be skipped (which is the correct behavior - we don't want to regress).
+   * This provides a form of version-based conflict resolution for _last_checkpoint updates. If a concurrent writer has
+   * already advanced the checkpoint to a higher version, this write will be skipped (which is the correct behavior - we
+   * don't want to regress).
    *
    * @param transactionLogPath
    *   Path to the transaction log directory
@@ -554,9 +564,10 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   true if written (new version was >= existing), false if skipped (existing version was > new)
    */
   def writeLastCheckpointIfNewer(
-      transactionLogPath: String,
-      newVersion: Long,
-      lastCheckpointJson: String): Boolean = {
+    transactionLogPath: String,
+    newVersion: Long,
+    lastCheckpointJson: String
+  ): Boolean = {
 
     val lastCheckpointPath = s"$transactionLogPath/_last_checkpoint"
 
@@ -581,13 +592,12 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
   /**
    * Verify a checkpoint version hint by probing for version N+1.
    *
-   * This uses the monotonically incrementing version property: if version N+1 exists,
-   * then the hint is stale. We keep probing N+2, N+3, etc. until we find a version
-   * that doesn't exist - that's the true latest.
+   * This uses the monotonically incrementing version property: if version N+1 exists, then the hint is stale. We keep
+   * probing N+2, N+3, etc. until we find a version that doesn't exist - that's the true latest.
    *
    * This is much cheaper than a directory scan:
-   * - Common case (hint is correct): 1 existence check (HEAD request)
-   * - Rare regression case: O(k) existence checks where k is typically 1-2
+   *   - Common case (hint is correct): 1 existence check (HEAD request)
+   *   - Rare regression case: O(k) existence checks where k is typically 1-2
    *
    * @param transactionLogPath
    *   Path to the transaction log directory
@@ -597,7 +607,7 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   The actual latest version (>= hintVersion)
    */
   def verifyCheckpointVersion(transactionLogPath: String, hintVersion: Long): Long = {
-    var version = hintVersion
+    var version      = hintVersion
     var nextStateDir = s"$transactionLogPath/${formatStateDir(version + 1)}"
 
     while (stateExists(nextStateDir)) {
@@ -641,10 +651,9 @@ object StateManifestIO {
   private[avro] def incrementParseCounter(): Unit = parseCounter.incrementAndGet()
 
   /**
-   * Shared ObjectMapper for JSON parsing.
-   * Jackson ObjectMapper creation is expensive (class loading, module registration),
-   * so we share a single instance across all StateManifestIO instances.
-   * ObjectMapper is thread-safe for read operations after configuration.
+   * Shared ObjectMapper for JSON parsing. Jackson ObjectMapper creation is expensive (class loading, module
+   * registration), so we share a single instance across all StateManifestIO instances. ObjectMapper is thread-safe for
+   * read operations after configuration.
    */
   private[avro] lazy val sharedMapper: ObjectMapper = {
     val m = new ObjectMapper()
@@ -661,7 +670,6 @@ object StateManifestIO {
    * @return
    *   StateManifestIO instance
    */
-  def apply(cloudProvider: CloudStorageProvider): StateManifestIO = {
+  def apply(cloudProvider: CloudStorageProvider): StateManifestIO =
     new StateManifestIO(cloudProvider)
-  }
 }

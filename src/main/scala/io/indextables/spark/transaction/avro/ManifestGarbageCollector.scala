@@ -17,18 +17,17 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.io.CloudStorageProvider
-
-import org.slf4j.LoggerFactory
-
 import scala.collection.mutable
 import scala.util.Try
+
+import io.indextables.spark.io.CloudStorageProvider
+import org.slf4j.LoggerFactory
 
 /**
  * Iceberg-style manifest garbage collector.
  *
- * Tracks which manifests are reachable from retained state versions and safely deletes orphaned
- * manifests from the shared manifest directory.
+ * Tracks which manifests are reachable from retained state versions and safely deletes orphaned manifests from the
+ * shared manifest directory.
  *
  * Safety features:
  *   - Age-based protection: Never deletes manifests younger than minManifestAgeHours
@@ -41,17 +40,17 @@ import scala.util.Try
  *   Path to the transaction log directory
  */
 class ManifestGarbageCollector(
-    cloudProvider: CloudStorageProvider,
-    transactionLogPath: String) {
+  cloudProvider: CloudStorageProvider,
+  transactionLogPath: String) {
 
-  private val log = LoggerFactory.getLogger(getClass)
+  private val log        = LoggerFactory.getLogger(getClass)
   private val manifestIO = StateManifestIO(cloudProvider)
 
   /**
    * Find all manifests reachable from any state version within retention.
    *
-   * Uses version-based approach: reads _last_checkpoint to get current version, then directly
-   * constructs paths for retained versions without listing. This minimizes cloud API calls.
+   * Uses version-based approach: reads _last_checkpoint to get current version, then directly constructs paths for
+   * retained versions without listing. This minimizes cloud API calls.
    *
    * @param config
    *   GC configuration
@@ -80,9 +79,7 @@ class ManifestGarbageCollector(
           Try {
             if (manifestIO.stateExists(stateDir)) {
               val manifest = manifestIO.readStateManifest(stateDir)
-              manifest.manifests.foreach { m =>
-                reachable.add(m.path)
-              }
+              manifest.manifests.foreach(m => reachable.add(m.path))
             }
           }.recover {
             case e: Exception =>
@@ -133,15 +130,16 @@ class ManifestGarbageCollector(
    */
   def findOrphanedManifests(reachable: Set[String], config: GCConfig = GCConfig()): Seq[String] = {
     val allManifests = listSharedManifests()
-    val now = System.currentTimeMillis()
-    val minAgeMs = config.minManifestAgeHours * 3600 * 1000L
+    val now          = System.currentTimeMillis()
+    val minAgeMs     = config.minManifestAgeHours * 3600 * 1000L
 
     allManifests
       .filterNot { case (path, _) => reachable.contains(path) }
-      .filter { case (_, modTime) =>
-        // Only delete if old enough (age-based protection)
-        val age = now - modTime
-        age >= minAgeMs
+      .filter {
+        case (_, modTime) =>
+          // Only delete if old enough (age-based protection)
+          val age = now - modTime
+          age >= minAgeMs
       }
       .map(_._1)
   }
@@ -164,9 +162,7 @@ class ManifestGarbageCollector(
 
     if (dryRun) {
       log.info(s"DRY RUN: Would delete ${orphaned.size} orphaned manifests:")
-      orphaned.foreach { path =>
-        log.info(s"  DRY RUN: Would delete $path")
-      }
+      orphaned.foreach(path => log.info(s"  DRY RUN: Would delete $path"))
       return orphaned.size.toLong
     }
 
@@ -198,12 +194,14 @@ class ManifestGarbageCollector(
    *   GCResult with statistics
    */
   def collectGarbage(config: GCConfig = GCConfig(), dryRun: Boolean = false): GCResult = {
-    log.info(s"Starting manifest garbage collection (dryRun=$dryRun, retentionVersions=${config.retentionVersions}, " +
-      s"minManifestAgeHours=${config.minManifestAgeHours})")
+    log.info(
+      s"Starting manifest garbage collection (dryRun=$dryRun, retentionVersions=${config.retentionVersions}, " +
+        s"minManifestAgeHours=${config.minManifestAgeHours})"
+    )
 
     val reachable = findReachableManifests(config)
-    val orphaned = findOrphanedManifests(reachable, config)
-    val deleted = deleteOrphanedManifests(orphaned, dryRun)
+    val orphaned  = findOrphanedManifests(reachable, config)
+    val deleted   = deleteOrphanedManifests(orphaned, dryRun)
 
     GCResult(
       reachableManifests = reachable.size,
@@ -227,10 +225,10 @@ class ManifestGarbageCollector(
  *   Whether this was a dry-run (no actual deletions)
  */
 case class GCResult(
-    reachableManifests: Int,
-    orphanedManifests: Int,
-    deletedManifests: Long,
-    dryRun: Boolean)
+  reachableManifests: Int,
+  orphanedManifests: Int,
+  deletedManifests: Long,
+  dryRun: Boolean)
 
 object ManifestGarbageCollector {
 
@@ -244,7 +242,6 @@ object ManifestGarbageCollector {
    * @return
    *   ManifestGarbageCollector instance
    */
-  def apply(cloudProvider: CloudStorageProvider, transactionLogPath: String): ManifestGarbageCollector = {
+  def apply(cloudProvider: CloudStorageProvider, transactionLogPath: String): ManifestGarbageCollector =
     new ManifestGarbageCollector(cloudProvider, transactionLogPath)
-  }
 }

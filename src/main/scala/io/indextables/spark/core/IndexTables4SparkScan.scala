@@ -64,11 +64,11 @@ class IndexTables4SparkScan(
   private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
 
   // Data skipping metrics for Spark UI reporting (captured during applyDataSkipping)
-  @volatile private var lastScanTotalFiles: Long = 0L
+  @volatile private var lastScanTotalFiles: Long           = 0L
   @volatile private var lastScanPartitionPrunedFiles: Long = 0L
-  @volatile private var lastScanDataSkippedFiles: Long = 0L
-  @volatile private var lastScanResultFiles: Long = 0L
-  @volatile private var lastScanTotalSkipRate: Double = 0.0
+  @volatile private var lastScanDataSkippedFiles: Long     = 0L
+  @volatile private var lastScanResultFiles: Long          = 0L
+  @volatile private var lastScanTotalSkipRate: Double      = 0.0
 
   // Cache for filtered actions (computed once, reused between planInputPartitions and estimateStatistics)
   // This avoids duplicate calls to transactionLog.listFiles() and applyDataSkipping()
@@ -79,25 +79,23 @@ class IndexTables4SparkScan(
   private val precomputedFilterHash: Long = computeFilterHash(pushedFilters)
 
   /**
-   * Compute a hash for the filter array (computed once in constructor).
-   * Uses toString to capture full filter structure, matching PartitionFilterCache pattern.
+   * Compute a hash for the filter array (computed once in constructor). Uses toString to capture full filter structure,
+   * matching PartitionFilterCache pattern.
    */
   private def computeFilterHash(filters: Array[Filter]): Long = {
     if (filters.isEmpty) return 0L
     val filterString = filters.map(_.toString).sorted.mkString("|")
-    filterString.hashCode.toLong & 0xFFFFFFFFL
+    filterString.hashCode.toLong & 0xffffffffL
   }
 
   /**
-   * Get filtered actions, computing and caching on first call.
-   * This optimization reduces redundant listFiles() and applyDataSkipping() calls
-   * that would otherwise occur in both planInputPartitions() and estimateStatistics().
+   * Get filtered actions, computing and caching on first call. This optimization reduces redundant listFiles() and
+   * applyDataSkipping() calls that would otherwise occur in both planInputPartitions() and estimateStatistics().
    *
-   * For Avro state format, partition-only filters are passed through to enable manifest
-   * pruning at the checkpoint read level, avoiding I/O for manifests that don't contain
-   * matching partitions.
+   * For Avro state format, partition-only filters are passed through to enable manifest pruning at the checkpoint read
+   * level, avoiding I/O for manifests that don't contain matching partitions.
    */
-  private def getFilteredActions(): Seq[AddAction] = {
+  private def getFilteredActions(): Seq[AddAction] =
     cachedFilteredActions.getOrElse {
       // Extract partition-only filters for Avro manifest pruning optimization
       val partitionColumns = transactionLog.getPartitionColumns()
@@ -122,7 +120,6 @@ class IndexTables4SparkScan(
       cachedFilteredActions = Some(filtered)
       filtered
     }
-  }
 
   if (logger.isDebugEnabled) {
     logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
@@ -137,9 +134,9 @@ class IndexTables4SparkScan(
     // Capture baseline metrics at scan start for delta computation
     // User can call getMetricsDelta() after query to get per-query metrics
     val tablePath = transactionLog.getTablePath().toString
-    try {
+    try
       io.indextables.spark.storage.BatchOptMetricsRegistry.captureBaseline(tablePath)
-    } catch {
+    catch {
       case ex: Exception =>
         logger.warn(s"Failed to capture baseline batch optimization metrics: ${ex.getMessage}")
     }
@@ -304,49 +301,68 @@ class IndexTables4SparkScan(
     val partitions = if (splitsPerTask == 1) {
       // Fallback to single-split behavior for backward compatibility
       // Still interleave by host for better distribution
-      val batchesByHost: Map[String, Seq[IndexTables4SparkInputPartition]] = splitsByHost.map { case (host, hostSplits) =>
-        host -> hostSplits.map { addAction =>
-          new IndexTables4SparkInputPartition(
-            addAction,
-            readSchema,
-            fullTableSchema,
-            pushedFilters,
-            0, // Will be reassigned after interleaving
-            limit,
-            indexQueryFilters,
-            if (host == "unknown") None else Some(host)
-          )
-        }
+      val batchesByHost: Map[String, Seq[IndexTables4SparkInputPartition]] = splitsByHost.map {
+        case (host, hostSplits) =>
+          host -> hostSplits.map { addAction =>
+            new IndexTables4SparkInputPartition(
+              addAction,
+              readSchema,
+              fullTableSchema,
+              pushedFilters,
+              0, // Will be reassigned after interleaving
+              limit,
+              indexQueryFilters,
+              if (host == "unknown") None else Some(host)
+            )
+          }
       }
       // Interleave: take one partition from each host in round-robin order
-      PartitionUtils.interleaveByHost(batchesByHost).zipWithIndex.map { case (p, idx) =>
-        new IndexTables4SparkInputPartition(
-          p.addAction, p.readSchema, p.fullTableSchema, p.filters,
-          idx, p.limit, p.indexQueryFilters, p.preferredHost
-        )
+      PartitionUtils.interleaveByHost(batchesByHost).zipWithIndex.map {
+        case (p, idx) =>
+          new IndexTables4SparkInputPartition(
+            p.addAction,
+            p.readSchema,
+            p.fullTableSchema,
+            p.filters,
+            idx,
+            p.limit,
+            p.indexQueryFilters,
+            p.preferredHost
+          )
       }
     } else {
       // Group splits by host and batch them
-      val batchesByHost: Map[String, Seq[IndexTables4SparkMultiSplitInputPartition]] = splitsByHost.map { case (host, hostSplits) =>
-        host -> hostSplits.grouped(splitsPerTask).map { batch =>
-          new IndexTables4SparkMultiSplitInputPartition(
-            addActions = batch,
-            readSchema = readSchema,
-            fullTableSchema = fullTableSchema,
-            filters = pushedFilters,
-            partitionId = 0, // Will be reassigned after interleaving
-            limit = limit,
-            indexQueryFilters = indexQueryFilters,
-            preferredHost = if (host == "unknown") None else Some(host)
-          )
-        }.toSeq
+      val batchesByHost: Map[String, Seq[IndexTables4SparkMultiSplitInputPartition]] = splitsByHost.map {
+        case (host, hostSplits) =>
+          host -> hostSplits
+            .grouped(splitsPerTask)
+            .map { batch =>
+              new IndexTables4SparkMultiSplitInputPartition(
+                addActions = batch,
+                readSchema = readSchema,
+                fullTableSchema = fullTableSchema,
+                filters = pushedFilters,
+                partitionId = 0, // Will be reassigned after interleaving
+                limit = limit,
+                indexQueryFilters = indexQueryFilters,
+                preferredHost = if (host == "unknown") None else Some(host)
+              )
+            }
+            .toSeq
       }
       // Interleave: take one partition from each host in round-robin order
-      PartitionUtils.interleaveByHost(batchesByHost).zipWithIndex.map { case (p, idx) =>
-        new IndexTables4SparkMultiSplitInputPartition(
-          p.addActions, p.readSchema, p.fullTableSchema, p.filters,
-          idx, p.limit, p.indexQueryFilters, p.preferredHost
-        )
+      PartitionUtils.interleaveByHost(batchesByHost).zipWithIndex.map {
+        case (p, idx) =>
+          new IndexTables4SparkMultiSplitInputPartition(
+            p.addActions,
+            p.readSchema,
+            p.fullTableSchema,
+            p.filters,
+            idx,
+            p.limit,
+            p.indexQueryFilters,
+            p.preferredHost
+          )
       }
     }
 
@@ -383,15 +399,20 @@ class IndexTables4SparkScan(
    *   - BEFORE: Up to 100 HTTP calls (one per executor)
    *   - AFTER: 1 HTTP call (on driver only)
    *
-   * If credential resolution fails, the original config is returned unchanged so that
-   * executors can attempt their own resolution (preserves backward compatibility).
+   * If credential resolution fails, the original config is returned unchanged so that executors can attempt their own
+   * resolution (preserves backward compatibility).
    *
-   * @param config Original configuration map
-   * @param tablePath Table path for credential resolution
-   * @return Modified config with explicit credentials, or original config if resolution fails
+   * @param config
+   *   Original configuration map
+   * @param tablePath
+   *   Table path for credential resolution
+   * @return
+   *   Modified config with explicit credentials, or original config if resolution fails
    */
-  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path): Map[String, String] = {
-    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path)
+    : Map[String, String] = {
+    val providerClass = config
+      .get("spark.indextables.aws.credentialsProviderClass")
       .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
 
     providerClass match {
@@ -402,7 +423,8 @@ class IndexTables4SparkScan(
 
           // Resolve credentials on driver (single HTTP call for UC provider)
           val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config, normalizedPath
+            config,
+            normalizedPath
           )
 
           credentials match {
@@ -420,7 +442,7 @@ class IndexTables4SparkScan(
               // Add session token if present (important for temporary credentials)
               creds.sessionToken match {
                 case Some(token) => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token)
-                case None => // no session token
+                case None        => // no session token
               }
 
               logger.debug(s"[DRIVER] Config modified: removed providerClass, added explicit credentials")
@@ -428,12 +450,12 @@ class IndexTables4SparkScan(
 
             case None =>
               logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
-              config  // Fall back to executor-side resolution
+              config // Fall back to executor-side resolution
           }
         } catch {
           case ex: Exception =>
             logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
-            config  // Fall back to executor-side resolution
+            config // Fall back to executor-side resolution
         }
 
       case None =>
@@ -489,7 +511,8 @@ class IndexTables4SparkScan(
 
       logger.info(
         s"Table statistics: ${statistics.sizeInBytes().orElse(0L)} bytes, ${statistics.numRows().orElse(0L)} rows" +
-          (if (referencedColumns.nonEmpty) s", column stats for ${referencedColumns.size} columns" else ", no column stats (no filters)")
+          (if (referencedColumns.nonEmpty) s", column stats for ${referencedColumns.size} columns"
+           else ", no column stats (no filters)")
       )
 
       statistics
@@ -515,7 +538,7 @@ class IndexTables4SparkScan(
     }
 
     val partitionColumns = transactionLog.getPartitionColumns()
-    val initialCount = addActions.length
+    val initialCount     = addActions.length
 
     // Step 0: Apply expression simplification (cached, using pre-computed filter hash)
     val simplifiedFilters = FilterExpressionCache.getOrSimplifyWithHash(filters, fullTableSchema, precomputedFilterHash)
@@ -535,12 +558,13 @@ class IndexTables4SparkScan(
     }
 
     // Check if simplification determined all files match (no filtering needed)
-    val effectiveFilters = if (simplifiedFilters.isEmpty || simplifiedFilters.forall(ExpressionSimplifier.isAlwaysTrue)) {
-      Array.empty[Filter]
-    } else {
-      // Filter out AlwaysTrue entries
-      simplifiedFilters.filterNot(ExpressionSimplifier.isAlwaysTrue)
-    }
+    val effectiveFilters =
+      if (simplifiedFilters.isEmpty || simplifiedFilters.forall(ExpressionSimplifier.isAlwaysTrue)) {
+        Array.empty[Filter]
+      } else {
+        // Filter out AlwaysTrue entries
+        simplifiedFilters.filterNot(ExpressionSimplifier.isAlwaysTrue)
+      }
 
     if (effectiveFilters.isEmpty) {
       val tablePath = transactionLog.getTablePath().toString
@@ -556,14 +580,16 @@ class IndexTables4SparkScan(
 
     // Step 1: Apply partition pruning with configurable optimizations
     val partitionPrunedActions = if (partitionColumns.nonEmpty) {
-      val filterCacheEnabled = config.getOrElse("spark.indextables.partitionPruning.filterCacheEnabled", "true").toBoolean
-      val indexEnabled = config.getOrElse("spark.indextables.partitionPruning.indexEnabled", "true").toBoolean
+      val filterCacheEnabled =
+        config.getOrElse("spark.indextables.partitionPruning.filterCacheEnabled", "true").toBoolean
+      val indexEnabled      = config.getOrElse("spark.indextables.partitionPruning.indexEnabled", "true").toBoolean
       val parallelThreshold = config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100").toInt
-      val selectivityOrdering = config.getOrElse("spark.indextables.partitionPruning.selectivityOrdering", "true").toBoolean
+      val selectivityOrdering =
+        config.getOrElse("spark.indextables.partitionPruning.selectivityOrdering", "true").toBoolean
 
       // Get table path and version for PartitionIndex caching
       // This enables O(1) cache hits on repeated queries to the same table version
-      val tablePath = transactionLog.getTablePath().toString
+      val tablePath    = transactionLog.getTablePath().toString
       val tableVersion = transactionLog.getVersions().lastOption.getOrElse(-1L)
 
       val pruned = PartitionPruning.prunePartitionsOptimized(
@@ -596,8 +622,12 @@ class IndexTables4SparkScan(
     val filterTypeSkips = new java.util.concurrent.ConcurrentHashMap[String, java.util.concurrent.atomic.AtomicLong]()
 
     // Get parallelism threshold from config (reuse partition pruning threshold)
-    val dataSkippingParallelThreshold = config.getOrElse("spark.indextables.dataSkipping.parallelThreshold",
-      config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100")).toInt
+    val dataSkippingParallelThreshold = config
+      .getOrElse(
+        "spark.indextables.dataSkipping.parallelThreshold",
+        config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100")
+      )
+      .toInt
 
     val finalActions = if (nonPartitionFilters.nonEmpty) {
       // Use parallel processing for large file counts
@@ -611,7 +641,9 @@ class IndexTables4SparkScan(
             nonPartitionFilters.foreach { filter =>
               if (!canFilterMatchFile(addAction, filter)) {
                 val filterType = getFilterTypeName(filter)
-                filterTypeSkips.computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L)).incrementAndGet()
+                filterTypeSkips
+                  .computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L))
+                  .incrementAndGet()
               }
             }
           }
@@ -625,7 +657,9 @@ class IndexTables4SparkScan(
             nonPartitionFilters.foreach { filter =>
               if (!canFilterMatchFile(addAction, filter)) {
                 val filterType = getFilterTypeName(filter)
-                filterTypeSkips.computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L)).incrementAndGet()
+                filterTypeSkips
+                  .computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L))
+                  .incrementAndGet()
               }
             }
           }
@@ -635,8 +669,10 @@ class IndexTables4SparkScan(
 
       val skippedCount = partitionPrunedActions.length - skipped.length
       if (skippedCount > 0) {
-        logger.info(s"Data skipping (min/max): filtered out $skippedCount of ${partitionPrunedActions.length} files" +
-          (if (useParallel) " (parallel)" else ""))
+        logger.info(
+          s"Data skipping (min/max): filtered out $skippedCount of ${partitionPrunedActions.length} files" +
+            (if (useParallel) " (parallel)" else "")
+        )
       }
       skipped
     } else {
@@ -673,28 +709,26 @@ class IndexTables4SparkScan(
     finalActions
   }
 
-  /**
-   * Get a human-readable name for a filter type (for metrics).
-   */
+  /** Get a human-readable name for a filter type (for metrics). */
   private def getFilterTypeName(filter: Filter): String = {
     import org.apache.spark.sql.sources._
     filter match {
-      case _: EqualTo => "EqualTo"
-      case _: EqualNullSafe => "EqualNullSafe"
-      case _: GreaterThan => "GreaterThan"
+      case _: EqualTo            => "EqualTo"
+      case _: EqualNullSafe      => "EqualNullSafe"
+      case _: GreaterThan        => "GreaterThan"
       case _: GreaterThanOrEqual => "GreaterThanOrEqual"
-      case _: LessThan => "LessThan"
-      case _: LessThanOrEqual => "LessThanOrEqual"
-      case _: In => "In"
-      case _: IsNull => "IsNull"
-      case _: IsNotNull => "IsNotNull"
-      case _: StringStartsWith => "StringStartsWith"
-      case _: StringEndsWith => "StringEndsWith"
-      case _: StringContains => "StringContains"
-      case _: And => "And"
-      case _: Or => "Or"
-      case _: Not => "Not"
-      case _ => filter.getClass.getSimpleName
+      case _: LessThan           => "LessThan"
+      case _: LessThanOrEqual    => "LessThanOrEqual"
+      case _: In                 => "In"
+      case _: IsNull             => "IsNull"
+      case _: IsNotNull          => "IsNotNull"
+      case _: StringStartsWith   => "StringStartsWith"
+      case _: StringEndsWith     => "StringEndsWith"
+      case _: StringContains     => "StringContains"
+      case _: And                => "And"
+      case _: Or                 => "Or"
+      case _: Not                => "Not"
+      case _                     => filter.getClass.getSimpleName
     }
   }
 
@@ -806,15 +840,15 @@ class IndexTables4SparkScan(
                       convertValuesForComparison(attribute, inRange.minValue, fileMin, fileMax)
 
                     // Also convert IN list min/max to same type for comparison
-                    val inMinStr = inRange.minValue.toString
-                    val inMaxStr = inRange.maxValue.toString
+                    val inMinStr               = inRange.minValue.toString
+                    val inMaxStr               = inRange.maxValue.toString
                     val (convertedInMin, _, _) = convertValuesForComparison(attribute, inMinStr, inMinStr, inMinStr)
                     val (convertedInMax, _, _) = convertValuesForComparison(attribute, inMaxStr, inMaxStr, inMaxStr)
 
                     // Skip if file's range doesn't overlap with IN list's range
                     // No overlap if: fileMax < inMin OR fileMin > inMax
                     convertedFileMax.compareTo(convertedInMin) < 0 ||
-                      convertedFileMin.compareTo(convertedInMax) > 0
+                    convertedFileMin.compareTo(convertedInMax) > 0
 
                   case None =>
                     // Could not compute IN range - don't skip
@@ -1093,10 +1127,10 @@ class IndexTables4SparkScan(
   // ============================================================================
 
   /**
-   * Returns the custom metrics supported by this scan.
-   * These metrics appear in the Spark UI SQL tab under the scan operator.
+   * Returns the custom metrics supported by this scan. These metrics appear in the Spark UI SQL tab under the scan
+   * operator.
    */
-  override def supportedCustomMetrics(): Array[CustomMetric] = {
+  override def supportedCustomMetrics(): Array[CustomMetric] =
     Array(
       new TotalFilesConsidered(),
       new PartitionPrunedFiles(),
@@ -1104,13 +1138,12 @@ class IndexTables4SparkScan(
       new ResultFiles(),
       new TotalSkipRate()
     )
-  }
 
   /**
-   * Reports driver-side metrics collected during scan planning.
-   * Called by Spark after the scan completes to populate metrics in the UI.
+   * Reports driver-side metrics collected during scan planning. Called by Spark after the scan completes to populate
+   * metrics in the UI.
    */
-  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
+  override def reportDriverMetrics(): Array[CustomTaskMetric] =
     Array(
       new TaskTotalFilesConsidered(lastScanTotalFiles),
       new TaskPartitionPrunedFiles(lastScanPartitionPrunedFiles),
@@ -1118,5 +1151,4 @@ class IndexTables4SparkScan(
       new TaskResultFiles(lastScanResultFiles),
       new TaskTotalSkipRate(lastScanTotalSkipRate)
     )
-  }
 }

@@ -46,8 +46,7 @@ import org.slf4j.LoggerFactory
  *   - duration_ms: Duration in milliseconds
  *   - error_message: Error message if failed (null otherwise)
  *
- * Note: Merge jobs run on the driver, so this command returns status from
- * the driver-side AsyncMergeOnWriteManager.
+ * Note: Merge jobs run on the driver, so this command returns status from the driver-side AsyncMergeOnWriteManager.
  */
 case class DescribeMergeJobsCommand() extends LeafRunnableCommand {
 

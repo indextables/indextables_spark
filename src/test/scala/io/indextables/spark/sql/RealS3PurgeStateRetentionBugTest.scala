@@ -29,16 +29,14 @@ import io.indextables.spark.RealS3TestBase
 /**
  * Real AWS S3 test to reproduce the PURGE LOG RETENTION bug.
  *
- * Bug description: PURGE INDEXTABLE ignores LOG RETENTION timeframe and
- * aggressively deletes state directories before they expire. Fresh state
- * directories (< 1 minute old) are being reported as "expired" even with
- * 24 HOURS LOG RETENTION.
+ * Bug description: PURGE INDEXTABLE ignores LOG RETENTION timeframe and aggressively deletes state directories before
+ * they expire. Fresh state directories (< 1 minute old) are being reported as "expired" even with 24 HOURS LOG
+ * RETENTION.
  *
  * Reproduction steps:
- *   1. Create multiple transactions/states on a table
- *   2. Run PURGE DRY RUN with LOG RETENTION 24 HOURS
- *   3. EXPECTED: 0 expired states found (all states are < 1 minute old)
- *   4. ACTUAL BUG: All but current version are reported as expired
+ *   1. Create multiple transactions/states on a table 2. Run PURGE DRY RUN with LOG RETENTION 24 HOURS 3. EXPECTED: 0
+ *      expired states found (all states are < 1 minute old) 4. ACTUAL BUG: All but current version are reported as
+ *      expired
  *
  * Credentials are loaded from ~/.aws/credentials file.
  */
@@ -138,43 +136,48 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
     }
 
     // Step 2: List state directories and their modification times
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath     = new Path(s"$tablePath/_transaction_log")
     val txLogContents = fs.listStatus(txLogPath)
 
-    val stateDirectories = txLogContents.filter(_.getPath.getName.startsWith("state-v"))
+    val stateDirectories = txLogContents
+      .filter(_.getPath.getName.startsWith("state-v"))
       .sortBy(_.getPath.getName)
 
     println(s"\n=== Step 2: State directories on S3 (all freshly created) ===")
     println(s"Found ${stateDirectories.length} state directories:")
     stateDirectories.foreach { status =>
-      val modTime = new java.util.Date(status.getModificationTime)
-      val ageMs = System.currentTimeMillis() - status.getModificationTime
+      val modTime    = new java.util.Date(status.getModificationTime)
+      val ageMs      = System.currentTimeMillis() - status.getModificationTime
       val ageMinutes = ageMs / 60000.0
       println(s"  - ${status.getPath.getName}: modified=$modTime, age=${ageMinutes.formatted("%.2f")} minutes")
     }
 
     // Verify all states are fresh (< 5 minutes old)
-    val now = System.currentTimeMillis()
-    val maxAgeMs = 5 * 60 * 1000  // 5 minutes
+    val now      = System.currentTimeMillis()
+    val maxAgeMs = 5 * 60 * 1000 // 5 minutes
     stateDirectories.foreach { status =>
       val ageMs = now - status.getModificationTime
-      assert(ageMs < maxAgeMs,
-        s"State ${status.getPath.getName} should be fresh (< 5 min), but is ${ageMs / 60000.0} minutes old")
+      assert(
+        ageMs < maxAgeMs,
+        s"State ${status.getPath.getName} should be fresh (< 5 min), but is ${ageMs / 60000.0} minutes old"
+      )
     }
     println(s"✓ All ${stateDirectories.length} state directories are fresh (< 5 minutes old)")
 
     // Step 3: Run PURGE DRY RUN with 24 HOURS LOG RETENTION
     println(s"\n=== Step 3: Running PURGE DRY RUN with 24 HOURS LOG RETENTION ===")
-    val result = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
-    ).collect()
+    val result = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
+      )
+      .collect()
 
-    val metrics = result(0).getStruct(1)
-    val status = metrics.getString(0)
-    val orphanedFilesFound = metrics.getLong(1)
-    val expiredStatesFound = metrics.getLong(6)   // expired_states_found
+    val metrics              = result(0).getStruct(1)
+    val status               = metrics.getString(0)
+    val orphanedFilesFound   = metrics.getLong(1)
+    val expiredStatesFound   = metrics.getLong(6) // expired_states_found
     val expiredStatesDeleted = metrics.getLong(7) // expired_states_deleted
-    val isDryRun = metrics.getBoolean(8)
+    val isDryRun             = metrics.getBoolean(8)
 
     println(s"\nPURGE DRY RUN Results:")
     println(s"  status: $status")
@@ -196,10 +199,12 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
       }
     }
 
-    assert(expiredStatesFound == 0,
+    assert(
+      expiredStatesFound == 0,
       s"BUG: PURGE found $expiredStatesFound 'expired' state directories, " +
-      s"but all ${stateDirectories.length} state directories are < 5 minutes old and should NOT be expired " +
-      s"with 24 HOURS LOG RETENTION. The LOG RETENTION parameter is being ignored!")
+        s"but all ${stateDirectories.length} state directories are < 5 minutes old and should NOT be expired " +
+        s"with 24 HOURS LOG RETENTION. The LOG RETENTION parameter is being ignored!"
+    )
 
     println(s"\n✅ Test passed - no fresh states incorrectly marked as expired")
   }
@@ -224,7 +229,8 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
 
     // Count state directories
     val txLogPath = new Path(s"$tablePath/_transaction_log")
-    val stateDirectories = fs.listStatus(txLogPath)
+    val stateDirectories = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
     println(s"Created ${stateDirectories.length} state directories")
 
@@ -233,27 +239,30 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
 
     // Test 1: PURGE with 0 HOURS LOG RETENTION - should find expired states
     println(s"\n=== Test 1: PURGE DRY RUN with 0 HOURS LOG RETENTION ===")
-    val result0h = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS DRY RUN"
-    ).collect()
+    val result0h = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS DRY RUN"
+      )
+      .collect()
 
-    val metrics0h = result0h(0).getStruct(1)
+    val metrics0h       = result0h(0).getStruct(1)
     val expiredStates0h = metrics0h.getLong(6)
     println(s"  expired_states_found with 0 HOURS: $expiredStates0h")
 
     // With 0 hour retention, all but the latest state should be expired
     // (Correct behavior: should find expired states)
-    assert(expiredStates0h > 0,
-      s"With 0 HOURS retention, expected to find expired states, but found $expiredStates0h")
+    assert(expiredStates0h > 0, s"With 0 HOURS retention, expected to find expired states, but found $expiredStates0h")
     println(s"  ✓ Correct: Found $expiredStates0h expired states with 0 HOURS retention")
 
     // Test 2: PURGE with 24 HOURS LOG RETENTION - should NOT find expired states
     println(s"\n=== Test 2: PURGE DRY RUN with 24 HOURS LOG RETENTION ===")
-    val result24h = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
-    ).collect()
+    val result24h = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 24 HOURS DRY RUN"
+      )
+      .collect()
 
-    val metrics24h = result24h(0).getStruct(1)
+    val metrics24h       = result24h(0).getStruct(1)
     val expiredStates24h = metrics24h.getLong(6)
     println(s"  expired_states_found with 24 HOURS: $expiredStates24h")
 
@@ -265,10 +274,12 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
       println(s"   These should be DIFFERENT - fresh states should not be expired with 24h retention")
     }
 
-    assert(expiredStates24h == 0,
+    assert(
+      expiredStates24h == 0,
       s"BUG: With 24 HOURS LOG RETENTION, expected 0 expired states (all are fresh), " +
-      s"but found $expiredStates24h. With 0 HOURS retention found $expiredStates0h. " +
-      s"The LOG RETENTION parameter appears to be ignored!")
+        s"but found $expiredStates24h. With 0 HOURS retention found $expiredStates0h. " +
+        s"The LOG RETENTION parameter appears to be ignored!"
+    )
 
     // Re-enable retention check
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "true")
@@ -296,19 +307,20 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
 
     // Read modification times from S3
     val txLogPath = new Path(s"$tablePath/_transaction_log")
-    val stateDirectories = fs.listStatus(txLogPath)
+    val stateDirectories = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.startsWith("state-v"))
       .sortBy(_.getPath.getName)
 
     println(s"\n=== State directory modification times from S3 ===")
-    val now = System.currentTimeMillis()
+    val now           = System.currentTimeMillis()
     val cutoffTime24h = now - (24L * 60 * 60 * 1000)
 
     var allFresh = true
     stateDirectories.foreach { status =>
-      val modTime = status.getModificationTime
-      val modDate = new java.util.Date(modTime)
-      val ageHours = (now - modTime) / (60.0 * 60.0 * 1000.0)
+      val modTime      = status.getModificationTime
+      val modDate      = new java.util.Date(modTime)
+      val ageHours     = (now - modTime) / (60.0 * 60.0 * 1000.0)
       val isExpired24h = modTime < cutoffTime24h
 
       println(s"  ${status.getPath.getName}:")
@@ -333,13 +345,15 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
     // Verify modification times are reasonable (within last 5 minutes)
     // Allow for minor clock skew between local machine and S3 (up to 5 seconds in the future)
     stateDirectories.foreach { status =>
-      val ageMs = now - status.getModificationTime
+      val ageMs      = now - status.getModificationTime
       val ageMinutes = ageMs / 60000.0
       assert(ageMs > -5000, s"Modification time should not be more than 5s in the future due to clock skew")
-      assert(ageMs < 5 * 60 * 1000,  // 5 minutes
+      assert(
+        ageMs < 5 * 60 * 1000, // 5 minutes
         s"State ${status.getPath.getName} should be fresh (< 5 min), " +
-        s"but reports age of ${ageMinutes.formatted("%.2f")} minutes. " +
-        s"modTime=${status.getModificationTime}, now=$now")
+          s"but reports age of ${ageMinutes.formatted("%.2f")} minutes. " +
+          s"modTime=${status.getModificationTime}, now=$now"
+      )
     }
 
     println(s"\n✅ All state directory modification times are correct and fresh")
@@ -371,11 +385,13 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
 
     println(s"\n=== Testing PURGE with different LOG RETENTION values ===")
     val results = retentionHours.map { hours =>
-      val result = spark.sql(
-        s"PURGE INDEXTABLE '$tablePath' OLDER THAN $hours HOURS TRANSACTION LOG RETENTION $hours HOURS DRY RUN"
-      ).collect()
+      val result = spark
+        .sql(
+          s"PURGE INDEXTABLE '$tablePath' OLDER THAN $hours HOURS TRANSACTION LOG RETENTION $hours HOURS DRY RUN"
+        )
+        .collect()
 
-      val metrics = result(0).getStruct(1)
+      val metrics       = result(0).getStruct(1)
       val expiredStates = metrics.getLong(6)
 
       println(s"  LOG RETENTION $hours HOURS: expired_states_found = $expiredStates")
@@ -388,27 +404,30 @@ class RealS3PurgeStateRetentionBugTest extends RealS3TestBase {
     // Analyze results
     println(s"\n=== Analysis ===")
     val (zeroHourCount, _) = results.find(_._1 == 0).get
-    val nonZeroResults = results.filter(_._1 > 0)
+    val nonZeroResults     = results.filter(_._1 > 0)
 
     // BUG CHECK: All non-zero retention values should return 0 expired states
     // (because all states are fresh)
     val buggyResults = nonZeroResults.filter(_._2 > 0)
     if (buggyResults.nonEmpty) {
       println(s"❌ BUG DETECTED: The following retention values incorrectly found expired states:")
-      buggyResults.foreach { case (hours, count) =>
-        println(s"   - $hours HOURS: found $count expired states (should be 0)")
+      buggyResults.foreach {
+        case (hours, count) =>
+          println(s"   - $hours HOURS: found $count expired states (should be 0)")
       }
     }
 
     // With 0 hours, we should find expired states
-    assert(results.find(_._1 == 0).get._2 > 0,
-      "With 0 HOURS retention, should find expired states")
+    assert(results.find(_._1 == 0).get._2 > 0, "With 0 HOURS retention, should find expired states")
 
     // With >= 1 hour, we should NOT find expired states (all are fresh)
-    nonZeroResults.foreach { case (hours, expiredCount) =>
-      assert(expiredCount == 0,
-        s"BUG: With $hours HOURS LOG RETENTION, expected 0 expired states " +
-        s"(all states are < 1 minute old), but found $expiredCount")
+    nonZeroResults.foreach {
+      case (hours, expiredCount) =>
+        assert(
+          expiredCount == 0,
+          s"BUG: With $hours HOURS LOG RETENTION, expected 0 expired states " +
+            s"(all states are < 1 minute old), but found $expiredCount"
+        )
     }
 
     println(s"\n✅ All retention values behave correctly")

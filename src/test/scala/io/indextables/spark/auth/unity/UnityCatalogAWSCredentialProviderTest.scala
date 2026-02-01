@@ -68,7 +68,7 @@ class UnityCatalogAWSCredentialProviderTest
     super.beforeEach()
     configMap = Map(
       "spark.indextables.databricks.workspaceUrl" -> s"http://localhost:$serverPort",
-      "spark.indextables.databricks.apiToken" -> "test-token-12345"
+      "spark.indextables.databricks.apiToken"     -> "test-token-12345"
     )
     requestLog.clear()
     UnityCatalogAWSCredentialProvider.clearCache()

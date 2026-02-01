@@ -18,27 +18,34 @@
 package io.indextables.spark.transaction
 
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
-import org.apache.spark.sql.catalyst.expressions.{Literal, Expression}
-import org.apache.spark.sql.catalyst.expressions.{And => CatalystAnd, Or => CatalystOr, Not => CatalystNot}
+import org.apache.spark.sql.catalyst.expressions.{And => CatalystAnd, Not => CatalystNot, Or => CatalystOr}
 import org.apache.spark.sql.catalyst.expressions.{EqualTo => CatalystEqualTo, GreaterThan => CatalystGreaterThan}
+import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.{GreaterThanOrEqual => CatalystGreaterThanOrEqual}
-import org.apache.spark.sql.catalyst.expressions.{LessThan => CatalystLessThan, LessThanOrEqual => CatalystLessThanOrEqual}
-import org.apache.spark.sql.catalyst.expressions.{In => CatalystIn, IsNull => CatalystIsNull, IsNotNull => CatalystIsNotNull}
+import org.apache.spark.sql.catalyst.expressions.{
+  In => CatalystIn,
+  IsNotNull => CatalystIsNotNull,
+  IsNull => CatalystIsNull
+}
+import org.apache.spark.sql.catalyst.expressions.{
+  LessThan => CatalystLessThan,
+  LessThanOrEqual => CatalystLessThanOrEqual
+}
 import org.apache.spark.sql.catalyst.expressions.{StartsWith => CatalystStartsWith}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
  * Unit tests for PartitionPredicateUtils.expressionsToFilters() and expressionToFilter().
  *
- * These methods convert Catalyst Expression objects to Spark Filter objects for
- * Avro manifest pruning in commands like PREWARM, DROP PARTITIONS, and MERGE SPLITS.
+ * These methods convert Catalyst Expression objects to Spark Filter objects for Avro manifest pruning in commands like
+ * PREWARM, DROP PARTITIONS, and MERGE SPLITS.
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.PartitionPredicateUtilsTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.PartitionPredicateUtilsTest'
  */
 class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
 
@@ -46,7 +53,11 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   private def utf8(s: String): UTF8String = UTF8String.fromString(s)
 
   // Helper to verify EqualTo filter with any value type
-  private def assertEqualToFilter(filter: Option[Filter], expectedAttr: String, expectedValue: Any): Unit = {
+  private def assertEqualToFilter(
+    filter: Option[Filter],
+    expectedAttr: String,
+    expectedValue: Any
+  ): Unit = {
     filter shouldBe defined
     filter.get match {
       case EqualTo(attr, value) =>
@@ -61,21 +72,21 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   // ==========================================================================
 
   test("expressionToFilter should convert EqualTo with column on left") {
-    val expr = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
+    val expr   = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     assertEqualToFilter(result, "date", "2024-01-01")
   }
 
   test("expressionToFilter should convert EqualTo with column on right") {
-    val expr = CatalystEqualTo(Literal(utf8("2024-01-01")), UnresolvedAttribute("date"))
+    val expr   = CatalystEqualTo(Literal(utf8("2024-01-01")), UnresolvedAttribute("date"))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     assertEqualToFilter(result, "date", "2024-01-01")
   }
 
   test("expressionToFilter should handle multi-part attribute names") {
-    val expr = CatalystEqualTo(UnresolvedAttribute(Seq("table", "column")), Literal(utf8("value")))
+    val expr   = CatalystEqualTo(UnresolvedAttribute(Seq("table", "column")), Literal(utf8("value")))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     assertEqualToFilter(result, "table.column", "value")
@@ -86,7 +97,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   // ==========================================================================
 
   test("expressionToFilter should convert GreaterThan with column on left") {
-    val expr = CatalystGreaterThan(UnresolvedAttribute("score"), Literal(100))
+    val expr   = CatalystGreaterThan(UnresolvedAttribute("score"), Literal(100))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -99,7 +110,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should convert GreaterThan with column on right (swap to LessThan)") {
-    val expr = CatalystGreaterThan(Literal(100), UnresolvedAttribute("score"))
+    val expr   = CatalystGreaterThan(Literal(100), UnresolvedAttribute("score"))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -112,7 +123,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should convert GreaterThanOrEqual") {
-    val expr = CatalystGreaterThanOrEqual(UnresolvedAttribute("value"), Literal(50))
+    val expr   = CatalystGreaterThanOrEqual(UnresolvedAttribute("value"), Literal(50))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -125,7 +136,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should convert LessThan") {
-    val expr = CatalystLessThan(UnresolvedAttribute("count"), Literal(1000))
+    val expr   = CatalystLessThan(UnresolvedAttribute("count"), Literal(1000))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -138,7 +149,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should convert LessThanOrEqual") {
-    val expr = CatalystLessThanOrEqual(UnresolvedAttribute("amount"), Literal(999.99))
+    val expr   = CatalystLessThanOrEqual(UnresolvedAttribute("amount"), Literal(999.99))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -165,7 +176,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
     result.get match {
       case In(attr, values) =>
         attr shouldBe "region"
-        values.map(_.toString) should contain allOf("us-east", "us-west", "eu-west")
+        values.map(_.toString) should contain allOf ("us-east", "us-west", "eu-west")
       case other => fail(s"Expected In filter, got: $other")
     }
   }
@@ -175,7 +186,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
     // This test simulates that by having an expression that's not a Literal
     val expr = CatalystIn(
       UnresolvedAttribute("id"),
-      Seq(Literal(1), UnresolvedAttribute("other"))  // mixed literals and non-literals
+      Seq(Literal(1), UnresolvedAttribute("other")) // mixed literals and non-literals
     )
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -187,7 +198,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   // ==========================================================================
 
   test("expressionToFilter should convert IsNull") {
-    val expr = CatalystIsNull(UnresolvedAttribute("optional_field"))
+    val expr   = CatalystIsNull(UnresolvedAttribute("optional_field"))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -195,7 +206,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should convert IsNotNull") {
-    val expr = CatalystIsNotNull(UnresolvedAttribute("required_field"))
+    val expr   = CatalystIsNotNull(UnresolvedAttribute("required_field"))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -207,7 +218,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   // ==========================================================================
 
   test("expressionToFilter should convert StartsWith") {
-    val expr = CatalystStartsWith(UnresolvedAttribute("name"), Literal(utf8("prefix_")))
+    val expr   = CatalystStartsWith(UnresolvedAttribute("name"), Literal(utf8("prefix_")))
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
     result shouldBe defined
@@ -224,9 +235,9 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   // ==========================================================================
 
   test("expressionToFilter should convert AND when both sides convert") {
-    val left = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
+    val left  = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
     val right = CatalystEqualTo(UnresolvedAttribute("region"), Literal(utf8("us-east")))
-    val expr = CatalystAnd(left, right)
+    val expr  = CatalystAnd(left, right)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -245,7 +256,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
     val left = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
     // Create an expression that won't convert (two literals)
     val right = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b")))
-    val expr = CatalystAnd(left, right)
+    val expr  = CatalystAnd(left, right)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -254,9 +265,9 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should return partial AND when only right side converts") {
-    val left = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b")))  // won't convert
+    val left  = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b"))) // won't convert
     val right = CatalystEqualTo(UnresolvedAttribute("region"), Literal(utf8("us-east")))
-    val expr = CatalystAnd(left, right)
+    val expr  = CatalystAnd(left, right)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -264,9 +275,9 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should return None for AND when neither side converts") {
-    val left = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b")))
+    val left  = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b")))
     val right = CatalystEqualTo(Literal(utf8("c")), Literal(utf8("d")))
-    val expr = CatalystAnd(left, right)
+    val expr  = CatalystAnd(left, right)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -274,9 +285,9 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should convert OR when both sides convert") {
-    val left = CatalystEqualTo(UnresolvedAttribute("status"), Literal(utf8("active")))
+    val left  = CatalystEqualTo(UnresolvedAttribute("status"), Literal(utf8("active")))
     val right = CatalystEqualTo(UnresolvedAttribute("status"), Literal(utf8("pending")))
-    val expr = CatalystOr(left, right)
+    val expr  = CatalystOr(left, right)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -293,18 +304,18 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
 
   test("expressionToFilter should return None for OR when only one side converts") {
     // OR requires both sides to convert (can't partially apply OR)
-    val left = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
-    val right = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b")))  // won't convert
-    val expr = CatalystOr(left, right)
+    val left  = CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01")))
+    val right = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b"))) // won't convert
+    val expr  = CatalystOr(left, right)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
-    result shouldBe None  // OR requires both sides
+    result shouldBe None // OR requires both sides
   }
 
   test("expressionToFilter should convert NOT") {
     val inner = CatalystEqualTo(UnresolvedAttribute("deleted"), Literal(true))
-    val expr = CatalystNot(inner)
+    val expr  = CatalystNot(inner)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -318,8 +329,8 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   }
 
   test("expressionToFilter should return None for NOT when inner doesn't convert") {
-    val inner = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b")))  // won't convert
-    val expr = CatalystNot(inner)
+    val inner = CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b"))) // won't convert
+    val expr  = CatalystNot(inner)
 
     val result = PartitionPredicateUtils.expressionToFilter(expr)
 
@@ -364,7 +375,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
   test("expressionsToFilters should skip unconvertible expressions") {
     val expressions = Seq(
       CatalystEqualTo(UnresolvedAttribute("date"), Literal(utf8("2024-01-01"))),
-      CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b"))),  // won't convert
+      CatalystEqualTo(Literal(utf8("a")), Literal(utf8("b"))), // won't convert
       CatalystGreaterThan(UnresolvedAttribute("score"), Literal(50))
     )
 
@@ -374,12 +385,12 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
 
     result(0) match {
       case EqualTo(attr, _) => attr shouldBe "date"
-      case other => fail(s"Expected EqualTo, got: $other")
+      case other            => fail(s"Expected EqualTo, got: $other")
     }
 
     result(1) match {
       case GreaterThan(attr, _) => attr shouldBe "score"
-      case other => fail(s"Expected GreaterThan, got: $other")
+      case other                => fail(s"Expected GreaterThan, got: $other")
     }
   }
 
@@ -420,7 +431,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
     result shouldBe defined
     result.get match {
       case Or(And(_, _), And(_, _)) => // structure is correct
-      case other => fail(s"Expected Or(And, And), got: $other")
+      case other                    => fail(s"Expected Or(And, And), got: $other")
     }
   }
 
@@ -437,7 +448,7 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
     result shouldBe defined
     result.get match {
       case Not(And(_, _)) => // structure is correct
-      case other => fail(s"Expected Not(And), got: $other")
+      case other          => fail(s"Expected Not(And), got: $other")
     }
   }
 }

@@ -338,8 +338,8 @@ object CredentialProviderFactory {
    * Resolve AWS credentials from a config map with standard priority. Convenience method that extracts values from
    * config map.
    *
-   * PERFORMANCE OPTIMIZATION: For UnityCatalogAWSCredentialProvider, this method uses the fast path
-   * that creates the provider directly from the config Map, bypassing expensive Hadoop Configuration creation.
+   * PERFORMANCE OPTIMIZATION: For UnityCatalogAWSCredentialProvider, this method uses the fast path that creates the
+   * provider directly from the config Map, bypassing expensive Hadoop Configuration creation.
    */
   def resolveAWSCredentialsFromConfig(
     configs: Map[String, String],
@@ -349,8 +349,10 @@ object CredentialProviderFactory {
       configs.get(key).orElse(configs.get(key.toLowerCase))
 
     // Priority 1: Use explicit credentials if present
-    (getConfig("spark.indextables.aws.accessKey").filter(_.nonEmpty),
-     getConfig("spark.indextables.aws.secretKey").filter(_.nonEmpty)) match {
+    (
+      getConfig("spark.indextables.aws.accessKey").filter(_.nonEmpty),
+      getConfig("spark.indextables.aws.secretKey").filter(_.nonEmpty)
+    ) match {
       case (Some(key), Some(secret)) =>
         logger.debug(s"Using explicit credentials: accessKey=${key.take(4)}...")
         return Some(BasicAWSCredentials(key, secret, getConfig("spark.indextables.aws.sessionToken").filter(_.nonEmpty)))
@@ -363,7 +365,7 @@ object CredentialProviderFactory {
         try {
           // Normalize path to table root for consistent cache keys
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
-          val uri = new URI(normalizedPath)
+          val uri            = new URI(normalizedPath)
 
           // FAST PATH: For UnityCatalogAWSCredentialProvider, use Map-based factory
           // This avoids creating Hadoop Configuration which is expensive
@@ -394,13 +396,17 @@ object CredentialProviderFactory {
   /**
    * Create a credential provider using the fast path (Map-based) when possible.
    *
-   * For UnityCatalogAWSCredentialProvider, this uses the Map-based factory method
-   * that bypasses Hadoop Configuration creation entirely.
+   * For UnityCatalogAWSCredentialProvider, this uses the Map-based factory method that bypasses Hadoop Configuration
+   * creation entirely.
    *
-   * @param providerClassName The fully qualified class name of the provider
-   * @param uri The URI for the table (will be normalized to table root)
-   * @param configMap The configuration map
-   * @return The credential provider instance
+   * @param providerClassName
+   *   The fully qualified class name of the provider
+   * @param uri
+   *   The URI for the table (will be normalized to table root)
+   * @param configMap
+   *   The configuration map
+   * @return
+   *   The credential provider instance
    */
   def createCredentialProviderFromConfig(
     providerClassName: String,

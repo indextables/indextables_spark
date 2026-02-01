@@ -81,11 +81,12 @@ case class PrewarmCacheCommand(
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
 
   /**
-   * Resolve AWS credentials on the driver and return a modified config.
-   * This eliminates executor-side HTTP calls for credential providers like UnityCatalogAWSCredentialProvider.
+   * Resolve AWS credentials on the driver and return a modified config. This eliminates executor-side HTTP calls for
+   * credential providers like UnityCatalogAWSCredentialProvider.
    */
   private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: String): Map[String, String] = {
-    val providerClass = config.get("spark.indextables.aws.credentialsProviderClass")
+    val providerClass = config
+      .get("spark.indextables.aws.credentialsProviderClass")
       .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
 
     providerClass match {
@@ -93,7 +94,8 @@ case class PrewarmCacheCommand(
         try {
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
           val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config, normalizedPath
+            config,
+            normalizedPath
           )
 
           credentials match {
@@ -139,13 +141,12 @@ case class PrewarmCacheCommand(
     AttributeReference("async_mode", BooleanType, nullable = false)()
   )
 
-  override def run(sparkSession: SparkSession): Seq[Row] = {
+  override def run(sparkSession: SparkSession): Seq[Row] =
     if (asyncMode) {
       runAsync(sparkSession)
     } else {
       runSync(sparkSession)
     }
-  }
 
   /** Execute synchronous prewarm (original behavior). */
   private def runSync(sparkSession: SparkSession): Seq[Row] = {
@@ -198,7 +199,7 @@ case class PrewarmCacheCommand(
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
-        val parsed = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+        val parsed  = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
         val filters = PartitionPredicateUtils.expressionsToFilters(parsed)
         logger.info(s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning")
         (parsed, filters)
@@ -426,8 +427,8 @@ case class PrewarmCacheCommand(
               skippedStr,
               retryCount,
               failedByHostStr,
-              null,  // job_id (sync mode has no job ID)
-              false  // async_mode
+              null, // job_id (sync mode has no job ID)
+              false // async_mode
             )
         }
         .toSeq
@@ -488,7 +489,7 @@ case class PrewarmCacheCommand(
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
-        val parsed = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+        val parsed  = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
         val filters = PartitionPredicateUtils.expressionsToFilters(parsed)
         logger.info(s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning")
         (parsed, filters)
@@ -556,9 +557,10 @@ case class PrewarmCacheCommand(
         .get("spark.indextables.prewarm.failOnMissingField")
         .map(_.toBoolean)
         .getOrElse(failOnMissingField)
-      val maxRetries = mergedConfig.getOrElse("spark.indextables.prewarm.maxRetries", "10").toInt
+      val maxRetries    = mergedConfig.getOrElse("spark.indextables.prewarm.maxRetries", "10").toInt
       val maxConcurrent = mergedConfig.getOrElse("spark.indextables.prewarm.async.maxConcurrent", "1").toInt
-      val completedRetentionMs = mergedConfig.getOrElse("spark.indextables.prewarm.async.completedJobRetentionMs", "3600000").toLong
+      val completedRetentionMs =
+        mergedConfig.getOrElse("spark.indextables.prewarm.async.completedJobRetentionMs", "3600000").toLong
 
       // Create one async task per host with ALL splits for that host
       val asyncTasks = splitsByHost.map {
@@ -601,7 +603,9 @@ case class PrewarmCacheCommand(
 
         try
           sc.makeRDD(tasksWithLocations)
-            .setName(if (retryNum == 0) s"Async Prewarm: ${addActions.length} splits" else s"Async Prewarm Retry $retryNum")
+            .setName(
+              if (retryNum == 0) s"Async Prewarm: ${addActions.length} splits" else s"Async Prewarm Retry $retryNum"
+            )
             .map(task => executeAsyncPrewarmTask(task, broadcastConfig.value))
             .collect()
             .toSeq
@@ -610,10 +614,10 @@ case class PrewarmCacheCommand(
       }
 
       // Retry loop - dispatch, collect wrong_host, rebuild tasks, repeat
-      var retryCount              = 0
-      var pendingTasks            = asyncTasks
-      var allSuccessfulResults    = Seq.empty[AsyncPrewarmStartResult]
-      var finalWrongHostResults   = Seq.empty[AsyncPrewarmStartResult]
+      var retryCount            = 0
+      var pendingTasks          = asyncTasks
+      var allSuccessfulResults  = Seq.empty[AsyncPrewarmStartResult]
+      var finalWrongHostResults = Seq.empty[AsyncPrewarmStartResult]
 
       while (pendingTasks.nonEmpty) {
         val taskResults = dispatchAsyncTasks(pendingTasks, retryCount)
@@ -655,20 +659,20 @@ case class PrewarmCacheCommand(
       // Build result rows
       val resultRows = allSuccessfulResults.map { result =>
         Row(
-          result.hostname,      // host
-          result.assignedHost,  // assigned_host
-          0,                    // locality_hits (not tracked at start)
-          0,                    // locality_misses
-          0,                    // splits_prewarmed (job just started)
-          result.segments,      // segments
-          result.fields,        // fields
-          0L,                   // duration_ms (job just started)
-          result.status,        // status
-          null,                 // skipped_fields
-          retryCount,           // retries
-          null,                 // failed_splits_by_host
-          result.jobId,         // job_id
-          true                  // async_mode
+          result.hostname,     // host
+          result.assignedHost, // assigned_host
+          0,                   // locality_hits (not tracked at start)
+          0,                   // locality_misses
+          0,                   // splits_prewarmed (job just started)
+          result.segments,     // segments
+          result.fields,       // fields
+          0L,                  // duration_ms (job just started)
+          result.status,       // status
+          null,                // skipped_fields
+          retryCount,          // retries
+          null,                // failed_splits_by_host
+          result.jobId,        // job_id
+          true                 // async_mode
         )
       }
 
@@ -730,8 +734,8 @@ case class PrewarmCacheCommand(
 
     // Define the prewarm work (closure that does actual prewarming)
     val prewarmWork: () => AsyncPrewarmJobResult = () => {
-      val startTime = System.currentTimeMillis()
-      var splitsPrewarmed = 0
+      val startTime                    = System.currentTimeMillis()
+      var splitsPrewarmed              = 0
       var errorMessage: Option[String] = None
 
       try {
@@ -787,9 +791,9 @@ case class PrewarmCacheCommand(
                 task.fields.map(_.toSet)
               )
 
-            } finally {
-              try { splitSearcher.close() } catch { case _: Exception => }
-            }
+            } finally
+              try splitSearcher.close()
+              catch { case _: Exception => }
           } catch {
             case e: InterruptedException => throw e
             case e: Exception =>
@@ -805,7 +809,9 @@ case class PrewarmCacheCommand(
       }
 
       val durationMs = System.currentTimeMillis() - startTime
-      taskLogger.info(s"Async prewarm job ${task.jobId} completed: $splitsPrewarmed/${task.addActions.size} splits in ${durationMs}ms")
+      taskLogger.info(
+        s"Async prewarm job ${task.jobId} completed: $splitsPrewarmed/${task.addActions.size} splits in ${durationMs}ms"
+      )
 
       AsyncPrewarmJobResult(
         jobId = task.jobId,
@@ -1059,8 +1065,8 @@ case class PrewarmCacheCommand(
   }
 
   /**
-   * Extract field names from AddAction metadata (docMappingJson).
-   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
+   * Extract field names from AddAction metadata (docMappingJson). Uses cached DocMappingMetadata to avoid repeated JSON
+   * parsing.
    */
   private def extractFieldsFromMetadata(addAction: io.indextables.spark.transaction.AddAction): Set[String] = {
     // Use cached DocMappingMetadata - no JSON parsing here
@@ -1113,7 +1119,7 @@ private[sql] case class AsyncPrewarmStartResult(
   hostname: String,
   assignedHost: String,
   jobId: String,
-  status: String,         // "job_started", "rejected", or "wrong_host"
+  status: String, // "job_started", "rejected", or "wrong_host"
   segments: String,
   fields: String,
   totalSplits: Int,

@@ -17,21 +17,21 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.AddAction
+import java.io.{ByteArrayOutputStream, File}
 
-import org.apache.avro.file.DataFileWriter
-import org.apache.avro.generic.{GenericDatumWriter, GenericRecord}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import java.io.{ByteArrayOutputStream, File}
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.TestBase
+import org.apache.avro.file.DataFileWriter
+import org.apache.avro.generic.{GenericDatumWriter, GenericRecord}
 
 class AvroManifestReaderTest extends TestBase {
 
   test("readFromBytes should read empty manifest") {
     val entries = Seq.empty[FileEntry]
-    val bytes = writeManifestToBytes(entries)
+    val bytes   = writeManifestToBytes(entries)
 
     val reader = new AvroManifestReader(null) // cloudProvider not needed for byte reading
     val result = reader.readFromBytes(bytes)
@@ -54,7 +54,7 @@ class AvroManifestReaderTest extends TestBase {
 
   test("readFromBytes should read multiple entries") {
     val entries = (1 to 100).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
-    val bytes = writeManifestToBytes(entries)
+    val bytes   = writeManifestToBytes(entries)
 
     val reader = new AvroManifestReader(null)
     val result = reader.readFromBytes(bytes)
@@ -88,7 +88,7 @@ class AvroManifestReaderTest extends TestBase {
       addedAtTimestamp = 1705123456789L
     )
 
-    val bytes = writeManifestToBytes(Seq(entry))
+    val bytes  = writeManifestToBytes(Seq(entry))
     val reader = new AvroManifestReader(null)
     val result = reader.readFromBytes(bytes)
 
@@ -137,7 +137,7 @@ class AvroManifestReaderTest extends TestBase {
       addedAtTimestamp = 1705123456789L
     )
 
-    val bytes = writeManifestToBytes(Seq(entry))
+    val bytes  = writeManifestToBytes(Seq(entry))
     val reader = new AvroManifestReader(null)
     val result = reader.readFromBytes(bytes)
 
@@ -167,7 +167,7 @@ class AvroManifestReaderTest extends TestBase {
 
       try {
         val entries = (1 to 10).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
-        val bytes = writeManifestToBytes(entries)
+        val bytes   = writeManifestToBytes(entries)
 
         val manifestPath = s"$tempPath/manifest-test.avro"
         cloudProvider.writeFile(manifestPath, bytes)
@@ -178,9 +178,8 @@ class AvroManifestReaderTest extends TestBase {
         result should have size 10
         result.head.path shouldBe "splits/file1.split"
         result.last.path shouldBe "splits/file10.split"
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -215,15 +214,14 @@ class AvroManifestReaderTest extends TestBase {
         result.count(_.path.startsWith("m1/")) shouldBe 10
         result.count(_.path.startsWith("m2/")) shouldBe 10
         result.count(_.path.startsWith("m3/")) shouldBe 10
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   test("readManifestSinceVersion should filter by version") {
     val entries = (1 to 100).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
-    val bytes = writeManifestToBytes(entries)
+    val bytes   = writeManifestToBytes(entries)
 
     withTempPath { tempPath =>
       val cloudProvider = CloudStorageProviderFactory.createProvider(
@@ -243,14 +241,13 @@ class AvroManifestReaderTest extends TestBase {
         result.forall(_.addedAtVersion > 50) shouldBe true
         result.head.addedAtVersion shouldBe 51
         result.last.addedAtVersion shouldBe 100
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   test("toAddAction should convert FileEntry to AddAction") {
-    val entry = createTestFileEntry("splits/file.split", version = 42)
+    val entry  = createTestFileEntry("splits/file.split", version = 42)
     val reader = new AvroManifestReader(null)
 
     val addAction = reader.toAddAction(entry)
@@ -264,7 +261,7 @@ class AvroManifestReaderTest extends TestBase {
 
   test("toAddActions should convert multiple FileEntries") {
     val entries = (1 to 5).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
-    val reader = new AvroManifestReader(null)
+    val reader  = new AvroManifestReader(null)
 
     val addActions = reader.toAddActions(entries)
 
@@ -274,12 +271,12 @@ class AvroManifestReaderTest extends TestBase {
 
   test("readFromBytes should handle large manifest (1000+ entries)") {
     val entries = (1 to 1000).map(i => createTestFileEntry(s"splits/file$i.split", version = i))
-    val bytes = writeManifestToBytes(entries)
+    val bytes   = writeManifestToBytes(entries)
 
-    val reader = new AvroManifestReader(null)
+    val reader    = new AvroManifestReader(null)
     val startTime = System.currentTimeMillis()
-    val result = reader.readFromBytes(bytes)
-    val duration = System.currentTimeMillis() - startTime
+    val result    = reader.readFromBytes(bytes)
+    val duration  = System.currentTimeMillis() - startTime
 
     result should have size 1000
     // Should complete in reasonable time (< 1 second for 1000 entries)
@@ -288,7 +285,7 @@ class AvroManifestReaderTest extends TestBase {
 
   // Helper methods
 
-  private def createTestFileEntry(path: String, version: Long = 1): FileEntry = {
+  private def createTestFileEntry(path: String, version: Long = 1): FileEntry =
     FileEntry(
       path = path,
       partitionValues = Map.empty,
@@ -309,23 +306,19 @@ class AvroManifestReaderTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 
   private def writeManifestToBytes(entries: Seq[FileEntry]): Array[Byte] = {
-    val schema = AvroSchemas.FILE_ENTRY_SCHEMA
-    val datumWriter = new GenericDatumWriter[GenericRecord](schema)
-    val baos = new ByteArrayOutputStream()
+    val schema         = AvroSchemas.FILE_ENTRY_SCHEMA
+    val datumWriter    = new GenericDatumWriter[GenericRecord](schema)
+    val baos           = new ByteArrayOutputStream()
     val dataFileWriter = new DataFileWriter[GenericRecord](datumWriter)
 
     try {
       dataFileWriter.create(schema, baos)
-      entries.foreach { entry =>
-        dataFileWriter.append(AvroSchemas.toGenericRecord(entry))
-      }
+      entries.foreach(entry => dataFileWriter.append(AvroSchemas.toGenericRecord(entry)))
       dataFileWriter.close()
       baos.toByteArray
-    } finally {
+    } finally
       dataFileWriter.close()
-    }
   }
 }

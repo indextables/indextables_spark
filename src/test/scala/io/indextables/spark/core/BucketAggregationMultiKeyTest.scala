@@ -11,9 +11,9 @@ import org.scalatest.funsuite.AnyFunSuite
  * Test for bucket aggregations with multiple GROUP BY keys.
  *
  * Multi-key bucket aggregations are supported using nested TermsAggregation:
- * - The bucket aggregation (DateHistogram/Histogram) is the outer aggregation
- * - Additional GROUP BY columns use nested TermsAggregation as sub-aggregations
- * - Results are flattened: [bucket_key, term_key, aggregation_values]
+ *   - The bucket aggregation (DateHistogram/Histogram) is the outer aggregation
+ *   - Additional GROUP BY columns use nested TermsAggregation as sub-aggregations
+ *   - Results are flattened: [bucket_key, term_key, aggregation_values]
  */
 class BucketAggregationMultiKeyTest extends AnyFunSuite {
 

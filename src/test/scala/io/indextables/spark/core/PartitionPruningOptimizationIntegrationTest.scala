@@ -19,12 +19,10 @@ package io.indextables.spark.core
 
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.transaction._
+import io.indextables.spark.TestBase
 
-/**
- * Integration tests for partition pruning optimizations with actual Spark operations.
- */
+/** Integration tests for partition pruning optimizations with actual Spark operations. */
 class PartitionPruningOptimizationIntegrationTest extends TestBase {
 
   private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
@@ -54,7 +52,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         .save(path)
 
       // Read and filter
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east")
         .collect()
 
@@ -81,7 +81,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         .save(path)
 
       // Read and filter with IN clause
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region").isin("us-east", "us-west"))
         .collect()
 
@@ -108,7 +110,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         .save(path)
 
       // Read and filter with compound conditions
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east" && col("year") >= 2024)
         .collect()
 
@@ -120,10 +124,8 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
   test("Integration: large partition count performance") {
     withTempPath { path =>
       // Create data with many partitions
-      val data = (1 to 200).map { i =>
-        (i, s"Person-$i", s"region-${i % 50}", s"2024-01-${(i % 28) + 1}")
-      }
-      val df = spark.createDataFrame(data).toDF("id", "name", "region", "date")
+      val data = (1 to 200).map(i => (i, s"Person-$i", s"region-${i % 50}", s"2024-01-${(i % 28) + 1}"))
+      val df   = spark.createDataFrame(data).toDF("id", "name", "region", "date")
 
       df.write
         .format(provider)
@@ -133,7 +135,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
 
       // Measure query time with filter
       val startTime = System.currentTimeMillis()
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "region-0")
         .collect()
       val duration = System.currentTimeMillis() - startTime
@@ -148,10 +152,8 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
   test("Integration: cache hit rate improves on repeated queries") {
     withTempPath { path =>
       // Create partitioned data
-      val data = (1 to 100).map { i =>
-        (i, s"Person-$i", s"region-${i % 10}")
-      }
-      val df = spark.createDataFrame(data).toDF("id", "name", "region")
+      val data = (1 to 100).map(i => (i, s"Person-$i", s"region-${i % 10}"))
+      val df   = spark.createDataFrame(data).toDF("id", "name", "region")
 
       df.write
         .format(provider)
@@ -163,14 +165,18 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
       PartitionFilterCache.invalidate()
 
       // First query - populates cache
-      spark.read.format(provider).load(path)
+      spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "region-0")
         .count()
 
       val (hits1, misses1, _) = PartitionFilterCache.getStats()
 
       // Second query - should hit cache
-      spark.read.format(provider).load(path)
+      spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "region-0")
         .count()
 
@@ -188,7 +194,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         (1, "Alice", "us-east"),
         (2, "Bob", "us-west")
       )
-      spark.createDataFrame(data1).toDF("id", "name", "region")
+      spark
+        .createDataFrame(data1)
+        .toDF("id", "name", "region")
         .write
         .format(provider)
         .mode("overwrite")
@@ -196,7 +204,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         .save(path)
 
       // Query to populate cache
-      val count1 = spark.read.format(provider).load(path)
+      val count1 = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east")
         .count()
 
@@ -210,7 +220,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         (3, "Charlie", "us-east"),
         (4, "Diana", "eu-central")
       )
-      spark.createDataFrame(data2).toDF("id", "name", "region")
+      spark
+        .createDataFrame(data2)
+        .toDF("id", "name", "region")
         .write
         .format(provider)
         .partitionBy("region")
@@ -218,7 +230,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         .save(path)
 
       // Query again - should see new data
-      val count2 = spark.read.format(provider).load(path)
+      val count2 = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east")
         .count()
 
@@ -234,14 +248,18 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         (2, "Bob"),
         (3, "Charlie")
       )
-      spark.createDataFrame(data).toDF("id", "name")
+      spark
+        .createDataFrame(data)
+        .toDF("id", "name")
         .write
         .format(provider)
         .mode("overwrite")
         .save(path)
 
       // Query with filter on data column (not partition)
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("id") > 1)
         .collect()
 
@@ -257,14 +275,18 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         (3, "Charlie", "eu-central"),
         (4, "Diana", "ap-south")
       )
-      spark.createDataFrame(data).toDF("id", "name", "region")
+      spark
+        .createDataFrame(data)
+        .toDF("id", "name", "region")
         .write
         .format(provider)
         .mode("overwrite")
         .partitionBy("region")
         .save(path)
 
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east" || col("region") === "ap-south")
         .collect()
 
@@ -281,7 +303,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         (3, "Charlie", 35, "us-west"),
         (4, "Diana", 28, "us-east")
       )
-      spark.createDataFrame(data).toDF("id", "name", "age", "region")
+      spark
+        .createDataFrame(data)
+        .toDF("id", "name", "age", "region")
         .write
         .format(provider)
         .mode("overwrite")
@@ -290,7 +314,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
 
       // Filter on both partition column and data column
       // Using >= 28 to include Diana (age 28)
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east" && col("age") >= 28)
         .collect()
 
@@ -307,7 +333,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         (3, 300.0, "us-west"),
         (4, 400.0, "us-east")
       )
-      spark.createDataFrame(data).toDF("id", "amount", "region")
+      spark
+        .createDataFrame(data)
+        .toDF("id", "amount", "region")
         .write
         .format(provider)
         .mode("overwrite")
@@ -316,7 +344,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
         .save(path)
 
       // Aggregate with partition filter
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "us-east")
         .agg(sum("amount").as("total"))
         .collect()
@@ -330,10 +360,8 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
     withTempPath { path =>
       // Create many files across many partitions
       // Each partition will have ~100 files
-      val data = (1 to 1000).map { i =>
-        (i, s"Person-$i", i * 10.0, s"region-${i % 100}")
-      }
-      val df = spark.createDataFrame(data).toDF("id", "name", "value", "region")
+      val data = (1 to 1000).map(i => (i, s"Person-$i", i * 10.0, s"region-${i % 100}"))
+      val df   = spark.createDataFrame(data).toDF("id", "name", "value", "region")
 
       df.write
         .format(provider)
@@ -347,7 +375,9 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
 
       // Benchmark: Query single partition
       val startTime = System.currentTimeMillis()
-      val result = spark.read.format(provider).load(path)
+      val result = spark.read
+        .format(provider)
+        .load(path)
         .filter(col("region") === "region-0")
         .count()
       val duration = System.currentTimeMillis() - startTime

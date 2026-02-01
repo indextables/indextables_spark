@@ -20,27 +20,28 @@ package io.indextables.spark.core
 import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.funsuite.AnyFunSuite
 
 import io.indextables.spark.config.IndexTables4SparkSQLConf
 import io.indextables.tantivy4java.core.Schema
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterAll
 
 /**
- * Tests for the _indexall safety check that rejects queries searching too many fields.
- * Uses tantivy4java's SplitQuery.countQueryFields() for accurate field counting.
+ * Tests for the _indexall safety check that rejects queries searching too many fields. Uses tantivy4java's
+ * SplitQuery.countQueryFields() for accurate field counting.
  */
 class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
   @transient private var _spark: SparkSession = _
-  private var tempDir: java.nio.file.Path = _
+  private var tempDir: java.nio.file.Path     = _
 
   def spark: SparkSession = _spark
 
   override def beforeAll(): Unit = {
     super.beforeAll()
 
-    _spark = SparkSession.builder()
+    _spark = SparkSession
+      .builder()
       .master("local[2]")
       .appName("IndexQueryAllSafetyCheckTest")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
@@ -67,8 +68,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
   }
 
   /**
-   * Helper to create a tantivy schema for testing countQueryFields.
-   * Creates a schema with text fields: title, content, body, author, tags.
+   * Helper to create a tantivy schema for testing countQueryFields. Creates a schema with text fields: title, content,
+   * body, author, tags.
    *
    * Note: Schema.fromDocMappingJson() expects a direct array format, not a wrapped object.
    */
@@ -91,9 +92,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     try {
       assert(FiltersToQueryConverter.countQueryFields("title:spark", schema) === 1)
       assert(FiltersToQueryConverter.countQueryFields("content:machine", schema) === 1)
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: multiple qualified fields returns correct count") {
@@ -101,9 +101,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     try {
       assert(FiltersToQueryConverter.countQueryFields("title:spark OR content:spark", schema) === 2)
       assert(FiltersToQueryConverter.countQueryFields("title:a AND body:b AND author:c", schema) === 3)
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: same field multiple times counts as 1") {
@@ -111,9 +110,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     try {
       assert(FiltersToQueryConverter.countQueryFields("title:spark AND title:lucene", schema) === 1)
       assert(FiltersToQueryConverter.countQueryFields("content:a OR content:b OR content:c", schema) === 1)
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: unqualified term uses all default text fields") {
@@ -122,9 +120,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       // Unqualified search term should search all text fields (5 in our test schema)
       val count = FiltersToQueryConverter.countQueryFields("searchterm", schema)
       assert(count === 5, s"Expected 5 fields for unqualified search, got $count")
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: mixed qualified and unqualified") {
@@ -134,9 +131,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       // The union should be 5 (all text fields include title)
       val count = FiltersToQueryConverter.countQueryFields("title:spark AND machine", schema)
       assert(count === 5, s"Expected 5 fields for mixed query, got $count")
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: qualified phrase returns 1") {
@@ -144,9 +140,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     try {
       assert(FiltersToQueryConverter.countQueryFields("title:\"apache spark\"", schema) === 1)
       assert(FiltersToQueryConverter.countQueryFields("content:\"machine learning\"", schema) === 1)
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: unqualified phrase uses all default text fields") {
@@ -154,9 +149,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     try {
       val count = FiltersToQueryConverter.countQueryFields("\"apache spark\"", schema)
       assert(count === 5, s"Expected 5 fields for unqualified phrase, got $count")
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   test("countQueryFields: complex boolean expression") {
@@ -165,9 +159,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       // All qualified: (title OR content) AND body = 3 fields
       val count1 = FiltersToQueryConverter.countQueryFields("(title:a OR content:b) AND body:c", schema)
       assert(count1 === 3, s"Expected 3 fields for qualified boolean, got $count1")
-    } finally {
+    } finally
       schema.close()
-    }
   }
 
   // ==================== Integration Tests ====================
@@ -178,7 +171,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Create a table with 15 fields (more than default limit of 10)
     val data = Seq((1, "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"))
-    val df = data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
+    val df =
+      data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_reject").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
@@ -202,7 +196,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Create a table with 15 fields
     val data = Seq((1, "test", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"))
-    val df = data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
+    val df =
+      data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_qualified").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
@@ -220,7 +215,7 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Create a table with 5 fields (below default limit of 10)
     val data = Seq((1, "test", "value", "data", "info"))
-    val df = data.toDF("id", "f1", "f2", "f3", "f4")
+    val df   = data.toDF("id", "f1", "f2", "f3", "f4")
 
     val tablePath = tempDir.resolve("narrow_table").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
@@ -238,7 +233,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Create a table with 15 fields
     val data = Seq((1, "test", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"))
-    val df = data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
+    val df =
+      data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_custom_config").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
@@ -260,7 +256,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Create a table with 15 fields
     val data = Seq((1, "test", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"))
-    val df = data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
+    val df =
+      data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_disabled").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
@@ -282,7 +279,8 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Create a table with specific field names
     val data = Seq((1, "data", "data", "data"))
-    val df = data.toDF("id", "title", "content", "description")
+    val df = data
+      .toDF("id", "title", "content", "description")
       .withColumn("author", org.apache.spark.sql.functions.lit("writer"))
       .withColumn("category", org.apache.spark.sql.functions.lit("blog"))
       .withColumn("tags", org.apache.spark.sql.functions.lit("tag1"))
@@ -319,23 +317,27 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       (1, "1234", "community content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"),
       (2, "5678", "curl content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n")
     )
-    val df = data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
+    val df =
+      data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
 
     val tablePath = tempDir.resolve("mixed_boolean_unqualified").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
       .createOrReplaceTempView("mixed_test")
 
     // Mixed boolean: one qualified, one unqualified - should reject because 'curl' is unqualified
     // WHERE uid='1234' AND (_indexall indexquery 'f1:community' OR _indexall indexquery 'curl')
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT * FROM mixed_test
         WHERE uid = '1234'
           AND ((_indexall indexquery 'f1:community') OR (_indexall indexquery 'curl'))
-      """).collect()
+      """)
+        .collect()
     }
 
     assert(exception.getMessage.contains("_indexall query would search"))
@@ -351,25 +353,30 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       (1, "1234", "community content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"),
       (2, "5678", "curl content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n")
     )
-    val df = data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
+    val df =
+      data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
 
     val tablePath = tempDir.resolve("mixed_boolean_qualified").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .option("spark.indextables.indexing.typemap.f1", "text")  // text field for tokenized search
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.f1", "text") // text field for tokenized search
       .mode("overwrite")
       .save(tablePath)
 
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
       .createOrReplaceTempView("mixed_qualified_test")
 
     // Mixed boolean: all qualified - should succeed
     // WHERE uid='1234' AND (_indexall indexquery 'f1:community' OR _indexall indexquery 'f1:curl')
-    val result = spark.sql("""
+    val result = spark
+      .sql("""
       SELECT * FROM mixed_qualified_test
       WHERE uid = '1234'
         AND ((_indexall indexquery 'f1:community') OR (_indexall indexquery 'f1:curl'))
-    """).collect()
+    """)
+      .collect()
 
     assert(result.length === 1)
   }
@@ -384,12 +391,14 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       (2, "1234", "CLASS2", "two content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
       (3, "5678", "CRITICAL", "one content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m")
     )
-    val df = data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
+    val df =
+      data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
 
     val tablePath = tempDir.resolve("complex_nested_unqualified").toString
     df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
       .createOrReplaceTempView("complex_nested_test")
 
@@ -397,12 +406,14 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     // WHERE uid='1234' AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
     //                       OR (urgency <> 'CLASS2' AND _indexall indexquery 'two'))
     val exception = intercept[Exception] {
-      spark.sql("""
+      spark
+        .sql("""
         SELECT * FROM complex_nested_test
         WHERE uid = '1234'
           AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
                OR (urgency <> 'CLASS2' AND _indexall indexquery 'two'))
-      """).collect()
+      """)
+        .collect()
     }
 
     assert(exception.getMessage.contains("_indexall query would search"))
@@ -420,27 +431,32 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       (3, "5678", "CRITICAL", "one content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"),
       (4, "1234", "LOW", "two content", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m")
     )
-    val df = data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
+    val df =
+      data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
 
     val tablePath = tempDir.resolve("complex_nested_qualified").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .option("spark.indextables.indexing.typemap.f1", "text")  // text field for tokenized search
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.f1", "text") // text field for tokenized search
       .mode("overwrite")
       .save(tablePath)
 
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
       .createOrReplaceTempView("complex_qualified_test")
 
     // Complex nested: all _indexall queries are qualified
     // WHERE uid='1234' AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
     //                       OR (urgency <> 'CLASS2' AND _indexall indexquery 'f1:two'))
-    val result = spark.sql("""
+    val result = spark
+      .sql("""
       SELECT * FROM complex_qualified_test
       WHERE uid = '1234'
         AND ((urgency = 'CRITICAL' AND _indexall indexquery 'f1:one')
              OR (urgency <> 'CLASS2' AND _indexall indexquery 'f1:two'))
-    """).collect()
+    """)
+      .collect()
 
     // id=1: uid='1234', urgency='CRITICAL', matches 'f1:one' -> included
     // id=2: uid='1234', urgency='CLASS2', excluded by urgency <> 'CLASS2'

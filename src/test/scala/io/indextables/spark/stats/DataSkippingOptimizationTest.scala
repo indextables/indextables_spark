@@ -20,9 +20,9 @@ package io.indextables.spark.stats
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
@@ -96,7 +96,7 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   test("DataSkippingMetrics: formatStats produces readable output") {
     DataSkippingMetrics.recordScan("/test/table", 100, 60, 30, Map("EqualTo" -> 20, "In" -> 10))
 
-    val stats = DataSkippingMetrics.getTableStats("/test/table").get
+    val stats     = DataSkippingMetrics.getTableStats("/test/table").get
     val formatted = DataSkippingMetrics.formatStats(stats)
 
     formatted should include("Total files considered: 100")
@@ -112,29 +112,35 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   // ==========================================================================
 
   test("ExpressionSimplifier: IsNull on non-nullable column returns AlwaysFalse") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("name", StringType, nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("name", StringType, nullable = true)
+      )
+    )
 
     val result = ExpressionSimplifier.simplifyFilter(IsNull("id"), schema)
     ExpressionSimplifier.isAlwaysFalse(result) shouldBe true
   }
 
   test("ExpressionSimplifier: IsNotNull on non-nullable column returns AlwaysTrue") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("name", StringType, nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("name", StringType, nullable = true)
+      )
+    )
 
     val result = ExpressionSimplifier.simplifyFilter(IsNotNull("id"), schema)
     ExpressionSimplifier.isAlwaysTrue(result) shouldBe true
   }
 
   test("ExpressionSimplifier: IsNull on nullable column is unchanged") {
-    val schema = StructType(Seq(
-      StructField("name", StringType, nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType, nullable = true)
+      )
+    )
 
     val filter = IsNull("name")
     val result = ExpressionSimplifier.simplifyFilter(filter, schema)
@@ -156,9 +162,11 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: AND with AlwaysFalse returns AlwaysFalse") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     // IsNull on non-nullable -> AlwaysFalse, so AND should return AlwaysFalse
     val filter = And(IsNull("id"), EqualTo("id", 1))
@@ -167,9 +175,11 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: AND with AlwaysTrue returns other operand") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     // IsNotNull on non-nullable -> AlwaysTrue, so AND should return EqualTo
     val filter = And(IsNotNull("id"), EqualTo("id", 1))
@@ -178,9 +188,11 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: OR with AlwaysTrue returns AlwaysTrue") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     // IsNotNull on non-nullable -> AlwaysTrue, so OR should return AlwaysTrue
     val filter = Or(IsNotNull("id"), EqualTo("id", 1))
@@ -189,9 +201,11 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: OR with AlwaysFalse returns other operand") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     // IsNull on non-nullable -> AlwaysFalse, so OR should return EqualTo
     val filter = Or(IsNull("id"), EqualTo("id", 1))
@@ -208,9 +222,11 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: NOT(AlwaysTrue) returns AlwaysFalse") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     // NOT(IsNotNull(non-nullable)) -> NOT(AlwaysTrue) -> AlwaysFalse
     val filter = Not(IsNotNull("id"))
@@ -219,13 +235,15 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: simplify array removes AlwaysTrue filters") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("status", StringType, nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("status", StringType, nullable = true)
+      )
+    )
 
     val filters = Array[Filter](
-      IsNotNull("id"),              // -> AlwaysTrue (non-nullable)
+      IsNotNull("id"), // -> AlwaysTrue (non-nullable)
       EqualTo("status", "active")
     )
 
@@ -235,12 +253,14 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("ExpressionSimplifier: simplify array with AlwaysFalse returns AlwaysFalse only") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     val filters = Array[Filter](
-      IsNull("id"),                 // -> AlwaysFalse (non-nullable)
+      IsNull("id"), // -> AlwaysFalse (non-nullable)
       EqualTo("id", 1)
     )
 
@@ -264,18 +284,20 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   // ==========================================================================
 
   test("FilterExpressionCache: caches simplified filters") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
     val filters = Array[Filter](IsNotNull("id"))
 
     // First call - should be a miss
-    val result1 = FilterExpressionCache.getOrSimplify(filters, schema)
+    val result1            = FilterExpressionCache.getOrSimplify(filters, schema)
     val (_, misses1, _, _) = FilterExpressionCache.getStats()
     misses1 shouldBe 1
 
     // Second call with same inputs - should be a hit
-    val result2 = FilterExpressionCache.getOrSimplify(filters, schema)
+    val result2                = FilterExpressionCache.getOrSimplify(filters, schema)
     val (hits2, misses2, _, _) = FilterExpressionCache.getStats()
     hits2 shouldBe 1
     misses2 shouldBe 1
@@ -300,12 +322,12 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
     val values = Array[Any]("apple", "banana", "cherry")
 
     // First call - should be a miss
-    val range1 = FilterExpressionCache.getOrComputeInRange("fruit", values)
+    val range1               = FilterExpressionCache.getOrComputeInRange("fruit", values)
     val (_, _, _, inMisses1) = FilterExpressionCache.getStats()
     inMisses1 shouldBe 1
 
     // Second call - should be a hit
-    val range2 = FilterExpressionCache.getOrComputeInRange("fruit", values)
+    val range2                     = FilterExpressionCache.getOrComputeInRange("fruit", values)
     val (_, _, inHits2, inMisses2) = FilterExpressionCache.getStats()
     inHits2 shouldBe 1
     inMisses2 shouldBe 1
@@ -360,7 +382,7 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("FilterExpressionCache: hit rates calculation") {
-    val schema = StructType(Seq(StructField("id", IntegerType, nullable = true)))
+    val schema  = StructType(Seq(StructField("id", IntegerType, nullable = true)))
     val filters = Array[Filter](EqualTo("id", 1))
 
     // 1 miss
@@ -378,16 +400,18 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   // ==========================================================================
 
   test("Integration: expression simplification combined with caching") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("status", StringType, nullable = true),
-      StructField("score", IntegerType, nullable = true)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("status", StringType, nullable = true),
+        StructField("score", IntegerType, nullable = true)
+      )
+    )
 
     val filters = Array[Filter](
-      IsNotNull("id"),              // -> AlwaysTrue
+      IsNotNull("id"), // -> AlwaysTrue
       EqualTo("status", "active"),
-      In("score", Array(1))         // -> EqualTo
+      In("score", Array(1)) // -> EqualTo
     )
 
     // First call
@@ -408,9 +432,11 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("Integration: canBeSatisfied with AlwaysFalse") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false)
+      )
+    )
 
     // Filter that simplifies to AlwaysFalse
     val unsatisfiableFilters = Array[Filter](IsNull("id"))
@@ -422,10 +448,12 @@ class DataSkippingOptimizationTest extends AnyFunSuite with Matchers with Before
   }
 
   test("Integration: isNoOp with all AlwaysTrue") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("name", StringType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("name", StringType, nullable = false)
+      )
+    )
 
     // All non-nullable IsNotNull filters -> all AlwaysTrue -> no-op
     val noOpFilters = Array[Filter](IsNotNull("id"), IsNotNull("name"))

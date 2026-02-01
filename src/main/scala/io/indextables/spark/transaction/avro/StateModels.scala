@@ -74,29 +74,29 @@ import io.indextables.spark.transaction.{AddAction, SchemaDeduplication}
  *   Timestamp when this file was added (epoch milliseconds)
  */
 case class FileEntry(
-    // Basic file info (100-109)
-    path: String,
-    partitionValues: Map[String, String],
-    size: Long,
-    modificationTime: Long,
-    dataChange: Boolean,
-    // Statistics (110-119)
-    stats: Option[String] = None,
-    minValues: Option[Map[String, String]] = None,
-    maxValues: Option[Map[String, String]] = None,
-    numRecords: Option[Long] = None,
-    // Footer offsets (120-129)
-    footerStartOffset: Option[Long] = None,
-    footerEndOffset: Option[Long] = None,
-    hasFooterOffsets: Boolean = false,
-    // Split metadata (130-139)
-    splitTags: Option[Set[String]] = None,
-    numMergeOps: Option[Int] = None,
-    docMappingRef: Option[String] = None,
-    uncompressedSizeBytes: Option[Long] = None,
-    // Streaming (140-149)
-    addedAtVersion: Long,
-    addedAtTimestamp: Long)
+  // Basic file info (100-109)
+  path: String,
+  partitionValues: Map[String, String],
+  size: Long,
+  modificationTime: Long,
+  dataChange: Boolean,
+  // Statistics (110-119)
+  stats: Option[String] = None,
+  minValues: Option[Map[String, String]] = None,
+  maxValues: Option[Map[String, String]] = None,
+  numRecords: Option[Long] = None,
+  // Footer offsets (120-129)
+  footerStartOffset: Option[Long] = None,
+  footerEndOffset: Option[Long] = None,
+  hasFooterOffsets: Boolean = false,
+  // Split metadata (130-139)
+  splitTags: Option[Set[String]] = None,
+  numMergeOps: Option[Int] = None,
+  docMappingRef: Option[String] = None,
+  uncompressedSizeBytes: Option[Long] = None,
+  // Streaming (140-149)
+  addedAtVersion: Long,
+  addedAtTimestamp: Long)
     extends Serializable
 
 object FileEntry {
@@ -113,7 +113,11 @@ object FileEntry {
    * @return
    *   FileEntry representation
    */
-  def fromAddAction(add: AddAction, version: Long, timestamp: Long): FileEntry = {
+  def fromAddAction(
+    add: AddAction,
+    version: Long,
+    timestamp: Long
+  ): FileEntry =
     FileEntry(
       path = add.path,
       partitionValues = add.partitionValues,
@@ -134,7 +138,6 @@ object FileEntry {
       addedAtVersion = version,
       addedAtTimestamp = timestamp
     )
-  }
 
   /**
    * Convert a FileEntry back to an AddAction.
@@ -192,9 +195,8 @@ case class PartitionBounds(min: Option[String], max: Option[String]) extends Ser
  * Metadata about a manifest file within a state directory.
  *
  * @param path
- *   Relative path to the manifest file. For shared manifests: "manifests/manifest-a1b2c3d4.avro"
- *   (relative to transaction log root). For legacy state-local manifests: "manifest-a1b2c3d4.avro"
- *   (relative to state directory).
+ *   Relative path to the manifest file. For shared manifests: "manifests/manifest-a1b2c3d4.avro" (relative to
+ *   transaction log root). For legacy state-local manifests: "manifest-a1b2c3d4.avro" (relative to state directory).
  * @param numEntries
  *   Number of file entries in this manifest
  * @param minAddedAtVersion
@@ -209,13 +211,13 @@ case class PartitionBounds(min: Option[String], max: Option[String]) extends Ser
  *   Number of live entries (numEntries - tombstoneCount). Used for selective compaction decisions.
  */
 case class ManifestInfo(
-    path: String,
-    numEntries: Long,
-    minAddedAtVersion: Long,
-    maxAddedAtVersion: Long,
-    partitionBounds: Option[Map[String, PartitionBounds]] = None,
-    tombstoneCount: Long = 0,
-    liveEntryCount: Long = -1)  // -1 means not computed (use numEntries)
+  path: String,
+  numEntries: Long,
+  minAddedAtVersion: Long,
+  maxAddedAtVersion: Long,
+  partitionBounds: Option[Map[String, PartitionBounds]] = None,
+  tombstoneCount: Long = 0,
+  liveEntryCount: Long = -1) // -1 means not computed (use numEntries)
     extends Serializable {
 
   /** Get effective live entry count, falling back to numEntries if not computed */
@@ -248,16 +250,16 @@ case class ManifestInfo(
  *   Protocol version (4 for Avro state format)
  */
 case class StateManifest(
-    formatVersion: Int,
-    stateVersion: Long,
-    createdAt: Long,
-    numFiles: Long,
-    totalBytes: Long,
-    manifests: Seq[ManifestInfo],
-    tombstones: Seq[String] = Seq.empty,
-    schemaRegistry: Map[String, String] = Map.empty,
-    protocolVersion: Int = 4,
-    metadata: Option[String] = None)  // JSON-encoded MetadataAction for fast getMetadata()
+  formatVersion: Int,
+  stateVersion: Long,
+  createdAt: Long,
+  numFiles: Long,
+  totalBytes: Long,
+  manifests: Seq[ManifestInfo],
+  tombstones: Seq[String] = Seq.empty,
+  schemaRegistry: Map[String, String] = Map.empty,
+  protocolVersion: Int = 4,
+  metadata: Option[String] = None) // JSON-encoded MetadataAction for fast getMetadata()
     extends Serializable
 
 /**
@@ -270,7 +272,10 @@ case class StateManifest(
  * @param schemaRegistry
  *   Schema registry for doc mapping restoration
  */
-case class StateSnapshot(version: Long, files: Seq[FileEntry], schemaRegistry: Map[String, String] = Map.empty)
+case class StateSnapshot(
+  version: Long,
+  files: Seq[FileEntry],
+  schemaRegistry: Map[String, String] = Map.empty)
     extends Serializable
 
 /**
@@ -283,70 +288,72 @@ case class StateSnapshot(version: Long, files: Seq[FileEntry], schemaRegistry: M
  * @param newVersion
  *   Current version after all changes
  */
-case class ChangeSet(adds: Seq[FileEntry], removes: Seq[String], newVersion: Long) extends Serializable
+case class ChangeSet(
+  adds: Seq[FileEntry],
+  removes: Seq[String],
+  newVersion: Long)
+    extends Serializable
 
-/**
- * Configuration for state file operations.
- */
+/** Configuration for state file operations. */
 object StateConfig {
 
   /** Configuration key prefix */
   val PREFIX = "spark.indextables.state"
 
   // Format configuration
-  val FORMAT_KEY = s"$PREFIX.format"
+  val FORMAT_KEY     = s"$PREFIX.format"
   val FORMAT_DEFAULT = "avro" // Avro is now the default (Phase 6)
 
-  val COMPRESSION_KEY = s"$PREFIX.compression"
+  val COMPRESSION_KEY     = s"$PREFIX.compression"
   val COMPRESSION_DEFAULT = "zstd"
 
-  val COMPRESSION_LEVEL_KEY = s"$PREFIX.compressionLevel"
+  val COMPRESSION_LEVEL_KEY     = s"$PREFIX.compressionLevel"
   val COMPRESSION_LEVEL_DEFAULT = 3
 
-  val ENTRIES_PER_MANIFEST_KEY = s"$PREFIX.entriesPerManifest"
+  val ENTRIES_PER_MANIFEST_KEY     = s"$PREFIX.entriesPerManifest"
   val ENTRIES_PER_MANIFEST_DEFAULT = 50000
 
   // Compaction configuration
-  val COMPACTION_TOMBSTONE_THRESHOLD_KEY = s"$PREFIX.compaction.tombstoneThreshold"
+  val COMPACTION_TOMBSTONE_THRESHOLD_KEY     = s"$PREFIX.compaction.tombstoneThreshold"
   val COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT = 0.10
 
-  val COMPACTION_MAX_MANIFESTS_KEY = s"$PREFIX.compaction.maxManifests"
+  val COMPACTION_MAX_MANIFESTS_KEY     = s"$PREFIX.compaction.maxManifests"
   val COMPACTION_MAX_MANIFESTS_DEFAULT = 20
 
-  val COMPACTION_AFTER_MERGE_KEY = s"$PREFIX.compaction.afterMerge"
+  val COMPACTION_AFTER_MERGE_KEY     = s"$PREFIX.compaction.afterMerge"
   val COMPACTION_AFTER_MERGE_DEFAULT = true
 
   // Large remove threshold - disabled by default (use Int.MaxValue)
   // When enabled, triggers compaction if a single operation removes more than this many files
-  val COMPACTION_LARGE_REMOVE_THRESHOLD_KEY = s"$PREFIX.compaction.largeRemoveThreshold"
+  val COMPACTION_LARGE_REMOVE_THRESHOLD_KEY     = s"$PREFIX.compaction.largeRemoveThreshold"
   val COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT = Int.MaxValue // Disabled by default
 
   // Shared manifest directory (relative to transaction log root)
   val SHARED_MANIFEST_DIR = "manifests"
 
   // Garbage collection configuration
-  val GC_MIN_MANIFEST_AGE_HOURS_KEY = s"$PREFIX.gc.minManifestAgeHours"
+  val GC_MIN_MANIFEST_AGE_HOURS_KEY     = s"$PREFIX.gc.minManifestAgeHours"
   val GC_MIN_MANIFEST_AGE_HOURS_DEFAULT = 1 // Never delete manifests < 1 hour old
 
   // Read configuration
-  val READ_PARALLELISM_KEY = s"$PREFIX.read.parallelism"
+  val READ_PARALLELISM_KEY     = s"$PREFIX.read.parallelism"
   val READ_PARALLELISM_DEFAULT = 8
 
   // Auto-parallelism: use available processors as default when set to 0
   val READ_PARALLELISM_AUTO = 0
 
   // Retention configuration
-  val RETENTION_VERSIONS_KEY = s"$PREFIX.retention.versions"
+  val RETENTION_VERSIONS_KEY     = s"$PREFIX.retention.versions"
   val RETENTION_VERSIONS_DEFAULT = 2
 
-  val RETENTION_HOURS_KEY = s"$PREFIX.retention.hours"
+  val RETENTION_HOURS_KEY     = s"$PREFIX.retention.hours"
   val RETENTION_HOURS_DEFAULT = 168 // 7 days
 
   /** State format identifiers */
   object Format {
-    val JSON = "json"
+    val JSON           = "json"
     val JSON_MULTIPART = "json-multipart"
-    val AVRO_STATE = "avro-state"
+    val AVRO_STATE     = "avro-state"
 
     /** Check if a format is a legacy JSON format (deprecated) */
     def isJsonFormat(format: Option[String]): Boolean = format match {
@@ -362,25 +369,25 @@ object StateConfig {
 
   /** Compression codec identifiers */
   object Compression {
-    val ZSTD = "zstd"
+    val ZSTD   = "zstd"
     val SNAPPY = "snappy"
-    val NONE = "none"
+    val NONE   = "none"
   }
 
   // Retry configuration for concurrent write conflicts
-  val RETRY_MAX_ATTEMPTS_KEY = s"$PREFIX.retry.maxAttempts"
+  val RETRY_MAX_ATTEMPTS_KEY     = s"$PREFIX.retry.maxAttempts"
   val RETRY_MAX_ATTEMPTS_DEFAULT = 10
 
-  val RETRY_BASE_DELAY_MS_KEY = s"$PREFIX.retry.baseDelayMs"
+  val RETRY_BASE_DELAY_MS_KEY     = s"$PREFIX.retry.baseDelayMs"
   val RETRY_BASE_DELAY_MS_DEFAULT = 100L
 
-  val RETRY_MAX_DELAY_MS_KEY = s"$PREFIX.retry.maxDelayMs"
+  val RETRY_MAX_DELAY_MS_KEY     = s"$PREFIX.retry.maxDelayMs"
   val RETRY_MAX_DELAY_MS_DEFAULT = 5000L
 
   // Schema normalization configuration
   // If unique docMappingRef count exceeds this threshold, re-normalize all schemas to consolidate
   // This handles tables with buggy non-normalized hashes that need consolidation during checkpoint
-  val SCHEMA_RENORMALIZE_THRESHOLD_KEY = s"$PREFIX.schema.renormalizeThreshold"
+  val SCHEMA_RENORMALIZE_THRESHOLD_KEY     = s"$PREFIX.schema.renormalizeThreshold"
   val SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT = 5
 }
 
@@ -395,9 +402,9 @@ object StateConfig {
  *   Maximum delay in milliseconds (default: 5000)
  */
 case class StateRetryConfig(
-    maxAttempts: Int = StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT,
-    baseDelayMs: Long = StateConfig.RETRY_BASE_DELAY_MS_DEFAULT,
-    maxDelayMs: Long = StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
+  maxAttempts: Int = StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT,
+  baseDelayMs: Long = StateConfig.RETRY_BASE_DELAY_MS_DEFAULT,
+  maxDelayMs: Long = StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
 
 /**
  * Configuration for compaction behavior.
@@ -412,10 +419,10 @@ case class StateRetryConfig(
  *   Force full compaction regardless of other thresholds
  */
 case class CompactionConfig(
-    tombstoneThreshold: Double = StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT,
-    maxManifests: Int = StateConfig.COMPACTION_MAX_MANIFESTS_DEFAULT,
-    largeRemoveThreshold: Int = StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT,
-    forceCompaction: Boolean = false)
+  tombstoneThreshold: Double = StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT,
+  maxManifests: Int = StateConfig.COMPACTION_MAX_MANIFESTS_DEFAULT,
+  largeRemoveThreshold: Int = StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT,
+  forceCompaction: Boolean = false)
 
 /**
  * Configuration for manifest garbage collection.
@@ -423,12 +430,12 @@ case class CompactionConfig(
  * @param retentionVersions
  *   Number of state versions to retain (default: 2)
  * @param minManifestAgeHours
- *   Minimum age in hours before a manifest can be deleted (default: 1)
- *   Prevents deleting manifests that may be in use by active readers.
+ *   Minimum age in hours before a manifest can be deleted (default: 1) Prevents deleting manifests that may be in use
+ *   by active readers.
  */
 case class GCConfig(
-    retentionVersions: Int = StateConfig.RETENTION_VERSIONS_DEFAULT,
-    minManifestAgeHours: Int = StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
+  retentionVersions: Int = StateConfig.RETENTION_VERSIONS_DEFAULT,
+  minManifestAgeHours: Int = StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
 
 /**
  * Result of a state write operation.
@@ -443,10 +450,10 @@ case class GCConfig(
  *   Whether a concurrent write conflict was detected
  */
 case class StateWriteResult(
-    stateDir: String,
-    version: Long,
-    attempts: Int,
-    conflictDetected: Boolean)
+  stateDir: String,
+  version: Long,
+  attempts: Int,
+  conflictDetected: Boolean)
 
 /**
  * Exception thrown when state write fails after all retry attempts due to concurrent conflicts.
@@ -458,5 +465,8 @@ case class StateWriteResult(
  * @param attempts
  *   Total number of attempts made
  */
-class ConcurrentStateWriteException(message: String, val lastAttemptedVersion: Long, val attempts: Int)
+class ConcurrentStateWriteException(
+  message: String,
+  val lastAttemptedVersion: Long,
+  val attempts: Int)
     extends RuntimeException(message)

@@ -19,19 +19,16 @@ package io.indextables.spark.transaction
 
 import org.apache.spark.sql.sources._
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
-/**
- * Unit tests for partition pruning optimizations.
- */
+/** Unit tests for partition pruning optimizations. */
 class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     // Clear caches before each test
     PartitionFilterCache.invalidate()
-  }
 
   // Helper to create AddActions for testing
   private def createAddAction(path: String, partitionValues: Map[String, String]): AddAction =
@@ -47,11 +44,11 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
 
   test("PartitionFilterCache: cache hit on repeated evaluations") {
     // Test the cache directly (bypassing prunePartitions which uses index for EqualTo)
-    val filters = Array[Filter](GreaterThan("year", "2023"))  // Use range filter to test cache
+    val filters         = Array[Filter](GreaterThan("year", "2023")) // Use range filter to test cache
     val partitionValues = Map("year" -> "2024")
 
     // First call - cache miss
-    val result1 = PartitionFilterCache.getOrCompute(filters, partitionValues, true)
+    val result1             = PartitionFilterCache.getOrCompute(filters, partitionValues, true)
     val (hits1, misses1, _) = PartitionFilterCache.getStats()
 
     result1 shouldBe true
@@ -59,7 +56,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
     hits1 shouldBe 0
 
     // Second call - cache hit
-    val result2 = PartitionFilterCache.getOrCompute(filters, partitionValues, true)
+    val result2             = PartitionFilterCache.getOrCompute(filters, partitionValues, true)
     val (hits2, misses2, _) = PartitionFilterCache.getStats()
 
     result2 shouldBe true
@@ -83,7 +80,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
   }
 
   test("PartitionFilterCache: different partition values have different cache entries") {
-    val filters = Array[Filter](GreaterThan("year", "2023"))  // Use range filter to test cache
+    val filters = Array[Filter](GreaterThan("year", "2023")) // Use range filter to test cache
 
     // First partition values
     val partitionValues1 = Map("year" -> "2024")
@@ -98,7 +95,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
   }
 
   test("PartitionFilterCache: invalidation clears cache") {
-    val filters = Array[Filter](GreaterThan("year", "2023"))  // Use range filter to test cache
+    val filters         = Array[Filter](GreaterThan("year", "2023")) // Use range filter to test cache
     val partitionValues = Map("year" -> "2024")
 
     // Add entry to cache
@@ -176,12 +173,12 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
 
     val files = index.getFilesForPartitions(Set(Map("region" -> "us-east")))
     files.length shouldBe 2
-    files.map(_.path) should contain allOf("file1.split", "file2.split")
+    files.map(_.path) should contain allOf ("file1.split", "file2.split")
   }
 
   test("PartitionIndex: empty index for no partition columns") {
     val addActions = Seq(createAddAction("file1.split", Map.empty))
-    val index = PartitionIndex.build(addActions, Seq.empty)
+    val index      = PartitionIndex.build(addActions, Seq.empty)
 
     index.isEmpty shouldBe true
     index.partitionCount shouldBe 0
@@ -192,23 +189,24 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
 
   test("FilterSelectivityEstimator: equality filters are most selective") {
     val equalityScore = FilterSelectivityEstimator.estimateSelectivity(EqualTo("col", "value"))
-    val rangeScore = FilterSelectivityEstimator.estimateSelectivity(GreaterThan("col", 10))
+    val rangeScore    = FilterSelectivityEstimator.estimateSelectivity(GreaterThan("col", 10))
 
     equalityScore should be < rangeScore
   }
 
   test("FilterSelectivityEstimator: small IN is more selective than large IN") {
     val smallInScore = FilterSelectivityEstimator.estimateSelectivity(In("col", Array("a", "b")))
-    val largeInScore = FilterSelectivityEstimator.estimateSelectivity(In("col", Array("a", "b", "c", "d", "e", "f", "g")))
+    val largeInScore =
+      FilterSelectivityEstimator.estimateSelectivity(In("col", Array("a", "b", "c", "d", "e", "f", "g")))
 
     smallInScore should be < largeInScore
   }
 
   test("FilterSelectivityEstimator: orders filters by selectivity") {
     val filters = Array[Filter](
-      GreaterThan("age", 20),        // Range - less selective
-      In("region", Array("us-east", "us-west")),  // Small IN - selective
-      EqualTo("status", "active")    // Equality - most selective
+      GreaterThan("age", 20),                    // Range - less selective
+      In("region", Array("us-east", "us-west")), // Small IN - selective
+      EqualTo("status", "active")                // Equality - most selective
     )
 
     val ordered = FilterSelectivityEstimator.orderBySelectivity(filters)
@@ -237,8 +235,8 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
 
     val (indexable, remaining) = FilterSelectivityEstimator.partitionFilters(filters)
 
-    indexable.length shouldBe 2  // EqualTo and In
-    remaining.length shouldBe 1  // GreaterThan
+    indexable.length shouldBe 2 // EqualTo and In
+    remaining.length shouldBe 1 // GreaterThan
     remaining(0) shouldBe a[GreaterThan]
   }
 
@@ -253,10 +251,10 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
     )
 
     val filters = Array[Filter](EqualTo("region", "us-east"))
-    val result = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
+    val result  = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
 
     result.length shouldBe 2
-    result.map(_.path) should contain allOf("file1.split", "file2.split")
+    result.map(_.path) should contain allOf ("file1.split", "file2.split")
   }
 
   test("PartitionPruning: IN filter pruning with index") {
@@ -268,10 +266,10 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
     )
 
     val filters = Array[Filter](In("region", Array("us-east", "us-west")))
-    val result = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
+    val result  = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
 
     result.length shouldBe 2
-    result.map(_.path) should contain allOf("file1.split", "file2.split")
+    result.map(_.path) should contain allOf ("file1.split", "file2.split")
   }
 
   test("PartitionPruning: compound filter with equality and range") {
@@ -321,7 +319,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
     )
 
     val filters = Array[Filter](EqualTo("region", "eu-central"))
-    val result = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
+    val result  = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
 
     result shouldBe empty
   }
@@ -333,7 +331,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
     )
 
     val filters = Array[Filter](EqualTo("non_partition_column", "value"))
-    val result = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
+    val result  = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
 
     result.length shouldBe 2
   }
@@ -388,7 +386,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
       Seq("year"),
       filters,
       filterCacheEnabled = true,
-      indexEnabled = false,  // Disable index to test cache
+      indexEnabled = false, // Disable index to test cache
       parallelThreshold = 1000,
       selectivityOrdering = true
     )
@@ -400,7 +398,7 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
       Seq("year"),
       filters,
       filterCacheEnabled = true,
-      indexEnabled = false,  // Disable index to test cache
+      indexEnabled = false, // Disable index to test cache
       parallelThreshold = 1000,
       selectivityOrdering = true
     )
@@ -415,8 +413,8 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
   test("PartitionPruning: lazy AND evaluation short-circuits") {
     // Create a filter where the first condition is always false
     val filters = Array[Filter](
-      EqualTo("region", "nonexistent"),  // This is false
-      EqualTo("year", "2024")            // This should not be evaluated
+      EqualTo("region", "nonexistent"), // This is false
+      EqualTo("year", "2024")           // This should not be evaluated
     )
 
     val addActions = Seq(
@@ -440,18 +438,16 @@ class PartitionPruningOptimizationTest extends AnyFunSuite with Matchers with Be
     val filters = Array[Filter](EqualTo("region", "region-0"))
 
     val startTime = System.currentTimeMillis()
-    val result = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
-    val duration = System.currentTimeMillis() - startTime
+    val result    = PartitionPruning.prunePartitions(addActions, Seq("region"), filters)
+    val duration  = System.currentTimeMillis() - startTime
 
-    result.length shouldBe 100  // 1000 files / 10 partitions = 100 per partition
-    duration should be < 1000L  // Should complete in under 1 second
+    result.length shouldBe 100 // 1000 files / 10 partitions = 100 per partition
+    duration should be < 1000L // Should complete in under 1 second
   }
 
   test("PartitionPruning: handles many unique partitions") {
     // Create 100 files across 100 unique partitions
-    val addActions = (1 to 100).map { i =>
-      createAddAction(s"file$i.split", Map("region" -> s"region-$i"))
-    }
+    val addActions = (1 to 100).map(i => createAddAction(s"file$i.split", Map("region" -> s"region-$i")))
 
     val filters = Array[Filter](In("region", (1 to 10).map(i => s"region-$i").toArray))
 

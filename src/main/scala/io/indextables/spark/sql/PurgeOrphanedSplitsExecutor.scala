@@ -204,7 +204,8 @@ class PurgeOrphanedSplitsExecutor(
         expiredStatesDeleted = stateCleanupResult.deleted,
         dryRun = dryRun,
         durationMs = durationMs,
-        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
+        message =
+          Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
       )
     }
 
@@ -546,9 +547,8 @@ class PurgeOrphanedSplitsExecutor(
    *   - manifest-*.avro: Avro manifest files containing file entries
    *
    * This method:
-   *   1. Lists all state directories in the transaction log
-   *   2. Identifies the latest state directory (to preserve)
-   *   3. Deletes state directories older than the retention period
+   *   1. Lists all state directories in the transaction log 2. Identifies the latest state directory (to preserve) 3.
+   *      Deletes state directories older than the retention period
    *
    * @return
    *   Number of state directories deleted (or would be deleted in DRY RUN)
@@ -609,7 +609,7 @@ class PurgeOrphanedSplitsExecutor(
           val name = new Path(f.path).getName
           name match {
             case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
-            case _ => None
+            case _                                 => None
           }
         }
 
@@ -621,45 +621,48 @@ class PurgeOrphanedSplitsExecutor(
         var foundCount   = 0L
         var deletedCount = 0L
 
-        stateVersions.foreach { case (version, stateDir) =>
-          // Never delete the latest state directory
-          if (version == latestVersion) {
-            logger.debug(s"Preserving latest state directory: state-v$version")
-          } else {
-            // Check if the state directory is old enough to delete
-            // CRITICAL FIX: S3 "directories" return modificationTime = 0 because they're just prefixes.
-            // We need to get the actual modification time from a file inside the directory.
-            val effectiveModTime = getStateDirectoryModificationTime(provider, stateDir)
-            val fileAge = currentTime - effectiveModTime
-
-            logger.debug(s"State directory state-v$version: reportedModTime=${stateDir.modificationTime}, " +
-              s"effectiveModTime=$effectiveModTime, fileAge=${fileAge}ms, retention=${logRetentionDuration}ms")
-
-            if (fileAge > logRetentionDuration) {
-              foundCount += 1
-              if (dryRun) {
-                logger.info(
-                  s"DRY RUN: Would delete old state directory: state-v$version (age: ${fileAge / 1000}s)"
-                )
-              } else {
-                // Delete the state directory and all its contents
-                try {
-                  val deleted = deleteDirectoryRecursively(provider, stateDir.path)
-                  if (deleted) {
-                    deletedCount += 1
-                    logger.debug(s"Deleted old state directory: state-v$version (age: ${fileAge / 1000}s)")
-                  }
-                } catch {
-                  case e: Exception =>
-                    logger.warn(s"Failed to delete state directory state-v$version: ${e.getMessage}")
-                }
-              }
+        stateVersions.foreach {
+          case (version, stateDir) =>
+            // Never delete the latest state directory
+            if (version == latestVersion) {
+              logger.debug(s"Preserving latest state directory: state-v$version")
             } else {
+              // Check if the state directory is old enough to delete
+              // CRITICAL FIX: S3 "directories" return modificationTime = 0 because they're just prefixes.
+              // We need to get the actual modification time from a file inside the directory.
+              val effectiveModTime = getStateDirectoryModificationTime(provider, stateDir)
+              val fileAge          = currentTime - effectiveModTime
+
               logger.debug(
-                s"Keeping state directory: state-v$version (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)"
+                s"State directory state-v$version: reportedModTime=${stateDir.modificationTime}, " +
+                  s"effectiveModTime=$effectiveModTime, fileAge=${fileAge}ms, retention=${logRetentionDuration}ms"
               )
+
+              if (fileAge > logRetentionDuration) {
+                foundCount += 1
+                if (dryRun) {
+                  logger.info(
+                    s"DRY RUN: Would delete old state directory: state-v$version (age: ${fileAge / 1000}s)"
+                  )
+                } else {
+                  // Delete the state directory and all its contents
+                  try {
+                    val deleted = deleteDirectoryRecursively(provider, stateDir.path)
+                    if (deleted) {
+                      deletedCount += 1
+                      logger.debug(s"Deleted old state directory: state-v$version (age: ${fileAge / 1000}s)")
+                    }
+                  } catch {
+                    case e: Exception =>
+                      logger.warn(s"Failed to delete state directory state-v$version: ${e.getMessage}")
+                  }
+                }
+              } else {
+                logger.debug(
+                  s"Keeping state directory: state-v$version (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)"
+                )
+              }
             }
-          }
         }
 
         if (foundCount > 0) {
@@ -692,14 +695,14 @@ class PurgeOrphanedSplitsExecutor(
   /**
    * Get the effective modification time for a state directory.
    *
-   * CRITICAL FIX for S3: S3 doesn't have real directories - they're just prefixes.
-   * When listing, S3 "directories" return modificationTime = 0L which would make
-   * ALL state directories appear infinitely old, bypassing retention checks.
+   * CRITICAL FIX for S3: S3 doesn't have real directories - they're just prefixes. When listing, S3 "directories"
+   * return modificationTime = 0L which would make ALL state directories appear infinitely old, bypassing retention
+   * checks.
    *
    * This method:
-   *   1. If the directory has a valid modification time (> 0), uses it directly
-   *   2. Otherwise, looks inside the directory for _manifest.avro or any .avro file
-   *      and uses that file's modification time as a proxy for the directory's age
+   *   1. If the directory has a valid modification time (> 0), uses it directly 2. Otherwise, looks inside the
+   *      directory for _manifest.avro or any .avro file and uses that file's modification time as a proxy for the
+   *      directory's age
    *
    * @param provider
    *   Cloud storage provider
@@ -724,7 +727,7 @@ class PurgeOrphanedSplitsExecutor(
       // Without the trailing slash, S3 uses delimiter-based grouping which won't return
       // the files directly inside the directory
       val stateDirPath = stateDir.path.stripSuffix("/") + "/"
-      val filesInDir = provider.listFiles(stateDirPath, recursive = false)
+      val filesInDir   = provider.listFiles(stateDirPath, recursive = false)
 
       // Try to find _manifest.avro first (most authoritative for state directory age)
       // Note: Avro state directories only contain _manifest.avro, not _manifest.json
@@ -735,7 +738,9 @@ class PurgeOrphanedSplitsExecutor(
 
       manifestFile match {
         case Some(manifest) =>
-          logger.debug(s"Using manifest file modification time for ${new Path(stateDir.path).getName}: ${manifest.modificationTime}")
+          logger.debug(
+            s"Using manifest file modification time for ${new Path(stateDir.path).getName}: ${manifest.modificationTime}"
+          )
           manifest.modificationTime
         case None =>
           // Fall back to the newest file in the directory
@@ -745,12 +750,16 @@ class PurgeOrphanedSplitsExecutor(
 
           if (validFiles.nonEmpty) {
             val newestFile = validFiles.maxBy(_.modificationTime)
-            logger.debug(s"Using newest file modification time for ${new Path(stateDir.path).getName}: ${newestFile.modificationTime}")
+            logger.debug(
+              s"Using newest file modification time for ${new Path(stateDir.path).getName}: ${newestFile.modificationTime}"
+            )
             newestFile.modificationTime
           } else {
             // No files with valid modification times - directory is effectively empty or very old
             // Use 0 which will cause it to be marked as expired (safe default for orphaned state dirs)
-            logger.warn(s"Could not determine modification time for ${new Path(stateDir.path).getName}, treating as expired")
+            logger.warn(
+              s"Could not determine modification time for ${new Path(stateDir.path).getName}, treating as expired"
+            )
             0L
           }
       }
@@ -766,9 +775,8 @@ class PurgeOrphanedSplitsExecutor(
   /**
    * Clean up orphaned manifests from the shared manifest directory.
    *
-   * With the incremental write feature, manifests are stored in a shared location
-   * (_transaction_log/manifests/) and referenced by multiple state versions.
-   * This method finds and deletes manifests that are no longer referenced by any
+   * With the incremental write feature, manifests are stored in a shared location (_transaction_log/manifests/) and
+   * referenced by multiple state versions. This method finds and deletes manifests that are no longer referenced by any
    * retained state version.
    *
    * @param provider
@@ -797,11 +805,13 @@ class PurgeOrphanedSplitsExecutor(
         minManifestAgeHours = minManifestAgeHours
       )
 
-      val gc = ManifestGarbageCollector(provider, txLogPath)
+      val gc     = ManifestGarbageCollector(provider, txLogPath)
       val result = gc.collectGarbage(gcConfig, dryRun)
 
-      logger.info(s"Manifest GC: ${result.reachableManifests} reachable, ${result.orphanedManifests} orphaned, " +
-        s"${result.deletedManifests} deleted (dryRun=$dryRun)")
+      logger.info(
+        s"Manifest GC: ${result.reachableManifests} reachable, ${result.orphanedManifests} orphaned, " +
+          s"${result.deletedManifests} deleted (dryRun=$dryRun)"
+      )
 
       result.deletedManifests
     } catch {
@@ -821,7 +831,7 @@ class PurgeOrphanedSplitsExecutor(
    * @return
    *   true if the directory was successfully deleted
    */
-  private def deleteDirectoryRecursively(provider: CloudStorageProvider, dirPath: String): Boolean = {
+  private def deleteDirectoryRecursively(provider: CloudStorageProvider, dirPath: String): Boolean =
     try {
       // List all files in the directory
       val files = provider.listFiles(dirPath, recursive = true)
@@ -829,12 +839,12 @@ class PurgeOrphanedSplitsExecutor(
       // Delete all files first
       var allDeleted = true
       files.filterNot(_.isDirectory).foreach { file =>
-        try {
+        try
           if (!provider.deleteFile(file.path)) {
             logger.warn(s"Failed to delete file: ${file.path}")
             allDeleted = false
           }
-        } catch {
+        catch {
           case e: Exception =>
             logger.warn(s"Error deleting file ${file.path}: ${e.getMessage}")
             allDeleted = false
@@ -842,9 +852,9 @@ class PurgeOrphanedSplitsExecutor(
       }
 
       // Try to delete the directory itself (may or may not be needed depending on storage)
-      try {
+      try
         provider.deleteFile(dirPath)
-      } catch {
+      catch {
         case _: Exception => // Ignore - directory may already be gone or not supported
       }
 
@@ -854,7 +864,6 @@ class PurgeOrphanedSplitsExecutor(
         logger.warn(s"Error deleting directory $dirPath: ${e.getMessage}")
         false
     }
-  }
 
   /**
    * Determine which transaction log versions will be deleted based on checkpoint and retention policy. This duplicates
@@ -1016,9 +1025,8 @@ class PurgeOrphanedSplitsExecutor(
   /**
    * Get files from all retained Avro state directories.
    *
-   * Reads file entries from the latest Avro state directory (state-v*) and any
-   * older state directories within the retention period. This is the primary
-   * method for Protocol V4 tables that use the Avro state format.
+   * Reads file entries from the latest Avro state directory (state-v*) and any older state directories within the
+   * retention period. This is the primary method for Protocol V4 tables that use the Avro state format.
    *
    * @return
    *   All AddActions from retained Avro state directories
@@ -1070,7 +1078,7 @@ class PurgeOrphanedSplitsExecutor(
         val name = new Path(f.path).getName
         name match {
           case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
-          case _ => None
+          case _                                 => None
         }
       }
 
@@ -1082,51 +1090,52 @@ class PurgeOrphanedSplitsExecutor(
       val latestVersion = stateVersions.map(_._1).max
       logger.info(s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion)")
 
-      val manifestIO = StateManifestIO(provider)
-      val manifestReader = AvroManifestReader(provider)
+      val manifestIO       = StateManifestIO(provider)
+      val manifestReader   = AvroManifestReader(provider)
       val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
       // Process state directories - always include latest, plus any within retention
-      stateVersions.foreach { case (version, stateDir) =>
-        val isLatest = version == latestVersion
-        val fileAge = currentTime - stateDir.modificationTime
-        val isWithinRetention = fileAge <= logRetentionDuration
-        val isRetained = isLatest || isWithinRetention
+      stateVersions.foreach {
+        case (version, stateDir) =>
+          val isLatest          = version == latestVersion
+          val fileAge           = currentTime - stateDir.modificationTime
+          val isWithinRetention = fileAge <= logRetentionDuration
+          val isRetained        = isLatest || isWithinRetention
 
-        if (isRetained) {
-          try {
-            logger.debug(s"Reading Avro state directory: state-v$version (latest=$isLatest, withinRetention=$isWithinRetention)")
+          if (isRetained) {
+            try {
+              logger.debug(
+                s"Reading Avro state directory: state-v$version (latest=$isLatest, withinRetention=$isWithinRetention)"
+              )
 
-            // Strip trailing slashes to avoid double-slash paths (e.g., state-v1//_manifest.avro)
-            val stateDirPath = stateDir.path.stripSuffix("/")
+              // Strip trailing slashes to avoid double-slash paths (e.g., state-v1//_manifest.avro)
+              val stateDirPath = stateDir.path.stripSuffix("/")
 
-            // Read the state manifest
-            val stateManifest = manifestIO.readStateManifest(stateDirPath)
+              // Read the state manifest
+              val stateManifest = manifestIO.readStateManifest(stateDirPath)
 
-            // Resolve manifest paths and read all file entries
-            val manifestPaths = stateManifest.manifests.map { m =>
-              manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath)
+              // Resolve manifest paths and read all file entries
+              val manifestPaths = stateManifest.manifests.map { m =>
+                manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath)
+              }
+
+              val allEntries = manifestReader.readManifestsParallel(manifestPaths)
+
+              // Apply tombstones to get live files
+              val liveEntries = manifestIO.applyTombstones(allEntries, stateManifest.tombstones)
+
+              // Convert to AddActions and add to result
+              val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+              addActions.foreach(add => filePathToAction(add.path) = add)
+
+              logger.debug(s"Read ${liveEntries.size} live files from Avro state v$version (${allEntries.size} total, ${stateManifest.tombstones.size} tombstoned)")
+            } catch {
+              case e: Exception =>
+                logger.warn(s"Failed to read Avro state directory state-v$version: ${e.getMessage}")
             }
-
-            val allEntries = manifestReader.readManifestsParallel(manifestPaths)
-
-            // Apply tombstones to get live files
-            val liveEntries = manifestIO.applyTombstones(allEntries, stateManifest.tombstones)
-
-            // Convert to AddActions and add to result
-            val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
-            addActions.foreach { add =>
-              filePathToAction(add.path) = add
-            }
-
-            logger.debug(s"Read ${liveEntries.size} live files from Avro state v$version (${allEntries.size} total, ${stateManifest.tombstones.size} tombstoned)")
-          } catch {
-            case e: Exception =>
-              logger.warn(s"Failed to read Avro state directory state-v$version: ${e.getMessage}")
+          } else {
+            logger.debug(s"Skipping old Avro state directory: state-v$version (age: ${fileAge / 1000}s)")
           }
-        } else {
-          logger.debug(s"Skipping old Avro state directory: state-v$version (age: ${fileAge / 1000}s)")
-        }
       }
 
       filePathToAction.values.toSeq
@@ -1623,7 +1632,8 @@ class PurgeOrphanedSplitsExecutor(
       expiredStatesDeleted = 0, // DRY_RUN doesn't delete
       dryRun = true,
       durationMs = durationMs,
-      message = Some(s"Dry run completed. $count split files would be deleted (${"%.2f".format(totalSizeMB)} MB).$stateMessage")
+      message =
+        Some(s"Dry run completed. $count split files would be deleted (${"%.2f".format(totalSizeMB)} MB).$stateMessage")
     )
   }
 
@@ -1683,13 +1693,15 @@ class PurgeOrphanedSplitsExecutor(
           val result = scala.collection.mutable.Map[String, String]()
           // First add broadcast Hadoop config settings (lower priority)
           val baseConf = conf
-          val iter = baseConf.iterator()
+          val iter     = baseConf.iterator()
           while (iter.hasNext) {
             val entry = iter.next()
-            val key = entry.getKey
+            val key   = entry.getKey
             // Only include relevant config keys (spark.indextables.* and fs.s3a.*)
-            if (key.startsWith("spark.indextables.") || key.startsWith("fs.s3a.") ||
-                key.startsWith("spark.hadoop.fs.s3a.")) {
+            if (
+              key.startsWith("spark.indextables.") || key.startsWith("fs.s3a.") ||
+              key.startsWith("spark.hadoop.fs.s3a.")
+            ) {
               result.put(key, entry.getValue)
             }
           }

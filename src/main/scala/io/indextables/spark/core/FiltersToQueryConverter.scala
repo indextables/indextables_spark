@@ -29,7 +29,13 @@ import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.util.TimestampUtils
 import io.indextables.tantivy4java.core.{FieldType, Index, Schema}
 import io.indextables.tantivy4java.query.{Occur, Query}
-import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitExistsQuery, SplitMatchAllQuery, SplitQuery, SplitTermQuery}
+import io.indextables.tantivy4java.split.{
+  SplitBooleanQuery,
+  SplitExistsQuery,
+  SplitMatchAllQuery,
+  SplitQuery,
+  SplitTermQuery
+}
 import org.slf4j.LoggerFactory
 
 // Data class for storing range optimization information
@@ -155,12 +161,12 @@ object FiltersToQueryConverter {
   /**
    * Transform an IndexQuery string to handle leading wildcards automatically.
    *
-   * Tantivy's default query parser doesn't support leading wildcards (e.g., `*Configuration`).
-   * However, explicit field syntax (e.g., `fieldname:*Configuration`) uses the wildcard query
-   * builder directly, which does support leading wildcards.
+   * Tantivy's default query parser doesn't support leading wildcards (e.g., `*Configuration`). However, explicit field
+   * syntax (e.g., `fieldname:*Configuration`) uses the wildcard query builder directly, which does support leading
+   * wildcards.
    *
-   * This method automatically transforms ALL leading wildcard terms in a query when we know the
-   * target field, making leading wildcard queries work transparently for users.
+   * This method automatically transforms ALL leading wildcard terms in a query when we know the target field, making
+   * leading wildcard queries work transparently for users.
    *
    * Examples:
    *   - Input: `*Configuration`, field: `message` -> Output: `message:*Configuration`
@@ -168,12 +174,15 @@ object FiltersToQueryConverter {
    *   - Input: `config*`, field: `title` -> Output: `config*` (no change - trailing wildcard works)
    *   - Input: `title:*test`, field: `title` -> Output: `title:*test` (already has field prefix)
    *   - Input: `bob AND *wildcard*`, field: `msg` -> Output: `bob AND msg:*wildcard*`
-   *   - Input: `bob AND *ildcar* OR (sally AND *oogl*)`, field: `msg` ->
-   *            Output: `bob AND msg:*ildcar* OR (sally AND msg:*oogl*)`
+   *   - Input: `bob AND *ildcar* OR (sally AND *oogl*)`, field: `msg` -> Output: `bob AND msg:*ildcar* OR (sally AND
+   *     msg:*oogl*)`
    *
-   * @param queryString The original query string
-   * @param fieldName The target field name for the IndexQuery
-   * @return The transformed query string with field prefix added to leading wildcard terms
+   * @param queryString
+   *   The original query string
+   * @param fieldName
+   *   The target field name for the IndexQuery
+   * @return
+   *   The transformed query string with field prefix added to leading wildcard terms
    */
   def transformLeadingWildcardQuery(queryString: String, fieldName: String): String = {
     val trimmed = queryString.trim
@@ -202,10 +211,13 @@ object FiltersToQueryConverter {
     //
     val leadingWildcardPattern = """(?<!\w:)(?<=^|[\s(])([*?][\w*?]+)""".r
 
-    val transformed = leadingWildcardPattern.replaceAllIn(trimmed, m => {
-      val wildcardTerm = m.group(1)
-      s"$fieldName:$wildcardTerm"
-    })
+    val transformed = leadingWildcardPattern.replaceAllIn(
+      trimmed,
+      m => {
+        val wildcardTerm = m.group(1)
+        s"$fieldName:$wildcardTerm"
+      }
+    )
 
     if (transformed != trimmed) {
       queryLog(s"Transformed leading wildcard query '$trimmed' to '$transformed'")
@@ -214,10 +226,7 @@ object FiltersToQueryConverter {
     transformed
   }
 
-  /**
-   * Check if a query string contains a leading wildcard pattern.
-   * Useful for logging and diagnostics.
-   */
+  /** Check if a query string contains a leading wildcard pattern. Useful for logging and diagnostics. */
   def hasLeadingWildcard(queryString: String): Boolean = {
     val trimmed = queryString.trim
     trimmed.startsWith("*") || trimmed.startsWith("?")
@@ -684,18 +693,21 @@ object FiltersToQueryConverter {
     logger.debug(msg)
 
   /**
-   * Count the number of unique fields that would be searched by a query.
-   * Uses tantivy4java's SplitQuery.countQueryFields() for accurate AST-based analysis.
+   * Count the number of unique fields that would be searched by a query. Uses tantivy4java's
+   * SplitQuery.countQueryFields() for accurate AST-based analysis.
    *
-   * @param queryString The Tantivy query string to analyze
-   * @param schema The Tantivy schema for field resolution
-   * @return The number of unique fields the query would search
+   * @param queryString
+   *   The Tantivy query string to analyze
+   * @param schema
+   *   The Tantivy schema for field resolution
+   * @return
+   *   The number of unique fields the query would search
    */
   def countQueryFields(queryString: String, schema: Schema): Int = {
     import io.indextables.tantivy4java.split.SplitQuery
-    try {
+    try
       SplitQuery.countQueryFields(queryString, schema)
-    } catch {
+    catch {
       case e: Exception =>
         logger.warn(s"Failed to count query fields for '$queryString': ${e.getMessage}")
         // On error, return schema field count as conservative estimate (assumes all fields searched)
@@ -704,14 +716,16 @@ object FiltersToQueryConverter {
   }
 
   /**
-   * Validate that an _indexall query is safe to execute on the given schema.
-   * Uses tantivy4java's accurate field counting to determine how many fields
-   * would actually be searched. Throws IllegalArgumentException if the query
+   * Validate that an _indexall query is safe to execute on the given schema. Uses tantivy4java's accurate field
+   * counting to determine how many fields would actually be searched. Throws IllegalArgumentException if the query
    * would search more fields than allowed.
    *
-   * @param queryString The query string from the IndexQueryAll filter
-   * @param schema The Tantivy schema with field information
-   * @param options Optional configuration options containing the maxUnqualifiedFields setting
+   * @param queryString
+   *   The query string from the IndexQueryAll filter
+   * @param schema
+   *   The Tantivy schema with field information
+   * @param options
+   *   Optional configuration options containing the maxUnqualifiedFields setting
    */
   private def validateIndexQueryAllSafety(
     queryString: String,
@@ -719,9 +733,12 @@ object FiltersToQueryConverter {
     options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): Unit = {
     val maxFields = options
-      .map(_.getInt(
-        IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS,
-        IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT))
+      .map(
+        _.getInt(
+          IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS,
+          IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT
+        )
+      )
       .getOrElse(IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS_DEFAULT)
 
     // Skip validation if disabled (maxFields <= 0)
@@ -733,7 +750,7 @@ object FiltersToQueryConverter {
     if (searchedFieldCount > maxFields) {
       val fieldSample = schema.getFieldNames.asScala.take(10).mkString(", ")
       val totalFields = schema.getFieldNames.size()
-      val moreFields = if (totalFields > 10) s" ... and ${totalFields - 10} more" else ""
+      val moreFields  = if (totalFields > 10) s" ... and ${totalFields - 10} more" else ""
 
       throw new IllegalArgumentException(
         s"""_indexall query would search $searchedFieldCount fields (limit: $maxFields).
@@ -748,7 +765,8 @@ object FiltersToQueryConverter {
            |Or increase the limit (if searching many fields is intentional):
            |  spark.conf.set("${IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS}", "$searchedFieldCount")
            |
-           |Available fields: $fieldSample$moreFields""".stripMargin)
+           |Available fields: $fieldSample$moreFields""".stripMargin
+      )
     }
   }
 
@@ -1058,10 +1076,10 @@ object FiltersToQueryConverter {
   /**
    * Check if a mixed filter (Spark Filter or custom filter) is valid for the schema.
    *
-   * Returns false for filters that reference non-existent fields, allowing graceful degradation.
-   * Driver-side validation in IndexTables4SparkScanBuilder.validateIndexQueryFieldsExist() handles
-   * throwing descriptive errors for IndexQuery filters with invalid fields BEFORE tasks are created.
-   * This executor-side check is a safety net that should never be hit if driver validation ran.
+   * Returns false for filters that reference non-existent fields, allowing graceful degradation. Driver-side validation
+   * in IndexTables4SparkScanBuilder.validateIndexQueryFieldsExist() handles throwing descriptive errors for IndexQuery
+   * filters with invalid fields BEFORE tasks are created. This executor-side check is a safety net that should never be
+   * hit if driver validation ran.
    */
   private def isMixedFilterValidForSchema(filter: Any, fieldNames: Set[String]): Boolean = {
     import org.apache.spark.sql.sources._
@@ -1092,11 +1110,11 @@ object FiltersToQueryConverter {
       case indexQuery: IndexQueryFilter       => Set(indexQuery.columnName)
       case indexQueryAll: IndexQueryAllFilter => Set.empty // No specific field references
       // Handle V2 filters
-      case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter       => Set(indexQueryV2.columnName)
-      case _: io.indextables.spark.filters.IndexQueryAllV2Filter               => Set.empty // No specific field references
+      case indexQueryV2: io.indextables.spark.filters.IndexQueryV2Filter => Set(indexQueryV2.columnName)
+      case _: io.indextables.spark.filters.IndexQueryAllV2Filter         => Set.empty // No specific field references
       // Handle MixedBooleanFilter types
-      case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter        => mixedFilter.references().toSet
-      case _                                                                   => Set.empty
+      case mixedFilter: io.indextables.spark.filters.MixedBooleanFilter => mixedFilter.references().toSet
+      case _                                                            => Set.empty
     }
 
     val filterFields = getMixedFilterFieldNames(filter)
@@ -1108,8 +1126,10 @@ object FiltersToQueryConverter {
       // If we reach here, it indicates either:
       // 1. A code path that bypasses driver validation (bug)
       // 2. Schema mismatch between driver and executor (configuration issue)
-      logger.warn(s"Executor-side filter validation: filter $filter references non-existent fields: ${missingFields.mkString(", ")}. " +
-        s"This should have been caught by driver-side validation.")
+      logger.warn(
+        s"Executor-side filter validation: filter $filter references non-existent fields: ${missingFields.mkString(", ")}. " +
+          s"This should have been caught by driver-side validation."
+      )
       queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
     }
 
@@ -1179,9 +1199,8 @@ object FiltersToQueryConverter {
   }
 
   /**
-   * Convert a MixedBooleanFilter tree to a Query.
-   * Recursively handles Or, And, Not combinations of IndexQuery and Spark filters.
-   * This preserves the original boolean structure instead of flattening to AND.
+   * Convert a MixedBooleanFilter tree to a Query. Recursively handles Or, And, Not combinations of IndexQuery and Spark
+   * filters. This preserves the original boolean structure instead of flattening to AND.
    */
   private def convertMixedBooleanFilterToQuery(
     filter: io.indextables.spark.filters.MixedBooleanFilter,
@@ -1226,7 +1245,7 @@ object FiltersToQueryConverter {
 
       case MixedOrFilter(left, right) =>
         queryLog(s"MixedBooleanFilter->Query: Converting MixedOrFilter - combining with SHOULD (OR)")
-        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema, options)
+        val leftQuery  = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema, options)
         val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema, options)
         val occurQueries = List(
           new Query.OccurQuery(Occur.SHOULD, leftQuery),
@@ -1236,7 +1255,7 @@ object FiltersToQueryConverter {
 
       case MixedAndFilter(left, right) =>
         queryLog(s"MixedBooleanFilter->Query: Converting MixedAndFilter - combining with MUST (AND)")
-        val leftQuery = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema, options)
+        val leftQuery  = convertMixedBooleanFilterToQuery(left, splitSearchEngine, schema, options)
         val rightQuery = convertMixedBooleanFilterToQuery(right, splitSearchEngine, schema, options)
         val occurQueries = List(
           new Query.OccurQuery(Occur.MUST, leftQuery),
@@ -1272,7 +1291,7 @@ object FiltersToQueryConverter {
   private def isNumericFieldType(fieldType: FieldType): Boolean =
     fieldType match {
       case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => true
-      case _ => false
+      case _                                                                        => false
     }
 
   /** Convert Spark values to tantivy4java compatible values for filtering */
@@ -1851,20 +1870,25 @@ object FiltersToQueryConverter {
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         // (e.g., columnName:*Configuration) which Tantivy's wildcard query builder supports
         val transformedQuery = transformLeadingWildcardQuery(queryString, columnName)
-        queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'" +
-          (if (transformedQuery != queryString) s" (transformed to '$transformedQuery')" else ""))
+        queryLog(
+          s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'" +
+            (if (transformedQuery != queryString) s" (transformed to '$transformedQuery')" else "")
+        )
         try {
           val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, columnName)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
-            throw IndexQueryParseException.forField(queryString, columnName,
-              new RuntimeException("parseQuery returned null - invalid query syntax"))
+            throw IndexQueryParseException.forField(
+              queryString,
+              columnName,
+              new RuntimeException("parseQuery returned null - invalid query syntax")
+            )
           }
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
           case e: IndexQueryParseException => throw e
-          case e: Exception =>
+          case e: Exception                =>
             // Wrap tantivy exception in IndexQueryParseException for user-friendly error
             throw IndexQueryParseException.forField(queryString, columnName, e)
         }
@@ -1882,13 +1906,15 @@ object FiltersToQueryConverter {
           val parsedQuery = splitSearchEngine.parseQuery(queryString, allFieldNames)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
-            throw IndexQueryParseException.forAllFields(queryString,
-              new RuntimeException("parseQuery returned null - invalid query syntax"))
+            throw IndexQueryParseException.forAllFields(
+              queryString,
+              new RuntimeException("parseQuery returned null - invalid query syntax")
+            )
           }
           Some(parsedQuery)
         } catch {
           case e: IndexQueryParseException => throw e
-          case e: Exception =>
+          case e: Exception                =>
             // Wrap tantivy exception in IndexQueryParseException for user-friendly error
             throw IndexQueryParseException.forAllFields(queryString, e)
         }
@@ -1900,20 +1926,25 @@ object FiltersToQueryConverter {
         //
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, indexQueryV2.columnName)
-        queryLog(s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'" +
-          (if (transformedQuery != indexQueryV2.queryString) s" (transformed to '$transformedQuery')" else ""))
+        queryLog(
+          s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'" +
+            (if (transformedQuery != indexQueryV2.queryString) s" (transformed to '$transformedQuery')" else "")
+        )
         try {
           val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryV2.columnName)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
-            throw IndexQueryParseException.forField(indexQueryV2.queryString, indexQueryV2.columnName,
-              new RuntimeException("parseQuery returned null - invalid query syntax"))
+            throw IndexQueryParseException.forField(
+              indexQueryV2.queryString,
+              indexQueryV2.columnName,
+              new RuntimeException("parseQuery returned null - invalid query syntax")
+            )
           }
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
           case e: IndexQueryParseException => throw e
-          case e: Exception =>
+          case e: Exception                =>
             // Wrap tantivy exception in IndexQueryParseException for user-friendly error
             throw IndexQueryParseException.forField(indexQueryV2.queryString, indexQueryV2.columnName, e)
         }
@@ -1929,14 +1960,16 @@ object FiltersToQueryConverter {
           val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllV2.queryString)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
-            throw IndexQueryParseException.forAllFields(indexQueryAllV2.queryString,
-              new RuntimeException("parseQuery returned null - invalid query syntax"))
+            throw IndexQueryParseException.forAllFields(
+              indexQueryAllV2.queryString,
+              new RuntimeException("parseQuery returned null - invalid query syntax")
+            )
           }
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
           case e: IndexQueryParseException => throw e
-          case e: Exception =>
+          case e: Exception                =>
             // Wrap tantivy exception in IndexQueryParseException for user-friendly error
             throw IndexQueryParseException.forAllFields(indexQueryAllV2.queryString, e)
         }
@@ -1951,9 +1984,8 @@ object FiltersToQueryConverter {
     }
 
   /**
-   * Convert a MixedBooleanFilter tree to a SplitQuery.
-   * Recursively handles Or, And, Not combinations of IndexQuery and Spark filters.
-   * This preserves the original boolean structure instead of flattening to AND.
+   * Convert a MixedBooleanFilter tree to a SplitQuery. Recursively handles Or, And, Not combinations of IndexQuery and
+   * Spark filters. This preserves the original boolean structure instead of flattening to AND.
    */
   private def convertMixedBooleanFilterToSplitQuery(
     filter: io.indextables.spark.filters.MixedBooleanFilter,
@@ -1968,8 +2000,10 @@ object FiltersToQueryConverter {
         // Delegate to existing IndexQueryFilter handling
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
-        queryLog(s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
-          (if (transformedQuery != indexQueryFilter.queryString) s" (transformed to '$transformedQuery')" else ""))
+        queryLog(
+          s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
+            (if (transformedQuery != indexQueryFilter.queryString) s" (transformed to '$transformedQuery')" else "")
+        )
         try {
           val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryFilter.columnName)
           queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
@@ -2005,13 +2039,13 @@ object FiltersToQueryConverter {
 
       case MixedOrFilter(left, right) =>
         queryLog(s"MixedBooleanFilter: Converting MixedOrFilter - combining with SHOULD (OR)")
-        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema, options)
+        val leftQuery  = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema, options)
         val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema, options)
 
         (leftQuery, rightQuery) match {
           case (Some(lq), Some(rq)) =>
             val boolQuery = new SplitBooleanQuery()
-            boolQuery.addShould(lq)  // OR = SHOULD
+            boolQuery.addShould(lq) // OR = SHOULD
             boolQuery.addShould(rq)
             queryLog(s"MixedBooleanFilter: Created OR boolean query with left=${lq.getClass.getSimpleName}, right=${rq.getClass.getSimpleName}")
             Some(boolQuery)
@@ -2028,13 +2062,13 @@ object FiltersToQueryConverter {
 
       case MixedAndFilter(left, right) =>
         queryLog(s"MixedBooleanFilter: Converting MixedAndFilter - combining with MUST (AND)")
-        val leftQuery = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema, options)
+        val leftQuery  = convertMixedBooleanFilterToSplitQuery(left, splitSearchEngine, schema, options)
         val rightQuery = convertMixedBooleanFilterToSplitQuery(right, splitSearchEngine, schema, options)
 
         (leftQuery, rightQuery) match {
           case (Some(lq), Some(rq)) =>
             val boolQuery = new SplitBooleanQuery()
-            boolQuery.addMust(lq)  // AND = MUST
+            boolQuery.addMust(lq) // AND = MUST
             boolQuery.addMust(rq)
             queryLog(s"MixedBooleanFilter: Created AND boolean query with left=${lq.getClass.getSimpleName}, right=${rq.getClass.getSimpleName}")
             Some(boolQuery)
@@ -2054,7 +2088,7 @@ object FiltersToQueryConverter {
         convertMixedBooleanFilterToSplitQuery(child, splitSearchEngine, schema, options) match {
           case Some(childQuery) =>
             val boolQuery = new SplitBooleanQuery()
-            boolQuery.addMustNot(childQuery)  // NOT = MUST_NOT
+            boolQuery.addMustNot(childQuery) // NOT = MUST_NOT
             queryLog(s"MixedBooleanFilter: Created NOT boolean query with child=${childQuery.getClass.getSimpleName}")
             Some(boolQuery)
           case None =>

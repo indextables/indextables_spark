@@ -17,19 +17,18 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.{AddAction, SchemaDeduplication}
-
-import org.apache.avro.file.DataFileStream
-import org.apache.avro.generic.{GenericDatumReader, GenericRecord}
-
-import org.slf4j.LoggerFactory
-
 import java.io.{ByteArrayInputStream, InputStream}
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
+
+import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.{AddAction, SchemaDeduplication}
+import org.apache.avro.file.DataFileStream
+import org.apache.avro.generic.{GenericDatumReader, GenericRecord}
+import org.slf4j.LoggerFactory
 
 /**
  * Reader for Avro manifest files containing FileEntry records.
@@ -45,13 +44,13 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
   private val log = LoggerFactory.getLogger(getClass)
 
   // Use shared thread pool from companion object to avoid creating threads on every parallel read
-  private implicit val sharedExecutionContext: ExecutionContext = AvroManifestReader.sharedExecutionContext
+  implicit private val sharedExecutionContext: ExecutionContext = AvroManifestReader.sharedExecutionContext
 
   /**
    * Read all file entries from a single Avro manifest file.
    *
-   * Uses global cache to avoid re-reading the same manifest file from cloud storage.
-   * Manifest files are immutable once written, so caching is safe.
+   * Uses global cache to avoid re-reading the same manifest file from cloud storage. Manifest files are immutable once
+   * written, so caching is safe.
    *
    * @param manifestPath
    *   Full path to the manifest file (e.g., "s3://bucket/table/_transaction_log/state-v.../manifest-xxx.avro")
@@ -62,14 +61,12 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
     import io.indextables.spark.transaction.EnhancedTransactionLogCache
 
     // Use global cache for manifest file contents
-    EnhancedTransactionLogCache.getOrComputeAvroManifestFile(manifestPath, {
-      readManifestUncached(manifestPath)
-    })
+    EnhancedTransactionLogCache.getOrComputeAvroManifestFile(manifestPath, readManifestUncached(manifestPath))
   }
 
   /**
-   * Read all file entries from a single Avro manifest file without caching.
-   * This is the actual I/O operation - only called on cache miss.
+   * Read all file entries from a single Avro manifest file without caching. This is the actual I/O operation - only
+   * called on cache miss.
    */
   private def readManifestUncached(manifestPath: String): Seq[FileEntry] = {
     log.debug(s"Reading Avro manifest from storage: $manifestPath")
@@ -80,11 +77,10 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
 
     val entries = Try {
       val inputStream = cloudProvider.openInputStream(manifestPath)
-      try {
+      try
         readFromStream(inputStream)
-      } finally {
+      finally
         inputStream.close()
-      }
     } match {
       case Success(result) => result
       case Failure(e) =>
@@ -106,8 +102,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    *   Sequence of FileEntry records
    */
   def readFromStream(inputStream: InputStream): Seq[FileEntry] = {
-    val reader    = new GenericDatumReader[GenericRecord](AvroSchemas.FILE_ENTRY_SCHEMA)
-    val entries   = ArrayBuffer[FileEntry]()
+    val reader                                    = new GenericDatumReader[GenericRecord](AvroSchemas.FILE_ENTRY_SCHEMA)
+    val entries                                   = ArrayBuffer[FileEntry]()
     var dataStream: DataFileStream[GenericRecord] = null
 
     try {
@@ -117,11 +113,10 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
         entries += AvroSchemas.toFileEntry(record)
       }
       entries.toSeq
-    } finally {
+    } finally
       if (dataStream != null) {
         dataStream.close()
       }
-    }
   }
 
   /**
@@ -132,9 +127,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @return
    *   Sequence of FileEntry records
    */
-  def readFromBytes(data: Array[Byte]): Seq[FileEntry] = {
+  def readFromBytes(data: Array[Byte]): Seq[FileEntry] =
     readFromStream(new ByteArrayInputStream(data))
-  }
 
   /**
    * Read file entries from multiple manifest files in parallel.
@@ -142,14 +136,15 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @param manifestPaths
    *   Paths to manifest files
    * @param parallelism
-   *   Maximum number of parallel reads. Use 0 for auto (available processors).
-   *   Default: 8, but can be increased for high-throughput storage backends.
+   *   Maximum number of parallel reads. Use 0 for auto (available processors). Default: 8, but can be increased for
+   *   high-throughput storage backends.
    * @return
    *   Combined sequence of all file entries
    */
   def readManifestsParallel(
-      manifestPaths: Seq[String],
-      parallelism: Int = StateConfig.READ_PARALLELISM_DEFAULT): Seq[FileEntry] = {
+    manifestPaths: Seq[String],
+    parallelism: Int = StateConfig.READ_PARALLELISM_DEFAULT
+  ): Seq[FileEntry] = {
     if (manifestPaths.isEmpty) {
       return Seq.empty
     }
@@ -196,7 +191,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
     val duration = System.currentTimeMillis() - startTime
     log.info(
       s"Read ${allEntries.size} entries from ${manifestPaths.size} manifests in ${duration}ms " +
-        s"(parallelism=$effectiveParallelism, avg ${duration / manifestPaths.size}ms per manifest)")
+        s"(parallelism=$effectiveParallelism, avg ${duration / manifestPaths.size}ms per manifest)"
+    )
 
     allEntries
   }
@@ -211,9 +207,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @return
    *   Filtered sequence of FileEntry records
    */
-  def readManifestSinceVersion(manifestPath: String, sinceVersion: Long): Seq[FileEntry] = {
+  def readManifestSinceVersion(manifestPath: String, sinceVersion: Long): Seq[FileEntry] =
     readManifest(manifestPath).filter(_.addedAtVersion > sinceVersion)
-  }
 
   /**
    * Read multiple manifests and filter by version range.
@@ -229,17 +224,18 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @param parallelism
    *   Maximum number of parallel reads
    * @param transactionLogPath
-   *   Optional transaction log path for resolving shared manifests. If not provided,
-   *   assumes legacy state-local manifests.
+   *   Optional transaction log path for resolving shared manifests. If not provided, assumes legacy state-local
+   *   manifests.
    * @return
    *   Filtered sequence of FileEntry records
    */
   def readManifestsSinceVersion(
-      manifests: Seq[ManifestInfo],
-      stateDir: String,
-      sinceVersion: Long,
-      parallelism: Int = StateConfig.READ_PARALLELISM_DEFAULT,
-      transactionLogPath: Option[String] = None): Seq[FileEntry] = {
+    manifests: Seq[ManifestInfo],
+    stateDir: String,
+    sinceVersion: Long,
+    parallelism: Int = StateConfig.READ_PARALLELISM_DEFAULT,
+    transactionLogPath: Option[String] = None
+  ): Seq[FileEntry] = {
 
     // Filter manifests by version bounds - skip manifests that can't contain new entries
     val relevantManifests = manifests.filter(_.maxAddedAtVersion > sinceVersion)
@@ -251,7 +247,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
 
     log.debug(
       s"Version filtering: ${manifests.size} manifests -> ${relevantManifests.size} " +
-        s"(filtered ${manifests.size - relevantManifests.size} by version bounds)")
+        s"(filtered ${manifests.size - relevantManifests.size} by version bounds)"
+    )
 
     // Resolve manifest paths - handles both shared manifests and legacy state-local
     val paths = relevantManifests.map { m =>
@@ -274,9 +271,8 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @return
    *   AddAction representation
    */
-  def toAddAction(entry: FileEntry, schemaRegistry: Map[String, String] = Map.empty): AddAction = {
+  def toAddAction(entry: FileEntry, schemaRegistry: Map[String, String] = Map.empty): AddAction =
     FileEntry.toAddAction(entry, schemaRegistry)
-  }
 
   /**
    * Convert multiple FileEntries to AddActions.
@@ -292,8 +288,10 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
     // Diagnostic logging for performance debugging
     val uniqueRefs = entries.flatMap(_.docMappingRef).distinct
     if (entries.size > 100) {
-      log.info(s"toAddActions: processing ${entries.size} entries, schemaRegistry has ${schemaRegistry.size} schemas, " +
-        s"entries have ${uniqueRefs.size} unique docMappingRefs")
+      log.info(
+        s"toAddActions: processing ${entries.size} entries, schemaRegistry has ${schemaRegistry.size} schemas, " +
+          s"entries have ${uniqueRefs.size} unique docMappingRefs"
+      )
     }
     // Pre-filter the schemaRegistry ONCE, not per file entry
     // This avoids JSON parsing overhead for each file
@@ -319,9 +317,8 @@ object AvroManifestReader {
   private[avro] def incrementReadCounter(): Unit = readCounter.incrementAndGet()
 
   /**
-   * Shared thread pool for parallel manifest reads.
-   * Using a cached thread pool allows threads to be reused across reads while
-   * still scaling up for parallel workloads. Threads are terminated after 60s of idle time.
+   * Shared thread pool for parallel manifest reads. Using a cached thread pool allows threads to be reused across reads
+   * while still scaling up for parallel workloads. Threads are terminated after 60s of idle time.
    */
   private lazy val sharedThreadPool: java.util.concurrent.ExecutorService = {
     log.info("Initializing shared thread pool for Avro manifest parallel reads")
@@ -336,8 +333,8 @@ object AvroManifestReader {
   }
 
   /**
-   * Shared execution context backed by the shared thread pool.
-   * This avoids creating new thread pools on every parallel read operation.
+   * Shared execution context backed by the shared thread pool. This avoids creating new thread pools on every parallel
+   * read operation.
    */
   private[avro] lazy val sharedExecutionContext: ExecutionContext =
     ExecutionContext.fromExecutorService(sharedThreadPool)
@@ -350,7 +347,6 @@ object AvroManifestReader {
    * @return
    *   AvroManifestReader instance
    */
-  def apply(cloudProvider: CloudStorageProvider): AvroManifestReader = {
+  def apply(cloudProvider: CloudStorageProvider): AvroManifestReader =
     new AvroManifestReader(cloudProvider)
-  }
 }

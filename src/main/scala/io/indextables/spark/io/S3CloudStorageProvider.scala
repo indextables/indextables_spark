@@ -102,8 +102,8 @@ class S3CloudStorageProvider(
     }
 
   /**
-   * Normalize a path to table root level by removing filenames and Hive-style partition paths.
-   * Delegates to the shared PathNormalizer utility for consistent behavior across the codebase.
+   * Normalize a path to table root level by removing filenames and Hive-style partition paths. Delegates to the shared
+   * PathNormalizer utility for consistent behavior across the codebase.
    */
   private def normalizeToTablePath(path: String): String =
     io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(path)

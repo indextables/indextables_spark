@@ -17,38 +17,35 @@
 
 package io.indextables.spark.sql
 
+import io.indextables.spark.transaction.AddAction
 import org.scalatest.funsuite.AnyFunSuite
 import org.slf4j.LoggerFactory
-
-import io.indextables.spark.transaction.AddAction
 
 /**
  * Tests for multi-pass merge logic at scale.
  *
  * Simulates realistic production scenarios:
- * - 7 days of data with day/hour partitions (168 partitions)
- * - 20,000+ files per day (~833 files per hour)
- * - Each file ~500MB
+ *   - 7 days of data with day/hour partitions (168 partitions)
+ *   - 20,000+ files per day (~833 files per hour)
+ *   - Each file ~500MB
  *
- * These tests validate the merge group finding and prioritization logic
- * without actually executing merges (which would require real files).
+ * These tests validate the merge group finding and prioritization logic without actually executing merges (which would
+ * require real files).
  */
 class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsMultiPassScaleTest])
 
   // Realistic file sizes
-  val FILE_SIZE_500MB: Long = 500L * 1024 * 1024  // 500MB per file
-  val TARGET_SIZE_4GB: Long = 4L * 1024 * 1024 * 1024  // 4GB target
+  val FILE_SIZE_500MB: Long = 500L * 1024 * 1024      // 500MB per file
+  val TARGET_SIZE_4GB: Long = 4L * 1024 * 1024 * 1024 // 4GB target
 
   // Scale parameters
-  val NUM_DAYS = 7
-  val HOURS_PER_DAY = 24
-  val FILES_PER_HOUR = 833  // ~20,000 files per day
+  val NUM_DAYS       = 7
+  val HOURS_PER_DAY  = 24
+  val FILES_PER_HOUR = 833 // ~20,000 files per day
 
-  /**
-   * Creates mock AddAction entries for a day/hour partitioned dataset.
-   */
+  /** Creates mock AddAction entries for a day/hour partitioned dataset. */
   def createMockFiles(
     numDays: Int,
     hoursPerDay: Int,
@@ -62,9 +59,9 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
       (0 until hoursPerDay).flatMap { hour =>
         val hourStr = f"$hour%02d"
         (0 until filesPerHour).map { fileIdx =>
-          val path = s"day=$dateStr/hour=$hourStr/part-$fileIdx.split"
+          val path            = s"day=$dateStr/hour=$hourStr/part-$fileIdx.split"
           val partitionValues = Map("day" -> dateStr, "hour" -> hourStr)
-          val modTime = baseTime + (day * 24 * 60 * 60 * 1000L) + (hour * 60 * 60 * 1000L) + fileIdx
+          val modTime         = baseTime + (day * 24 * 60 * 60 * 1000L) + (hour * 60 * 60 * 1000L) + fileIdx
 
           AddAction(
             path = path,
@@ -82,8 +79,8 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
   }
 
   /**
-   * Simulates the merge group finding logic from MergeSplitsExecutor.
-   * Groups files by partition and creates merge groups based on target size.
+   * Simulates the merge group finding logic from MergeSplitsExecutor. Groups files by partition and creates merge
+   * groups based on target size.
    */
   def findMergeGroups(
     files: Seq[AddAction],
@@ -100,44 +97,44 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     val filesByPartition = eligibleFiles.groupBy(_.partitionValues)
 
     // Create merge groups within each partition
-    filesByPartition.flatMap { case (partitionValues, partitionFiles) =>
-      // Sort by modification time (oldest first)
-      val sortedFiles = partitionFiles.sortBy(_.modificationTime)
+    filesByPartition.flatMap {
+      case (partitionValues, partitionFiles) =>
+        // Sort by modification time (oldest first)
+        val sortedFiles = partitionFiles.sortBy(_.modificationTime)
 
-      // Bin-pack files into groups up to target size
-      val groups = scala.collection.mutable.ArrayBuffer[MergeGroup]()
-      var currentGroup = scala.collection.mutable.ArrayBuffer[AddAction]()
-      var currentSize = 0L
+        // Bin-pack files into groups up to target size
+        val groups       = scala.collection.mutable.ArrayBuffer[MergeGroup]()
+        var currentGroup = scala.collection.mutable.ArrayBuffer[AddAction]()
+        var currentSize  = 0L
 
-      sortedFiles.foreach { file =>
-        if (currentSize + file.size > targetSize || currentGroup.length >= maxSourceSplitsPerMerge) {
-          if (currentGroup.length >= 2) {
-            groups += MergeGroup(partitionValues, currentGroup.toSeq)
+        sortedFiles.foreach { file =>
+          if (currentSize + file.size > targetSize || currentGroup.length >= maxSourceSplitsPerMerge) {
+            if (currentGroup.length >= 2) {
+              groups += MergeGroup(partitionValues, currentGroup.toSeq)
+            }
+            currentGroup = scala.collection.mutable.ArrayBuffer[AddAction]()
+            currentSize = 0L
           }
-          currentGroup = scala.collection.mutable.ArrayBuffer[AddAction]()
-          currentSize = 0L
+          currentGroup += file
+          currentSize += file.size
         }
-        currentGroup += file
-        currentSize += file.size
-      }
 
-      // Don't forget the last group
-      if (currentGroup.length >= 2) {
-        groups += MergeGroup(partitionValues, currentGroup.toSeq)
-      }
+        // Don't forget the last group
+        if (currentGroup.length >= 2) {
+          groups += MergeGroup(partitionValues, currentGroup.toSeq)
+        }
 
-      groups.toSeq
+        groups.toSeq
     }.toSeq
   }
 
-  /**
-   * Simulates merge pass execution - returns the expected merged file sizes.
-   */
-  def simulateMergePass(groups: Seq[MergeGroup]): Seq[AddAction] = {
+  /** Simulates merge pass execution - returns the expected merged file sizes. */
+  def simulateMergePass(groups: Seq[MergeGroup]): Seq[AddAction] =
     groups.map { group =>
-      val mergedSize = group.files.map(_.size).sum
+      val mergedSize      = group.files.map(_.size).sum
       val partitionValues = group.partitionValues
-      val path = s"day=${partitionValues.getOrElse("day", "unknown")}/hour=${partitionValues.getOrElse("hour", "unknown")}/merged-${System.nanoTime()}.split"
+      val path = s"day=${partitionValues
+          .getOrElse("day", "unknown")}/hour=${partitionValues.getOrElse("hour", "unknown")}/merged-${System.nanoTime()}.split"
 
       AddAction(
         path = path,
@@ -150,18 +147,15 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
         numRecords = Some(group.files.flatMap(_.numRecords).sum)
       )
     }
-  }
 
-  /**
-   * Simulates the full multi-pass merge loop.
-   */
+  /** Simulates the full multi-pass merge loop. */
   def simulateMultiPassMerge(
     initialFiles: Seq[AddAction],
     targetSize: Long,
     maxPasses: Int = 10
   ): (Int, Seq[AddAction]) = {
-    var currentFiles = initialFiles
-    var passNumber = 0
+    var currentFiles    = initialFiles
+    var passNumber      = 0
     var continueLooping = true
 
     while (continueLooping && passNumber < maxPasses) {
@@ -173,13 +167,15 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
       } else {
         // Remove source files from current set
         val sourceFilePaths = groups.flatMap(_.files.map(_.path)).toSet
-        val remainingFiles = currentFiles.filterNot(f => sourceFilePaths.contains(f.path))
+        val remainingFiles  = currentFiles.filterNot(f => sourceFilePaths.contains(f.path))
 
         // Add merged files
         val mergedFiles = simulateMergePass(groups)
         currentFiles = remainingFiles ++ mergedFiles
 
-        logger.info(s"Pass $passNumber: Merged ${groups.map(_.files.length).sum} files into ${mergedFiles.length} splits")
+        logger.info(
+          s"Pass $passNumber: Merged ${groups.map(_.files.length).sum} files into ${mergedFiles.length} splits"
+        )
       }
     }
 
@@ -199,9 +195,12 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     assert(filesByPartition.size == NUM_DAYS * HOURS_PER_DAY, s"Should have ${NUM_DAYS * HOURS_PER_DAY} partitions")
 
     // Verify each partition has the expected number of files
-    filesByPartition.foreach { case (partition, partitionFiles) =>
-      assert(partitionFiles.length == FILES_PER_HOUR,
-        s"Partition $partition should have $FILES_PER_HOUR files, got ${partitionFiles.length}")
+    filesByPartition.foreach {
+      case (partition, partitionFiles) =>
+        assert(
+          partitionFiles.length == FILES_PER_HOUR,
+          s"Partition $partition should have $FILES_PER_HOUR files, got ${partitionFiles.length}"
+        )
     }
 
     // Calculate total data size
@@ -211,7 +210,7 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
   }
 
   test("merge group finding: files should be grouped within partitions only") {
-    val files = createMockFiles(NUM_DAYS, HOURS_PER_DAY, FILES_PER_HOUR, FILE_SIZE_500MB)
+    val files  = createMockFiles(NUM_DAYS, HOURS_PER_DAY, FILES_PER_HOUR, FILE_SIZE_500MB)
     val groups = findMergeGroups(files, TARGET_SIZE_4GB)
 
     logger.info(s"Found ${groups.length} merge groups")
@@ -219,8 +218,10 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     // Each group should only contain files from a single partition
     groups.foreach { group =>
       val partitions = group.files.map(_.partitionValues).distinct
-      assert(partitions.length == 1,
-        s"Merge group should contain files from exactly one partition, found ${partitions.length}")
+      assert(
+        partitions.length == 1,
+        s"Merge group should contain files from exactly one partition, found ${partitions.length}"
+      )
     }
 
     // All groups should have at least 2 files
@@ -230,7 +231,7 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
   }
 
   test("merge group finding: 500MB files into 4GB target = ~8 files per group") {
-    val files = createMockFiles(NUM_DAYS, HOURS_PER_DAY, FILES_PER_HOUR, FILE_SIZE_500MB)
+    val files  = createMockFiles(NUM_DAYS, HOURS_PER_DAY, FILES_PER_HOUR, FILE_SIZE_500MB)
     val groups = findMergeGroups(files, TARGET_SIZE_4GB)
 
     // With 500MB files and 4GB target, each group should have ~8 files
@@ -238,12 +239,11 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     logger.info(f"Average files per group: $avgFilesPerGroup%.2f")
 
     // Should be roughly 8 files per group (4GB / 500MB = 8)
-    assert(avgFilesPerGroup >= 7 && avgFilesPerGroup <= 9,
-      f"Expected ~8 files per group, got $avgFilesPerGroup%.2f")
+    assert(avgFilesPerGroup >= 7 && avgFilesPerGroup <= 9, f"Expected ~8 files per group, got $avgFilesPerGroup%.2f")
   }
 
   test("merge group finding: number of merge groups per partition") {
-    val files = createMockFiles(NUM_DAYS, HOURS_PER_DAY, FILES_PER_HOUR, FILE_SIZE_500MB)
+    val files  = createMockFiles(NUM_DAYS, HOURS_PER_DAY, FILES_PER_HOUR, FILE_SIZE_500MB)
     val groups = findMergeGroups(files, TARGET_SIZE_4GB)
 
     // Group merge groups by partition
@@ -253,11 +253,14 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     val expectedGroupsPerPartition = FILES_PER_HOUR / 8
     logger.info(s"Expected ~$expectedGroupsPerPartition merge groups per partition")
 
-    groupsByPartition.foreach { case (partition, partitionGroups) =>
-      // Allow some variance due to bin-packing
-      assert(partitionGroups.length >= expectedGroupsPerPartition - 10 &&
-             partitionGroups.length <= expectedGroupsPerPartition + 10,
-        s"Partition $partition: expected ~$expectedGroupsPerPartition groups, got ${partitionGroups.length}")
+    groupsByPartition.foreach {
+      case (partition, partitionGroups) =>
+        // Allow some variance due to bin-packing
+        assert(
+          partitionGroups.length >= expectedGroupsPerPartition - 10 &&
+            partitionGroups.length <= expectedGroupsPerPartition + 10,
+          s"Partition $partition: expected ~$expectedGroupsPerPartition groups, got ${partitionGroups.length}"
+        )
     }
 
     // Total groups should be ~104 * 168 = ~17,472
@@ -267,7 +270,7 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
 
   test("multi-pass simulation: should complete within maxPasses") {
     // Use a smaller scale for this test to keep it fast
-    val smallFiles = createMockFiles(1, 4, 100, FILE_SIZE_500MB)  // 1 day, 4 hours, 100 files/hour = 400 files
+    val smallFiles = createMockFiles(1, 4, 100, FILE_SIZE_500MB) // 1 day, 4 hours, 100 files/hour = 400 files
 
     val (passCount, finalFiles) = simulateMultiPassMerge(smallFiles, TARGET_SIZE_4GB, maxPasses = 10)
 
@@ -277,8 +280,10 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     assert(passCount <= 3, s"Should complete within 3 passes, took $passCount")
 
     // Final file count should be much smaller than initial
-    assert(finalFiles.length < smallFiles.length,
-      s"Should have fewer files after merge: ${finalFiles.length} vs ${smallFiles.length}")
+    assert(
+      finalFiles.length < smallFiles.length,
+      s"Should have fewer files after merge: ${finalFiles.length} vs ${smallFiles.length}"
+    )
   }
 
   test("multi-pass simulation: merged files can trigger second pass") {
@@ -306,9 +311,9 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     // 2. After merge, the merged files are still small enough to re-merge
 
     // Use 50MB files, 1GB target
-    val smallFileSize = 50L * 1024 * 1024  // 50MB
-    val targetSize = 1L * 1024 * 1024 * 1024  // 1GB
-    val skipThreshold = (targetSize * 0.45).toLong  // 450MB
+    val smallFileSize = 50L * 1024 * 1024          // 50MB
+    val targetSize    = 1L * 1024 * 1024 * 1024    // 1GB
+    val skipThreshold = (targetSize * 0.45).toLong // 450MB
 
     // Create files: 2 partitions, each with 100 files of 50MB = 5GB per partition
     val files = (0 until 2).flatMap { partIdx =>
@@ -326,8 +331,10 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
       }
     }
 
-    logger.info(s"Created ${files.length} files of ${smallFileSize / (1024*1024)}MB each")
-    logger.info(s"Target size: ${targetSize / (1024*1024*1024)}GB, skip threshold: ${skipThreshold / (1024*1024)}MB")
+    logger.info(s"Created ${files.length} files of ${smallFileSize / (1024 * 1024)}MB each")
+    logger.info(
+      s"Target size: ${targetSize / (1024 * 1024 * 1024)}GB, skip threshold: ${skipThreshold / (1024 * 1024)}MB"
+    )
 
     // First pass groups
     val pass1Groups = findMergeGroups(files, targetSize)
@@ -335,7 +342,7 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
 
     // Simulate pass 1
     val pass1MergedFiles = simulateMergePass(pass1Groups)
-    val pass1Sizes = pass1MergedFiles.map(_.size / (1024*1024))
+    val pass1Sizes       = pass1MergedFiles.map(_.size / (1024 * 1024))
     logger.info(s"Pass 1 merged file sizes: ${pass1Sizes.take(5).mkString(", ")}... MB")
 
     // Check if any merged files are below skip threshold (would trigger pass 2)
@@ -348,7 +355,11 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
 
   test("prioritization: groups with most files should be processed first") {
     // Create groups with varying file counts
-    def createGroup(partition: String, numFiles: Int, modTime: Long): MergeGroup = {
+    def createGroup(
+      partition: String,
+      numFiles: Int,
+      modTime: Long
+    ): MergeGroup = {
       val files = (0 until numFiles).map { i =>
         AddAction(
           path = s"partition=$partition/file-$i.split",
@@ -365,24 +376,24 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     }
 
     val groups = Seq(
-      createGroup("a", 5, 1000L),   // 5 files, oldest=1000
-      createGroup("b", 10, 2000L),  // 10 files, oldest=2000
-      createGroup("c", 8, 500L),    // 8 files, oldest=500
-      createGroup("d", 10, 1500L),  // 10 files, oldest=1500 (same count as b, older)
-      createGroup("e", 3, 100L)     // 3 files, oldest=100
+      createGroup("a", 5, 1000L),  // 5 files, oldest=1000
+      createGroup("b", 10, 2000L), // 10 files, oldest=2000
+      createGroup("c", 8, 500L),   // 8 files, oldest=500
+      createGroup("d", 10, 1500L), // 10 files, oldest=1500 (same count as b, older)
+      createGroup("e", 3, 100L)    // 3 files, oldest=100
     )
 
     // Sort using the same logic as MergeSplitsExecutor
     val prioritized = groups.sortBy { g =>
-      val sourceCount = -g.files.length  // Descending
-      val oldestTime = g.files.map(_.modificationTime).min  // Ascending for ties
+      val sourceCount = -g.files.length                     // Descending
+      val oldestTime  = g.files.map(_.modificationTime).min // Ascending for ties
       (sourceCount, oldestTime)
     }
 
     // Expected order: b and d both have 10 files, d is older so comes first
     // Then c (8 files), a (5 files), e (3 files)
     val expectedOrder = Seq("d", "b", "c", "a", "e")
-    val actualOrder = prioritized.map(_.partitionValues("partition"))
+    val actualOrder   = prioritized.map(_.partitionValues("partition"))
 
     logger.info(s"Expected order: ${expectedOrder.mkString(", ")}")
     logger.info(s"Actual order: ${actualOrder.mkString(", ")}")
@@ -391,28 +402,31 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
   }
 
   test("skip threshold: files above 45% of target should be excluded") {
-    val targetSize = TARGET_SIZE_4GB
-    val skipThreshold = (targetSize * 0.45).toLong  // ~1.93GB
+    val targetSize    = TARGET_SIZE_4GB
+    val skipThreshold = (targetSize * 0.45).toLong // ~1.93GB
 
-    logger.info(s"Target size: $targetSize bytes (${targetSize / (1024*1024*1024)}GB)")
-    logger.info(s"Skip threshold (45%): $skipThreshold bytes (${skipThreshold / (1024*1024)}MB)")
+    logger.info(s"Target size: $targetSize bytes (${targetSize / (1024 * 1024 * 1024)}GB)")
+    logger.info(s"Skip threshold (45%): $skipThreshold bytes (${skipThreshold / (1024 * 1024)}MB)")
 
     val files = Seq(
-      AddAction("small.split", Map("p" -> "1"), 500L * 1024 * 1024, 0L, true, None, None, None),       // 500MB - eligible
-      AddAction("medium.split", Map("p" -> "1"), 1500L * 1024 * 1024, 0L, true, None, None, None),     // 1.5GB - eligible
+      AddAction("small.split", Map("p" -> "1"), 500L * 1024 * 1024, 0L, true, None, None, None), // 500MB - eligible
+      AddAction("medium.split", Map("p" -> "1"), 1500L * 1024 * 1024, 0L, true, None, None, None), // 1.5GB - eligible
       AddAction("borderline.split", Map("p" -> "1"), 1800L * 1024 * 1024, 0L, true, None, None, None), // 1.8GB - eligible (below 1.93GB threshold)
-      AddAction("threshold.split", Map("p" -> "1"), 2000L * 1024 * 1024, 0L, true, None, None, None),  // 2GB - excluded (>= 1.93GB threshold)
-      AddAction("large.split", Map("p" -> "1"), 2500L * 1024 * 1024, 0L, true, None, None, None),      // 2.5GB - excluded
-      AddAction("huge.split", Map("p" -> "1"), 3500L * 1024 * 1024, 0L, true, None, None, None)        // 3.5GB - excluded
+      AddAction("threshold.split", Map("p" -> "1"), 2000L * 1024 * 1024, 0L, true, None, None, None), // 2GB - excluded (>= 1.93GB threshold)
+      AddAction("large.split", Map("p" -> "1"), 2500L * 1024 * 1024, 0L, true, None, None, None), // 2.5GB - excluded
+      AddAction("huge.split", Map("p" -> "1"), 3500L * 1024 * 1024, 0L, true, None, None, None) // 3.5GB - excluded
     )
 
     val eligible = files.filter(_.size < skipThreshold)
-    logger.info(s"Eligible files: ${eligible.map(f => s"${f.path} (${f.size / (1024*1024)}MB)").mkString(", ")}")
+    logger.info(s"Eligible files: ${eligible.map(f => s"${f.path} (${f.size / (1024 * 1024)}MB)").mkString(", ")}")
 
     assert(eligible.length == 3, s"Should have 3 eligible files, got ${eligible.length}")
     assert(eligible.map(_.path).contains("small.split"), "small.split should be eligible")
     assert(eligible.map(_.path).contains("medium.split"), "medium.split should be eligible")
-    assert(eligible.map(_.path).contains("borderline.split"), "borderline.split should be eligible (1.8GB < 1.93GB threshold)")
+    assert(
+      eligible.map(_.path).contains("borderline.split"),
+      "borderline.split should be eligible (1.8GB < 1.93GB threshold)"
+    )
   }
 
   test("maxSourceSplitsPerMerge: groups should not exceed limit") {
@@ -421,7 +435,7 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
       AddAction(
         path = s"partition=test/file-$i.split",
         partitionValues = Map("partition" -> "test"),
-        size = 10L * 1024 * 1024,  // 10MB each
+        size = 10L * 1024 * 1024, // 10MB each
         modificationTime = i.toLong,
         dataChange = true,
         stats = None,
@@ -431,12 +445,14 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     }
 
     val maxSourceSplits = 500
-    val groups = findMergeGroups(files, TARGET_SIZE_4GB, maxSourceSplitsPerMerge = maxSourceSplits)
+    val groups          = findMergeGroups(files, TARGET_SIZE_4GB, maxSourceSplitsPerMerge = maxSourceSplits)
 
     // All groups should have at most maxSourceSplitsPerMerge files
     groups.foreach { group =>
-      assert(group.files.length <= maxSourceSplits,
-        s"Group has ${group.files.length} files, exceeds max of $maxSourceSplits")
+      assert(
+        group.files.length <= maxSourceSplits,
+        s"Group has ${group.files.length} files, exceeds max of $maxSourceSplits"
+      )
     }
 
     // With 2000 files and max 500 per group, should have at least 4 groups
@@ -462,13 +478,13 @@ class MergeSplitsMultiPassScaleTest extends AnyFunSuite {
     logger.info(f"Average files per group: ${groups.map(_.files.length).sum.toDouble / groups.length}%.2f")
 
     // Estimate merged output
-    val estimatedMergedFiles = groups.length
+    val estimatedMergedFiles  = groups.length
     val estimatedMergedSizeTB = groups.map(g => g.files.map(_.size).sum).sum / (1024.0 * 1024 * 1024 * 1024)
-    logger.info(s"After merge: ~$estimatedMergedFiles files, ${estimatedMergedSizeTB}%.2f TB")
+    logger.info(s"After merge: ~$estimatedMergedFiles files, $estimatedMergedSizeTB%.2f TB")
 
     // Verify that merge would significantly reduce file count
     val reductionRatio = files.length.toDouble / estimatedMergedFiles
-    logger.info(f"File count reduction: ${reductionRatio}%.1fx")
+    logger.info(f"File count reduction: $reductionRatio%.1fx")
 
     assert(reductionRatio > 5, "Merge should reduce file count by at least 5x")
     logger.info("=" * 60)

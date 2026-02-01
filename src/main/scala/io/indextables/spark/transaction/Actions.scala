@@ -17,30 +17,33 @@
 
 package io.indextables.spark.transaction
 
+import scala.jdk.CollectionConverters._
+
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode, ObjectMapper}
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 
-import scala.jdk.CollectionConverters._
-
 /**
- * Pre-parsed metadata extracted from docMappingJson.
- * This avoids repeated JSON parsing throughout the codebase.
+ * Pre-parsed metadata extracted from docMappingJson. This avoids repeated JSON parsing throughout the codebase.
  *
- * @param fieldNames All field names in the schema
- * @param fastFields Fields configured with fast=true (for aggregations)
- * @param fieldTypes Map of field name -> type (text, string, i64, f64, etc.)
- * @param indexedFields Fields configured with indexed=true
- * @param storedFields Fields configured with stored=true
+ * @param fieldNames
+ *   All field names in the schema
+ * @param fastFields
+ *   Fields configured with fast=true (for aggregations)
+ * @param fieldTypes
+ *   Map of field name -> type (text, string, i64, f64, etc.)
+ * @param indexedFields
+ *   Fields configured with indexed=true
+ * @param storedFields
+ *   Fields configured with stored=true
  */
 case class DocMappingMetadata(
   fieldNames: Set[String],
   fastFields: Set[String],
   fieldTypes: Map[String, String],
   indexedFields: Set[String] = Set.empty,
-  storedFields: Set[String] = Set.empty
-)
+  storedFields: Set[String] = Set.empty)
 
 object DocMappingMetadata {
   private val mapper = new ObjectMapper()
@@ -48,10 +51,7 @@ object DocMappingMetadata {
   /** Empty metadata for when no docMappingJson is available */
   val empty: DocMappingMetadata = DocMappingMetadata(Set.empty, Set.empty, Map.empty, Set.empty, Set.empty)
 
-  /**
-   * Parse docMappingJson into structured metadata.
-   * Handles both array format and field_mappings wrapper format.
-   */
+  /** Parse docMappingJson into structured metadata. Handles both array format and field_mappings wrapper format. */
   def parse(docMappingJson: String): DocMappingMetadata = {
     if (docMappingJson == null || docMappingJson.isEmpty) {
       return empty
@@ -72,11 +72,11 @@ object DocMappingMetadata {
         return empty
       }
 
-      val fieldNames = scala.collection.mutable.Set[String]()
-      val fastFields = scala.collection.mutable.Set[String]()
-      val fieldTypes = scala.collection.mutable.Map[String, String]()
+      val fieldNames    = scala.collection.mutable.Set[String]()
+      val fastFields    = scala.collection.mutable.Set[String]()
+      val fieldTypes    = scala.collection.mutable.Map[String, String]()
       val indexedFields = scala.collection.mutable.Set[String]()
-      val storedFields = scala.collection.mutable.Set[String]()
+      val storedFields  = scala.collection.mutable.Set[String]()
 
       fieldsArray.elements().asScala.foreach { fieldNode =>
         val name = Option(fieldNode.get("name")).map(_.asText()).getOrElse("")
@@ -163,17 +163,16 @@ case class AddAction(
   @JsonProperty("hotcacheStartOffset") @JsonDeserialize(using =
     classOf[OptionalLongDeserializer]
   ) hotcacheStartOffset: Option[Long] = None,
-  @JsonProperty("hotcacheLength") @JsonDeserialize(using =
-    classOf[OptionalLongDeserializer]
-  ) hotcacheLength: Option[Long] = None,
+  @JsonProperty("hotcacheLength") @JsonDeserialize(using = classOf[OptionalLongDeserializer]) hotcacheLength: Option[
+    Long
+  ] = None,
   @JsonProperty("hasFooterOffsets") hasFooterOffsets: Boolean = false,
   // Complete tantivy4java SplitMetadata fields
   @JsonProperty("timeRangeStart") timeRangeStart: Option[String] = None, // Instant as ISO string
   @JsonProperty("timeRangeEnd") timeRangeEnd: Option[String] = None,     // Instant as ISO string
   @JsonProperty("splitTags") splitTags: Option[Set[String]] = None,      // tantivy4java tags (distinct from Delta tags)
-  @JsonProperty("deleteOpstamp") @JsonDeserialize(using =
-    classOf[OptionalLongDeserializer]
-  ) deleteOpstamp: Option[Long] = None,
+  @JsonProperty("deleteOpstamp") @JsonDeserialize(using = classOf[OptionalLongDeserializer]) deleteOpstamp: Option[Long] =
+    None,
   @JsonProperty("numMergeOps") numMergeOps: Option[Int] = None,
   @JsonProperty("docMappingJson") docMappingJson: Option[String] = None,
   @JsonProperty("docMappingRef") docMappingRef: Option[String] = None, // Schema hash reference for deduplication

@@ -17,12 +17,13 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{LastCheckpointInfo, ProtocolAction, ProtocolVersion}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.{LastCheckpointInfo, ProtocolAction, ProtocolVersion}
+import io.indextables.spark.TestBase
 
 class MigrationTest extends TestBase {
 
@@ -119,9 +120,8 @@ class MigrationTest extends TestBase {
 
         val v2Files = streamingReader.getFilesAtVersion(2)
         v2Files should have size 10
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -155,23 +155,23 @@ class MigrationTest extends TestBase {
 
         // Read back and verify partition values
         val streamingReader = StreamingStateReader(cloudProvider, txLogPath.toString)
-        val allFiles = streamingReader.getFilesAtVersion(1)
+        val allFiles        = streamingReader.getFilesAtVersion(1)
 
         allFiles should have size 4
         allFiles.filter(_.partitionValues.get("date").contains("2024-01-01")) should have size 2
         allFiles.filter(_.partitionValues.get("date").contains("2024-01-02")) should have size 2
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
   // Helper methods
 
   private def createTestFileEntry(
-      path: String,
-      version: Long = 1,
-      partitionValues: Map[String, String] = Map.empty): FileEntry = {
+    path: String,
+    version: Long = 1,
+    partitionValues: Map[String, String] = Map.empty
+  ): FileEntry =
     FileEntry(
       path = path,
       partitionValues = partitionValues,
@@ -192,5 +192,4 @@ class MigrationTest extends TestBase {
       addedAtVersion = version,
       addedAtTimestamp = System.currentTimeMillis()
     )
-  }
 }

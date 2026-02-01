@@ -17,21 +17,19 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.TestBase
-
 import scala.collection.mutable.ArrayBuffer
+
+import io.indextables.spark.TestBase
 
 /**
  * Tests for concurrent state write handling in the Avro state format.
  *
  * These tests verify:
- *   1. Conditional writes properly detect concurrent conflicts
- *   2. Retry logic increments version on conflict
- *   3. _last_checkpoint is updated atomically with version checking
- *   4. Multiple concurrent writers eventually succeed with unique versions
+ *   1. Conditional writes properly detect concurrent conflicts 2. Retry logic increments version on conflict 3.
+ *      _last_checkpoint is updated atomically with version checking 4. Multiple concurrent writers eventually succeed
+ *      with unique versions
  *
- * Run with:
- *   mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.ConcurrentStateWriteTest'
+ * Run with: mvn scalatest:test -DwildcardSuites='io.indextables.spark.transaction.avro.ConcurrentStateWriteTest'
  */
 class ConcurrentStateWriteTest extends TestBase {
 
@@ -43,8 +41,11 @@ class ConcurrentStateWriteTest extends TestBase {
 
       // Create initial table
       val data = Seq((1, "doc1"), (2, "doc2"))
-      spark.createDataFrame(data).toDF("id", "content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data)
+        .toDF("id", "content")
+        .write
+        .format(provider)
         .mode("overwrite")
         .save(path)
 
@@ -104,9 +105,8 @@ class ConcurrentStateWriteTest extends TestBase {
 
         // Verify the manifest exists
         manifestIO.stateExists(stateDir) shouldBe true
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -124,12 +124,12 @@ class ConcurrentStateWriteTest extends TestBase {
         val manifestIO = StateManifestIO(cloudProvider)
 
         // Write checkpoint at version 10
-        val json10 = """{"version":10,"size":100,"sizeInBytes":1000,"numFiles":100,"createdTime":1234567890000}"""
+        val json10    = """{"version":10,"size":100,"sizeInBytes":1000,"numFiles":100,"createdTime":1234567890000}"""
         val written10 = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 10L, json10)
         written10 shouldBe true
 
         // Try to write checkpoint at version 5 (older) - should be skipped
-        val json5 = """{"version":5,"size":50,"sizeInBytes":500,"numFiles":50,"createdTime":1234567890000}"""
+        val json5    = """{"version":5,"size":50,"sizeInBytes":500,"numFiles":50,"createdTime":1234567890000}"""
         val written5 = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 5L, json5)
         written5 shouldBe false
 
@@ -138,16 +138,15 @@ class ConcurrentStateWriteTest extends TestBase {
         written10Same shouldBe true
 
         // Write checkpoint at version 15 (newer) - should succeed
-        val json15 = """{"version":15,"size":150,"sizeInBytes":1500,"numFiles":150,"createdTime":1234567890000}"""
+        val json15    = """{"version":15,"size":150,"sizeInBytes":1500,"numFiles":150,"createdTime":1234567890000}"""
         val written15 = manifestIO.writeLastCheckpointIfNewer(transactionLogPath, 15L, json15)
         written15 shouldBe true
 
         // Verify final version is 15
         val currentVersion = manifestIO.getCurrentCheckpointVersion(transactionLogPath)
         currentVersion shouldBe Some(15L)
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -215,9 +214,8 @@ class ConcurrentStateWriteTest extends TestBase {
         // Verify both versions exist
         manifestIO.stateExists(s"$transactionLogPath/${manifestIO.formatStateDir(1L)}") shouldBe true
         manifestIO.stateExists(s"$transactionLogPath/${manifestIO.formatStateDir(2L)}") shouldBe true
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -227,8 +225,11 @@ class ConcurrentStateWriteTest extends TestBase {
 
       // Create initial table with data
       val data = (1 to 100).map(i => (i, s"document $i", i * 10))
-      spark.createDataFrame(data).toDF("id", "content", "score")
-        .write.format(provider)
+      spark
+        .createDataFrame(data)
+        .toDF("id", "content", "score")
+        .write
+        .format(provider)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(path)
@@ -242,8 +243,8 @@ class ConcurrentStateWriteTest extends TestBase {
 
       try {
         for (i <- 1 to 3) {
-          val result = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
-          val status = result(0).getAs[String]("status")
+          val result  = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+          val status  = result(0).getAs[String]("status")
           val version = result(0).getAs[Long]("checkpoint_version")
           results += ((version, status))
           println(s"Checkpoint $i: version=$version, status=$status")
@@ -261,9 +262,8 @@ class ConcurrentStateWriteTest extends TestBase {
         val state = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
         state(0).getAs[String]("format") shouldBe "avro-state"
 
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.state.format")
-      }
     }
   }
 
@@ -336,9 +336,8 @@ class ConcurrentStateWriteTest extends TestBase {
         writtenManifest.stateVersion shouldBe 4L
         writtenManifest.numFiles shouldBe 1
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -348,8 +347,11 @@ class ConcurrentStateWriteTest extends TestBase {
 
       // Create initial table
       val data = Seq((1, "doc1"), (2, "doc2"))
-      spark.createDataFrame(data).toDF("id", "content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data)
+        .toDF("id", "content")
+        .write
+        .format(provider)
         .mode("overwrite")
         .save(path)
 
@@ -420,9 +422,8 @@ class ConcurrentStateWriteTest extends TestBase {
         val aheadHint = manifestIO.verifyCheckpointVersion(transactionLogPath, 10L)
         aheadHint shouldBe 10L
 
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -432,8 +433,11 @@ class ConcurrentStateWriteTest extends TestBase {
 
       // Create initial table with data
       val data = Seq((1, "doc1"), (2, "doc2"))
-      spark.createDataFrame(data).toDF("id", "content")
-        .write.format(provider)
+      spark
+        .createDataFrame(data)
+        .toDF("id", "content")
+        .write
+        .format(provider)
         .mode("overwrite")
         .save(path)
 
@@ -448,8 +452,11 @@ class ConcurrentStateWriteTest extends TestBase {
 
         // Add more data and create another checkpoint
         val data2 = Seq((3, "doc3"), (4, "doc4"))
-        spark.createDataFrame(data2).toDF("id", "content")
-          .write.format(provider)
+        spark
+          .createDataFrame(data2)
+          .toDF("id", "content")
+          .write
+          .format(provider)
           .mode("append")
           .save(path)
 
@@ -470,7 +477,8 @@ class ConcurrentStateWriteTest extends TestBase {
         try {
           val manifestIO = StateManifestIO(cloudProvider)
           val staleCheckpointJson =
-            s"""{"version":$v1,"size":2,"sizeInBytes":1000,"numFiles":2,"createdTime":${System.currentTimeMillis()},"format":"avro-state","stateDir":"${manifestIO.formatStateDir(v1)}"}"""
+            s"""{"version":$v1,"size":2,"sizeInBytes":1000,"numFiles":2,"createdTime":${System
+                .currentTimeMillis()},"format":"avro-state","stateDir":"${manifestIO.formatStateDir(v1)}"}"""
           cloudProvider.writeFile(s"$transactionLogPath/_last_checkpoint", staleCheckpointJson.getBytes("UTF-8"))
 
           // Verify _last_checkpoint now points to v1 (stale)
@@ -499,12 +507,10 @@ class ConcurrentStateWriteTest extends TestBase {
           verifiedInfo.get.stateDir shouldBe Some(manifestIO.formatStateDir(v2))
 
           checkpoint.close()
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.state.format")
-      }
     }
   }
 
@@ -521,8 +527,11 @@ class ConcurrentStateWriteTest extends TestBase {
           (1, Map("color" -> "red", "size" -> "large")),
           (2, Map("color" -> "blue", "size" -> "small"))
         )
-        spark.createDataFrame(data).toDF("id", "attributes")
-          .write.format(provider)
+        spark
+          .createDataFrame(data)
+          .toDF("id", "attributes")
+          .write
+          .format(provider)
           .mode("overwrite")
           .save(path)
 
@@ -546,9 +555,8 @@ class ConcurrentStateWriteTest extends TestBase {
           val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
           println(s"DEBUG: Transaction log files:")
           files.foreach(f => println(s"  - ${f.path}"))
-        } finally {
+        } finally
           cloudProvider.close()
-        }
 
         // Now create a new cloud provider to read state
         val cloudProvider2 = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
@@ -561,7 +569,8 @@ class ConcurrentStateWriteTest extends TestBase {
           val manifestIO = StateManifestIO(cloudProvider2)
 
           // Find the state directory
-          val stateDir = cloudProvider2.listFiles(transactionLogPath, recursive = false)
+          val stateDir = cloudProvider2
+            .listFiles(transactionLogPath, recursive = false)
             .filter(f => f.path.contains("state-v"))
             .headOption
             .map(_.path)
@@ -578,8 +587,8 @@ class ConcurrentStateWriteTest extends TestBase {
 
           // Read entries and verify docMappingRef
           val manifestPaths = manifestIO.resolveManifestPaths(manifest, transactionLogPath, stateDir)
-          val avroReader = AvroManifestReader(cloudProvider2)
-          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+          val avroReader    = AvroManifestReader(cloudProvider2)
+          val fileEntries   = avroReader.readManifestsParallel(manifestPaths)
 
           fileEntries.foreach { entry =>
             println(s"DEBUG MAP: entry docMappingRef=${entry.docMappingRef}")
@@ -599,9 +608,8 @@ class ConcurrentStateWriteTest extends TestBase {
           df.count() shouldBe 2
           println(s"DEBUG: df.count() succeeded!")
 
-        } finally {
+        } finally
           cloudProvider2.close()
-        }
       } finally {
         // No config to unset since we didn't set any
       }
@@ -618,8 +626,11 @@ class ConcurrentStateWriteTest extends TestBase {
       try {
         // Write data - this should create AddActions with docMappingJson
         val data = Seq((1, "doc1"), (2, "doc2"))
-        spark.createDataFrame(data).toDF("id", "content")
-          .write.format(provider)
+        spark
+          .createDataFrame(data)
+          .toDF("id", "content")
+          .write
+          .format(provider)
           .mode("overwrite")
           .save(path)
 
@@ -635,7 +646,8 @@ class ConcurrentStateWriteTest extends TestBase {
           val manifestIO = StateManifestIO(cloudProvider)
 
           // Find the state directory
-          val stateDir = cloudProvider.listFiles(transactionLogPath, recursive = false)
+          val stateDir = cloudProvider
+            .listFiles(transactionLogPath, recursive = false)
             .filter(f => f.path.contains("state-v"))
             .headOption
             .map(_.path)
@@ -654,8 +666,8 @@ class ConcurrentStateWriteTest extends TestBase {
 
           // Read the manifest file entries and verify they have docMappingRef
           val manifestPaths = manifestIO.resolveManifestPaths(manifest, transactionLogPath, stateDir)
-          val avroReader = AvroManifestReader(cloudProvider)
-          val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+          val avroReader    = AvroManifestReader(cloudProvider)
+          val fileEntries   = avroReader.readManifestsParallel(manifestPaths)
 
           println(s"DEBUG: fileEntries count = ${fileEntries.size}")
           fileEntries.foreach { entry =>
@@ -663,9 +675,7 @@ class ConcurrentStateWriteTest extends TestBase {
           }
 
           // All entries should have docMappingRef set
-          fileEntries.foreach { entry =>
-            entry.docMappingRef shouldBe defined
-          }
+          fileEntries.foreach(entry => entry.docMappingRef shouldBe defined)
 
           // Convert to AddActions and verify docMappingJson is restored
           val addActions = avroReader.toAddActions(fileEntries, manifest.schemaRegistry)
@@ -678,12 +688,10 @@ class ConcurrentStateWriteTest extends TestBase {
           val df = spark.read.format(provider).load(path)
           df.count() shouldBe 2
 
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.state.format")
-      }
     }
   }
 }
