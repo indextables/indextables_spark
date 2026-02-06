@@ -112,11 +112,11 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *   - Per-field (old): `typemap.title` = "text" → title gets type "text"
    *   - Per-type (new): `typemap.text` = "title,content" → title and content both get type "text"
    */
-  def getFieldTypeMapping: Map[String, String] =
+  lazy val getFieldTypeMapping: Map[String, String] =
     parseDualSyntaxConfig("spark.indextables.indexing.typemap.", ValidFieldTypes)
 
   /** Get fast fields configuration. Returns set of field names that should get "fast" indexing. */
-  def getFastFields: Set[String] =
+  lazy val getFastFields: Set[String] =
     Option(options.get("spark.indextables.indexing.fastfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
@@ -125,19 +125,19 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    * Get non-fast fields configuration. Returns set of field names that should be excluded from default fast field
    * behavior. This allows users to exclude specific fields from being auto-configured as fast.
    */
-  def getNonFastFields: Set[String] =
+  lazy val getNonFastFields: Set[String] =
     Option(options.get("spark.indextables.indexing.nonfastfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /** Get store-only fields configuration. Returns set of field names that should be stored but not indexed. */
-  def getStoreOnlyFields: Set[String] =
+  lazy val getStoreOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.storeonlyfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /** Get index-only fields configuration. Returns set of field names that should be indexed but not stored. */
-  def getIndexOnlyFields: Set[String] =
+  lazy val getIndexOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.indexonlyfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
@@ -149,7 +149,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *   - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.en_stem = "content,body")
    *   - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "en_stem")
    */
-  def getTokenizerOverrides: Map[String, String] =
+  lazy val getTokenizerOverrides: Map[String, String] =
     parseDualSyntaxConfig("spark.indextables.indexing.tokenizer.", ValidTokenizers)
 
   /**
@@ -157,7 +157,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    * text fields. Options: "basic" (doc IDs only), "freq" (doc IDs + term frequency), "position" (doc IDs + freq +
    * positions) Default: "position" (required for phrase queries and exact phrase matching)
    */
-  def getDefaultIndexRecordOption: String =
+  lazy val getDefaultIndexRecordOption: String =
     Option(options.get("spark.indextables.indexing.text.indexRecordOption"))
       .map(_.toLowerCase)
       .getOrElse("position")
@@ -170,7 +170,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *   - Per-field (old): `indexrecordoption.content` = "position" → content uses option "position"
    *   - Per-option (new): `indexrecordoption.position` = "content,body" → content and body both use "position"
    */
-  def getIndexRecordOptionOverrides: Map[String, String] =
+  lazy val getIndexRecordOptionOverrides: Map[String, String] =
     parseDualSyntaxConfig("spark.indextables.indexing.indexrecordoption.", ValidIndexRecordOptions)
 
   /**
@@ -187,7 +187,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *
    * Default: 255 (Quickwit-compatible)
    */
-  def getDefaultMaxTokenLength: Int = {
+  lazy val getDefaultMaxTokenLength: Int = {
     val rawValue = Option(options.get("spark.indextables.indexing.text.maxTokenLength"))
       .map(_.trim.toLowerCase)
     rawValue match {
@@ -253,7 +253,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *   - `tokenLength.content` = "legacy" → content uses 40-byte limit
    *   - `tokenLength.content` = "tantivy_max" → content uses 65530-byte limit
    */
-  def getMaxTokenLengthOverrides: Map[String, Int] = {
+  lazy val getMaxTokenLengthOverrides: Map[String, Int] = {
     import scala.jdk.CollectionConverters._
     val result = scala.collection.mutable.Map[String, Int]()
     val prefix = "spark.indextables.indexing.tokenlength."
