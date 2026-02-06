@@ -89,6 +89,16 @@ spark.indextables.indexing.text.maxTokenLength: 255 (default: 255, Quickwit-comp
 spark.indextables.dataSkippingStatsColumns: <column_list> (comma-separated, takes precedence over numIndexedCols)
 spark.indextables.dataSkippingNumIndexedCols: 32 (default: 32, -1 for all eligible columns, 0 to disable)
 
+// Optimized Writes (Iceberg-style shuffle before writing)
+// When enabled, requests a shuffle to cluster data by partition columns before writing.
+// Produces well-sized splits (~1GB) by using advisory partition sizes from AQE.
+// Uses transaction log history (if available) or a sampling ratio fallback for size estimation.
+spark.indextables.write.optimizeWrite.enabled: false (default: false, enable shuffle-based write optimization)
+spark.indextables.write.optimizeWrite.targetSplitSize: "1G" (default: 1GB, target on-disk split size)
+spark.indextables.write.optimizeWrite.samplingRatio: 1.1 (default: 1.1, split-to-shuffle-data ratio for sampling mode)
+spark.indextables.write.optimizeWrite.minRowsForEstimation: 10000 (default: 10000, min rows per split for history mode)
+spark.indextables.write.optimizeWrite.distributionMode: "hash" (default: "hash", options: "hash", "none")
+
 // Merge-On-Write (automatic split consolidation during writes)
 spark.indextables.mergeOnWrite.enabled: false (default: false)
 spark.indextables.mergeOnWrite.targetSize: "4G" (default: 4G, target merged split size)
@@ -378,6 +388,16 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.title", "string")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score")
+  .save("s3://bucket/path")
+```
+
+### Optimized Write (shuffle before writing)
+```scala
+// Enable optimized writes to produce well-sized splits (~1GB)
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.write.optimizeWrite.enabled", "true")
+  .option("spark.indextables.write.optimizeWrite.targetSplitSize", "1G")
+  .partitionBy("date")
   .save("s3://bucket/path")
 ```
 
@@ -1236,6 +1256,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
   - Real S3/Azure purge-on-write tests available but require credentials
 - ✅ **DESCRIBE ENVIRONMENT**: 10/10 tests passing (parsing, schema, redaction, queryability)
 - ✅ **Merge I/O**: 34/34 tests passing (config, priority queue, download manager, local copy downloader)
+- ✅ **Optimized Writes**: 44/44 tests passing (config 17, estimator 12, integration 15)
 
 ## Important Notes
 - **DataSource API**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for all read/write operations
@@ -1256,6 +1277,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **L2 Disk Cache**: Auto-enabled on Databricks/EMR when `/local_disk0` detected; disabled on spinning disk systems (no benefit). Use `spark.indextables.cache.disk.enabled=false` to explicitly disable.
 - **Bucket aggregations**: Use `indextables_histogram`, `indextables_date_histogram`, `indextables_range` functions in GROUP BY for time-series and distribution analysis. Requires fast fields.
 - **Merge I/O**: Downloads/uploads handled in Scala using AWS SDK v2 async client; tantivy4java receives only local paths. Priority queue ensures first-submitted batches complete first while maximizing throughput.
+- **Optimized Writes**: Disabled by default. When enabled, uses Spark's `RequiresDistributionAndOrdering` to shuffle data by partition columns before writing, producing well-sized (~1GB) splits. Uses AQE advisory partition size with history-based or sampling-based estimation.
 
 ---
 
