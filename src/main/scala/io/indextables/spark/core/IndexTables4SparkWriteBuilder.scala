@@ -23,6 +23,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.write.OptimizedWriteConfig
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkWriteBuilder(
@@ -70,10 +71,23 @@ class IndexTables4SparkWriteBuilder(
       serializedOptions = serializedOptions + (configKey -> maxParallelism.toString)
     }
 
-    logger.info("Using IndexTables4SparkStandardWrite")
-    val standardWrite =
-      new IndexTables4SparkStandardWrite(transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite)
-    logger.info(s"Created write instance: ${standardWrite.getClass.getSimpleName}")
-    standardWrite
+    val optimizedConfig = OptimizedWriteConfig.fromOptions(
+      new CaseInsensitiveStringMap(serializedOptions.asJava)
+    )
+
+    if (optimizedConfig.enabled) {
+      logger.info("Using IndexTables4SparkOptimizedWrite (shuffle optimization enabled)")
+      val write = new IndexTables4SparkOptimizedWrite(
+        transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite, optimizedConfig
+      )
+      logger.info(s"Created write instance: ${write.getClass.getSimpleName}")
+      write
+    } else {
+      logger.info("Using IndexTables4SparkStandardWrite")
+      val write =
+        new IndexTables4SparkStandardWrite(transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite)
+      logger.info(s"Created write instance: ${write.getClass.getSimpleName}")
+      write
+    }
   }
 }

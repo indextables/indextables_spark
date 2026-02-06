@@ -66,7 +66,7 @@ class IndexTables4SparkStandardWrite(
   private val serializedHadoopConf =
     // Serialize only the tantivy4spark config properties from hadoopConf (includes credentials from enrichedHadoopConf)
     io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-  private val partitionColumns =
+  protected val partitionColumns =
     // Extract partition columns from write options (set by .partitionBy())
     // Spark sets this as a JSON array string like ["col1","col2"]
     serializedOptions.get("__partition_columns") match {
