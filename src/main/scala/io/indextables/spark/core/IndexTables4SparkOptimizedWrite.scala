@@ -56,38 +56,51 @@ class IndexTables4SparkOptimizedWrite(
     estimator.calculateAdvisoryPartitionSize()
   }
 
+  private lazy val defaultParallelism: Int =
+    org.apache.spark.sql.SparkSession.active.sparkContext.defaultParallelism
+
   override def requiredDistribution(): Distribution =
-    if (config.distributionMode == "hash") {
-      if (partitionColumns.nonEmpty) {
-        // Partitioned: cluster by partition columns so each writer gets one partition's data.
-        val exprs = partitionColumns.map(col => Expressions.column(col).asInstanceOf[Expression]).toArray
-        optLogger.info(s"Requesting clustered distribution on columns: ${partitionColumns.mkString(", ")}")
-        Distributions.clustered(exprs)
-      } else {
-        // Unpartitioned: cluster by a single column just to trigger a shuffle so AQE can
-        // coalesce using the advisory size. Spark 3.5 rejects empty clustering + advisory > 0
-        // (DistributionAndOrderingUtils treats empty clustering as "no distribution"), so we
-        // need at least one expression. A single column keeps hash cost O(1) per row
-        // regardless of schema width.
-        val expr = Array(Expressions.column(firstSchemaField).asInstanceOf[Expression])
-        optLogger.info(s"Requesting clustered distribution on column: $firstSchemaField (unpartitioned table)")
-        Distributions.clustered(expr)
-      }
-    } else {
-      optLogger.info("Using unspecified distribution (mode=none)")
-      Distributions.unspecified()
+    config.distributionMode match {
+      case "hash" | "balanced" =>
+        if (partitionColumns.nonEmpty) {
+          val exprs = partitionColumns.map(col => Expressions.column(col).asInstanceOf[Expression]).toArray
+          optLogger.info(s"Requesting clustered distribution on columns: ${partitionColumns.mkString(", ")} (mode=${config.distributionMode})")
+          Distributions.clustered(exprs)
+        } else {
+          // Unpartitioned: cluster by a single column just to trigger a shuffle so AQE can
+          // coalesce using the advisory size. Spark 3.5 rejects empty clustering + advisory > 0
+          // (DistributionAndOrderingUtils treats empty clustering as "no distribution"), so we
+          // need at least one expression.
+          val expr = Array(Expressions.column(firstSchemaField).asInstanceOf[Expression])
+          optLogger.info(s"Requesting clustered distribution on column: $firstSchemaField (unpartitioned, mode=${config.distributionMode})")
+          Distributions.clustered(expr)
+        }
+      case _ =>
+        optLogger.info("Using unspecified distribution (mode=none)")
+        Distributions.unspecified()
     }
 
-  override def distributionStrictlyRequired(): Boolean = false
+  override def distributionStrictlyRequired(): Boolean =
+    config.distributionMode == "balanced"
 
   override def requiredOrdering(): Array[SortOrder] = Array.empty
 
-  override def advisoryPartitionSizeInBytes(): Long =
-    if (config.distributionMode == "hash") {
-      optLogger.info(s"Advisory partition size: ${config.targetSplitSizeString} ($advisorySize bytes)")
-      advisorySize
+  override def requiredNumPartitions(): Int =
+    if (config.distributionMode == "balanced") {
+      optLogger.info(s"Balanced mode: requiredNumPartitions=$defaultParallelism (defaultParallelism)")
+      defaultParallelism
     } else {
-      // Spark doesn't support advisory size with UnspecifiedDistribution
-      0L
+      0 // Let Spark decide
+    }
+
+  override def advisoryPartitionSizeInBytes(): Long =
+    config.distributionMode match {
+      case "hash" =>
+        optLogger.info(s"Advisory partition size: ${config.targetSplitSizeString} ($advisorySize bytes)")
+        advisorySize
+      case _ =>
+        // balanced: uses requiredNumPartitions instead
+        // none: Spark doesn't support advisory size with UnspecifiedDistribution
+        0L
     }
 }

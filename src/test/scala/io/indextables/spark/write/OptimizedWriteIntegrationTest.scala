@@ -497,4 +497,412 @@ class OptimizedWriteIntegrationTest extends TestBase {
       txLog.close()
     }
   }
+
+  // ===== Balanced Mode API Tests =====
+
+  test("balanced mode: requiredNumPartitions equals defaultParallelism") {
+    withTempPath { path =>
+      val tablePath = new Path(s"file://$path/test_balanced_num_parts")
+      val txLog = createTxLog(tablePath)
+
+      val builder = createWriteBuilder(tablePath, txLog, Map(
+        OptimizedWriteConfig.KEY_ENABLED -> "true",
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced"
+      ))
+      val write = builder.build().asInstanceOf[RequiresDistributionAndOrdering]
+
+      val expected = spark.sparkContext.defaultParallelism
+      write.requiredNumPartitions() shouldBe expected
+      write.requiredNumPartitions() should be > 0
+
+      txLog.close()
+    }
+  }
+
+  test("balanced mode: advisoryPartitionSizeInBytes is 0") {
+    withTempPath { path =>
+      val tablePath = new Path(s"file://$path/test_balanced_advisory")
+      val txLog = createTxLog(tablePath)
+
+      val builder = createWriteBuilder(tablePath, txLog, Map(
+        OptimizedWriteConfig.KEY_ENABLED -> "true",
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced"
+      ))
+      val write = builder.build().asInstanceOf[RequiresDistributionAndOrdering]
+
+      // Balanced mode uses requiredNumPartitions, not advisory size
+      write.advisoryPartitionSizeInBytes() shouldBe 0L
+
+      txLog.close()
+    }
+  }
+
+  test("balanced mode: distributionStrictlyRequired is true") {
+    withTempPath { path =>
+      val tablePath = new Path(s"file://$path/test_balanced_strict")
+      val txLog = createTxLog(tablePath)
+
+      val builder = createWriteBuilder(tablePath, txLog, Map(
+        OptimizedWriteConfig.KEY_ENABLED -> "true",
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced"
+      ))
+      val write = builder.build().asInstanceOf[RequiresDistributionAndOrdering]
+
+      write.distributionStrictlyRequired() shouldBe true
+
+      txLog.close()
+    }
+  }
+
+  test("balanced mode: uses clustered distribution like hash mode") {
+    withTempPath { path =>
+      val tablePath = new Path(s"file://$path/test_balanced_dist")
+      val txLog = createTxLog(tablePath)
+
+      val builder = createWriteBuilder(tablePath, txLog,
+        extraOptions = Map(
+          OptimizedWriteConfig.KEY_ENABLED -> "true",
+          OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced",
+          "__partition_columns" -> """["category"]"""
+        ),
+        schemaFields = Seq("id" -> "long", "text" -> "string", "category" -> "string")
+      )
+      val write = builder.build().asInstanceOf[RequiresDistributionAndOrdering]
+
+      val dist = write.requiredDistribution()
+      dist shouldBe a[ClusteredDistribution]
+
+      txLog.close()
+    }
+  }
+
+  test("hash mode: requiredNumPartitions is 0 and distributionStrictlyRequired is false") {
+    withTempPath { path =>
+      val tablePath = new Path(s"file://$path/test_hash_num_parts")
+      val txLog = createTxLog(tablePath)
+
+      val builder = createWriteBuilder(tablePath, txLog, Map(
+        OptimizedWriteConfig.KEY_ENABLED -> "true",
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "hash"
+      ))
+      val write = builder.build().asInstanceOf[RequiresDistributionAndOrdering]
+
+      write.requiredNumPartitions() shouldBe 0
+      write.distributionStrictlyRequired() shouldBe false
+
+      txLog.close()
+    }
+  }
+
+  // ===== Split Rolling E2E Tests =====
+
+  test("balanced mode: write produces correct data") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_balanced_write"
+      val df = spark.range(0, 200).selectExpr("id", "CAST(id AS STRING) as text")
+
+      df.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .save(tablePath)
+
+      val result = spark.read.format(FORMAT).load(tablePath)
+      result.count() shouldBe 200
+
+      val ids = result.select("id").collect().map(_.getLong(0)).sorted
+      ids shouldBe (0L until 200L).toArray
+    }
+  }
+
+  test("balanced mode with partitions: data integrity per partition") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_balanced_partitioned"
+      val df = spark.range(0, 300)
+        .selectExpr("id", "CAST(id AS STRING) as text", "CAST(id % 3 AS STRING) as category")
+
+      df.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .partitionBy("category")
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .save(tablePath)
+
+      val result = spark.read.format(FORMAT).load(tablePath)
+      result.count() shouldBe 300
+      result.filter("category = '0'").count() shouldBe 100
+      result.filter("category = '1'").count() shouldBe 100
+      result.filter("category = '2'").count() shouldBe 100
+    }
+  }
+
+  test("split rolling: small maxSplitSize produces multiple splits per task") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_rolling"
+
+      // First write to establish history for bytes-per-row estimation
+      // Use minRowsForEstimation=100 so the first write qualifies for history mode
+      val df1 = spark.range(0, 1000).selectExpr("id", "CAST(id AS STRING) as text")
+      df1.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "hash")
+        .save(tablePath)
+
+      val txLogBefore = createTxLog(new Path(tablePath))
+      val firstWriteSplitCount = txLogBefore.listFiles().length
+      txLogBefore.close()
+
+      // Second write with balanced mode and small maxSplitSize to trigger rolling
+      // minRowsForEstimation=100 ensures the first write's history qualifies
+      val df2 = spark.range(1000, 5000).selectExpr("id", "CAST(id AS STRING) as text")
+      df2.write
+        .mode("append")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .option(OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE, "10K")
+        .option(OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST, "100") // Low threshold for test
+        .save(tablePath)
+
+      // Verify split count increased significantly due to rolling
+      val txLog = createTxLog(new Path(tablePath))
+      val allSplits = txLog.listFiles()
+      val parallelism = spark.sparkContext.defaultParallelism
+
+      // Rolling should produce more splits than defaultParallelism
+      // (each task rolls multiple times with 10K max split size)
+      withClue(s"Total splits: ${allSplits.length}, firstWrite=$firstWriteSplitCount, " +
+        s"parallelism=$parallelism - rolling should produce more splits than tasks: ") {
+        val secondWriteSplits = allSplits.length - firstWriteSplitCount
+        secondWriteSplits should be > parallelism
+      }
+
+      // Verify metadata-level record counts match expectations
+      val totalMetadataRecords = allSplits.flatMap(_.numRecords).sum
+      withClue(s"Metadata numRecords sum across ${allSplits.length} splits: ") {
+        totalMetadataRecords shouldBe 5000
+      }
+
+      // Use .limit(Int.MaxValue) to push a large limit through to the reader,
+      // overriding the default per-split limit of 250
+      val result = spark.read.format(FORMAT).load(tablePath)
+      val collectedCount = result.select("id").limit(Int.MaxValue).collect().length
+      withClue(s"Collected rows (splits=${allSplits.length}, parallelism=$parallelism): ") {
+        collectedCount shouldBe 5000
+      }
+
+      txLog.close()
+    }
+  }
+
+  test("split rolling: data integrity - all IDs present with no duplicates") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_rolling_integrity"
+
+      // First write to establish history
+      val df1 = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
+      df1.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "hash")
+        .save(tablePath)
+
+      // Second write with rolling
+      val df2 = spark.range(500, 3000).selectExpr("id", "CAST(id AS STRING) as text")
+      df2.write
+        .mode("append")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .option(OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE, "10K")
+        .option(OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST, "100")
+        .save(tablePath)
+
+      // Verify every single ID is present, no duplicates, no gaps
+      val result = spark.read.format(FORMAT).load(tablePath)
+      val ids = result.select("id").limit(Int.MaxValue).collect().map(_.getLong(0)).sorted
+      ids shouldBe (0L until 3000L).toArray
+
+      // Also verify text column survived rolling
+      val textsForId = result.filter("id = 1500").select("text").limit(Int.MaxValue).collect()
+      textsForId should have length 1
+      textsForId(0).getString(0) shouldBe "1500"
+    }
+  }
+
+  test("split rolling: partitioned table rolls correctly per partition") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_rolling_partitioned"
+
+      // First write to establish history
+      val df1 = spark.range(0, 600)
+        .selectExpr("id", "CAST(id AS STRING) as text", "CAST(id % 3 AS STRING) as category")
+      df1.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .partitionBy("category")
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "hash")
+        .save(tablePath)
+
+      val txLogBefore = createTxLog(new Path(tablePath))
+      val firstWriteSplitCount = txLogBefore.listFiles().length
+      txLogBefore.close()
+
+      // Second write with rolling on partitioned table
+      val df2 = spark.range(600, 3600)
+        .selectExpr("id", "CAST(id AS STRING) as text", "CAST(id % 3 AS STRING) as category")
+      df2.write
+        .mode("append")
+        .format(FORMAT)
+        .partitionBy("category")
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .option(OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE, "10K")
+        .option(OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST, "100")
+        .save(tablePath)
+
+      // Verify rolling produced more splits than tasks
+      val txLog = createTxLog(new Path(tablePath))
+      val allSplits = txLog.listFiles()
+      val secondWriteSplits = allSplits.length - firstWriteSplitCount
+      val parallelism = spark.sparkContext.defaultParallelism
+      withClue(s"Partitioned rolling: secondWriteSplits=$secondWriteSplits, parallelism=$parallelism: ") {
+        secondWriteSplits should be > parallelism
+      }
+
+      // Verify data integrity across all partitions
+      val result = spark.read.format(FORMAT).load(tablePath)
+      val allIds = result.select("id").limit(Int.MaxValue).collect().map(_.getLong(0)).sorted
+      allIds shouldBe (0L until 3600L).toArray
+
+      // Verify per-partition counts
+      result.filter("category = '0'").count() shouldBe 1200
+      result.filter("category = '1'").count() shouldBe 1200
+      result.filter("category = '2'").count() shouldBe 1200
+
+      txLog.close()
+    }
+  }
+
+  test("balanced mode: empty tasks handled gracefully when data < defaultParallelism") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_empty_tasks"
+      val parallelism = spark.sparkContext.defaultParallelism
+
+      // Write very few rows - fewer than defaultParallelism tasks
+      // Some tasks will receive no data at all
+      val df = spark.range(0, 1).selectExpr("id", "CAST(id AS STRING) as text")
+      df.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .save(tablePath)
+
+      // Verify data integrity - single row should survive
+      val result = spark.read.format(FORMAT).load(tablePath)
+      result.count() shouldBe 1
+      val ids = result.select("id").collect().map(_.getLong(0))
+      ids shouldBe Array(0L)
+
+      // Verify split count - should be <= parallelism (most tasks produced empty commits)
+      val txLog = createTxLog(new Path(tablePath))
+      val splits = txLog.listFiles()
+      withClue(s"With 1 row across $parallelism tasks, splits=${splits.length}: ") {
+        splits.length should be >= 1
+        splits.length should be <= parallelism
+      }
+      txLog.close()
+    }
+  }
+
+  test("split rolling: progressive output metrics are set correctly") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_progressive_metrics"
+
+      // First write to establish history
+      val df1 = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
+      df1.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "hash")
+        .save(tablePath)
+
+      // Second write with rolling - capture Spark job metrics via listener
+      @volatile var totalOutputBytes: Long = 0L
+      @volatile var totalOutputRecords: Long = 0L
+      val metricsListener = new org.apache.spark.scheduler.SparkListener {
+        override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit = {
+          val metrics = taskEnd.taskMetrics
+          if (metrics != null) {
+            totalOutputBytes += metrics.outputMetrics.bytesWritten
+            totalOutputRecords += metrics.outputMetrics.recordsWritten
+          }
+        }
+      }
+      spark.sparkContext.addSparkListener(metricsListener)
+
+      try {
+        val df2 = spark.range(500, 3000).selectExpr("id", "CAST(id AS STRING) as text")
+        df2.write
+          .mode("append")
+          .format(FORMAT)
+          .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+          .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+          .option(OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE, "10K")
+          .option(OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST, "100")
+          .save(tablePath)
+
+        // Wait for async listener events to be delivered
+        Thread.sleep(2000)
+
+        // Verify that output metrics were reported for the write tasks
+        // The rolling code calls updateOutputMetrics after each roll AND at final commit,
+        // so the final metrics should reflect the total bytes/records across all rolled splits
+        withClue(s"Output records from task metrics (bytes=$totalOutputBytes): ") {
+          totalOutputRecords shouldBe 2500 // second write: 500..3000
+        }
+        totalOutputBytes should be > 0L
+      } finally {
+        spark.sparkContext.removeSparkListener(metricsListener)
+      }
+    }
+  }
+
+  test("split rolling: first write without history does not roll (no estimation available)") {
+    withTempPath { path =>
+      val tablePath = s"file://$path/test_no_history_no_roll"
+
+      // First write with balanced mode - no history means calculateMaxRowsPerSplit returns None
+      val df = spark.range(0, 200).selectExpr("id", "CAST(id AS STRING) as text")
+      df.write
+        .mode("overwrite")
+        .format(FORMAT)
+        .option(OptimizedWriteConfig.KEY_ENABLED, "true")
+        .option(OptimizedWriteConfig.KEY_DISTRIBUTION_MODE, "balanced")
+        .option(OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE, "1K")
+        .save(tablePath)
+
+      // Verify data integrity
+      val result = spark.read.format(FORMAT).load(tablePath)
+      result.count() shouldBe 200
+
+      // Without history, no __maxRowsPerSplit is injected, so no rolling occurs.
+      // The number of splits should equal the number of tasks (defaultParallelism).
+      val txLog = createTxLog(new Path(tablePath))
+      val splits = txLog.listFiles()
+      val parallelism = spark.sparkContext.defaultParallelism
+      withClue(s"Without history, splits (${ splits.length}) should be <= defaultParallelism ($parallelism): ") {
+        splits.length should be <= parallelism
+      }
+      txLog.close()
+    }
+  }
 }

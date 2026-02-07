@@ -35,6 +35,7 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
     config.samplingRatio shouldBe 1.1
     config.minRowsForEstimation shouldBe 10000L
     config.distributionMode shouldBe "hash"
+    config.maxSplitSizeBytes shouldBe (4L * 1024 * 1024 * 1024)
   }
 
   test("fromOptions with all defaults") {
@@ -44,6 +45,7 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
     config.samplingRatio shouldBe 1.1
     config.minRowsForEstimation shouldBe 10000L
     config.distributionMode shouldBe "hash"
+    config.maxSplitSizeBytes shouldBe (4L * 1024 * 1024 * 1024)
   }
 
   test("fromOptions with all values specified") {
@@ -187,5 +189,72 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
   test("targetSplitSizeString formats correctly") {
     OptimizedWriteConfig(targetSplitSizeBytes = 1L * 1024 * 1024 * 1024).targetSplitSizeString shouldBe "1G"
     OptimizedWriteConfig(targetSplitSizeBytes = 512L * 1024 * 1024).targetSplitSizeString shouldBe "512M"
+  }
+
+  // ===== Balanced mode tests =====
+
+  test("fromOptions parses balanced distribution mode") {
+    val config = OptimizedWriteConfig.fromOptions(makeOptions(
+      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced"
+    ))
+    config.distributionMode shouldBe "balanced"
+  }
+
+  test("fromOptions balanced mode is case-insensitive") {
+    val config = OptimizedWriteConfig.fromOptions(makeOptions(
+      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "BALANCED"
+    ))
+    config.distributionMode shouldBe "balanced"
+  }
+
+  test("fromOptions parses maxSplitSize") {
+    val config = OptimizedWriteConfig.fromOptions(makeOptions(
+      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "2G"
+    ))
+    config.maxSplitSizeBytes shouldBe (2L * 1024 * 1024 * 1024)
+
+    val config512M = OptimizedWriteConfig.fromOptions(makeOptions(
+      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "512M"
+    ))
+    config512M.maxSplitSizeBytes shouldBe (512L * 1024 * 1024)
+  }
+
+  test("fromOptions falls back to default for invalid maxSplitSize") {
+    val config = OptimizedWriteConfig.fromOptions(makeOptions(
+      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "notasize"
+    ))
+    config.maxSplitSizeBytes shouldBe (4L * 1024 * 1024 * 1024)
+  }
+
+  test("fromMap parses balanced mode and maxSplitSize") {
+    val config = OptimizedWriteConfig.fromMap(Map(
+      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced",
+      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "2G"
+    ))
+    config.distributionMode shouldBe "balanced"
+    config.maxSplitSizeBytes shouldBe (2L * 1024 * 1024 * 1024)
+  }
+
+  test("validate rejects negative maxSplitSize") {
+    an[IllegalArgumentException] should be thrownBy {
+      OptimizedWriteConfig(maxSplitSizeBytes = -1).validate()
+    }
+  }
+
+  test("validate rejects zero maxSplitSize") {
+    an[IllegalArgumentException] should be thrownBy {
+      OptimizedWriteConfig(maxSplitSizeBytes = 0).validate()
+    }
+  }
+
+  test("validate accepts balanced distribution mode") {
+    noException should be thrownBy {
+      OptimizedWriteConfig(distributionMode = "balanced").validate()
+    }
+  }
+
+  test("maxSplitSizeString formats correctly") {
+    OptimizedWriteConfig(maxSplitSizeBytes = 4L * 1024 * 1024 * 1024).maxSplitSizeString shouldBe "4G"
+    OptimizedWriteConfig(maxSplitSizeBytes = 512L * 1024 * 1024).maxSplitSizeString shouldBe "512M"
   }
 }

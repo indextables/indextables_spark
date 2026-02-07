@@ -23,7 +23,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.TransactionLog
-import io.indextables.spark.write.OptimizedWriteConfig
+import io.indextables.spark.write.{OptimizedWriteConfig, WriteSizeEstimator}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkWriteBuilder(
@@ -76,6 +76,16 @@ class IndexTables4SparkWriteBuilder(
     )
 
     if (optimizedConfig.enabled) {
+      // For balanced mode, compute maxRowsPerSplit from transaction log history
+      // and inject into serialized options for the DataWriter to read on executors
+      if (optimizedConfig.distributionMode == "balanced") {
+        val estimator = new WriteSizeEstimator(transactionLog, optimizedConfig)
+        estimator.calculateMaxRowsPerSplit().foreach { maxRows =>
+          logger.info(s"Balanced mode: injecting __maxRowsPerSplit=$maxRows into writer options")
+          serializedOptions = serializedOptions + ("__maxRowsPerSplit" -> maxRows.toString)
+        }
+      }
+
       logger.info("Using IndexTables4SparkOptimizedWrite (shuffle optimization enabled)")
       val write = new IndexTables4SparkOptimizedWrite(
         transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite, optimizedConfig
