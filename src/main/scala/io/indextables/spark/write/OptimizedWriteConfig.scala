@@ -37,14 +37,18 @@ import org.slf4j.LoggerFactory
  * @param minRowsForEstimation
  *   Minimum rows per split to qualify for history-based size estimation (default: 10000)
  * @param distributionMode
- *   Distribution mode: "hash" clusters by partition columns, "none" uses unspecified (default: "hash")
+ *   Distribution mode: "hash" clusters by partition columns, "balanced" uses fixed partition count
+ *   for 100% executor utilization with split rolling, "none" uses unspecified (default: "hash")
+ * @param maxSplitSizeBytes
+ *   Maximum on-disk split size before rolling a new split in balanced mode (default: 4GB)
  */
 case class OptimizedWriteConfig(
   enabled: Boolean = OptimizedWriteConfig.DEFAULT_ENABLED,
   targetSplitSizeBytes: Long = OptimizedWriteConfig.DEFAULT_TARGET_SPLIT_SIZE_BYTES,
   samplingRatio: Double = OptimizedWriteConfig.DEFAULT_SAMPLING_RATIO,
   minRowsForEstimation: Long = OptimizedWriteConfig.DEFAULT_MIN_ROWS_FOR_ESTIMATION,
-  distributionMode: String = OptimizedWriteConfig.DEFAULT_DISTRIBUTION_MODE) {
+  distributionMode: String = OptimizedWriteConfig.DEFAULT_DISTRIBUTION_MODE,
+  maxSplitSizeBytes: Long = OptimizedWriteConfig.DEFAULT_MAX_SPLIT_SIZE_BYTES) {
 
   def validate(): OptimizedWriteConfig = {
     require(
@@ -63,10 +67,16 @@ case class OptimizedWriteConfig(
       OptimizedWriteConfig.VALID_DISTRIBUTION_MODES.contains(distributionMode),
       s"distributionMode must be one of ${OptimizedWriteConfig.VALID_DISTRIBUTION_MODES.mkString(", ")}, got: $distributionMode"
     )
+    require(
+      maxSplitSizeBytes > 0,
+      s"maxSplitSizeBytes must be > 0, got: $maxSplitSizeBytes"
+    )
     this
   }
 
   def targetSplitSizeString: String = SizeParser.formatBytes(targetSplitSizeBytes)
+
+  def maxSplitSizeString: String = SizeParser.formatBytes(maxSplitSizeBytes)
 }
 
 object OptimizedWriteConfig {
@@ -78,6 +88,7 @@ object OptimizedWriteConfig {
   val KEY_SAMPLING_RATIO       = "spark.indextables.write.optimizeWrite.samplingRatio"
   val KEY_MIN_ROWS_FOR_EST     = "spark.indextables.write.optimizeWrite.minRowsForEstimation"
   val KEY_DISTRIBUTION_MODE    = "spark.indextables.write.optimizeWrite.distributionMode"
+  val KEY_MAX_SPLIT_SIZE       = "spark.indextables.write.optimizeWrite.maxSplitSize"
 
   // Default values
   val DEFAULT_ENABLED: Boolean                = false
@@ -85,8 +96,9 @@ object OptimizedWriteConfig {
   val DEFAULT_SAMPLING_RATIO: Double          = 1.1
   val DEFAULT_MIN_ROWS_FOR_ESTIMATION: Long   = 10000L
   val DEFAULT_DISTRIBUTION_MODE: String       = "hash"
+  val DEFAULT_MAX_SPLIT_SIZE_BYTES: Long      = 4L * 1024 * 1024 * 1024 // 4GB
 
-  val VALID_DISTRIBUTION_MODES: Set[String] = Set("hash", "none")
+  val VALID_DISTRIBUTION_MODES: Set[String] = Set("hash", "balanced", "none")
 
   def default: OptimizedWriteConfig = OptimizedWriteConfig()
 
@@ -104,19 +116,23 @@ object OptimizedWriteConfig {
     val distributionMode = getStringOption(
       options, KEY_DISTRIBUTION_MODE, DEFAULT_DISTRIBUTION_MODE, VALID_DISTRIBUTION_MODES
     )
+    val maxSplitSizeBytes = parseSizeOption(
+      options, KEY_MAX_SPLIT_SIZE, DEFAULT_MAX_SPLIT_SIZE_BYTES
+    )
 
     val config = OptimizedWriteConfig(
       enabled = enabled,
       targetSplitSizeBytes = targetSplitSizeBytes,
       samplingRatio = samplingRatio,
       minRowsForEstimation = minRowsForEstimation,
-      distributionMode = distributionMode
+      distributionMode = distributionMode,
+      maxSplitSizeBytes = maxSplitSizeBytes
     )
 
     logger.debug(
       s"OptimizedWriteConfig: enabled=$enabled, targetSplitSize=${config.targetSplitSizeString}, " +
         s"samplingRatio=$samplingRatio, minRowsForEstimation=$minRowsForEstimation, " +
-        s"distributionMode=$distributionMode"
+        s"distributionMode=$distributionMode, maxSplitSize=${config.maxSplitSizeString}"
     )
 
     config
@@ -132,7 +148,9 @@ object OptimizedWriteConfig {
         .map(SizeParser.parseSize).getOrElse(DEFAULT_TARGET_SPLIT_SIZE_BYTES),
       samplingRatio = get(KEY_SAMPLING_RATIO).map(_.toDouble).getOrElse(DEFAULT_SAMPLING_RATIO),
       minRowsForEstimation = get(KEY_MIN_ROWS_FOR_EST).map(_.toLong).getOrElse(DEFAULT_MIN_ROWS_FOR_ESTIMATION),
-      distributionMode = get(KEY_DISTRIBUTION_MODE).getOrElse(DEFAULT_DISTRIBUTION_MODE)
+      distributionMode = get(KEY_DISTRIBUTION_MODE).getOrElse(DEFAULT_DISTRIBUTION_MODE),
+      maxSplitSizeBytes = get(KEY_MAX_SPLIT_SIZE)
+        .map(SizeParser.parseSize).getOrElse(DEFAULT_MAX_SPLIT_SIZE_BYTES)
     ).validate()
   }
 

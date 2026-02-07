@@ -1002,10 +1002,56 @@ class IndexTables4SparkDataWriter(
   private val partitionInfo: PartitionUtils.PartitionColumnInfo =
     PartitionUtils.precomputePartitionInfo(writeSchema, partitionColumns)
 
+  // Split rolling support for balanced mode: when maxRowsPerSplit is set,
+  // finalize and upload the current split when the row count reaches the limit,
+  // then continue writing to a fresh split.
+  private val maxRowsPerSplit: Option[Long] = Option(serializedOptions.getOrElse("__maxRowsPerSplit", null))
+    .filter(_.nonEmpty).map(_.toLong)
+  private val rolledActions = scala.collection.mutable.ArrayBuffer[AddAction]()
+  private var cumulativeBytes: Long = 0L
+  private var cumulativeRecords: Long = 0L
+
   // Debug: log partition columns being used
   logger.info(
-    s"DataWriter initialized for partition $partitionId with partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}"
+    s"DataWriter initialized for partition $partitionId with partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}" +
+      maxRowsPerSplit.map(m => s", maxRowsPerSplit=$m").getOrElse("")
   )
+
+  /**
+   * Check if the current writer should be rolled (finalized and replaced with a fresh one).
+   * Called after each row is written. If the row count reaches maxRowsPerSplit, the current
+   * split is committed (uploaded + cleaned up), and a fresh writer is returned.
+   */
+  private def maybeRollSplit(
+    engine: TantivySearchEngine,
+    stats: StatisticsCalculator.DatasetStatistics,
+    count: Long,
+    partitionValues: Map[String, String],
+    partitionKey: String
+  ): (TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long) =
+    maxRowsPerSplit match {
+      case Some(maxRows) if count >= maxRows =>
+        // Finalize current split (uploads to storage + cleans up temp files)
+        val addAction = commitWriter(engine, stats, count, partitionValues, partitionKey)
+        rolledActions += addAction
+
+        // Progressive metrics update so Spark UI shows real-time progress
+        cumulativeBytes += addAction.size
+        cumulativeRecords += addAction.numRecords.getOrElse(0L)
+        org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(cumulativeBytes, cumulativeRecords)
+
+        logger.info(s"Rolled split after $count rows (cumulative: $cumulativeRecords records, " +
+          s"${rolledActions.size} splits, partition=$partitionKey)")
+
+        // Create fresh writer
+        (
+          new TantivySearchEngine(writeSchema, options, serializedOptions),
+          new StatisticsCalculator.DatasetStatistics(writeSchema, serializedOptions),
+          0L
+        )
+      case _ =>
+        (engine, stats, count) // No change
+    }
 
   override def write(record: InternalRow): Unit =
     if (partitionColumns.isEmpty) {
@@ -1013,7 +1059,7 @@ class IndexTables4SparkDataWriter(
       val (engine, stats, count) = singleWriter.get
       engine.addDocument(record)
       stats.updateRow(record)
-      singleWriter = Some((engine, stats, count + 1))
+      singleWriter = Some(maybeRollSplit(engine, stats, count + 1, Map.empty, ""))
     } else {
       // Partitioned write - extract partition values using precomputed indices (O(1) vs O(schema.size))
       val partitionValues = PartitionUtils.extractPartitionValuesFast(record, partitionInfo)
@@ -1035,28 +1081,30 @@ class IndexTables4SparkDataWriter(
       // Store the complete record in the split (including partition columns)
       engine.addDocument(record)
       stats.updateRow(record)
-      partitionWriters(partitionKey) = (engine, stats, count + 1)
+      partitionWriters(partitionKey) = maybeRollSplit(engine, stats, count + 1, partitionValues, partitionKey)
     }
 
   override def commit(): WriterCommitMessage = {
+    // Start with already-uploaded rolled splits
     val allActions = scala.collection.mutable.ArrayBuffer[AddAction]()
+    allActions ++= rolledActions
 
-    // Handle non-partitioned writes
+    // Handle non-partitioned writes (remaining data in current writer)
     if (singleWriter.isDefined) {
       val (searchEngine, statistics, recordCount) = singleWriter.get
-      if (recordCount == 0) {
-        logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written")
+      if (recordCount > 0) {
+        logger.info(s"Committing partition $partitionId with $recordCount records (final segment)")
+        val addAction = commitWriter(searchEngine, statistics, recordCount, Map.empty, "")
+        allActions += addAction
+      } else if (rolledActions.isEmpty) {
+        logger.info(s"Skipping transaction log entry for partition $partitionId - no records written")
         return IndexTables4SparkCommitMessage(Seq.empty)
       }
-
-      logger.info(s"Committing partition $partitionId with $recordCount records")
-      val addAction = commitWriter(searchEngine, statistics, recordCount, Map.empty, "")
-      allActions += addAction
     }
 
-    // Handle partitioned writes
+    // Handle partitioned writes (remaining data in each partition writer)
     if (partitionWriters.nonEmpty) {
-      logger.info(s"Committing ${partitionWriters.size} partition writers")
+      logger.info(s"Committing ${partitionWriters.size} partition writers (final segments)")
 
       partitionWriters.foreach {
         case (partitionKey, (searchEngine, statistics, recordCount)) =>
@@ -1065,17 +1113,17 @@ class IndexTables4SparkDataWriter(
             val addAction       = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
             allActions += addAction
           } else {
-            logger.warn(s"Skipping empty partition: $partitionKey")
+            logger.debug(s"Skipping empty partition writer: $partitionKey (data already rolled)")
           }
       }
     }
 
     if (allActions.isEmpty) {
-      logger.info(s"⚠️  No records written in partition $partitionId")
+      logger.info(s"No records written in partition $partitionId")
       return IndexTables4SparkCommitMessage(Seq.empty)
     }
 
-    // Report output metrics to Spark UI (bytesWritten, recordsWritten)
+    // Report final output metrics to Spark UI (bytesWritten, recordsWritten)
     val totalBytes   = allActions.map(_.size).sum
     val totalRecords = allActions.flatMap(_.numRecords).sum
     if (org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(totalBytes, totalRecords)) {
@@ -1083,7 +1131,9 @@ class IndexTables4SparkDataWriter(
     }
 
     logger.info(
-      s"Committed partition $partitionId with ${allActions.size} splits, $totalBytes bytes, $totalRecords records"
+      s"Committed partition $partitionId with ${allActions.size} splits " +
+        s"(${rolledActions.size} rolled + ${allActions.size - rolledActions.size} final), " +
+        s"$totalBytes bytes, $totalRecords records"
     )
     IndexTables4SparkCommitMessage(allActions.toSeq)
   }
@@ -1342,9 +1392,10 @@ class IndexTables4SparkDataWriter(
   }
 
   override def abort(): Unit = {
-    logger.warn(s"Aborting writer for partition $partitionId")
+    logger.warn(s"Aborting writer for partition $partitionId (${rolledActions.size} splits already uploaded)")
     singleWriter.foreach { case (engine, _, _) => engine.close() }
     partitionWriters.values.foreach { case (engine, _, _) => engine.close() }
+    rolledActions.clear()
   }
 
   override def close(): Unit = {

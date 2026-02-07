@@ -43,34 +43,66 @@ class WriteSizeEstimator(
 
   private val logger = LoggerFactory.getLogger(classOf[WriteSizeEstimator])
 
-  def calculateAdvisoryPartitionSize(): Long =
+  /**
+   * Calculates bytes-per-row from qualifying splits in the transaction log.
+   *
+   * @return Some(bytesPerRow) if qualifying splits exist, None otherwise
+   */
+  def calculateBytesPerRow(): Option[Double] =
     try {
       val addActions = transactionLog.listFiles()
       val qualifying = addActions.filter(_.numRecords.exists(_ >= config.minRowsForEstimation))
 
       if (qualifying.nonEmpty) {
-        // HISTORY MODE: use real bytesPerRow from transaction log
         val totalBytes = qualifying.map(_.size).sum
         val totalRows = qualifying.flatMap(_.numRecords).sum
         val bytesPerRow = totalBytes.toDouble / totalRows
-        val advisory = config.targetSplitSizeBytes
         logger.info(
           s"History mode: ${qualifying.length} qualifying splits, " +
-            s"bytesPerRow=${f"$bytesPerRow%.1f"}, advisory=${SizeParser.formatBytes(advisory)}"
+            s"bytesPerRow=${f"$bytesPerRow%.1f"}"
         )
-        advisory
+        Some(bytesPerRow)
       } else {
-        // SAMPLING MODE: use configured ratio as fallback
+        logger.info("No qualifying splits found for bytes-per-row estimation")
+        None
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Bytes-per-row estimation failed: ${e.getMessage}")
+        None
+    }
+
+  def calculateAdvisoryPartitionSize(): Long =
+    calculateBytesPerRow() match {
+      case Some(_) =>
+        val advisory = config.targetSplitSizeBytes
+        logger.info(s"History mode: advisory=${SizeParser.formatBytes(advisory)}")
+        advisory
+      case None =>
         val advisory = (config.targetSplitSizeBytes / config.samplingRatio).toLong
         logger.info(
           s"Sampling mode: advisory=${SizeParser.formatBytes(advisory)} " +
             s"(target=${SizeParser.formatBytes(config.targetSplitSizeBytes)} / ratio=${config.samplingRatio})"
         )
         advisory
-      }
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Size estimation failed, falling back to sampling: ${e.getMessage}")
-        (config.targetSplitSizeBytes / config.samplingRatio).toLong
+    }
+
+  /**
+   * Calculates the maximum number of rows per split for balanced mode rolling.
+   *
+   * Uses bytes-per-row from transaction log history to estimate how many rows
+   * fit within maxSplitSizeBytes. Returns None if no history is available
+   * (first write), in which case no rolling occurs.
+   *
+   * @return Some(maxRows) if history exists, None otherwise
+   */
+  def calculateMaxRowsPerSplit(): Option[Long] =
+    calculateBytesPerRow().map { bpr =>
+      val maxRows = math.max(1L, (config.maxSplitSizeBytes / bpr).toLong)
+      logger.info(
+        s"Max rows per split: $maxRows " +
+          s"(maxSplitSize=${SizeParser.formatBytes(config.maxSplitSizeBytes)}, bytesPerRow=${f"$bpr%.1f"})"
+      )
+      maxRows
     }
 }

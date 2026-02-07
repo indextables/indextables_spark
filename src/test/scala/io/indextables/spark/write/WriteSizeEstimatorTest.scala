@@ -245,4 +245,126 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
     advisory2G shouldBe GB
     advisory2G shouldBe (2 * advisory1G)
   }
+
+  // ===== calculateBytesPerRow tests =====
+
+  test("calculateBytesPerRow returns None for empty transaction log") {
+    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(), config)
+
+    estimator.calculateBytesPerRow() shouldBe None
+  }
+
+  test("calculateBytesPerRow returns None when splits below threshold") {
+    val files = Seq(
+      makeAddAction(size = 100 * MB, numRecords = Some(500))
+    )
+    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
+
+    estimator.calculateBytesPerRow() shouldBe None
+  }
+
+  test("calculateBytesPerRow returns correct value from history") {
+    val files = Seq(
+      makeAddAction(size = 500 * MB, numRecords = Some(50000)),
+      makeAddAction(size = 700 * MB, numRecords = Some(70000))
+    )
+    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
+
+    val result = estimator.calculateBytesPerRow()
+    result shouldBe defined
+    // (500MB + 700MB) / (50000 + 70000) = 1200MB / 120000 = 10485.76 bytes/row
+    val expected = (500.0 * MB + 700.0 * MB) / (50000 + 70000)
+    result.get shouldBe expected +- 0.01
+  }
+
+  test("calculateBytesPerRow returns None on listFiles exception") {
+    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB)
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(throwOnList = true), config)
+
+    estimator.calculateBytesPerRow() shouldBe None
+  }
+
+  // ===== calculateMaxRowsPerSplit tests =====
+
+  test("calculateMaxRowsPerSplit returns None without history") {
+    val config = OptimizedWriteConfig(
+      targetSplitSizeBytes = GB,
+      maxSplitSizeBytes = 4 * GB,
+      minRowsForEstimation = 10000
+    )
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(), config)
+
+    estimator.calculateMaxRowsPerSplit() shouldBe None
+  }
+
+  test("calculateMaxRowsPerSplit returns correct value with history") {
+    // 10KB per row (100MB / 10000 rows)
+    val files = Seq(
+      makeAddAction(size = 100 * MB, numRecords = Some(10000))
+    )
+    val config = OptimizedWriteConfig(
+      targetSplitSizeBytes = GB,
+      maxSplitSizeBytes = 4 * GB,
+      minRowsForEstimation = 10000
+    )
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
+
+    val result = estimator.calculateMaxRowsPerSplit()
+    result shouldBe defined
+    // bytesPerRow = 100MB / 10000 = 10485.76
+    // maxRows = 4GB / 10485.76 = 409600
+    val bytesPerRow = (100.0 * MB) / 10000
+    val expected = (4.0 * GB / bytesPerRow).toLong
+    result.get shouldBe expected
+  }
+
+  test("calculateMaxRowsPerSplit returns at least 1") {
+    // Very large bytes per row (1GB per row) with small max split size
+    val files = Seq(
+      makeAddAction(size = 10 * GB, numRecords = Some(10000)) // 1MB per row
+    )
+    val config = OptimizedWriteConfig(
+      targetSplitSizeBytes = GB,
+      maxSplitSizeBytes = 100, // Very small max split size (100 bytes)
+      minRowsForEstimation = 10000
+    )
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
+
+    val result = estimator.calculateMaxRowsPerSplit()
+    result shouldBe defined
+    result.get shouldBe 1L // Clamped to minimum of 1
+  }
+
+  test("calculateMaxRowsPerSplit returns None on listFiles exception") {
+    val config = OptimizedWriteConfig(
+      targetSplitSizeBytes = GB,
+      maxSplitSizeBytes = 4 * GB
+    )
+    val estimator = new WriteSizeEstimator(new StubTransactionLog(throwOnList = true), config)
+
+    estimator.calculateMaxRowsPerSplit() shouldBe None
+  }
+
+  test("calculateAdvisoryPartitionSize unchanged behavior after refactor") {
+    // Verify the refactored method produces identical results
+    val files = Seq(
+      makeAddAction(size = 500 * MB, numRecords = Some(50000))
+    )
+    val config = OptimizedWriteConfig(
+      targetSplitSizeBytes = GB,
+      samplingRatio = 1.1,
+      minRowsForEstimation = 10000
+    )
+
+    // History mode should still return targetSplitSize
+    val historyEstimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
+    historyEstimator.calculateAdvisoryPartitionSize() shouldBe GB
+
+    // Sampling mode should still return targetSplitSize / ratio
+    val samplingEstimator = new WriteSizeEstimator(new StubTransactionLog(), config)
+    samplingEstimator.calculateAdvisoryPartitionSize() shouldBe (GB / 1.1).toLong
+  }
 }
