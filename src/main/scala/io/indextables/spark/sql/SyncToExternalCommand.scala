@@ -548,15 +548,17 @@ case class SyncToExternalCommand(
     try {
       transactionLog.getMetadata()
       val files = transactionLog.listFiles()
-      // Derive lastSyncedVersion from the max companionDeltaVersion across all files
       val versions = files.flatMap(_.companionDeltaVersion)
       val maxDeltaVersion = if (versions.nonEmpty) versions.max else -1L
       logger.info(s"Existing table: ${files.size} files, lastSyncedVersion=$maxDeltaVersion")
       (files, maxDeltaVersion, false)
     } catch {
-      // Finding #5: Narrow catch to expected exceptions for missing/uninitialized table
-      case _: java.io.FileNotFoundException | _: java.io.IOException |
-           _: IllegalStateException | _: NoSuchElementException =>
+      // Only catch the specific exception thrown by TransactionLog.getMetadata() when no
+      // table/metadata exists. All other exceptions (network errors, credential failures,
+      // etc.) propagate — this prevents accidentally re-initializing an existing table
+      // on a transient failure.
+      case e: RuntimeException if e.getMessage != null &&
+          e.getMessage.contains("No metadata found in transaction log") =>
         logger.info(s"No existing table at $destPath, initializing for initial sync")
         transactionLog.initialize(deltaSchema, partitionColumns)
         (Seq.empty[AddAction], -1L, true)
