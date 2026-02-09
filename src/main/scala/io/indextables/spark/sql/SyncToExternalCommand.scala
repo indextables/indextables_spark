@@ -143,11 +143,7 @@ case class SyncToExternalCommand(
 
     // 2. DRY RUN mode: compute plan from Delta table only, no filesystem modifications
     if (dryRun) {
-      var allFiles = if (fromVersion.isDefined) {
-        deltaReader.getFilesAddedSinceVersion(fromVersion.get)
-      } else {
-        deltaReader.getAllFiles()
-      }
+      var allFiles = deltaReader.getAllFiles()
       allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups = planIndexingGroups(allFiles, maxGroupSize)
@@ -229,39 +225,13 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
-      // 7. Determine what needs indexing
-      val (rawParquetFiles, splitsToInvalidate) = if (isInitialSync) {
-        // Full snapshot or FROM VERSION subset
-        val allFiles = if (fromVersion.isDefined) {
-          deltaReader.getFilesAddedSinceVersion(fromVersion.get)
-        } else {
-          deltaReader.getAllFiles()
-        }
-        logger.info(s"Initial sync: ${allFiles.size} parquet files to index" +
-          fromVersion.map(v => s" (from version $v)").getOrElse(""))
-        (allFiles, Seq.empty[AddAction])
-      } else {
-        // Incremental: compute changes since last sync
-        computeIncrementalChanges(deltaReader, existingFiles, lastSyncedVersion, deltaVersion)
-      }
+      // 7. Determine what needs indexing via anti-join (works for both initial and incremental)
+      val (rawParquetFiles, splitsToInvalidate) =
+        computeAntiJoinChanges(deltaReader, existingFiles, isInitialSync)
 
       // 7b. Apply WHERE partition filter
-      val filteredFiles = applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession,
+      val parquetFilesToIndex = applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession,
         effectiveWherePredicates)
-
-      // 7c. Idempotency filter: skip parquet files already indexed in existing companion splits
-      // Finding #4: Normalize paths (strip leading slashes, URL decode) to ensure
-      // consistent comparison between companionSourceFiles and Delta AddFile paths
-      val existingCompanionFiles = existingFiles
-        .flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
-        .map(normalizePath).toSet
-      val parquetFilesToIndex = filteredFiles.filterNot(f =>
-        existingCompanionFiles.contains(normalizePath(f.path)))
-
-      if (parquetFilesToIndex.size < filteredFiles.size) {
-        logger.info(s"Idempotency filter: skipped ${filteredFiles.size - parquetFilesToIndex.size} " +
-          s"already-indexed files, ${parquetFilesToIndex.size} files remaining")
-      }
 
       if (parquetFilesToIndex.isEmpty && splitsToInvalidate.isEmpty) {
         val durationMs = System.currentTimeMillis() - startTime
@@ -565,39 +535,67 @@ case class SyncToExternalCommand(
     }
 
   /**
-   * For incremental sync: compute which parquet files need indexing and which
-   * companion splits need invalidation.
+   * Compute which parquet files need indexing and which companion splits need
+   * invalidation, using an anti-join between the current Delta snapshot and
+   * existing companion splits.
+   *
+   * This replaces the changelog-replay approach (getChanges) with a simpler
+   * set-reconciliation approach that works with delta-kernel (which has no
+   * getChanges API) and is more robust against missed changes.
    */
-  private def computeIncrementalChanges(
+  private def computeAntiJoinChanges(
     deltaReader: DeltaLogReader,
     existingFiles: Seq[AddAction],
-    lastSyncedVersion: Long,
-    currentDeltaVersion: Long
+    isInitialSync: Boolean
   ): (Seq[DeltaAddFile], Seq[AddAction]) = {
-    val (added, removed) = deltaReader.getChanges(lastSyncedVersion, currentDeltaVersion)
+    val currentDeltaFiles = deltaReader.getAllFiles()
 
-    // Find companion splits affected by removed parquet files
-    val removedPaths = removed.map(_.path).toSet
-    val splitsToInvalidate = existingFiles.filter { split =>
-      split.companionSourceFiles.exists(_.exists(removedPaths.contains))
+    if (isInitialSync) {
+      logger.info(s"Initial sync: ${currentDeltaFiles.size} parquet files to index")
+      return (currentDeltaFiles, Seq.empty[AddAction])
     }
 
-    // Finding #6: Collect remaining valid files from invalidated splits, preserving
-    // partition values from the parent split so they group correctly in planIndexingGroups
-    val remainingAsDeltaAddFiles = splitsToInvalidate.flatMap { split =>
+    val currentDeltaPaths = currentDeltaFiles.map(f => normalizePath(f.path)).toSet
+
+    // Collect all parquet file paths tracked by existing companion splits
+    val companionPaths = existingFiles
+      .flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
+      .map(normalizePath).toSet
+
+    // Anti-join: files in Delta but not in any companion split → need indexing
+    val filesToIndex = currentDeltaFiles.filterNot(f =>
+      companionPaths.contains(normalizePath(f.path)))
+
+    // Files tracked by companion splits but no longer in Delta → gone from Delta
+    val pathsGoneFromDelta = companionPaths -- currentDeltaPaths
+
+    // Find companion splits that reference files gone from Delta → need invalidation
+    val splitsToInvalidate = if (pathsGoneFromDelta.nonEmpty) {
+      existingFiles.filter { split =>
+        split.companionSourceFiles.exists(_.exists(f =>
+          pathsGoneFromDelta.contains(normalizePath(f))))
+      }
+    } else {
+      Seq.empty
+    }
+
+    // Collect remaining valid files from invalidated splits that still exist in Delta,
+    // preserving partition values from the parent split for correct grouping
+    val remainingFromInvalidated = splitsToInvalidate.flatMap { split =>
       split.companionSourceFiles.getOrElse(Seq.empty)
-        .filterNot(removedPaths.contains)
+        .filterNot(f => pathsGoneFromDelta.contains(normalizePath(f)))
         .map(relPath => DeltaAddFile(relPath, split.partitionValues, 0L))
-    }.groupBy(_.path).map(_._2.head).toSeq
+    }.groupBy(f => normalizePath(f.path)).map(_._2.head).toSeq
 
-    // Merge added files with remaining files from invalidated splits, dedup by path
-    // (prefer added files since they have accurate size from Delta log)
-    val allFilesToIndex = (added ++ remainingAsDeltaAddFiles)
-      .groupBy(_.path).map(_._2.head).toSeq
+    // Merge new files with remaining files from invalidated splits, dedup by path
+    // (prefer Delta files since they have accurate size)
+    val allFilesToIndex = (filesToIndex ++ remainingFromInvalidated)
+      .groupBy(f => normalizePath(f.path)).map(_._2.head).toSeq
 
-    logger.info(s"Incremental sync: ${added.size} added, ${removed.size} removed, " +
-      s"${splitsToInvalidate.size} splits to invalidate, " +
-      s"${remainingAsDeltaAddFiles.size} files to re-index from invalidated splits")
+    logger.info(s"Anti-join sync: ${currentDeltaFiles.size} in Delta, " +
+      s"${companionPaths.size} in companion, ${filesToIndex.size} new, " +
+      s"${pathsGoneFromDelta.size} gone, ${splitsToInvalidate.size} splits to invalidate, " +
+      s"${remainingFromInvalidated.size} files to re-index from invalidated splits")
 
     (allFilesToIndex, splitsToInvalidate)
   }

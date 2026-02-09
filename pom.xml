@@ -180,19 +180,20 @@
             <classifier>${platform.classifier}</classifier>
         </dependency>
 
-        <!-- Delta Standalone Reader for reading Delta transaction logs -->
+        <!-- Delta Kernel (shaded into fat jar for Databricks/EMR compatibility) -->
         <dependency>
             <groupId>io.delta</groupId>
-            <artifactId>delta-standalone_${scala.compat.version}</artifactId>
-            <version>0.6.0</version>
+            <artifactId>delta-kernel-api</artifactId>
+            <version>3.3.2</version>
+        </dependency>
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-kernel-defaults</artifactId>
+            <version>3.3.2</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.hadoop</groupId>
-                    <artifactId>hadoop-common</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.hadoop</groupId>
-                    <artifactId>hadoop-client</artifactId>
+                    <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -201,7 +202,7 @@
         <dependency>
             <groupId>io.delta</groupId>
             <artifactId>delta-spark_${scala.compat.version}</artifactId>
-            <version>3.2.1</version>
+            <version>3.3.2</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
@@ -568,6 +569,8 @@
                             <artifactSet>
                                 <includes>
                                     <include>io.indextables:tantivy4java</include>
+                                    <include>io.delta:delta-kernel-api</include>
+                                    <include>io.delta:delta-kernel-defaults</include>
                                     <include>software.amazon.awssdk:*</include>
                                     <include>com.azure:azure-core</include>
                                     <!-- <include>com.fasterxml.jackson.core:*</include>

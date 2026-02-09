@@ -20,87 +20,123 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
-import io.delta.standalone.{DeltaLog => StandaloneDeltaLog}
-import io.delta.standalone.actions.{AddFile => StandaloneAddFile, Metadata => StandaloneMetadata}
-import io.delta.standalone.types.{DoubleType => StandaloneDoubleType, LongType => StandaloneLongType,
-  StringType => StandaloneStringType, StructField => StandaloneStructField,
-  StructType => StandaloneStructType, BooleanType => StandaloneBooleanType}
-import io.indextables.spark.TestBase
 import io.indextables.spark.transaction.TransactionLogFactory
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.SparkSession
 
-import scala.collection.JavaConverters._
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FROM DELTA.
  *
- * Uses tantivy4java's nativeWriteTestParquet to create parquet files that are
- * guaranteed to be compatible with createFromParquet, then creates a Delta
- * transaction log pointing at those files using delta-standalone.
+ * Uses delta-spark to create Delta tables with known schemas, then exercises
+ * the BUILD INDEXTABLES COMPANION command pipeline.
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class LocalSyncIntegrationTest extends TestBase {
+class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+
+  protected var spark: SparkSession = _
+
+  override def beforeAll(): Unit = {
+    SparkSession.getActiveSession.foreach(_.stop())
+    SparkSession.getDefaultSession.foreach(_.stop())
+
+    spark = SparkSession.builder()
+      .appName("LocalSyncIntegrationTest")
+      .master("local[2]")
+      .config("spark.sql.warehouse.dir",
+        Files.createTempDirectory("spark-warehouse").toString)
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.driver.host", "127.0.0.1")
+      .config("spark.driver.bindAddress", "127.0.0.1")
+      .config("spark.sql.extensions",
+        "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
+          "io.delta.sql.DeltaSparkSessionExtension")
+      .config("spark.sql.catalog.spark_catalog",
+        "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+      .config("spark.sql.adaptive.enabled", "false")
+      .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
+      .config("spark.indextables.aws.accessKey", "test-default-access-key")
+      .config("spark.indextables.aws.secretKey", "test-default-secret-key")
+      .config("spark.indextables.aws.sessionToken", "test-default-session-token")
+      .config("spark.indextables.s3.pathStyleAccess", "true")
+      .config("spark.indextables.aws.region", "us-east-1")
+      .config("spark.indextables.s3.endpoint", "http://localhost:10101")
+      .getOrCreate()
+
+    spark.sparkContext.setLogLevel("WARN")
+
+    _root_.io.indextables.spark.storage.SplitConversionThrottle.initialize(
+      maxParallelism = Runtime.getRuntime.availableProcessors() max 1
+    )
+  }
+
+  override def afterAll(): Unit =
+    if (spark != null) {
+      spark.stop()
+    }
+
+  private def withTempPath(f: String => Unit): Unit = {
+    val path = Files.createTempDirectory("tantivy4spark").toString
+    try {
+      try {
+        import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
+        GlobalSplitCacheManager.flushAllCaches()
+        DriverSplitLocalityManager.clear()
+      } catch {
+        case _: Exception =>
+      }
+      f(path)
+    } finally
+      deleteRecursively(new File(path))
+  }
+
+  private def deleteRecursively(file: File): Unit = {
+    if (file.isDirectory) {
+      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
+    }
+    file.delete()
+  }
 
   /**
-   * Create a Delta table on the local filesystem using delta-standalone.
-   * Writes parquet files using nativeWriteTestParquet (compatible with createFromParquet),
-   * then creates a Delta log referencing those files.
-   *
-   * nativeWriteTestParquet produces: id(i64), name(utf8), score(f64), active(bool)
+   * Create a Delta table using delta-spark's DataFrame write API.
+   * Schema: id(Long), name(String), score(Double), active(Boolean)
    */
   private def createLocalDeltaTable(
     deltaPath: String,
-    numFiles: Int = 1,
-    rowsPerFile: Int = 20
+    numRows: Int = 20
   ): Unit = {
-    val deltaDir = new File(deltaPath)
-    deltaDir.mkdirs()
+    val ss = spark
+    import ss.implicits._
 
-    // Schema matching nativeWriteTestParquet output
-    val schema = new StandaloneStructType(Array(
-      new StandaloneStructField("id", new StandaloneLongType, false),
-      new StandaloneStructField("name", new StandaloneStringType, true),
-      new StandaloneStructField("score", new StandaloneDoubleType, true),
-      new StandaloneStructField("active", new StandaloneBooleanType, true)
-    ))
-
-    // Write parquet files using tantivy4java's native writer
-    val addFiles = (0 until numFiles).map { i =>
-      val parquetFileName = s"part-0000$i.parquet"
-      val parquetPath = new File(deltaDir, parquetFileName).getAbsolutePath
-
-      QuickwitSplit.nativeWriteTestParquet(parquetPath, rowsPerFile, i * rowsPerFile)
-
-      val fileSize = new File(parquetPath).length()
-      new StandaloneAddFile(
-        parquetFileName,
-        java.util.Collections.emptyMap(),
-        fileSize,
-        System.currentTimeMillis(),
-        true, // dataChange
-        null, // stats
-        null  // tags
-      )
+    val data = (0 until numRows).map { i =>
+      (i.toLong, s"name_$i", i * 1.5, i % 2 == 0)
     }
+    data.toDF("id", "name", "score", "active")
+      .repartition(1)
+      .write.format("delta").save(deltaPath)
+  }
 
-    // Create Delta log using delta-standalone
-    val hadoopConf = new Configuration()
-    val deltaLog = StandaloneDeltaLog.forTable(hadoopConf, deltaPath)
+  /**
+   * Create a Delta table with a specific number of parquet files.
+   */
+  private def createLocalDeltaTableWithFiles(
+    deltaPath: String,
+    numFiles: Int,
+    rowsPerFile: Int = 10
+  ): Unit = {
+    val ss = spark
+    import ss.implicits._
 
-    val metadata = StandaloneMetadata.builder()
-      .schema(schema)
-      .format(new io.delta.standalone.actions.Format("parquet", java.util.Collections.emptyMap()))
-      .build()
-
-    val txn = deltaLog.startTransaction()
-    val actions = new java.util.ArrayList[io.delta.standalone.actions.Action]()
-    actions.add(metadata)
-    addFiles.foreach(actions.add)
-    txn.commit(actions, new io.delta.standalone.Operation(
-      io.delta.standalone.Operation.Name.CREATE_TABLE), "test")
+    val data = (0 until numFiles * rowsPerFile).map { i =>
+      (i.toLong, s"name_$i", i * 1.5, i % 2 == 0)
+    }
+    data.toDF("id", "name", "score", "active")
+      .repartition(numFiles)
+      .write.format("delta").save(deltaPath)
   }
 
   // ═══════════════════════════════════════════
@@ -112,7 +148,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_table").getAbsolutePath
       val indexPath = new File(tempDir, "companion_index").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 20)
+      createLocalDeltaTable(deltaPath, numRows = 20)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
@@ -136,7 +172,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_multi").getAbsolutePath
       val indexPath = new File(tempDir, "companion_multi").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 3, rowsPerFile = 10)
+      createLocalDeltaTableWithFiles(deltaPath, numFiles = 3, rowsPerFile = 10)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
@@ -154,7 +190,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_dryrun").getAbsolutePath
       val indexPath = new File(tempDir, "companion_dryrun").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
+      createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
@@ -178,7 +214,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_incr").getAbsolutePath
       val indexPath = new File(tempDir, "companion_incr").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
+      createLocalDeltaTable(deltaPath, numRows = 10)
 
       // First sync
       val result1 = spark.sql(
@@ -199,7 +235,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_ff").getAbsolutePath
       val indexPath = new File(tempDir, "companion_ff").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
+      createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
@@ -209,7 +245,6 @@ class LocalSyncIntegrationTest extends TestBase {
       rows.length shouldBe 1
       rows(0).getString(2) shouldBe "success"
 
-      // Verify the companion splits have the correct fast field mode
       val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
       try {
         val files = txLog.listFiles()
@@ -228,7 +263,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_hybrid").getAbsolutePath
       val indexPath = new File(tempDir, "companion_hybrid").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
+      createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
@@ -256,7 +291,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_pq").getAbsolutePath
       val indexPath = new File(tempDir, "companion_pq").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
+      createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
@@ -284,7 +319,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_meta").getAbsolutePath
       val indexPath = new File(tempDir, "companion_meta").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 15)
+      createLocalDeltaTableWithFiles(deltaPath, numFiles = 2, rowsPerFile = 15)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
@@ -319,7 +354,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_metrics").getAbsolutePath
       val indexPath = new File(tempDir, "companion_metrics").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 20)
+      createLocalDeltaTable(deltaPath, numRows = 20)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
@@ -353,7 +388,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val deltaPath = new File(tempDir, "delta_guard").getAbsolutePath
       val indexPath = new File(tempDir, "companion_guard").getAbsolutePath
 
-      createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
+      createLocalDeltaTable(deltaPath, numRows = 10)
 
       // Create companion index
       val syncResult = spark.sql(
@@ -362,8 +397,8 @@ class LocalSyncIntegrationTest extends TestBase {
       syncResult.collect()(0).getString(2) shouldBe "success"
 
       // Try to write directly — should fail
-      val _spark = spark
-      import _spark.implicits._
+      val ss = spark
+      import ss.implicits._
       val df = Seq((100, "test")).toDF("id", "content")
 
       val ex = intercept[Exception] {
