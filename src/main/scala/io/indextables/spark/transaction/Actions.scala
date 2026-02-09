@@ -178,7 +178,15 @@ case class AddAction(
   @JsonProperty("docMappingRef") docMappingRef: Option[String] = None, // Schema hash reference for deduplication
   @JsonProperty("uncompressedSizeBytes") @JsonDeserialize(using =
     classOf[OptionalLongDeserializer]
-  ) uncompressedSizeBytes: Option[Long] = None // SplitMetadata uncompressed size
+  ) uncompressedSizeBytes: Option[Long] = None, // SplitMetadata uncompressed size
+  // Companion mode fields (parquet companion splits)
+  @JsonProperty("companionSourceFiles") companionSourceFiles: Option[Seq[String]] =
+    None, // Relative parquet file paths indexed into this split
+  @JsonProperty("companionDeltaVersion") @JsonDeserialize(using =
+    classOf[OptionalLongDeserializer]
+  ) companionDeltaVersion: Option[Long] = None, // Delta version this split was built from
+  @JsonProperty("companionFastFieldMode") companionFastFieldMode: Option[String] =
+    None // "DISABLED", "HYBRID", or "PARQUET_ONLY"
 ) extends Action
 
 case class RemoveAction(

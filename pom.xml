@@ -171,13 +171,56 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.28.8: IP address field type support -->
+        <!-- Version 0.29.0: Parquet companion mode support -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.28.8</version>
+            <version>0.29.0</version>
             <classifier>${platform.classifier}</classifier>
+        </dependency>
+
+        <!-- Delta Standalone Reader for reading Delta transaction logs -->
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-standalone_${scala.compat.version}</artifactId>
+            <version>0.6.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Delta Spark DataSource for integration tests (write Delta tables) -->
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-spark_${scala.compat.version}</artifactId>
+            <version>3.2.1</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Hadoop Azure ABFS filesystem for Azure integration tests -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-azure</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->

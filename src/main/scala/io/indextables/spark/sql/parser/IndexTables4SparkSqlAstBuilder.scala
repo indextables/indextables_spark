@@ -41,6 +41,7 @@ import io.indextables.spark.sql.{
   PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand,
+  SyncToExternalCommand,
   TruncateTimeTravelCommand,
   WaitForPrewarmJobsCommand
 }
@@ -705,6 +706,68 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     } catch {
       case e: Exception =>
         logger.error(s"Exception in visitPrewarmCache: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitSyncToExternal(ctx: SyncToExternalContext): LogicalPlan = {
+    logger.debug(s"visitSyncToExternal called with context: $ctx")
+
+    try {
+      // Source path (Delta table)
+      val sourcePath = ParserUtils.string(ctx.sourcePath)
+      logger.debug(s"Source path: $sourcePath")
+
+      // Destination path (IndexTables output)
+      val destPath = ParserUtils.string(ctx.destPath)
+      logger.debug(s"Destination path: $destPath")
+
+      // Fast field mode (default: HYBRID)
+      val fastFieldMode = if (ctx.fastFieldMode != null) {
+        ctx.fastFieldMode.getText.toUpperCase
+      } else {
+        "HYBRID"
+      }
+      logger.debug(s"Fast field mode: $fastFieldMode")
+
+      // Target input size
+      val targetInputSize = if (ctx.targetInputSize != null) {
+        Some(parseAlphanumericSize(ctx.targetInputSize.getText))
+      } else {
+        None
+      }
+      logger.debug(s"Target input size: $targetInputSize")
+
+      // Indexing modes
+      val indexingModes: Map[String, String] = if (ctx.indexingModeList() != null) {
+        ctx.indexingModeList().indexingModeEntry().asScala.map { entry =>
+          val fieldName = ParserUtils.string(entry.fieldName)
+          val fieldMode = ParserUtils.string(entry.fieldMode).toLowerCase
+          fieldName -> fieldMode
+        }.toMap
+      } else {
+        Map.empty
+      }
+      logger.debug(s"Indexing modes: $indexingModes")
+
+      // DRY RUN flag
+      val dryRun = ctx.DRY() != null && ctx.RUN() != null
+      logger.debug(s"DRY RUN flag: $dryRun")
+
+      val result = SyncToExternalCommand(
+        sourceFormat = "delta",
+        sourcePath = sourcePath,
+        destPath = destPath,
+        indexingModes = indexingModes,
+        fastFieldMode = fastFieldMode,
+        targetInputSize = targetInputSize,
+        dryRun = dryRun
+      )
+      logger.debug(s"Created SyncToExternalCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitSyncToExternal: ${e.getMessage}", e)
         throw e
     }
   }

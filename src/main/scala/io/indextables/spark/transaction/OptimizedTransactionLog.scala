@@ -593,6 +593,32 @@ class OptimizedTransactionLog(
     version
   }
 
+  override def commitSyncActions(
+    removeActions: Seq[RemoveAction],
+    addActions: Seq[AddAction],
+    metadataUpdate: Option[MetadataAction] = None
+  ): Long = {
+    val actions: Seq[Action] = metadataUpdate.toSeq ++ removeActions ++ addActions
+    val version              = writeActionsWithRetry(actions)
+
+    // Invalidate caches
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
+    currentSnapshot.set(None)
+
+    // Re-cache metadata after invalidation
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after commitSyncActions for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after commitSyncActions: ${e.getMessage}")
+    }
+
+    version
+  }
+
   /**
    * Commits remove actions to mark files as logically deleted with retry on concurrent conflict.
    *
@@ -1767,6 +1793,15 @@ class OptimizedTransactionLog(
     val removeActions = actions.collect { case remove: RemoveAction => remove }
     val removedPaths  = removeActions.map(_.path).toSet
 
+    // Extract MetadataAction if present (for SYNC operations that update metadata)
+    // Wrap in {"metaData": ...} format to match the checkpoint reader expectation
+    val metadataJson = actions.collectFirst { case m: MetadataAction =>
+      val node = JsonUtil.mapper.createObjectNode()
+      node.set[com.fasterxml.jackson.databind.JsonNode](
+        "metaData", JsonUtil.mapper.valueToTree(m))
+      JsonUtil.mapper.writeValueAsString(node)
+    }
+
     // Build schema registry from NEW AddActions only
     // Existing schemas are already in the base state's schema registry
     val newSchemaRegistry = scala.collection.mutable.Map[String, String]()
@@ -1807,7 +1842,8 @@ class OptimizedTransactionLog(
       newFileEntries,
       removedPaths,
       newSchemaRegistry.toMap,
-      compactionConfig
+      compactionConfig,
+      metadata = metadataJson
     )
 
     // Update _last_checkpoint to point to new Avro state

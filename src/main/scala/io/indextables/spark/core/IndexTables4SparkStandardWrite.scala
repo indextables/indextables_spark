@@ -139,6 +139,26 @@ class IndexTables4SparkStandardWrite(
         logger.debug(s"DEBUG: serializedOption $k = ${io.indextables.spark.util.CredentialRedaction.redactValue(k, v)}")
     }
 
+    // Guard: reject writes to companion-mode tables (must use SYNC INDEXTABLES TO DELTA)
+    try {
+      val metadata = transactionLog.getMetadata()
+      if (metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true") {
+        throw new UnsupportedOperationException(
+          "Cannot write to a companion-mode table. Use SYNC INDEXTABLES TO DELTA to update."
+        )
+      }
+      // Also check AddAction fields (companion tables created via SYNC)
+      val files = transactionLog.listFiles()
+      if (files.exists(_.companionSourceFiles.nonEmpty)) {
+        throw new UnsupportedOperationException(
+          "Cannot write to a companion-mode table. Use SYNC INDEXTABLES TO DELTA to update."
+        )
+      }
+    } catch {
+      case e: UnsupportedOperationException => throw e
+      case _: Exception => // Table may not exist yet, which is fine
+    }
+
     // Validate indexing configuration for append operations
     if (!isOverwrite) {
       validateIndexingConfigurationForAppend()

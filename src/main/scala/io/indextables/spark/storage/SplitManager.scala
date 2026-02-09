@@ -448,7 +448,9 @@ case class SplitCacheConfig(
   diskCacheMaxSize: Option[Long] = None,            // Max size in bytes (0 = auto: 2/3 available disk)
   diskCacheCompression: Option[String] = None,      // "lz4" (default), "zstd", "none"
   diskCacheMinCompressSize: Option[Long] = None,    // Skip compression below threshold (default: 4096)
-  diskCacheManifestSyncInterval: Option[Int] = None // Seconds between manifest writes (default: 30)
+  diskCacheManifestSyncInterval: Option[Int] = None, // Seconds between manifest writes (default: 30)
+  // Companion mode (parquet companion splits)
+  companionSourceTableRoot: Option[String] = None // Root path of parquet table for companion splits
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
@@ -599,6 +601,12 @@ case class SplitCacheConfig(
     createTieredCacheConfig().foreach { tieredConfig =>
       logger.info(s"L2 Disk cache configured")
       config = config.withTieredCache(tieredConfig)
+    }
+
+    // Configure companion mode (parquet table root for document retrieval)
+    companionSourceTableRoot.foreach { tableRoot =>
+      logger.info(s"Companion mode: parquet table root = $tableRoot")
+      config = config.withParquetTableRoot(tableRoot)
     }
 
     logger.debug(s"Final tantivy4java CacheConfig: $config")

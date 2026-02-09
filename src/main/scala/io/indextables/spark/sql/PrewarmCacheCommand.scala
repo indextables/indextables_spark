@@ -155,22 +155,18 @@ case class PrewarmCacheCommand(
 
     val sc = sparkSession.sparkContext
 
-    // Resolve segment aliases to IndexComponent set
+    // Resolve segment aliases to IndexComponent set, extracting parquet companion aliases separately
+    val segmentString = segments.mkString(",")
     val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
       logger.info("Using default segments: TERM, POSTINGS")
       IndexComponentMapping.defaultComponents
     } else {
-      val resolved = segments.map { seg =>
-        IndexComponentMapping.aliasToComponent.getOrElse(
-          seg,
-          throw new IllegalArgumentException(
-            s"Unknown segment type: $seg. Valid types: ${IndexComponentMapping.aliasToComponent.keys.mkString(", ")}"
-          )
-        )
-      }.toSet
-      logger.info(s"Using specified segments: ${resolved.map(_.name()).mkString(", ")}")
-      resolved
+      val resolved = IndexComponentMapping.parseSegments(segmentString)
+      if (resolved.nonEmpty) logger.info(s"Using specified segments: ${resolved.map(_.name()).mkString(", ")}")
+      if (resolved.isEmpty) IndexComponentMapping.defaultComponents else resolved
     }
+    val parquetSegments: Set[String] = IndexComponentMapping.parseParquetSegments(segmentString)
+    if (parquetSegments.nonEmpty) logger.info(s"Companion parquet preload segments: ${parquetSegments.mkString(", ")}")
 
     // Get session config for credentials and cache settings
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
@@ -280,7 +276,8 @@ case class PrewarmCacheCommand(
                 tablePath = tablePath,
                 segments = resolvedSegments,
                 fields = fields,
-                failOnMissingField = effectiveFailOnMissingField
+                failOnMissingField = effectiveFailOnMissingField,
+                parquetSegments = parquetSegments
               )
           }
       }.toSeq
@@ -368,7 +365,8 @@ case class PrewarmCacheCommand(
                 tablePath = tablePath,
                 segments = resolvedSegments,
                 fields = fields,
-                failOnMissingField = effectiveFailOnMissingField
+                failOnMissingField = effectiveFailOnMissingField,
+                parquetSegments = parquetSegments
               )
           }
           logger.warn(s"Prewarm retry $retryCount/$maxRetries: ${pendingTasks.size} splits misrouted, retrying with per-split tasks")
@@ -449,22 +447,18 @@ case class PrewarmCacheCommand(
 
     val sc = sparkSession.sparkContext
 
-    // Resolve segment aliases to IndexComponent set
+    // Resolve segment aliases to IndexComponent set, extracting parquet companion aliases separately
+    val asyncSegmentString = segments.mkString(",")
     val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
       logger.info("Using default segments: TERM, POSTINGS")
       IndexComponentMapping.defaultComponents
     } else {
-      val resolved = segments.map { seg =>
-        IndexComponentMapping.aliasToComponent.getOrElse(
-          seg,
-          throw new IllegalArgumentException(
-            s"Unknown segment type: $seg. Valid types: ${IndexComponentMapping.aliasToComponent.keys.mkString(", ")}"
-          )
-        )
-      }.toSet
-      logger.info(s"Using specified segments: ${resolved.map(_.name()).mkString(", ")}")
-      resolved
+      val resolved = IndexComponentMapping.parseSegments(asyncSegmentString)
+      if (resolved.nonEmpty) logger.info(s"Using specified segments: ${resolved.map(_.name()).mkString(", ")}")
+      if (resolved.isEmpty) IndexComponentMapping.defaultComponents else resolved
     }
+    val asyncParquetSegments: Set[String] = IndexComponentMapping.parseParquetSegments(asyncSegmentString)
+    if (asyncParquetSegments.nonEmpty) logger.info(s"Companion parquet preload segments: ${asyncParquetSegments.mkString(", ")}")
 
     // Get session config for credentials and cache settings
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
@@ -574,7 +568,8 @@ case class PrewarmCacheCommand(
             fields = fields,
             failOnMissingField = effectiveFailOnMissingField,
             maxConcurrent = maxConcurrent,
-            completedRetentionMs = completedRetentionMs
+            completedRetentionMs = completedRetentionMs,
+            parquetSegments = asyncParquetSegments
           )
       }.toSeq
 
@@ -649,7 +644,8 @@ case class PrewarmCacheCommand(
               fields = fields,
               failOnMissingField = effectiveFailOnMissingField,
               maxConcurrent = maxConcurrent,
-              completedRetentionMs = completedRetentionMs
+              completedRetentionMs = completedRetentionMs,
+              parquetSegments = asyncParquetSegments
             )
           }
           logger.warn(s"Async prewarm retry $retryCount/$maxRetries: ${pendingTasks.size} splits misrouted")
@@ -778,6 +774,26 @@ case class PrewarmCacheCommand(
                   // Full component preloading
                   val fut = splitSearcher.preloadComponents(task.segments.toArray: _*)
                   fut.join()
+              }
+
+              // Companion parquet preloading (after standard components)
+              if (task.parquetSegments.nonEmpty) {
+                try {
+                  if (splitSearcher.hasParquetCompanion()) {
+                    val fieldArgs = task.fields.getOrElse(Seq.empty)
+                    if (task.parquetSegments.contains("PARQUET_FAST_FIELDS")) {
+                      taskLogger.debug(s"Preloading parquet fast fields for ${addAction.path}")
+                      splitSearcher.preloadParquetFastFields(fieldArgs: _*).join()
+                    }
+                    if (task.parquetSegments.contains("PARQUET_COLUMNS")) {
+                      taskLogger.debug(s"Preloading parquet columns for ${addAction.path}")
+                      splitSearcher.preloadParquetColumns(fieldArgs: _*).join()
+                    }
+                  }
+                } catch {
+                  case e: Exception =>
+                    taskLogger.warn(s"Parquet preload failed for ${addAction.path}: ${e.getMessage}")
+                }
               }
 
               splitsPrewarmed += 1
@@ -996,6 +1012,27 @@ case class PrewarmCacheCommand(
         try {
           // Join all futures for this split
           work.futures.foreach(_.join())
+
+          // Companion parquet preloading (after standard components)
+          if (task.parquetSegments.nonEmpty) {
+            try {
+              if (work.splitSearcher.hasParquetCompanion()) {
+                val fieldArgs = task.fields.getOrElse(Seq.empty)
+                if (task.parquetSegments.contains("PARQUET_FAST_FIELDS")) {
+                  taskLogger.debug(s"Preloading parquet fast fields for ${work.addAction.path}")
+                  work.splitSearcher.preloadParquetFastFields(fieldArgs: _*).join()
+                }
+                if (task.parquetSegments.contains("PARQUET_COLUMNS")) {
+                  taskLogger.debug(s"Preloading parquet columns for ${work.addAction.path}")
+                  work.splitSearcher.preloadParquetColumns(fieldArgs: _*).join()
+                }
+              }
+            } catch {
+              case e: Exception =>
+                taskLogger.warn(s"Parquet preload failed for ${work.addAction.path}: ${e.getMessage}")
+            }
+          }
+
           prewarmedCount += 1
 
           // Track skipped fields
@@ -1084,7 +1121,8 @@ private[sql] case class PrewarmTask(
   tablePath: String,
   segments: Set[IndexComponent],
   fields: Option[Seq[String]],
-  failOnMissingField: Boolean)
+  failOnMissingField: Boolean,
+  parquetSegments: Set[String] = Set.empty)
     extends Serializable
 
 /** Result from a single prewarm task execution. */
@@ -1111,7 +1149,8 @@ private[sql] case class AsyncPrewarmTask(
   fields: Option[Seq[String]],
   failOnMissingField: Boolean,
   maxConcurrent: Int,
-  completedRetentionMs: Long)
+  completedRetentionMs: Long,
+  parquetSegments: Set[String] = Set.empty)
     extends Serializable
 
 /** Result from starting an async prewarm task (returned immediately). */

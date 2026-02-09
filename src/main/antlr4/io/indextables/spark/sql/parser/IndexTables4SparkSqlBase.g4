@@ -84,6 +84,12 @@ statement
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
         (DRY RUN)?                                              #truncateTimeTravel
+    | SYNC indexTablesKeyword TO DELTA sourcePath=STRING
+        (INDEXING MODES '(' indexingModeList ')')?
+        (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
+        (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
+        AT LOCATION destPath=STRING
+        (DRY RUN)?                                            #syncToExternal
     | .*?                                                       #passThrough
     ;
 
@@ -97,6 +103,14 @@ alphanumericValue
 
 identifierList
     : identifier (',' identifier)*
+    ;
+
+indexingModeList
+    : indexingModeEntry (',' indexingModeEntry)*
+    ;
+
+indexingModeEntry
+    : fieldName=STRING ':' fieldMode=STRING
     ;
 
 predicateToken
@@ -124,6 +138,7 @@ nonReserved
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
+    | SYNC | TO | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT
     ;
 
 // Keywords (case-insensitive)
@@ -192,6 +207,16 @@ WAIT: [Ww][Aa][Ii][Tt];
 TIMEOUT: [Tt][Ii][Mm][Ee][Oo][Uu][Tt];
 COMPONENT: [Cc][Oo][Mm][Pp][Oo][Nn][Ee][Nn][Tt];
 SIZES: [Ss][Ii][Zz][Ee][Ss];
+SYNC: [Ss][Yy][Nn][Cc];
+TO: [Tt][Oo];
+DELTA: [Dd][Ee][Ll][Tt][Aa];
+INDEXING: [Ii][Nn][Dd][Ee][Xx][Ii][Nn][Gg];
+MODES: [Mm][Oo][Dd][Ee][Ss];
+FASTFIELDS: [Ff][Aa][Ss][Tt][Ff][Ii][Ee][Ll][Dd][Ss];
+HYBRID: [Hh][Yy][Bb][Rr][Ii][Dd];
+DISABLED: [Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd];
+PARQUET_ONLY: [Pp][Aa][Rr][Qq][Uu][Ee][Tt]'_'[Oo][Nn][Ll][Yy];
+INPUT: [Ii][Nn][Pp][Uu][Tt];
 
 // Literals
 STRING

@@ -89,6 +89,31 @@ class IndexTables4SparkScanBuilder(
   // Bucket aggregation state (DateHistogram, Histogram, Range)
   private var _bucketConfig: Option[BucketAggregationConfig] = None
 
+  // Inject companion mode config from transaction log metadata (lazy, computed once)
+  private lazy val effectiveConfig: Map[String, String] = {
+    if (config.contains("spark.indextables.companion.parquetTableRoot")) config
+    else {
+      try {
+        val metadata = transactionLog.getMetadata()
+        val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
+        if (isCompanion) {
+          metadata.configuration.get("indextables.companion.sourceTablePath") match {
+            case Some(path) =>
+              logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
+              config + ("spark.indextables.companion.parquetTableRoot" -> path)
+            case None =>
+              logger.warn("Companion mode enabled but no sourceTablePath in metadata")
+              config
+          }
+        } else config
+      } catch {
+        case e: Exception =>
+          logger.debug(s"Could not read metadata for companion mode detection: ${e.getMessage}")
+          config
+      }
+    }
+  }
+
   // IMPORTANT: Do NOT capture relation at construction time!
   // ScanBuilders may be created before V2IndexQueryExpressionRule runs.
   // Instead, look up the relation from ThreadLocal at usage time (in build() and pushFilters()).
@@ -245,7 +270,7 @@ class IndexTables4SparkScanBuilder(
           effectiveFilters,
           options,
           _limit,
-          config,
+          effectiveConfig,
           extractedIndexQueryFilters
         )
     }
@@ -335,7 +360,7 @@ class IndexTables4SparkScanBuilder(
         transactionLog,
         effectiveFilters,
         options,
-        config,
+        effectiveConfig,
         Some(groupByColumns), // Pass GROUP BY columns for grouped aggregation
         hasAggregations,      // Indicate if this has aggregations or is just DISTINCT
         Some(schema)          // Pass table schema for proper type conversion
@@ -350,7 +375,7 @@ class IndexTables4SparkScanBuilder(
         schema,
         effectiveFilters,
         options,
-        config,
+        effectiveConfig,
         aggregation,
         groupByColumns,
         extractedIndexQueryFilters,
@@ -370,7 +395,7 @@ class IndexTables4SparkScanBuilder(
       schema,
       effectiveFilters,
       options,
-      config,
+      effectiveConfig,
       aggregation,
       extractedIndexQueryFilters
     )
@@ -413,7 +438,7 @@ class IndexTables4SparkScanBuilder(
       schema,
       effectiveFilters,
       options,
-      config,
+      effectiveConfig,
       aggregation,
       groupByColumns,
       extractedIndexQueryFilters,
@@ -526,7 +551,7 @@ class IndexTables4SparkScanBuilder(
       transactionLog,
       effectiveFilters,
       options,
-      config,
+      effectiveConfig,
       None,        // No GROUP BY columns for simple count
       true,        // hasAggregations
       Some(schema) // Pass table schema for proper type conversion
