@@ -84,10 +84,12 @@ statement
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
         (DRY RUN)?                                              #truncateTimeTravel
-    | SYNC indexTablesKeyword TO DELTA sourcePath=STRING
+    | SYNC indexTablesKeyword (TO | WITH) DELTA sourcePath=STRING
         (INDEXING MODES '(' indexingModeList ')')?
         (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
         (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
+        (FROM VERSION fromVersion=INTEGER_VALUE)?
+        (WHERE whereClause=predicateToken)?
         AT LOCATION destPath=STRING
         (DRY RUN)?                                            #syncToExternal
     | .*?                                                       #passThrough
@@ -113,6 +115,10 @@ indexingModeEntry
     : fieldName=STRING ':' fieldMode=STRING
     ;
 
+// Non-greedy match for WHERE predicate text. ANTLR's .*? stops at the first
+// token that allows the enclosing rule to continue (e.g., AT LOCATION, DRY RUN).
+// This is safe because the subsequent keywords are multi-token sequences that
+// won't appear in normal SQL predicate expressions.
 predicateToken
     : .*?
     ;
@@ -138,7 +144,7 @@ nonReserved
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
-    | SYNC | TO | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT
+    | SYNC | TO | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION
     ;
 
 // Keywords (case-insensitive)
@@ -217,6 +223,7 @@ HYBRID: [Hh][Yy][Bb][Rr][Ii][Dd];
 DISABLED: [Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd];
 PARQUET_ONLY: [Pp][Aa][Rr][Qq][Uu][Ee][Tt]'_'[Oo][Nn][Ll][Yy];
 INPUT: [Ii][Nn][Pp][Uu][Tt];
+VERSION: [Vv][Ee][Rr][Ss][Ii][Oo][Nn];
 
 // Literals
 STRING

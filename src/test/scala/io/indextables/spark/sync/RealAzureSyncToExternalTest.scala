@@ -100,6 +100,10 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
         case (Some(a), Some(k)) =>
           val hadoopConf = spark.sparkContext.hadoopConfiguration
           hadoopConf.set(s"fs.azure.account.key.$a.dfs.core.windows.net", k)
+          // Disable ACL check and remote filesystem creation to avoid 409 errors
+          // on storage accounts with BlobStorageEvents/SoftDelete enabled
+          hadoopConf.set("fs.azure.enable.check.access", "false")
+          hadoopConf.set("fs.azure.createRemoteFileSystemDuringInitialization", "false")
         case _ =>
       }
     }
@@ -119,6 +123,11 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
     columns should contain("status")
     columns should contain("delta_version")
     columns should contain("splits_created")
+    columns should contain("splits_invalidated")
+    columns should contain("parquet_files_indexed")
+    columns should contain("parquet_bytes_downloaded")
+    columns should contain("split_bytes_uploaded")
+    columns should contain("duration_ms")
     columns should contain("message")
   }
 

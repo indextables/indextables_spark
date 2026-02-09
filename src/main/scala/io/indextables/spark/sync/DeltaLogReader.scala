@@ -23,7 +23,6 @@ import io.delta.standalone.DeltaLog
 import io.delta.standalone.actions.{AddFile => DeltaStandaloneAddFile, RemoveFile => DeltaStandaloneRemoveFile}
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types.StructType
 
 import org.slf4j.LoggerFactory
@@ -56,20 +55,52 @@ class DeltaLogReader(deltaTablePath: String, hadoopConf: Configuration) {
   private val logger = LoggerFactory.getLogger(classOf[DeltaLogReader])
   private val deltaLog = DeltaLog.forTable(hadoopConf, deltaTablePath)
 
+  // Cache the snapshot to ensure consistent reads across currentVersion(), getAllFiles(),
+  // schema(), and partitionColumns() calls (Finding #7: multiple snapshot reads)
+  @volatile private var cachedSnapshot: io.delta.standalone.Snapshot = _
+
+  private def snapshot(): io.delta.standalone.Snapshot = {
+    if (cachedSnapshot == null) {
+      cachedSnapshot = deltaLog.update()
+    }
+    cachedSnapshot
+  }
+
   /** Get the current (latest) version of the Delta table. */
   def currentVersion(): Long = {
-    val snapshot = deltaLog.snapshot()
-    val version = snapshot.getVersion
+    val version = snapshot().getVersion
     logger.info(s"Delta table at $deltaTablePath: current version = $version")
     version
   }
 
+  /**
+   * Get files added since a specific version.
+   *
+   * Compares the snapshot at `sinceVersion` with the current snapshot to find
+   * files that exist now but did not exist at the older version.
+   *
+   * @param sinceVersion
+   *   The version to compare against (exclusive - files at this version are excluded)
+   * @return
+   *   Files present in current snapshot but not in the older snapshot
+   */
+  def getFilesAddedSinceVersion(sinceVersion: Long): Seq[DeltaAddFile] = {
+    logger.info(s"Getting files added since version $sinceVersion")
+    val oldSnapshot = deltaLog.getSnapshotForVersionAsOf(sinceVersion)
+    val oldPaths = oldSnapshot.getAllFiles.asScala.map(_.getPath).toSet
+    val currentFiles = getAllFiles()
+    val addedFiles = currentFiles.filterNot(f => oldPaths.contains(f.path))
+    logger.info(s"Files added since version $sinceVersion: ${addedFiles.size} " +
+      s"(current: ${currentFiles.size}, old: ${oldPaths.size})")
+    addedFiles
+  }
+
   /** Get all AddFile actions at the current snapshot (full file listing). */
   def getAllFiles(): Seq[DeltaAddFile] = {
-    val snapshot = deltaLog.snapshot()
-    logger.info(s"Reading Delta snapshot at version ${snapshot.getVersion}")
+    val snap = snapshot()
+    logger.info(s"Reading Delta snapshot at version ${snap.getVersion}")
 
-    snapshot.getAllFiles.asScala.map { addFile =>
+    snap.getAllFiles.asScala.map { addFile =>
       DeltaAddFile(
         path = addFile.getPath,
         partitionValues = addFile.getPartitionValues.asScala.toMap,
@@ -91,30 +122,34 @@ class DeltaLogReader(deltaTablePath: String, hadoopConf: Configuration) {
   def getChanges(fromVersionExclusive: Long, toVersionInclusive: Long): (Seq[DeltaAddFile], Seq[DeltaRemoveFile]) = {
     logger.info(s"Getting Delta changes from version ${fromVersionExclusive + 1} to $toVersionInclusive")
 
+    // Finding #2: Validate Long-to-Int conversion for delta-standalone API
+    val startVersion = fromVersionExclusive + 1
+    require(startVersion <= Int.MaxValue,
+      s"Delta version $startVersion exceeds Int.MaxValue; delta-standalone getChanges requires int")
+
     val added = scala.collection.mutable.ArrayBuffer[DeltaAddFile]()
     val removed = scala.collection.mutable.ArrayBuffer[DeltaRemoveFile]()
 
     // delta-standalone getChanges returns an iterator of VersionLog
-    val changes = deltaLog.getChanges(fromVersionExclusive.toInt + 1, false)
+    val changes = deltaLog.getChanges(startVersion.toInt, false)
 
-    changes.asScala.foreach { versionLog =>
-      if (versionLog.getVersion <= toVersionInclusive) {
-        versionLog.getActions.asScala.foreach {
-          case addFile: DeltaStandaloneAddFile =>
-            added += DeltaAddFile(
-              path = addFile.getPath,
-              partitionValues = addFile.getPartitionValues.asScala.toMap,
-              size = addFile.getSize
-            )
-          case removeFile: DeltaStandaloneRemoveFile =>
-            removed += DeltaRemoveFile(
-              path = removeFile.getPath,
-              partitionValues = Option(removeFile.getPartitionValues)
-                .map(_.asScala.toMap)
-                .getOrElse(Map.empty)
-            )
-          case _ => // Ignore other action types (Metadata, Protocol, etc.)
-        }
+    // Finding #3: Use takeWhile to stop iterating past the target version
+    changes.asScala.takeWhile(_.getVersion <= toVersionInclusive).foreach { versionLog =>
+      versionLog.getActions.asScala.foreach {
+        case addFile: DeltaStandaloneAddFile =>
+          added += DeltaAddFile(
+            path = addFile.getPath,
+            partitionValues = addFile.getPartitionValues.asScala.toMap,
+            size = addFile.getSize
+          )
+        case removeFile: DeltaStandaloneRemoveFile =>
+          removed += DeltaRemoveFile(
+            path = removeFile.getPath,
+            partitionValues = Option(removeFile.getPartitionValues)
+              .map(_.asScala.toMap)
+              .getOrElse(Map.empty)
+          )
+        case _ => // Ignore other action types (Metadata, Protocol, etc.)
       }
     }
 
@@ -124,13 +159,13 @@ class DeltaLogReader(deltaTablePath: String, hadoopConf: Configuration) {
 
   /** Get partition columns from Delta table metadata. */
   def partitionColumns(): Seq[String] = {
-    val metadata = deltaLog.snapshot().getMetadata
+    val metadata = snapshot().getMetadata
     metadata.getPartitionColumns.asScala.toSeq
   }
 
   /** Get the schema from Delta table metadata as a Spark StructType. */
   def schema(): StructType = {
-    val metadata = deltaLog.snapshot().getMetadata
+    val metadata = snapshot().getMetadata
     val deltaSchema = metadata.getSchema
     // Convert delta-standalone schema to Spark StructType
     // delta-standalone StructType is compatible with Spark's

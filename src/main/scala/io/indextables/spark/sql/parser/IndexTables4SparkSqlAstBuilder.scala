@@ -750,6 +750,24 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Indexing modes: $indexingModes")
 
+      // FROM VERSION
+      val fromVersion: Option[Long] = if (ctx.fromVersion != null) {
+        val v = ctx.fromVersion.getText.toLong
+        logger.debug(s"FROM VERSION: $v")
+        Some(v)
+      } else {
+        None
+      }
+
+      // WHERE clause
+      val wherePredicates: Seq[String] = if (ctx.whereClause != null) {
+        val originalText = extractRawText(ctx.whereClause)
+        logger.debug(s"Found WHERE clause: $originalText")
+        Seq(originalText)
+      } else {
+        Seq.empty
+      }
+
       // DRY RUN flag
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
       logger.debug(s"DRY RUN flag: $dryRun")
@@ -761,6 +779,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         indexingModes = indexingModes,
         fastFieldMode = fastFieldMode,
         targetInputSize = targetInputSize,
+        fromVersion = fromVersion,
+        wherePredicates = wherePredicates,
         dryRun = dryRun
       )
       logger.debug(s"Created SyncToExternalCommand: $result")

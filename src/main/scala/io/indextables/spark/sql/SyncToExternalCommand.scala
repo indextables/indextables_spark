@@ -35,7 +35,9 @@ import io.indextables.spark.sync.{
   SyncMetricsAccumulator,
   SyncTaskExecutor
 }
-import io.indextables.spark.transaction.{AddAction, FileFormat, MetadataAction, RemoveAction, TransactionLogFactory}
+import io.indextables.spark.transaction.{
+  AddAction, MetadataAction, PartitionPredicateUtils, RemoveAction, TransactionLogFactory
+}
 import io.indextables.spark.util.{ConfigNormalization, SizeParser}
 
 import org.slf4j.LoggerFactory
@@ -47,17 +49,21 @@ import org.slf4j.LoggerFactory
  * of duplicating data (45-70% split size reduction).
  *
  * Syntax:
- *   SYNC INDEXTABLES TO DELTA '<delta_table_path>'
+ *   SYNC INDEXTABLES WITH DELTA '<delta_table_path>'
  *     [INDEXING MODES (field1:mode1, field2:mode2)]
  *     [FASTFIELDS MODE (HYBRID | DISABLED | PARQUET_ONLY)]
  *     [TARGET INPUT SIZE <size>]
+ *     [FROM VERSION <version>]
+ *     [WHERE <partition_predicates>]
  *     AT LOCATION '<index_table_path>'
  *     [DRY RUN]
  *
+ * Note: "TO DELTA" is also accepted for backward compatibility.
+ *
  * Examples:
- *   - SYNC INDEXTABLES TO DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
- *   - SYNC INDEXTABLES TO DELTA 's3://data/events' FASTFIELDS MODE HYBRID AT LOCATION 's3://index/events'
- *   - SYNC INDEXTABLES TO DELTA 's3://data/events' TARGET INPUT SIZE 2G AT LOCATION 's3://index/events' DRY RUN
+ *   - SYNC INDEXTABLES WITH DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
+ *   - SYNC INDEXTABLES WITH DELTA 's3://data/events' WHERE year >= 2024 AT LOCATION 's3://index/events'
+ *   - SYNC INDEXTABLES WITH DELTA 's3://data/events' FROM VERSION 500 AT LOCATION 's3://index/events'
  */
 case class SyncToExternalCommand(
   sourceFormat: String,
@@ -66,6 +72,8 @@ case class SyncToExternalCommand(
   indexingModes: Map[String, String],
   fastFieldMode: String,
   targetInputSize: Option[Long],
+  fromVersion: Option[Long] = None,
+  wherePredicates: Seq[String] = Seq.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
 
@@ -90,8 +98,9 @@ case class SyncToExternalCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val startTime = System.currentTimeMillis()
-    logger.info(s"Starting SYNC INDEXTABLES TO DELTA: source=$sourcePath, dest=$destPath, " +
-      s"fastFieldMode=$fastFieldMode, dryRun=$dryRun")
+    logger.info(s"Starting SYNC INDEXTABLES WITH DELTA: source=$sourcePath, dest=$destPath, " +
+      s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, " +
+      s"wherePredicates=${wherePredicates.mkString(",")}, dryRun=$dryRun")
 
     try {
       executeSyncInternal(sparkSession, startTime)
@@ -134,7 +143,12 @@ case class SyncToExternalCommand(
 
     // 2. DRY RUN mode: compute plan from Delta table only, no filesystem modifications
     if (dryRun) {
-      val allFiles = deltaReader.getAllFiles()
+      var allFiles = if (fromVersion.isDefined) {
+        deltaReader.getFilesAddedSinceVersion(fromVersion.get)
+      } else {
+        deltaReader.getAllFiles()
+      }
+      allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups = planIndexingGroups(allFiles, maxGroupSize)
       val durationMs = System.currentTimeMillis() - startTime
@@ -150,6 +164,11 @@ case class SyncToExternalCommand(
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // Read batch size config (0 = all-at-once, preserving backward compatibility)
+    val batchSize = mergedConfigs.get("spark.indextables.companion.sync.batchSize")
+      .map(_.toInt)
+      .getOrElse(0)
 
     // 4. Open IndexTables transaction log at destination
     val destTablePath = new Path(destPath)
@@ -174,7 +193,7 @@ case class SyncToExternalCommand(
         ))
       }
 
-      // 6b. On incremental sync, fall back to stored indexing modes if not specified
+      // 6b. On incremental sync, fall back to stored indexing modes/WHERE if not specified
       val effectiveIndexingModes = if (indexingModes.nonEmpty) {
         indexingModes
       } else if (!isInitialSync) {
@@ -194,15 +213,54 @@ case class SyncToExternalCommand(
         Map.empty[String, String]
       }
 
+      // Resolve effective WHERE predicates: use stored WHERE from metadata if not specified
+      val effectiveWherePredicates = if (wherePredicates.nonEmpty) {
+        wherePredicates
+      } else if (!isInitialSync) {
+        try {
+          val existingMeta = transactionLog.getMetadata()
+          existingMeta.configuration.get("indextables.companion.whereClause")
+            .map(Seq(_))
+            .getOrElse(Seq.empty)
+        } catch {
+          case _: Exception => Seq.empty[String]
+        }
+      } else {
+        Seq.empty[String]
+      }
+
       // 7. Determine what needs indexing
-      val (parquetFilesToIndex, splitsToInvalidate) = if (isInitialSync) {
-        // Full snapshot of all files in the Delta table
-        val allFiles = deltaReader.getAllFiles()
-        logger.info(s"Initial sync: ${allFiles.size} parquet files to index")
+      val (rawParquetFiles, splitsToInvalidate) = if (isInitialSync) {
+        // Full snapshot or FROM VERSION subset
+        val allFiles = if (fromVersion.isDefined) {
+          deltaReader.getFilesAddedSinceVersion(fromVersion.get)
+        } else {
+          deltaReader.getAllFiles()
+        }
+        logger.info(s"Initial sync: ${allFiles.size} parquet files to index" +
+          fromVersion.map(v => s" (from version $v)").getOrElse(""))
         (allFiles, Seq.empty[AddAction])
       } else {
         // Incremental: compute changes since last sync
         computeIncrementalChanges(deltaReader, existingFiles, lastSyncedVersion, deltaVersion)
+      }
+
+      // 7b. Apply WHERE partition filter
+      val filteredFiles = applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession,
+        effectiveWherePredicates)
+
+      // 7c. Idempotency filter: skip parquet files already indexed in existing companion splits
+      // Finding #4: Normalize paths (strip leading slashes, URL decode) to ensure
+      // consistent comparison between companionSourceFiles and Delta AddFile paths
+      val existingCompanionFiles = existingFiles
+        .flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
+        .map(normalizePath).toSet
+      val parquetFilesToIndex = filteredFiles.filterNot(f =>
+        existingCompanionFiles.contains(normalizePath(f.path)))
+
+      if (parquetFilesToIndex.size < filteredFiles.size) {
+        logger.info(s"Idempotency filter: skipped ${filteredFiles.size - parquetFilesToIndex.size} " +
+          s"already-indexed files, ${parquetFilesToIndex.size} files remaining")
       }
 
       if (parquetFilesToIndex.isEmpty && splitsToInvalidate.isEmpty) {
@@ -244,70 +302,236 @@ case class SyncToExternalCommand(
         readerBatchSize = readerBatchSize
       )
 
-      // 10. Dispatch Spark tasks across executors
-      val results = dispatchSyncTasks(sparkSession, groups, syncConfig)
-
-      // 11. Build companion metadata for transaction log
-      val existingMetadata = transactionLog.getMetadata()
-      val companionConfig = existingMetadata.configuration ++ Map(
-        "indextables.companion.enabled" -> "true",
-        "indextables.companion.sourceTablePath" -> sourcePath,
-        "indextables.companion.sourceFormat" -> sourceFormat,
-        "indextables.companion.lastSyncedVersion" -> deltaVersion.toString,
-        "indextables.companion.fastFieldMode" -> fastFieldMode
-      ) ++ (if (effectiveIndexingModes.nonEmpty) {
-        import com.fasterxml.jackson.databind.ObjectMapper
-        val mapper = new ObjectMapper()
-        Map("indextables.companion.indexingModes" -> mapper.writeValueAsString(
-          effectiveIndexingModes.asJava
-        ))
-      } else Map.empty)
-      val updatedMetadata = existingMetadata.copy(configuration = companionConfig)
-
-      // 12. Commit transaction log with metadata update
-      val removeActions = splitsToInvalidate.map { split =>
-        RemoveAction(
-          path = split.path,
-          deletionTimestamp = Some(System.currentTimeMillis()),
-          dataChange = true,
-          extendedFileMetadata = Some(true),
-          partitionValues = Some(split.partitionValues),
-          size = Some(split.size)
-        )
+      // 10. Dispatch Spark tasks and commit
+      if (batchSize > 0 && groups.size > batchSize) {
+        // Batched path: dispatch and commit in batches for incremental progress
+        dispatchSyncTasksBatched(
+          sparkSession, groups, syncConfig, transactionLog,
+          splitsToInvalidate, effectiveIndexingModes,
+          effectiveWherePredicates, deltaVersion, batchSize, startTime)
+      } else {
+        // Legacy single-job path
+        dispatchSyncTasksAndCommit(
+          sparkSession, groups, syncConfig, transactionLog,
+          splitsToInvalidate, effectiveIndexingModes,
+          effectiveWherePredicates, deltaVersion, startTime)
       }
-      val addActions = results.map(_.addAction.copy(
-        companionDeltaVersion = Some(deltaVersion)
-      ))
-
-      if (addActions.nonEmpty || removeActions.nonEmpty) {
-        val version = transactionLog.commitSyncActions(
-          removeActions, addActions, Some(updatedMetadata))
-        transactionLog.invalidateCache()
-        logger.info(s"Committed ${addActions.size} adds and ${removeActions.size} removes " +
-          s"with companion metadata at transaction log version $version")
-      }
-
-      // 13. Build result row
-      val totalBytesDownloaded = results.map(_.bytesDownloaded).sum
-      val totalBytesUploaded = results.map(_.bytesUploaded).sum
-      val totalFilesIndexed = results.map(_.parquetFilesIndexed).sum
-      val durationMs = System.currentTimeMillis() - startTime
-
-      logger.info(s"SYNC completed: ${results.length} splits created, " +
-        s"${splitsToInvalidate.size} invalidated, " +
-        s"$totalFilesIndexed files indexed, " +
-        s"downloaded ${totalBytesDownloaded} bytes, uploaded ${totalBytesUploaded} bytes, " +
-        s"duration ${durationMs}ms")
-
-      Seq(Row(
-        destPath, sourcePath, "success", deltaVersion.asInstanceOf[java.lang.Long],
-        results.length, splitsToInvalidate.size, totalFilesIndexed,
-        totalBytesDownloaded, totalBytesUploaded, durationMs,
-        s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
-      ))
     } finally {
       transactionLog.close()
     }
+  }
+
+  /**
+   * Legacy single-job dispatch: all groups in one Spark job, one atomic commit.
+   */
+  private def dispatchSyncTasksAndCommit(
+    sparkSession: SparkSession,
+    groups: Seq[SyncIndexingGroupPlan],
+    syncConfig: SyncConfig,
+    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    splitsToInvalidate: Seq[AddAction],
+    effectiveIndexingModes: Map[String, String],
+    effectiveWherePredicates: Seq[String],
+    deltaVersion: Long,
+    startTime: Long
+  ): Seq[Row] = {
+    val results = dispatchSyncTasks(sparkSession, groups, syncConfig)
+
+    // Build companion metadata for transaction log
+    val updatedMetadata = buildCompanionMetadata(
+      transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion)
+
+    // Commit transaction log with metadata update
+    val removeActions = buildRemoveActions(splitsToInvalidate)
+    val addActions = results.map(_.addAction.copy(
+      companionDeltaVersion = Some(deltaVersion)
+    ))
+
+    if (addActions.nonEmpty || removeActions.nonEmpty) {
+      val version = transactionLog.commitSyncActions(
+        removeActions, addActions, Some(updatedMetadata))
+      transactionLog.invalidateCache()
+      logger.info(s"Committed ${addActions.size} adds and ${removeActions.size} removes " +
+        s"with companion metadata at transaction log version $version")
+    }
+
+    buildResultRow(results, splitsToInvalidate.size, deltaVersion, startTime)
+  }
+
+  /**
+   * Batched dispatch: process groups in batches with per-batch commits for
+   * incremental progress on large tables.
+   */
+  private def dispatchSyncTasksBatched(
+    sparkSession: SparkSession,
+    groups: Seq[SyncIndexingGroupPlan],
+    syncConfig: SyncConfig,
+    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    splitsToInvalidate: Seq[AddAction],
+    effectiveIndexingModes: Map[String, String],
+    effectiveWherePredicates: Seq[String],
+    deltaVersion: Long,
+    batchSize: Int,
+    startTime: Long
+  ): Seq[Row] = {
+    val batches = groups.grouped(batchSize).toSeq
+    val allResults = scala.collection.mutable.ArrayBuffer[io.indextables.spark.sync.SyncTaskResult]()
+
+    logger.info(s"Batched sync: ${groups.size} groups in ${batches.size} batches of $batchSize")
+
+    batches.zipWithIndex.foreach { case (batch, batchIdx) =>
+      val isFirstBatch = batchIdx == 0
+      val isLastBatch = batchIdx == batches.size - 1
+
+      logger.info(s"Dispatching batch ${batchIdx + 1}/${batches.size} " +
+        s"(${batch.size} groups)")
+
+      // Refresh credentials for each batch (handles token expiration)
+      val mergedConfigs = {
+        val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+        val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(
+          sparkSession.sparkContext.hadoopConfiguration)
+        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+      }
+      val refreshedConfig = syncConfig.copy(
+        splitCredentials = resolveCredentials(mergedConfigs, destPath),
+        parquetCredentials = resolveCredentials(mergedConfigs, sourcePath)
+      )
+
+      val batchResults = dispatchSyncTasks(sparkSession, batch, refreshedConfig)
+      allResults ++= batchResults
+
+      // Commit this batch's results
+      val batchAddActions = batchResults.map(_.addAction.copy(
+        companionDeltaVersion = Some(deltaVersion)
+      ))
+
+      // First batch also commits RemoveActions (invalidation splits)
+      val batchRemoveActions = if (isFirstBatch) {
+        buildRemoveActions(splitsToInvalidate)
+      } else {
+        Seq.empty
+      }
+
+      // Last batch updates metadata with lastSyncedVersion
+      val metadataUpdate = if (isLastBatch) {
+        Some(buildCompanionMetadata(
+          transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
+      } else {
+        None
+      }
+
+      if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty || metadataUpdate.isDefined) {
+        val version = transactionLog.commitSyncActions(
+          batchRemoveActions, batchAddActions, metadataUpdate)
+        transactionLog.invalidateCache()
+        logger.info(s"Batch ${batchIdx + 1}/${batches.size}: committed " +
+          s"${batchAddActions.size} adds, ${batchRemoveActions.size} removes " +
+          s"at transaction log version $version")
+      }
+    }
+
+    buildResultRow(allResults.toSeq, splitsToInvalidate.size, deltaVersion, startTime)
+  }
+
+  /**
+   * Apply WHERE partition filter to DeltaAddFile list.
+   * Uses the explicitly provided predicates, or falls back to effectiveWherePredicates.
+   */
+  private def applyWhereFilter(
+    files: Seq[DeltaAddFile],
+    partitionColumns: Seq[String],
+    sparkSession: SparkSession,
+    predicates: Seq[String] = Seq.empty
+  ): Seq[DeltaAddFile] = {
+    val effectivePreds = if (predicates.nonEmpty) predicates else wherePredicates
+    if (effectivePreds.isEmpty || partitionColumns.isEmpty) return files
+
+    val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns)
+    val parsedPredicates = PartitionPredicateUtils.parseAndValidatePredicates(
+      effectivePreds, partitionSchema, sparkSession)
+
+    val filtered = files.filter(f =>
+      PartitionPredicateUtils.evaluatePredicates(f.partitionValues, partitionSchema, parsedPredicates))
+
+    if (filtered.size < files.size) {
+      logger.info(s"WHERE filter: ${files.size} -> ${filtered.size} files " +
+        s"(pruned ${files.size - filtered.size})")
+    }
+    filtered
+  }
+
+  /**
+   * Build companion metadata configuration for transaction log commit.
+   */
+  private def buildCompanionMetadata(
+    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    effectiveIndexingModes: Map[String, String],
+    effectiveWherePredicates: Seq[String],
+    deltaVersion: Long
+  ): MetadataAction = {
+    val existingMetadata = transactionLog.getMetadata()
+    val companionConfig = existingMetadata.configuration ++ Map(
+      "indextables.companion.enabled" -> "true",
+      "indextables.companion.sourceTablePath" -> sourcePath,
+      "indextables.companion.sourceFormat" -> sourceFormat,
+      "indextables.companion.lastSyncedVersion" -> deltaVersion.toString,
+      "indextables.companion.fastFieldMode" -> fastFieldMode
+    ) ++ (if (effectiveIndexingModes.nonEmpty) {
+      import com.fasterxml.jackson.databind.ObjectMapper
+      val mapper = new ObjectMapper()
+      Map("indextables.companion.indexingModes" -> mapper.writeValueAsString(
+        effectiveIndexingModes.asJava
+      ))
+    } else Map.empty) ++ (if (effectiveWherePredicates.nonEmpty) {
+      Map("indextables.companion.whereClause" -> effectiveWherePredicates.head)
+    } else Map.empty) ++ fromVersion.map(v =>
+      "indextables.companion.fromVersion" -> v.toString
+    )
+    existingMetadata.copy(configuration = companionConfig)
+  }
+
+  /**
+   * Build RemoveAction entries for invalidated splits.
+   */
+  private def buildRemoveActions(splitsToInvalidate: Seq[AddAction]): Seq[RemoveAction] =
+    splitsToInvalidate.map { split =>
+      RemoveAction(
+        path = split.path,
+        deletionTimestamp = Some(System.currentTimeMillis()),
+        dataChange = true,
+        extendedFileMetadata = Some(true),
+        partitionValues = Some(split.partitionValues),
+        size = Some(split.size)
+      )
+    }
+
+  /**
+   * Build the result row from sync task results.
+   */
+  private def buildResultRow(
+    results: Seq[io.indextables.spark.sync.SyncTaskResult],
+    splitsInvalidated: Int,
+    deltaVersion: Long,
+    startTime: Long
+  ): Seq[Row] = {
+    val totalBytesDownloaded = results.map(_.bytesDownloaded).sum
+    val totalBytesUploaded = results.map(_.bytesUploaded).sum
+    val totalFilesIndexed = results.map(_.parquetFilesIndexed).sum
+    val durationMs = System.currentTimeMillis() - startTime
+
+    logger.info(s"SYNC completed: ${results.length} splits created, " +
+      s"$splitsInvalidated invalidated, " +
+      s"$totalFilesIndexed files indexed, " +
+      s"downloaded ${totalBytesDownloaded} bytes, uploaded ${totalBytesUploaded} bytes, " +
+      s"duration ${durationMs}ms")
+
+    Seq(Row(
+      destPath, sourcePath, "success", deltaVersion.asInstanceOf[java.lang.Long],
+      results.length, splitsInvalidated, totalFilesIndexed,
+      totalBytesDownloaded, totalBytesUploaded, durationMs,
+      s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
+    ))
   }
 
   /**
@@ -330,8 +554,9 @@ case class SyncToExternalCommand(
       logger.info(s"Existing table: ${files.size} files, lastSyncedVersion=$maxDeltaVersion")
       (files, maxDeltaVersion, false)
     } catch {
-      case _: Exception =>
-        // Table doesn't exist yet - initialize for initial sync
+      // Finding #5: Narrow catch to expected exceptions for missing/uninitialized table
+      case _: java.io.FileNotFoundException | _: java.io.IOException |
+           _: IllegalStateException | _: NoSuchElementException =>
         logger.info(s"No existing table at $destPath, initializing for initial sync")
         transactionLog.initialize(deltaSchema, partitionColumns)
         (Seq.empty[AddAction], -1L, true)
@@ -355,22 +580,22 @@ case class SyncToExternalCommand(
       split.companionSourceFiles.exists(_.exists(removedPaths.contains))
     }
 
-    // Collect remaining valid files from invalidated splits for re-indexing
-    val remainingFromInvalidated = splitsToInvalidate.flatMap { split =>
-      split.companionSourceFiles.getOrElse(Seq.empty).filterNot(removedPaths.contains)
-    }.distinct
+    // Finding #6: Collect remaining valid files from invalidated splits, preserving
+    // partition values from the parent split so they group correctly in planIndexingGroups
+    val remainingAsDeltaAddFiles = splitsToInvalidate.flatMap { split =>
+      split.companionSourceFiles.getOrElse(Seq.empty)
+        .filterNot(removedPaths.contains)
+        .map(relPath => DeltaAddFile(relPath, split.partitionValues, 0L))
+    }.groupBy(_.path).map(_._2.head).toSeq
 
-    // Convert remaining relative paths to DeltaAddFile (size=0 since we don't know it)
-    val remainingAsDeltaAddFiles = remainingFromInvalidated.map { relPath =>
-      DeltaAddFile(relPath, Map.empty, 0L)
-    }
-
+    // Merge added files with remaining files from invalidated splits, dedup by path
+    // (prefer added files since they have accurate size from Delta log)
     val allFilesToIndex = (added ++ remainingAsDeltaAddFiles)
       .groupBy(_.path).map(_._2.head).toSeq
 
     logger.info(s"Incremental sync: ${added.size} added, ${removed.size} removed, " +
       s"${splitsToInvalidate.size} splits to invalidate, " +
-      s"${remainingFromInvalidated.size} files to re-index from invalidated splits")
+      s"${remainingAsDeltaAddFiles.size} files to re-index from invalidated splits")
 
     (allFilesToIndex, splitsToInvalidate)
   }
@@ -437,7 +662,7 @@ case class SyncToExternalCommand(
     // Set job group for Spark UI visibility
     sparkSession.sparkContext.setJobGroup(
       "sync_indextables",
-      s"SYNC INDEXTABLES TO DELTA: ${syncGroups.size} groups from $sourcePath"
+      s"SYNC INDEXTABLES WITH DELTA: ${syncGroups.size} groups from $sourcePath"
     )
 
     try {
@@ -445,7 +670,7 @@ case class SyncToExternalCommand(
       val numPartitions = math.max(1, syncGroups.size)
       val groupsRDD = sparkSession.sparkContext
         .parallelize(syncGroups, numPartitions)
-        .setName(s"SYNC INDEXTABLES TO DELTA [${syncGroups.size} groups]")
+        .setName(s"SYNC INDEXTABLES WITH DELTA [${syncGroups.size} groups]")
 
       val results = groupsRDD.map { group =>
         val result = SyncTaskExecutor.execute(group, broadcastConfig.value)
@@ -457,6 +682,19 @@ case class SyncToExternalCommand(
       broadcastConfig.destroy()
       sparkSession.sparkContext.clearJobGroup()
     }
+  }
+
+  /**
+   * Normalize a file path for consistent comparison (Finding #4).
+   * Handles URL-encoded paths from Delta log and strips trailing slashes.
+   */
+  private def normalizePath(path: String): String = {
+    val decoded = try {
+      java.net.URLDecoder.decode(path, "UTF-8")
+    } catch {
+      case _: Exception => path
+    }
+    decoded.stripSuffix("/")
   }
 
   /**
