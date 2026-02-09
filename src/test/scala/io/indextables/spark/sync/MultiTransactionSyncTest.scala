@@ -29,7 +29,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Tests that SYNC INDEXTABLES TO DELTA correctly handles Delta tables that
+ * Tests that BUILD INDEXTABLES COMPANION FROM DELTA correctly handles Delta tables that
  * have undergone multiple transactions between syncs, including appends,
  * OPTIMIZE (compaction), DELETE, UPDATE, and schema evolution.
  *
@@ -107,7 +107,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
   private def syncAndCollect(deltaPath: String, indexPath: String): org.apache.spark.sql.Row = {
     val result = spark.sql(
-      s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -627,7 +627,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       // SYNC with very large target size — all files COULD fit in one group,
       // but partition boundaries must be respected
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE 10G AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE 10G AT LOCATION '$indexPath'"
       )
       val row = result.collect()(0)
       row.getString(2) shouldBe "success"
@@ -696,14 +696,14 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       // SYNC with very small target (just above one file size) — should create many splits
       val smallTarget = singleFileSize + 1 // fits exactly one file per group
       val rowSmall = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE ${smallTarget} AT LOCATION '$indexSmall'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE ${smallTarget} AT LOCATION '$indexSmall'"
       ).collect()(0)
       rowSmall.getString(2) shouldBe "success"
       val smallSplitCount = rowSmall.getInt(4) // splits_created
 
       // SYNC with very large target — should create fewer splits
       val rowLarge = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE 10G AT LOCATION '$indexLarge'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE 10G AT LOCATION '$indexLarge'"
       ).collect()(0)
       rowLarge.getString(2) shouldBe "success"
       val largeSplitCount = rowLarge.getInt(4) // splits_created
@@ -754,7 +754,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // SYNC with tiny target size (1 byte) — file is bigger but should still be indexed
       val row = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE 1 AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE 1 AT LOCATION '$indexPath'"
       ).collect()(0)
       row.getString(2) shouldBe "success"
       row.getInt(4) shouldBe 1 // exactly 1 split created
@@ -791,7 +791,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       // fewer splits than 4, and total source files = 4.
       val targetSize = sortedSizes.takeRight(2).sum
       val row = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE $targetSize AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE $targetSize AT LOCATION '$indexPath'"
       ).collect()(0)
       row.getString(2) shouldBe "success"
       val splitCount = row.getInt(4)
@@ -835,14 +835,14 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       val singleFileSize = deltaReader.getAllFiles().head.size
 
       val rowSmall = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE ${singleFileSize + 1} AT LOCATION '$indexPath' DRY RUN"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE ${singleFileSize + 1} AT LOCATION '$indexPath' DRY RUN"
       ).collect()(0)
       rowSmall.getString(2) shouldBe "dry_run"
       rowSmall.getInt(4) shouldBe 4 // splits_created = 4 groups
 
       // DRY RUN with huge target — all files in one group
       val rowLarge = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE 10G AT LOCATION '$indexPath' DRY RUN"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE 10G AT LOCATION '$indexPath' DRY RUN"
       ).collect()(0)
       rowLarge.getString(2) shouldBe "dry_run"
       rowLarge.getInt(4) shouldBe 1 // splits_created = 1 group
@@ -873,7 +873,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Target size fits exactly 1 file — should create 4 splits (1 per file)
       val row = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' TARGET INPUT SIZE ${singleFileSize + 1} AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE ${singleFileSize + 1} AT LOCATION '$indexPath'"
       ).collect()(0)
       row.getString(2) shouldBe "success"
       row.getInt(4) shouldBe 4 // 4 splits: 2 partitions × 2 files/partition × 1 file/group
@@ -1061,7 +1061,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Use INDEXING MODES to set text/string types
       val result = spark.sql(
-        s"""SYNC INDEXTABLES TO DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
            |  INDEXING MODES ('title': 'text', 'body': 'text', 'status': 'string')
            |  AT LOCATION '$indexPath'""".stripMargin)
 
@@ -1094,7 +1094,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
           .write.format("delta").save(deltaPath)
 
         val result = spark.sql(
-          s"SYNC INDEXTABLES TO DELTA '$deltaPath' FASTFIELDS MODE $mode AT LOCATION '$indexPath'"
+          s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE $mode AT LOCATION '$indexPath'"
         )
         val row = result.collect()(0)
         row.getString(2) shouldBe "success"
@@ -1303,7 +1303,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Initial SYNC with INDEXING MODES
       val row1 = spark.sql(
-        s"""SYNC INDEXTABLES TO DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
            |  INDEXING MODES ('title': 'text', 'status': 'string')
            |  AT LOCATION '$indexPath'""".stripMargin
       ).collect()(0)
@@ -1359,7 +1359,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Sync with fast fields for aggregation
       spark.sql(
-        s"""SYNC INDEXTABLES TO DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
            |  INDEXING MODES ('name': 'string')
            |  AT LOCATION '$indexPath'""".stripMargin
       ).collect()

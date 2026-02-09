@@ -1793,7 +1793,7 @@ class OptimizedTransactionLog(
     val removeActions = actions.collect { case remove: RemoveAction => remove }
     val removedPaths  = removeActions.map(_.path).toSet
 
-    // Extract MetadataAction if present (for SYNC operations that update metadata)
+    // Extract MetadataAction if present (for BUILD COMPANION operations that update metadata)
     // Wrap in {"metaData": ...} format to match the checkpoint reader expectation
     val metadataJson = actions.collectFirst { case m: MetadataAction =>
       val node = JsonUtil.mapper.createObjectNode()

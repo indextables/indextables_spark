@@ -389,7 +389,7 @@ class CompanionModeTest extends TestBase {
       try {
         transactionLog.initialize(getTestSchema())
 
-        // Simulate a SYNC commit: add companion splits via commitMergeSplits
+        // Simulate a BUILD COMPANION commit: add companion splits via commitMergeSplits
         val removes = Seq.empty[RemoveAction]
         val adds = Seq(
           AddAction(
@@ -444,7 +444,7 @@ class CompanionModeTest extends TestBase {
       try {
         transactionLog.initialize(getTestSchema())
 
-        // Create a companion split (simulating SYNC)
+        // Create a companion split (simulating BUILD COMPANION)
         val companionAction = AddAction(
           path = "companion-split.split",
           partitionValues = Map.empty,

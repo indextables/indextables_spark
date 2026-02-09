@@ -110,19 +110,19 @@ class IndexTables4SparkBatchWrite(
       case None => Seq.empty
     }
 
-    // Guard: reject writes to companion-mode tables (must use SYNC INDEXTABLES TO DELTA)
+    // Guard: reject writes to companion-mode tables (must use BUILD INDEXTABLES COMPANION FROM DELTA)
     try {
       val metadata = transactionLog.getMetadata()
       if (metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true") {
         throw new UnsupportedOperationException(
-          "Cannot write to a companion-mode table. Use SYNC INDEXTABLES TO DELTA to update."
+          "Cannot write to a companion-mode table. Use BUILD INDEXTABLES COMPANION FROM DELTA to update."
         )
       }
-      // Also check AddAction fields (companion tables created via SYNC)
+      // Also check AddAction fields (companion tables created via BUILD COMPANION)
       val files = transactionLog.listFiles()
       if (files.exists(_.companionSourceFiles.nonEmpty)) {
         throw new UnsupportedOperationException(
-          "Cannot write to a companion-mode table. Use SYNC INDEXTABLES TO DELTA to update."
+          "Cannot write to a companion-mode table. Use BUILD INDEXTABLES COMPANION FROM DELTA to update."
         )
       }
     } catch {

@@ -34,7 +34,7 @@ import org.apache.hadoop.fs.Path
 import scala.collection.JavaConverters._
 
 /**
- * Local filesystem integration tests for SYNC INDEXTABLES TO DELTA.
+ * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FROM DELTA.
  *
  * Uses tantivy4java's nativeWriteTestParquet to create parquet files that are
  * guaranteed to be compatible with createFromParquet, then creates a Delta
@@ -115,7 +115,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 20)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -139,7 +139,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 3, rowsPerFile = 10)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -157,7 +157,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
       )
 
       val rows = result.collect()
@@ -182,13 +182,13 @@ class LocalSyncIntegrationTest extends TestBase {
 
       // First sync
       val result1 = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result1.collect()(0).getString(2) shouldBe "success"
 
       // Second sync (same delta version) - should be no_action
       val result2 = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result2.collect()(0).getString(2) shouldBe "no_action"
     }
@@ -202,7 +202,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -231,7 +231,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -259,7 +259,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -287,7 +287,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 15)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result.collect()(0).getString(2) shouldBe "success"
 
@@ -322,7 +322,7 @@ class LocalSyncIntegrationTest extends TestBase {
       createLocalDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 20)
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val row = result.collect()(0)
@@ -339,7 +339,7 @@ class LocalSyncIntegrationTest extends TestBase {
       val indexPath = new File(tempDir, "nonexistent_index").getAbsolutePath
 
       val result = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -357,7 +357,7 @@ class LocalSyncIntegrationTest extends TestBase {
 
       // Create companion index
       val syncResult = spark.sql(
-        s"SYNC INDEXTABLES TO DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
 

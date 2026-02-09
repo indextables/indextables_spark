@@ -240,7 +240,7 @@ trait TransactionLogInterface extends AutoCloseable {
   /**
    * Commits a sync operation atomically, optionally including a metadata update.
    *
-   * This is used by SYNC INDEXTABLES TO DELTA to commit companion split changes
+   * This is used by BUILD INDEXTABLES COMPANION FROM DELTA to commit companion split changes
    * along with companion metadata (source path, synced version, etc.) in a single
    * transaction.
    *

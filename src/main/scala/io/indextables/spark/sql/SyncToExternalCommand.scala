@@ -49,7 +49,7 @@ import org.slf4j.LoggerFactory
  * of duplicating data (45-70% split size reduction).
  *
  * Syntax:
- *   SYNC INDEXTABLES WITH DELTA '<delta_table_path>'
+ *   BUILD INDEXTABLES COMPANION FROM DELTA '<delta_table_path>'
  *     [INDEXING MODES (field1:mode1, field2:mode2)]
  *     [FASTFIELDS MODE (HYBRID | DISABLED | PARQUET_ONLY)]
  *     [TARGET INPUT SIZE <size>]
@@ -58,12 +58,12 @@ import org.slf4j.LoggerFactory
  *     AT LOCATION '<index_table_path>'
  *     [DRY RUN]
  *
- * Note: "TO DELTA" is also accepted for backward compatibility.
+ * Note: "WITH DELTA" is also accepted for backward compatibility.
  *
  * Examples:
- *   - SYNC INDEXTABLES WITH DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
- *   - SYNC INDEXTABLES WITH DELTA 's3://data/events' WHERE year >= 2024 AT LOCATION 's3://index/events'
- *   - SYNC INDEXTABLES WITH DELTA 's3://data/events' FROM VERSION 500 AT LOCATION 's3://index/events'
+ *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
+ *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' WHERE year >= 2024 AT LOCATION 's3://index/events'
+ *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' FROM VERSION 500 AT LOCATION 's3://index/events'
  */
 case class SyncToExternalCommand(
   sourceFormat: String,
@@ -98,7 +98,7 @@ case class SyncToExternalCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val startTime = System.currentTimeMillis()
-    logger.info(s"Starting SYNC INDEXTABLES WITH DELTA: source=$sourcePath, dest=$destPath, " +
+    logger.info(s"Starting BUILD INDEXTABLES COMPANION FROM DELTA: source=$sourcePath, dest=$destPath, " +
       s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, " +
       s"wherePredicates=${wherePredicates.mkString(",")}, dryRun=$dryRun")
 
@@ -107,7 +107,7 @@ case class SyncToExternalCommand(
     } catch {
       case e: Exception =>
         val durationMs = System.currentTimeMillis() - startTime
-        logger.error(s"SYNC failed: ${e.getMessage}", e)
+        logger.error(s"BUILD COMPANION failed: ${e.getMessage}", e)
         Seq(Row(
           destPath, sourcePath, "error",
           null, // delta_version
@@ -520,7 +520,7 @@ case class SyncToExternalCommand(
     val totalFilesIndexed = results.map(_.parquetFilesIndexed).sum
     val durationMs = System.currentTimeMillis() - startTime
 
-    logger.info(s"SYNC completed: ${results.length} splits created, " +
+    logger.info(s"BUILD COMPANION completed: ${results.length} splits created, " +
       s"$splitsInvalidated invalidated, " +
       s"$totalFilesIndexed files indexed, " +
       s"downloaded ${totalBytesDownloaded} bytes, uploaded ${totalBytesUploaded} bytes, " +
@@ -663,8 +663,8 @@ case class SyncToExternalCommand(
 
     // Set job group for Spark UI visibility
     sparkSession.sparkContext.setJobGroup(
-      "sync_indextables",
-      s"SYNC INDEXTABLES WITH DELTA: ${syncGroups.size} groups from $sourcePath"
+      "build_indextables_companion",
+      s"BUILD INDEXTABLES COMPANION FROM DELTA: ${syncGroups.size} groups from $sourcePath"
     )
 
     try {
@@ -672,7 +672,7 @@ case class SyncToExternalCommand(
       val numPartitions = math.max(1, syncGroups.size)
       val groupsRDD = sparkSession.sparkContext
         .parallelize(syncGroups, numPartitions)
-        .setName(s"SYNC INDEXTABLES WITH DELTA [${syncGroups.size} groups]")
+        .setName(s"BUILD INDEXTABLES COMPANION FROM DELTA [${syncGroups.size} groups]")
 
       val results = groupsRDD.map { group =>
         val result = SyncTaskExecutor.execute(group, broadcastConfig.value)
@@ -749,7 +749,7 @@ case class SyncToExternalCommand(
   }
 }
 
-/** Internal grouping plan for SYNC operation (driver-side only, not serialized). */
+/** Internal grouping plan for BUILD COMPANION operation (driver-side only, not serialized). */
 private[sql] case class SyncIndexingGroupPlan(
   files: Seq[DeltaAddFile],
   partitionValues: Map[String, String])
