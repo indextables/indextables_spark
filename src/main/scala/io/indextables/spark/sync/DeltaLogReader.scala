@@ -21,6 +21,8 @@ import scala.jdk.CollectionConverters._
 
 import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaTableReader}
 
+import org.apache.spark.sql.types._
+
 import org.slf4j.LoggerFactory
 
 /** Simplified representation of a Delta AddFile action. */
@@ -81,6 +83,14 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
     val entries = fileEntries
     if (entries.isEmpty) Seq.empty
     else entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
+  }
+
+  /** Get the schema from Delta table metadata as a Spark StructType. */
+  def schema(): StructType = {
+    val deltaSchema = DeltaTableReader.readSchema(deltaTablePath, deltaConfig)
+    logger.info(s"Delta schema at $deltaTablePath: ${deltaSchema.getFieldCount} fields, " +
+      s"version=${deltaSchema.getTableVersion}")
+    DataType.fromJson(deltaSchema.getSchemaJson()).asInstanceOf[StructType]
   }
 
   /**

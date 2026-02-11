@@ -154,13 +154,14 @@ case class SyncToExternalCommand(
     }
 
     val partitionColumns = deltaReader.partitionColumns()
+    val allDeltaFiles = deltaReader.getAllFiles()
 
     logger.info(s"Delta table at $sourcePath: version=$deltaVersion, " +
-      s"partitionColumns=${partitionColumns.mkString(",")}")
+      s"partitionColumns=${partitionColumns.mkString(",")}, files=${allDeltaFiles.size}")
 
     // 2. DRY RUN mode: compute plan from Delta table only, no filesystem modifications
     if (dryRun) {
-      var allFiles = deltaReader.getAllFiles()
+      var allFiles = allDeltaFiles
       allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups = planIndexingGroups(allFiles, maxGroupSize)
@@ -175,10 +176,16 @@ case class SyncToExternalCommand(
 
     // 3. Use merged configuration (resolved earlier) for transaction log access
 
-    // Read batch size config (0 = all-at-once, preserving backward compatibility)
+    // Read batch size config (default: defaultParallelism = one Spark task per group per batch)
+    val defaultParallelism = sparkSession.sparkContext.defaultParallelism
     val batchSize = mergedConfigs.get("spark.indextables.companion.sync.batchSize")
       .map(_.toInt)
-      .getOrElse(0)
+      .getOrElse(defaultParallelism)
+
+    // Read max concurrent batches config (default: 3 concurrent Spark jobs)
+    val maxConcurrentBatches = mergedConfigs.get("spark.indextables.companion.sync.maxConcurrentBatches")
+      .map(_.toInt)
+      .getOrElse(3)
 
     // 4. Open IndexTables transaction log at destination
     val destTablePath = new Path(destPath)
@@ -190,7 +197,7 @@ case class SyncToExternalCommand(
     try {
       // 5. Determine sync mode: initial vs incremental
       val (existingFiles, lastSyncedVersion, isInitialSync) = determineSyncMode(transactionLog,
-        sparkSession, partitionColumns)
+        deltaReader.schema(), partitionColumns)
 
       // 6. Check if already up-to-date
       if (!isInitialSync && lastSyncedVersion >= deltaVersion) {
@@ -286,65 +293,21 @@ case class SyncToExternalCommand(
         readerBatchSize = readerBatchSize
       )
 
-      // 10. Dispatch Spark tasks and commit
-      if (batchSize > 0 && groups.size > batchSize) {
-        // Batched path: dispatch and commit in batches for incremental progress
-        dispatchSyncTasksBatched(
-          sparkSession, groups, syncConfig, transactionLog,
-          splitsToInvalidate, effectiveIndexingModes,
-          effectiveWherePredicates, deltaVersion, batchSize, startTime)
-      } else {
-        // Legacy single-job path
-        dispatchSyncTasksAndCommit(
-          sparkSession, groups, syncConfig, transactionLog,
-          splitsToInvalidate, effectiveIndexingModes,
-          effectiveWherePredicates, deltaVersion, startTime)
-      }
+      // 10. Dispatch Spark tasks in concurrent batches and commit per-batch
+      dispatchSyncTasksBatched(
+        sparkSession, groups, syncConfig, transactionLog,
+        splitsToInvalidate, effectiveIndexingModes,
+        effectiveWherePredicates, deltaVersion, batchSize,
+        maxConcurrentBatches, startTime)
     } finally {
       transactionLog.close()
     }
   }
 
   /**
-   * Legacy single-job dispatch: all groups in one Spark job, one atomic commit.
-   */
-  private def dispatchSyncTasksAndCommit(
-    sparkSession: SparkSession,
-    groups: Seq[SyncIndexingGroupPlan],
-    syncConfig: SyncConfig,
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
-    splitsToInvalidate: Seq[AddAction],
-    effectiveIndexingModes: Map[String, String],
-    effectiveWherePredicates: Seq[String],
-    deltaVersion: Long,
-    startTime: Long
-  ): Seq[Row] = {
-    val results = dispatchSyncTasks(sparkSession, groups, syncConfig)
-
-    // Build companion metadata for transaction log
-    val updatedMetadata = buildCompanionMetadata(
-      transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion)
-
-    // Commit transaction log with metadata update
-    val removeActions = buildRemoveActions(splitsToInvalidate)
-    val addActions = results.map(_.addAction.copy(
-      companionDeltaVersion = Some(deltaVersion)
-    ))
-
-    if (addActions.nonEmpty || removeActions.nonEmpty) {
-      val version = transactionLog.commitSyncActions(
-        removeActions, addActions, Some(updatedMetadata))
-      transactionLog.invalidateCache()
-      logger.info(s"Committed ${addActions.size} adds and ${removeActions.size} removes " +
-        s"with companion metadata at transaction log version $version")
-    }
-
-    buildResultRow(results, splitsToInvalidate.size, deltaVersion, startTime)
-  }
-
-  /**
-   * Batched dispatch: process groups in batches with per-batch commits for
-   * incremental progress on large tables.
+   * Concurrent batched dispatch: process groups in batches with per-batch commits
+   * for crash resilience. Multiple batches run concurrently as separate Spark jobs
+   * using a ForkJoinPool, similar to the merge concurrent batch pattern.
    */
   private def dispatchSyncTasksBatched(
     sparkSession: SparkSession,
@@ -356,66 +319,90 @@ case class SyncToExternalCommand(
     effectiveWherePredicates: Seq[String],
     deltaVersion: Long,
     batchSize: Int,
+    maxConcurrentBatches: Int,
     startTime: Long
   ): Seq[Row] = {
     val batches = groups.grouped(batchSize).toSeq
-    val allResults = scala.collection.mutable.ArrayBuffer[io.indextables.spark.sync.SyncTaskResult]()
+    val allResults = new java.util.concurrent.ConcurrentLinkedQueue[io.indextables.spark.sync.SyncTaskResult]()
 
-    logger.info(s"Batched sync: ${groups.size} groups in ${batches.size} batches of $batchSize")
+    logger.info(s"Concurrent batched sync: ${groups.size} groups in ${batches.size} batches " +
+      s"of $batchSize, maxConcurrentBatches=$maxConcurrentBatches")
 
-    batches.zipWithIndex.foreach { case (batch, batchIdx) =>
-      val isFirstBatch = batchIdx == 0
-      val isLastBatch = batchIdx == batches.size - 1
+    // Thread-safe coordination for RemoveActions and metadata
+    val removesCommitted = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val completedBatches = new java.util.concurrent.atomic.AtomicInteger(0)
+    val commitLock = new Object()
 
-      logger.info(s"Dispatching batch ${batchIdx + 1}/${batches.size} " +
-        s"(${batch.size} groups)")
+    val effectiveConcurrency = math.min(maxConcurrentBatches, batches.size)
+    val forkJoinPool = new java.util.concurrent.ForkJoinPool(effectiveConcurrency)
+    val parBatches = batches.zipWithIndex.par
+    parBatches.tasksupport = new scala.collection.parallel.ForkJoinTaskSupport(forkJoinPool)
 
-      // Refresh credentials for each batch (handles token expiration)
-      val mergedConfigs = {
-        val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-        val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(
-          sparkSession.sparkContext.hadoopConfiguration)
-        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    try {
+      parBatches.foreach { case (batch, batchIdx) =>
+        logger.info(s"Dispatching batch ${batchIdx + 1}/${batches.size} " +
+          s"(${batch.size} groups)")
+
+        // Set per-batch job group for Spark UI visibility
+        sparkSession.sparkContext.setJobGroup(
+          s"build_indextables_companion_batch_${batchIdx + 1}",
+          s"BUILD COMPANION Batch ${batchIdx + 1}/${batches.size}: ${batch.size} groups"
+        )
+
+        // Refresh credentials for each batch (handles token expiration)
+        val mergedConfigs = {
+          val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+          val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(
+            sparkSession.sparkContext.hadoopConfiguration)
+          ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+        }
+        val refreshedConfig = syncConfig.copy(
+          splitCredentials = resolveCredentials(mergedConfigs, destPath),
+          parquetCredentials = resolveCredentials(mergedConfigs, sourcePath)
+        )
+
+        val batchResults = dispatchSyncTasks(sparkSession, batch, refreshedConfig)
+        batchResults.foreach(allResults.add)
+
+        // Commit this batch's results
+        val batchAddActions = batchResults.map(_.addAction.copy(
+          companionDeltaVersion = Some(deltaVersion)
+        ))
+
+        // Exactly one batch commits RemoveActions (first to arrive wins)
+        val batchRemoveActions = if (removesCommitted.compareAndSet(false, true)) {
+          buildRemoveActions(splitsToInvalidate)
+        } else {
+          Seq.empty
+        }
+
+        // Last batch to complete updates metadata with lastSyncedVersion
+        val completed = completedBatches.incrementAndGet()
+        val metadataUpdate = if (completed == batches.size) {
+          Some(buildCompanionMetadata(
+            transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
+        } else {
+          None
+        }
+
+        // Synchronized commit — transaction log is not thread-safe
+        if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty || metadataUpdate.isDefined) {
+          commitLock.synchronized {
+            val version = transactionLog.commitSyncActions(
+              batchRemoveActions, batchAddActions, metadataUpdate)
+            transactionLog.invalidateCache()
+            logger.info(s"Batch ${batchIdx + 1}/${batches.size}: committed " +
+              s"${batchAddActions.size} adds, ${batchRemoveActions.size} removes " +
+              s"at transaction log version $version")
+          }
+        }
       }
-      val refreshedConfig = syncConfig.copy(
-        splitCredentials = resolveCredentials(mergedConfigs, destPath),
-        parquetCredentials = resolveCredentials(mergedConfigs, sourcePath)
-      )
-
-      val batchResults = dispatchSyncTasks(sparkSession, batch, refreshedConfig)
-      allResults ++= batchResults
-
-      // Commit this batch's results
-      val batchAddActions = batchResults.map(_.addAction.copy(
-        companionDeltaVersion = Some(deltaVersion)
-      ))
-
-      // First batch also commits RemoveActions (invalidation splits)
-      val batchRemoveActions = if (isFirstBatch) {
-        buildRemoveActions(splitsToInvalidate)
-      } else {
-        Seq.empty
-      }
-
-      // Last batch updates metadata with lastSyncedVersion
-      val metadataUpdate = if (isLastBatch) {
-        Some(buildCompanionMetadata(
-          transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
-      } else {
-        None
-      }
-
-      if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty || metadataUpdate.isDefined) {
-        val version = transactionLog.commitSyncActions(
-          batchRemoveActions, batchAddActions, metadataUpdate)
-        transactionLog.invalidateCache()
-        logger.info(s"Batch ${batchIdx + 1}/${batches.size}: committed " +
-          s"${batchAddActions.size} adds, ${batchRemoveActions.size} removes " +
-          s"at transaction log version $version")
-      }
+    } finally {
+      forkJoinPool.shutdown()
+      sparkSession.sparkContext.clearJobGroup()
     }
 
-    buildResultRow(allResults.toSeq, splitsToInvalidate.size, deltaVersion, startTime)
+    buildResultRow(allResults.asScala.toSeq, splitsToInvalidate.size, deltaVersion, startTime)
   }
 
   /**
@@ -526,7 +513,7 @@ case class SyncToExternalCommand(
    */
   private def determineSyncMode(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
-    sparkSession: SparkSession,
+    deltaSchema: org.apache.spark.sql.types.StructType,
     partitionColumns: Seq[String]
   ): (Seq[AddAction], Long, Boolean) =
     try {
@@ -544,9 +531,6 @@ case class SyncToExternalCommand(
       case e: RuntimeException if e.getMessage != null &&
           e.getMessage.contains("No metadata found in transaction log") =>
         logger.info(s"No existing table at $destPath, initializing for initial sync")
-        // Read schema from Delta table via Spark's delta format reader
-        // (delta-spark is available on Databricks runtime and in tests)
-        val deltaSchema = sparkSession.read.format("delta").load(sourcePath).schema
         transactionLog.initialize(deltaSchema, partitionColumns)
         (Seq.empty[AddAction], -1L, true)
     }
