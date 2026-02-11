@@ -171,31 +171,13 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.29.0: Parquet companion mode support -->
+        <!-- Version 0.29.1: DeltaTableReader (delta-kernel-rs, no Hadoop dependency) -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.29.0</version>
+            <version>0.29.1</version>
             <classifier>${platform.classifier}</classifier>
-        </dependency>
-
-        <!-- Delta Kernel (shaded into fat jar for Databricks/EMR compatibility) -->
-        <dependency>
-            <groupId>io.delta</groupId>
-            <artifactId>delta-kernel-api</artifactId>
-            <version>3.3.2</version>
-        </dependency>
-        <dependency>
-            <groupId>io.delta</groupId>
-            <artifactId>delta-kernel-defaults</artifactId>
-            <version>3.3.2</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.hadoop</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <!-- Delta Spark DataSource for integration tests (write Delta tables) -->
@@ -569,8 +551,6 @@
                             <artifactSet>
                                 <includes>
                                     <include>io.indextables:tantivy4java</include>
-                                    <include>io.delta:delta-kernel-api</include>
-                                    <include>io.delta:delta-kernel-defaults</include>
                                     <include>software.amazon.awssdk:*</include>
                                     <include>com.azure:azure-core</include>
                                     <!-- <include>com.fasterxml.jackson.core:*</include>

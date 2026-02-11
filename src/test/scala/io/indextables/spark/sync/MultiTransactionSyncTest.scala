@@ -686,8 +686,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       }
 
       // Get actual file sizes to set a meaningful target
-      val deltaReader = new DeltaLogReader(deltaPath,
-        spark.sparkContext.hadoopConfiguration)
+      val deltaReader = new DeltaLogReader(deltaPath, Map.empty[String, String])
       val allFiles = deltaReader.getAllFiles()
       allFiles.size should be >= 6
       val singleFileSize = allFiles.head.size
@@ -778,8 +777,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       }
 
       // Get actual file sizes and use a target that precisely fits 2 files
-      val deltaReader = new DeltaLogReader(deltaPath,
-        spark.sparkContext.hadoopConfiguration)
+      val deltaReader = new DeltaLogReader(deltaPath, Map.empty[String, String])
       val allFiles = deltaReader.getAllFiles()
       allFiles.size shouldBe 4
       val sortedSizes = allFiles.map(_.size).sorted
@@ -830,8 +828,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       }
 
       // DRY RUN with tiny target — each file should be its own group
-      val deltaReader = new DeltaLogReader(deltaPath,
-        spark.sparkContext.hadoopConfiguration)
+      val deltaReader = new DeltaLogReader(deltaPath, Map.empty[String, String])
       val singleFileSize = deltaReader.getAllFiles().head.size
 
       val rowSmall = spark.sql(
@@ -867,8 +864,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
         .write.format("delta").mode("append").save(deltaPath)
 
       // Get file size for target calculation
-      val deltaReader = new DeltaLogReader(deltaPath,
-        spark.sparkContext.hadoopConfiguration)
+      val deltaReader = new DeltaLogReader(deltaPath, Map.empty[String, String])
       val singleFileSize = deltaReader.getAllFiles().head.size
 
       // Target size fits exactly 1 file — should create 4 splits (1 per file)

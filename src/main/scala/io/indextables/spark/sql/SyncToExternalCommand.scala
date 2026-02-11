@@ -118,9 +118,27 @@ case class SyncToExternalCommand(
   }
 
   private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
-    // 1. Read Delta table log
+    // 1. Extract merged configuration and resolve credentials for Delta table access
     val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
-    val deltaReader = new DeltaLogReader(sourcePath, hadoopConf)
+    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // Resolve credentials for the SOURCE Delta table (not the destination split table).
+    // These are passed to DeltaLogReader which uses tantivy4java's DeltaTableReader
+    // (delta-kernel-rs) — no Hadoop dependency, native S3/Azure support.
+    val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+    val deltaReader = new DeltaLogReader(sourcePath, sourceCredentials)
+    executeSyncWithReader(sparkSession, deltaReader, mergedConfigs, startTime)
+  }
+
+  private def executeSyncWithReader(
+    sparkSession: SparkSession,
+    deltaReader: DeltaLogReader,
+    mergedConfigs: Map[String, String],
+    startTime: Long
+  ): Seq[Row] = {
+    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
     val deltaVersion = deltaReader.currentVersion()
 
     // Check for non-existent Delta table (version -1 means no commits exist)
@@ -135,11 +153,10 @@ case class SyncToExternalCommand(
       ))
     }
 
-    val deltaSchema = deltaReader.schema()
     val partitionColumns = deltaReader.partitionColumns()
 
     logger.info(s"Delta table at $sourcePath: version=$deltaVersion, " +
-      s"partitionColumns=${partitionColumns.mkString(",")}, schema=${deltaSchema.simpleString}")
+      s"partitionColumns=${partitionColumns.mkString(",")}")
 
     // 2. DRY RUN mode: compute plan from Delta table only, no filesystem modifications
     if (dryRun) {
@@ -156,10 +173,7 @@ case class SyncToExternalCommand(
       ))
     }
 
-    // 3. Extract merged configuration for transaction log access
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    // 3. Use merged configuration (resolved earlier) for transaction log access
 
     // Read batch size config (0 = all-at-once, preserving backward compatibility)
     val batchSize = mergedConfigs.get("spark.indextables.companion.sync.batchSize")
@@ -176,7 +190,7 @@ case class SyncToExternalCommand(
     try {
       // 5. Determine sync mode: initial vs incremental
       val (existingFiles, lastSyncedVersion, isInitialSync) = determineSyncMode(transactionLog,
-        deltaSchema, partitionColumns)
+        sparkSession, partitionColumns)
 
       // 6. Check if already up-to-date
       if (!isInitialSync && lastSyncedVersion >= deltaVersion) {
@@ -512,7 +526,7 @@ case class SyncToExternalCommand(
    */
   private def determineSyncMode(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
-    deltaSchema: org.apache.spark.sql.types.StructType,
+    sparkSession: SparkSession,
     partitionColumns: Seq[String]
   ): (Seq[AddAction], Long, Boolean) =
     try {
@@ -530,6 +544,9 @@ case class SyncToExternalCommand(
       case e: RuntimeException if e.getMessage != null &&
           e.getMessage.contains("No metadata found in transaction log") =>
         logger.info(s"No existing table at $destPath, initializing for initial sync")
+        // Read schema from Delta table via Spark's delta format reader
+        // (delta-spark is available on Databricks runtime and in tests)
+        val deltaSchema = sparkSession.read.format("delta").load(sourcePath).schema
         transactionLog.initialize(deltaSchema, partitionColumns)
         (Seq.empty[AddAction], -1L, true)
     }
