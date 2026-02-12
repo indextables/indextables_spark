@@ -383,6 +383,34 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     }
   }
 
+  test("companion read-back should return correct data via docBatchProjected") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_readback").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_readback").getAbsolutePath
+
+      createLocalDeltaTable(deltaPath, numRows = 10)
+
+      // Build companion index
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      // Read back companion index — this exercises the full docBatchProjected path
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      val allRecords = companionDf.collect()
+      allRecords.length shouldBe 10
+
+      // Verify data is not null (the old doc() path returned nulls for companion splits)
+      allRecords.foreach { row =>
+        row.get(0) should not be (null: Any) // id
+      }
+    }
+  }
+
   test("write guard should reject normal writes to companion-mode table") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta_guard").getAbsolutePath
