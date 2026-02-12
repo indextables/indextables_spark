@@ -176,11 +176,17 @@ case class SyncToExternalCommand(
 
     // 3. Use merged configuration (resolved earlier) for transaction log access
 
-    // Commit interval: how many groups to accumulate before committing to the
-    // transaction log. Default 1 = commit after every group for maximum crash resilience.
-    val commitInterval = mergedConfigs.get("spark.indextables.companion.sync.batchSize")
+    // Batch size: indexing tasks per group (each group = one Spark job).
+    // Default: defaultParallelism to fill the cluster with each group.
+    val defaultParallelism = sparkSession.sparkContext.defaultParallelism
+    val batchSize = mergedConfigs.get("spark.indextables.companion.sync.batchSize")
       .map(_.toInt)
-      .getOrElse(1)
+      .getOrElse(defaultParallelism)
+
+    // Max concurrent groups (Spark jobs) running simultaneously.
+    val maxConcurrentBatches = mergedConfigs.get("spark.indextables.companion.sync.maxConcurrentBatches")
+      .map(_.toInt)
+      .getOrElse(3)
 
     // 4. Open IndexTables transaction log at destination
     val destTablePath = new Path(destPath)
@@ -288,23 +294,23 @@ case class SyncToExternalCommand(
         readerBatchSize = readerBatchSize
       )
 
-      // 10. Dispatch all groups as one pipelined Spark job, committing incrementally
-      dispatchSyncTasksPipelined(
+      // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
+      dispatchSyncTasksBatched(
         sparkSession, groups, syncConfig, transactionLog,
         splitsToInvalidate, effectiveIndexingModes,
-        effectiveWherePredicates, deltaVersion, commitInterval, startTime)
+        effectiveWherePredicates, deltaVersion, batchSize, maxConcurrentBatches, startTime)
     } finally {
       transactionLog.close()
     }
   }
 
   /**
-   * Pipelined dispatch: all groups run as tasks in ONE Spark job, with per-group
-   * commits to the transaction log via runJob's result handler callback. Spark's
-   * internal scheduler handles task interleaving — as one task finishes on an
-   * executor, the next pending task starts immediately with zero idle CPU time.
+   * Batched concurrent dispatch: indexing tasks are grouped into batches of
+   * batchSize, with up to maxConcurrentBatches Spark jobs running at once.
+   * As each group completes, the next starts (sliding window: 1,2,3 → 2,3,4 → ...).
+   * Each group commits its results to the transaction log upon completion.
    */
-  private def dispatchSyncTasksPipelined(
+  private def dispatchSyncTasksBatched(
     sparkSession: SparkSession,
     groups: Seq[SyncIndexingGroupPlan],
     syncConfig: SyncConfig,
@@ -313,16 +319,13 @@ case class SyncToExternalCommand(
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
     deltaVersion: Long,
-    commitInterval: Int,
+    batchSize: Int,
+    maxConcurrentBatches: Int,
     startTime: Long
   ): Seq[Row] = {
-    val totalGroups = groups.size
-    logger.info(s"Pipelined sync: $totalGroups groups, commit every $commitInterval")
+    val totalTasks = groups.size
 
-    // Broadcast config to all executors
-    val broadcastConfig = sparkSession.sparkContext.broadcast(syncConfig)
-
-    // Convert plans to serializable groups numbered globally
+    // Convert plans to serializable groups
     val syncGroups = groups.zipWithIndex.map { case (plan, idx) =>
       SyncIndexingGroup(
         parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, sourcePath)),
@@ -332,70 +335,118 @@ case class SyncToExternalCommand(
       )
     }
 
-    // One Spark job with all groups — Spark's scheduler handles interleaving
-    val numPartitions = math.max(1, syncGroups.size)
-    val groupsRDD = sparkSession.sparkContext
-      .parallelize(syncGroups, numPartitions)
-      .setName(s"Building groups 1-$totalGroups of $totalGroups")
+    // Split into groups of batchSize tasks each
+    val batches = syncGroups.grouped(batchSize).toSeq
+    val totalGroups = batches.size
 
-    sparkSession.sparkContext.setJobGroup(
-      "tantivy4spark-build-companion",
-      s"BUILD COMPANION: $totalGroups groups from $sourcePath"
-    )
+    // Pre-compute per-batch input sizes from the original plans (which have file sizes)
+    val batchInputSizes = groups.grouped(batchSize).map { batchPlans =>
+      val totalFiles = batchPlans.map(_.files.size).sum
+      val totalBytes = batchPlans.map(_.files.map(_.size).sum).sum
+      (totalFiles, totalBytes)
+    }.toSeq
 
-    // Accumulate results and commit incrementally via runJob result handler.
-    // The handler is called on the driver as each partition (group) completes.
-    val allResults = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
-    val pendingBatch = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
+    val grandTotalBytes = batchInputSizes.map(_._2).sum
+    val grandTotalFiles = batchInputSizes.map(_._1).sum
+
+    logger.info(s"Batched sync: $totalTasks indexing tasks in $totalGroups groups " +
+      s"($batchSize tasks/group, $maxConcurrentBatches concurrent), " +
+      f"$grandTotalFiles files, ${grandTotalBytes / 1024.0 / 1024.0 / 1024.0}%.2f GB total input")
+
+    // Broadcast config once for all groups
+    val broadcastConfig = sparkSession.sparkContext.broadcast(syncConfig)
+
+    // Thread-safe accumulators
+    val allResults = new java.util.concurrent.ConcurrentLinkedQueue[io.indextables.spark.sync.SyncTaskResult]()
+    val commitLock = new Object()
     val removesCommitted = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val completedGroups = new java.util.concurrent.atomic.AtomicInteger(0)
+
+    // Fixed thread pool — exactly maxConcurrentBatches threads (no compensation threads)
+    val executor = java.util.concurrent.Executors.newFixedThreadPool(maxConcurrentBatches)
+
+    // Define task function OUTSIDE Callable to avoid capturing non-serializable Callable in closure
+    val taskFunc = (_: org.apache.spark.TaskContext, iter: Iterator[SyncIndexingGroup]) => {
+      val group = iter.next()
+      SyncTaskExecutor.execute(group, broadcastConfig.value)
+    }
 
     try {
-      sparkSession.sparkContext.runJob(
-        groupsRDD,
-        (_: org.apache.spark.TaskContext, iter: Iterator[SyncIndexingGroup]) => {
-          val group = iter.next()
-          SyncTaskExecutor.execute(group, broadcastConfig.value)
-        },
-        0 until numPartitions,
-        (partitionIdx: Int, result: io.indextables.spark.sync.SyncTaskResult) => {
-          allResults.add(result)
-          pendingBatch.add(result)
+      val futures = batches.zipWithIndex.map { case (batch, batchIdx) =>
+        executor.submit(new java.util.concurrent.Callable[Unit] {
+          override def call(): Unit = {
+            val groupNum = batchIdx + 1
+            val (batchFiles, batchBytes) = batchInputSizes(batchIdx)
+            val batchSizeGB = batchBytes / 1024.0 / 1024.0 / 1024.0
 
-          val isLastGroup = allResults.size() == totalGroups
+            // Set job group for Spark UI (thread-local, safe for concurrent use)
+            sparkSession.sparkContext.setJobGroup(
+              s"tantivy4spark-build-companion-group-$groupNum",
+              f"BUILD COMPANION Group $groupNum/$totalGroups: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)"
+            )
 
-          if (pendingBatch.size() >= commitInterval || isLastGroup) {
-            val addActions = pendingBatch.asScala.toSeq.map(_.addAction.copy(
+            val batchRDD = sparkSession.sparkContext
+              .parallelize(batch, batch.size)
+              .setName(f"Building group $groupNum of $totalGroups: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)")
+
+            // Run Spark job for this group
+            val batchResults = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
+
+            sparkSession.sparkContext.runJob(
+              batchRDD,
+              taskFunc,
+              0 until batch.size,
+              (_: Int, result: io.indextables.spark.sync.SyncTaskResult) => {
+                batchResults.add(result)
+                allResults.add(result)
+              }
+            )
+
+            // Commit this group's results (synchronized for thread safety)
+            val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
               companionDeltaVersion = Some(deltaVersion)
             ))
 
-            // First commit also includes RemoveActions for invalidated splits
+            // First group to commit also includes RemoveActions for invalidated splits
             val removeActions = if (removesCommitted.compareAndSet(false, true)) {
               buildRemoveActions(splitsToInvalidate)
             } else {
               Seq.empty
             }
 
-            // Last group triggers metadata update
-            val metadataUpdate = if (isLastGroup) {
+            // Last group to complete includes metadata update
+            val completed = completedGroups.incrementAndGet()
+            val metadataUpdate = if (completed == totalGroups) {
               Some(buildCompanionMetadata(
                 transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
             } else {
               None
             }
 
-            if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
-              val version = transactionLog.commitSyncActions(
-                removeActions, addActions, metadataUpdate)
-              transactionLog.invalidateCache()
-              logger.info(s"Committed ${addActions.size} adds " +
-                s"(${allResults.size}/$totalGroups groups complete) " +
-                s"at transaction log version $version")
+            commitLock.synchronized {
+              if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
+                val version = transactionLog.commitSyncActions(
+                  removeActions, addActions, metadataUpdate)
+                transactionLog.invalidateCache()
+                logger.info(s"Group $groupNum/$totalGroups committed: " +
+                  s"${addActions.size} adds at version $version " +
+                  s"($completed/$totalGroups groups complete)")
+              }
             }
-            pendingBatch.clear()
           }
+        })
+      }
+
+      // Wait for all groups, propagating first exception
+      futures.foreach { f =>
+        try {
+          f.get()
+        } catch {
+          case e: java.util.concurrent.ExecutionException => throw e.getCause
         }
-      )
+      }
     } finally {
+      executor.shutdownNow()
       broadcastConfig.destroy()
       sparkSession.sparkContext.clearJobGroup()
     }
@@ -579,17 +630,24 @@ case class SyncToExternalCommand(
     }
 
     // Collect remaining valid files from invalidated splits that still exist in Delta,
-    // preserving partition values from the parent split for correct grouping
+    // preserving partition values from the parent split for correct grouping.
+    // Look up accurate file sizes from the current Delta snapshot.
+    val deltaSizeByPath = currentDeltaFiles.map(f => normalizePath(f.path) -> f.size).toMap
     val remainingFromInvalidated = splitsToInvalidate.flatMap { split =>
       split.companionSourceFiles.getOrElse(Seq.empty)
         .filterNot(f => pathsGoneFromDelta.contains(normalizePath(f)))
-        .map(relPath => DeltaAddFile(relPath, split.partitionValues, 0L))
+        .map { relPath =>
+          val size = deltaSizeByPath.getOrElse(normalizePath(relPath), 0L)
+          DeltaAddFile(relPath, split.partitionValues, size)
+        }
     }.groupBy(f => normalizePath(f.path)).map(_._2.head).toSeq
 
-    // Merge new files with remaining files from invalidated splits, dedup by path
-    // (prefer Delta files since they have accurate size)
+    // Merge new files with remaining files from invalidated splits, dedup by path.
+    // Prefer the entry with the largest size (Delta files have accurate size, invalidated = 0L).
     val allFilesToIndex = (filesToIndex ++ remainingFromInvalidated)
-      .groupBy(f => normalizePath(f.path)).map(_._2.head).toSeq
+      .groupBy(f => normalizePath(f.path))
+      .map(_._2.maxBy(_.size))
+      .toSeq
 
     logger.info(s"Anti-join sync: ${currentDeltaFiles.size} in Delta, " +
       s"${companionPaths.size} in companion, ${filesToIndex.size} new, " +

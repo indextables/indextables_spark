@@ -20,7 +20,7 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
-import io.indextables.spark.transaction.TransactionLogFactory
+import io.indextables.spark.transaction.{AddAction, MetadataAction, RemoveAction, TransactionLogFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 
@@ -108,6 +108,15 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
   private def syncAndCollect(deltaPath: String, indexPath: String): org.apache.spark.sql.Row = {
     val result = spark.sql(
       s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+    )
+    val rows = result.collect()
+    rows.length shouldBe 1
+    rows(0)
+  }
+
+  private def syncWithTargetSize(deltaPath: String, indexPath: String, targetSize: String = "1"): org.apache.spark.sql.Row = {
+    val result = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' TARGET INPUT SIZE $targetSize AT LOCATION '$indexPath'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -1470,6 +1479,444 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
         }
       } finally {
         txLog.close()
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  Batched Concurrent Dispatch Tests
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Count the number of Avro state directories in the transaction log.
+   * Each commit (via writeActionsToAvroState) creates a new state-vN directory.
+   * This is the reliable way to count commits with the Avro state format.
+   */
+  private def countStateDirs(indexPath: String): Int = {
+    val txLogDir = new File(indexPath, "_transaction_log")
+    if (!txLogDir.exists()) return 0
+    Option(txLogDir.listFiles())
+      .map(_.count(f => f.isDirectory && f.getName.startsWith("state-v")))
+      .getOrElse(0)
+  }
+
+  test("batchSize=1 should produce one commit per indexing task") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_batch1").getAbsolutePath
+      val indexPath = new File(tempDir, "index_batch1").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 4 separate parquet files (4 appends)
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      for (i <- 2 to 4) {
+        Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+          .write.format("delta").mode("append").save(deltaPath)
+      }
+
+      // Force batchSize=1 so each indexing task is its own batch (= its own commit)
+      // TARGET INPUT SIZE 1 forces each parquet file into its own indexing group
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      try {
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+        row.getInt(6) shouldBe 4 // 4 parquet files indexed
+
+        // Verify multiple Avro state directories (one per batch commit)
+        // init uses JSON format, batch commits use Avro state format
+        val stateDirs = countStateDirs(indexPath)
+        stateDirs should be >= 4 // 4 batch commits (one per indexing group)
+
+        // Verify all files present
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val files = txLog.listFiles()
+          files.size shouldBe 4
+          files.flatMap(_.companionSourceFiles.get).size shouldBe 4
+        } finally {
+          txLog.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+      }
+    }
+  }
+
+  test("batchSize=1 with maxConcurrentBatches=1 should produce sequential commits") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_seq").getAbsolutePath
+      val indexPath = new File(tempDir, "index_seq").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 3 parquet files
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      for (i <- 2 to 3) {
+        Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+          .write.format("delta").mode("append").save(deltaPath)
+      }
+
+      // Force sequential execution: 1 batch at a time, 1 task per batch
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      spark.conf.set("spark.indextables.companion.sync.maxConcurrentBatches", "1")
+      try {
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+
+        // Verify correct file count
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val files = txLog.listFiles()
+          files.size shouldBe 3
+
+          // Each file should have companionDeltaVersion set
+          files.foreach(_.companionDeltaVersion shouldBe Some(2L))
+        } finally {
+          txLog.close()
+        }
+
+        // Verify multiple state directories from sequential commits
+        val stateDirs = countStateDirs(indexPath)
+        stateDirs should be >= 3 // 3 sequential batch commits
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+        spark.conf.unset("spark.indextables.companion.sync.maxConcurrentBatches")
+      }
+    }
+  }
+
+  test("batchSize=1 incremental sync with invalidation should remove old splits correctly") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_inv_batch").getAbsolutePath
+      val indexPath = new File(tempDir, "index_inv_batch").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 3 small files in one partition
+      // Use TARGET INPUT SIZE 1 to force 3 separate indexing groups (one per file)
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      Seq((2, "b", 2.0)).toDF("id", "name", "score")
+        .write.format("delta").mode("append").save(deltaPath)
+      Seq((3, "c", 3.0)).toDF("id", "name", "score")
+        .write.format("delta").mode("append").save(deltaPath)
+
+      // Initial sync with TARGET INPUT SIZE 1 to get 3 splits
+      val row1 = syncWithTargetSize(deltaPath, indexPath, "1")
+      row1.getString(2) shouldBe "success"
+
+      val txLog1 = TransactionLogFactory.create(new Path(indexPath), spark)
+      val initialFileCount = try txLog1.listFiles().size finally txLog1.close()
+      initialFileCount shouldBe 3
+
+      // OPTIMIZE: merges 3 small files into 1, removing the originals
+      spark.sql(s"OPTIMIZE delta.`$deltaPath`")
+
+      // Incremental sync with batchSize=1:
+      // After OPTIMIZE, there's 1 new parquet file but 3 old splits need invalidation.
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      try {
+        val row2 = syncWithTargetSize(deltaPath, indexPath, "1")
+        row2.getString(2) shouldBe "success"
+        row2.getInt(5) should be > 0 // splits_invalidated > 0
+
+        // Verify final state: old splits removed, new split added
+        val txLog2 = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val finalFiles = txLog2.listFiles()
+          // After OPTIMIZE: 1 compacted parquet file → 1 companion split
+          finalFiles.size shouldBe 1
+          finalFiles.head.companionSourceFiles shouldBe defined
+          finalFiles.head.companionSourceFiles.get.size shouldBe 1
+
+          // Metadata should reflect latest delta version
+          val metadata = txLog2.getMetadata()
+          metadata.configuration("indextables.companion.enabled") shouldBe "true"
+        } finally {
+          txLog2.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+      }
+    }
+  }
+
+  test("batchSize=1 should commit metadata with correct companion config") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_meta_batch").getAbsolutePath
+      val indexPath = new File(tempDir, "index_meta_batch").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 3 files
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      for (i <- 2 to 3) {
+        Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+          .write.format("delta").mode("append").save(deltaPath)
+      }
+
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      try {
+        // TARGET INPUT SIZE 1 forces 3 groups, batchSize=1 forces 3 batches
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+        row.getInt(4) shouldBe 3 // 3 splits created
+
+        // Multiple commits happened (verifiable via state directories)
+        val stateDirs = countStateDirs(indexPath)
+        stateDirs should be >= 3 // 3 batch commits
+
+        // The final metadata should have correct companion config
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val metadata = txLog.getMetadata()
+          metadata.configuration("indextables.companion.enabled") shouldBe "true"
+          metadata.configuration("indextables.companion.lastSyncedVersion") shouldBe "2"
+          metadata.configuration("indextables.companion.sourceFormat") shouldBe "delta"
+          metadata.configuration("indextables.companion.sourceTablePath") shouldBe deltaPath
+        } finally {
+          txLog.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+      }
+    }
+  }
+
+  test("batchSize=1 total source files should equal total parquet files") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_total_files").getAbsolutePath
+      val indexPath = new File(tempDir, "index_total_files").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 6 files
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      for (i <- 2 to 6) {
+        Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+          .write.format("delta").mode("append").save(deltaPath)
+      }
+
+      val deltaReader = new DeltaLogReader(deltaPath, Map.empty[String, String])
+      val totalParquetFiles = deltaReader.getAllFiles().size
+      totalParquetFiles shouldBe 6
+
+      // TARGET INPUT SIZE 1 + batchSize=1: each file becomes its own group and batch
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      try {
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+        row.getInt(6) shouldBe totalParquetFiles // all files indexed
+
+        // Verify total companion source files across all splits
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val files = txLog.listFiles()
+          files.size shouldBe totalParquetFiles // one split per file
+          val allSourceFiles = files.flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
+          allSourceFiles.distinct.size shouldBe totalParquetFiles
+        } finally {
+          txLog.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+      }
+    }
+  }
+
+  test("batchSize=2 should group tasks into batches of 2") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_batch2").getAbsolutePath
+      val indexPath = new File(tempDir, "index_batch2").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 5 files
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      for (i <- 2 to 5) {
+        Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+          .write.format("delta").mode("append").save(deltaPath)
+      }
+
+      // TARGET INPUT SIZE 1 forces 5 groups, batchSize=2 makes 3 batches (2+2+1)
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "2")
+      try {
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+        row.getInt(6) shouldBe 5 // 5 files indexed
+
+        // Verify multiple state dirs: 3 batch commits (batches of 2, 2, 1)
+        val stateDirs = countStateDirs(indexPath)
+        stateDirs should be >= 3 // 3 batches
+
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val files = txLog.listFiles()
+          files.size shouldBe 5
+        } finally {
+          txLog.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+      }
+    }
+  }
+
+  test("maxConcurrentBatches=2 should complete successfully with concurrent execution") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_conc2").getAbsolutePath
+      val indexPath = new File(tempDir, "index_conc2").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create table with 6 files
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      for (i <- 2 to 6) {
+        Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+          .write.format("delta").mode("append").save(deltaPath)
+      }
+
+      // TARGET INPUT SIZE 1 + batchSize=1: 6 batches, maxConcurrent=2: 2 at a time
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      spark.conf.set("spark.indextables.companion.sync.maxConcurrentBatches", "2")
+      try {
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+        row.getInt(6) shouldBe 6
+
+        // Verify multiple state dirs from concurrent batch commits
+        val stateDirs = countStateDirs(indexPath)
+        stateDirs should be >= 6 // 6 batch commits
+
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val files = txLog.listFiles()
+          files.size shouldBe 6
+          // All files should have companionDeltaVersion set
+          files.foreach(_.companionDeltaVersion shouldBe defined)
+        } finally {
+          txLog.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+        spark.conf.unset("spark.indextables.companion.sync.maxConcurrentBatches")
+      }
+    }
+  }
+
+  test("batchSize=1 incremental sync should preserve files from first sync") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_incr_batch").getAbsolutePath
+      val indexPath = new File(tempDir, "index_incr_batch").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Initial: 2 files
+      Seq((1, "a", 1.0)).toDF("id", "name", "score")
+        .write.format("delta").save(deltaPath)
+      Seq((2, "b", 2.0)).toDF("id", "name", "score")
+        .write.format("delta").mode("append").save(deltaPath)
+
+      // First sync with batchSize=1 and TARGET INPUT SIZE 1
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      try {
+        val row1 = syncWithTargetSize(deltaPath, indexPath, "1")
+        row1.getString(2) shouldBe "success"
+
+        val txLog1 = TransactionLogFactory.create(new Path(indexPath), spark)
+        val firstSyncFiles = try txLog1.listFiles() finally txLog1.close()
+        firstSyncFiles.size shouldBe 2
+
+        // Append 3 more files
+        for (i <- 3 to 5) {
+          Seq((i, s"name_$i", i * 1.0)).toDF("id", "name", "score")
+            .write.format("delta").mode("append").save(deltaPath)
+        }
+
+        // Second sync: should only add 3 new splits, preserving the original 2
+        val row2 = syncWithTargetSize(deltaPath, indexPath, "1")
+        row2.getString(2) shouldBe "success"
+        row2.getInt(4) shouldBe 3 // 3 new splits
+        row2.getInt(5) shouldBe 0 // no invalidations (append only)
+
+        val txLog2 = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val allFiles = txLog2.listFiles()
+          allFiles.size shouldBe 5 // 2 original + 3 new
+          allFiles.flatMap(_.companionSourceFiles.get).distinct.size shouldBe 5
+        } finally {
+          txLog2.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
+      }
+    }
+  }
+
+  test("batched sync with partitioned table should maintain partition isolation") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_batch_part").getAbsolutePath
+      val indexPath = new File(tempDir, "index_batch_part").getAbsolutePath
+      val ss = spark
+      import ss.implicits._
+
+      // Create partitioned table with 2 files per partition, 3 partitions
+      Seq(
+        (1, "a", "east", 1.0), (2, "b", "east", 2.0)
+      ).toDF("id", "name", "region", "score")
+        .repartition(2)
+        .write.format("delta").partitionBy("region").save(deltaPath)
+
+      Seq(
+        (3, "c", "west", 3.0), (4, "d", "west", 4.0)
+      ).toDF("id", "name", "region", "score")
+        .repartition(2)
+        .write.format("delta").mode("append").save(deltaPath)
+
+      Seq(
+        (5, "e", "north", 5.0), (6, "f", "north", 6.0)
+      ).toDF("id", "name", "region", "score")
+        .repartition(2)
+        .write.format("delta").mode("append").save(deltaPath)
+
+      // batchSize=1, TARGET INPUT SIZE 1: each indexing group is its own batch
+      spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
+      try {
+        val row = syncWithTargetSize(deltaPath, indexPath, "1")
+        row.getString(2) shouldBe "success"
+
+        val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val files = txLog.listFiles()
+          files should not be empty
+
+          // Each split's source files should all belong to the same partition
+          files.foreach { f =>
+            f.companionSourceFiles shouldBe defined
+            f.companionSourceFiles.get should not be empty
+            if (f.partitionValues.nonEmpty) {
+              val partPrefix = f.partitionValues.toSeq.sorted
+                .map { case (k, v) => s"$k=$v" }.mkString("/")
+              f.companionSourceFiles.get.foreach { sf =>
+                sf should include(partPrefix)
+              }
+            }
+          }
+
+          // Verify 3 distinct partitions present
+          val partitions = files.map(_.partitionValues).distinct
+          partitions.size shouldBe 3
+        } finally {
+          txLog.close()
+        }
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.batchSize")
       }
     }
   }
