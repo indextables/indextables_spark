@@ -91,19 +91,38 @@ object SyncTaskExecutor {
     )
 
     try {
-      // 1. Download parquet files to local temp, preserving relative paths
-      var totalBytesDownloaded = 0L
-      val localFiles = group.parquetFiles.map { parquetPath =>
-        val relativePath = extractRelativePath(parquetPath, group.parquetTableRoot)
-        val localFile = new File(tempDir, relativePath)
-        localFile.getParentFile.mkdirs()
+      // 1. Download parquet files to local temp in parallel, preserving relative paths
+      val downloadParallelism = math.min(8, math.max(1, group.parquetFiles.size))
+      val downloadPool = java.util.concurrent.Executors.newFixedThreadPool(downloadParallelism)
+      val totalBytesDownloaded = new java.util.concurrent.atomic.AtomicLong(0L)
 
-        val bytesDownloaded = downloadFile(parquetPath, localFile, config.parquetCredentials)
-        totalBytesDownloaded += bytesDownloaded
-        localFile.getAbsolutePath
+      val downloadFutures = group.parquetFiles.map { parquetPath =>
+        downloadPool.submit(new java.util.concurrent.Callable[String] {
+          override def call(): String = {
+            val relativePath = extractRelativePath(parquetPath, group.parquetTableRoot)
+            val localFile = new File(tempDir, relativePath)
+            localFile.getParentFile.mkdirs()
+
+            val bytesDownloaded = downloadFile(parquetPath, localFile, config.parquetCredentials)
+            totalBytesDownloaded.addAndGet(bytesDownloaded)
+            localFile.getAbsolutePath
+          }
+        })
       }
 
-      OutputMetricsUpdater.updateInputMetrics(totalBytesDownloaded, group.parquetFiles.size)
+      val localFiles = try {
+        downloadFutures.map { f =>
+          try {
+            f.get()
+          } catch {
+            case e: java.util.concurrent.ExecutionException => throw e.getCause
+          }
+        }
+      } finally {
+        downloadPool.shutdownNow()
+      }
+
+      OutputMetricsUpdater.updateInputMetrics(totalBytesDownloaded.get(), group.parquetFiles.size)
 
       // 2. Build ParquetCompanionConfig
       val companionConfig = new ParquetCompanionConfig(tempDir.getAbsolutePath)
@@ -133,7 +152,7 @@ object SyncTaskExecutor {
         ""
       }
       val destSplitPath = s"${config.splitTablePath}/$partitionPrefix$splitFileName"
-      val splitSize = uploadSplit(localSplitPath, destSplitPath, config.splitCredentials)
+      val splitSize = uploadSplit(localSplitPath, destSplitPath, config.splitCredentials, config.splitTablePath)
 
       OutputMetricsUpdater.updateOutputMetrics(splitSize, 1)
 
@@ -163,13 +182,13 @@ object SyncTaskExecutor {
       val durationMs = System.currentTimeMillis() - startTime
       logger.info(
         s"Sync task ${group.groupIndex}: completed in ${durationMs}ms, " +
-          s"downloaded ${totalBytesDownloaded} bytes, uploaded $splitSize bytes, " +
+          s"downloaded ${totalBytesDownloaded.get()} bytes, uploaded $splitSize bytes, " +
           s"${metadata.getNumDocs} documents"
       )
 
       SyncTaskResult(
         addAction = addAction,
-        bytesDownloaded = totalBytesDownloaded,
+        bytesDownloaded = totalBytesDownloaded.get(),
         bytesUploaded = splitSize,
         parquetFilesIndexed = group.parquetFiles.size
       )
@@ -293,100 +312,11 @@ object SyncTaskExecutor {
   private def uploadSplit(
     localPath: String,
     destPath: String,
-    credentials: Map[String, String]
-  ): Long = {
-    logger.debug(s"Uploading split from $localPath to $destPath")
-    val localFile = new File(localPath)
-
-    if (destPath.startsWith("s3://") || destPath.startsWith("s3a://")) {
-      uploadToS3(localFile, destPath, credentials)
-    } else if (destPath.startsWith("abfss://") || destPath.startsWith("wasbs://")) {
-      uploadToAzure(localFile, destPath, credentials)
-    } else {
-      // Local filesystem copy
-      val destFile = new File(destPath)
-      destFile.getParentFile.mkdirs()
-      Files.copy(localFile.toPath, destFile.toPath, StandardCopyOption.REPLACE_EXISTING)
-      localFile.length()
-    }
-  }
-
-  private def uploadToS3(
-    localFile: File,
-    s3Path: String,
-    credentials: Map[String, String]
-  ): Long = {
-    import io.indextables.spark.utils.CredentialProviderFactory
-
-    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(credentials, s3Path)
-    val (bucket, key) = parseS3Path(s3Path)
-    val clientBuilder = software.amazon.awssdk.services.s3.S3Client.builder()
-
-    resolvedCreds.foreach { creds =>
-      val credProvider = creds.sessionToken match {
-        case Some(token) =>
-          software.amazon.awssdk.auth.credentials.StaticCredentialsProvider.create(
-            software.amazon.awssdk.auth.credentials.AwsSessionCredentials.create(
-              creds.accessKey,
-              creds.secretKey,
-              token
-            )
-          )
-        case None =>
-          software.amazon.awssdk.auth.credentials.StaticCredentialsProvider.create(
-            software.amazon.awssdk.auth.credentials.AwsBasicCredentials.create(
-              creds.accessKey,
-              creds.secretKey
-            )
-          )
-      }
-      clientBuilder.credentialsProvider(credProvider)
-    }
-
-    credentials.get("spark.indextables.aws.region").foreach { region =>
-      clientBuilder.region(software.amazon.awssdk.regions.Region.of(region))
-    }
-
-    val client = clientBuilder.build()
-    try {
-      val request = software.amazon.awssdk.services.s3.model.PutObjectRequest.builder()
-        .bucket(bucket)
-        .key(key)
-        .build()
-
-      client.putObject(request, localFile.toPath)
-      localFile.length()
-    } finally {
-      client.close()
-    }
-  }
-
-  private def uploadToAzure(
-    localFile: File,
-    azurePath: String,
-    credentials: Map[String, String]
-  ): Long = {
-    val hadoopConf = new org.apache.hadoop.conf.Configuration()
-    credentials.foreach { case (k, v) => hadoopConf.set(k, v) }
-    val fs = org.apache.hadoop.fs.FileSystem.get(new java.net.URI(azurePath), hadoopConf)
-    val outputStream = fs.create(new org.apache.hadoop.fs.Path(azurePath))
-    try {
-      val inputStream = new java.io.FileInputStream(localFile)
-      try {
-        val buffer = new Array[Byte](65536)
-        var bytesRead = inputStream.read(buffer)
-        while (bytesRead != -1) {
-          outputStream.write(buffer, 0, bytesRead)
-          bytesRead = inputStream.read(buffer)
-        }
-      } finally {
-        inputStream.close()
-      }
-    } finally {
-      outputStream.close()
-    }
-    localFile.length()
-  }
+    credentials: Map[String, String],
+    tablePath: String
+  ): Long =
+    io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
+      localPath, destPath, credentials, tablePath)
 
   private def parseS3Path(s3Path: String): (String, String) = {
     val path = s3Path.replaceFirst("^s3a?://", "")
