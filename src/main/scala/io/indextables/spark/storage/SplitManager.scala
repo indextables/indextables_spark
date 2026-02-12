@@ -609,29 +609,10 @@ case class SplitCacheConfig(
       config = config.withTieredCache(tieredConfig)
     }
 
-    // Configure companion mode (parquet table root for document retrieval)
-    companionSourceTableRoot.foreach { tableRoot =>
-      logger.info(s"Companion mode: parquet table root = $tableRoot")
-      config = config.withParquetTableRoot(tableRoot)
-
-      // Configure separate parquet storage credentials if available.
-      // On Databricks/Unity Catalog, the Delta table may need different
-      // credentials than the companion index.
-      (parquetAwsAccessKey, parquetAwsSecretKey) match {
-        case (Some(key), Some(secret)) =>
-          val pqStorage = new io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig()
-          parquetAwsSessionToken match {
-            case Some(token) => pqStorage.withAwsCredentials(key, secret, token)
-            case None        => pqStorage.withAwsCredentials(key, secret)
-          }
-          parquetAwsRegion.foreach(pqStorage.withAwsRegion)
-          parquetAwsEndpoint.foreach(pqStorage.withAwsEndpoint)
-          config = config.withParquetStorage(pqStorage)
-          logger.info(s"Companion mode: configured separate parquet credentials (accessKey=${key.take(4)}...)")
-        case _ =>
-          logger.debug("Companion mode: no separate parquet credentials, using split credentials for parquet access")
-      }
-    }
+    // Note: Companion mode parquet config (parquetTableRoot and parquetStorageConfig)
+    // is passed per-split via the 4-arg createSplitSearcher() overload in SplitSearchEngine,
+    // NOT set on CacheConfig. This allows a single SplitCacheManager to serve multiple
+    // table roots and credential sets without duplicating the expensive native cache.
 
     logger.debug(s"Final tantivy4java CacheConfig: $config")
     config

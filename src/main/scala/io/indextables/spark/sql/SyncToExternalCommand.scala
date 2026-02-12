@@ -307,8 +307,9 @@ case class SyncToExternalCommand(
   /**
    * Batched concurrent dispatch: indexing tasks are grouped into batches of
    * batchSize, with up to maxConcurrentBatches Spark jobs running at once.
-   * As each group completes, the next starts (sliding window: 1,2,3 → 2,3,4 → ...).
-   * Each group commits its results to the transaction log upon completion.
+   * Uses Scala parallel collections with ForkJoinPool (same pattern as
+   * MergeSplitsCommand) and sets spark.scheduler.pool per thread so the
+   * FAIR scheduler on Databricks actually runs batches concurrently.
    */
   private def dispatchSyncTasksBatched(
     sparkSession: SparkSession,
@@ -323,6 +324,9 @@ case class SyncToExternalCommand(
     maxConcurrentBatches: Int,
     startTime: Long
   ): Seq[Row] = {
+    import scala.collection.parallel.ForkJoinTaskSupport
+    import scala.util.{Try, Success, Failure}
+
     val totalTasks = groups.size
 
     // Convert plans to serializable groups
@@ -335,9 +339,9 @@ case class SyncToExternalCommand(
       )
     }
 
-    // Split into groups of batchSize tasks each
+    // Split into batches of batchSize tasks each
     val batches = syncGroups.grouped(batchSize).toSeq
-    val totalGroups = batches.size
+    val totalBatches = batches.size
 
     // Pre-compute per-batch input sizes from the original plans (which have file sizes)
     val batchInputSizes = groups.grouped(batchSize).map { batchPlans =>
@@ -349,107 +353,100 @@ case class SyncToExternalCommand(
     val grandTotalBytes = batchInputSizes.map(_._2).sum
     val grandTotalFiles = batchInputSizes.map(_._1).sum
 
-    logger.info(s"Batched sync: $totalTasks indexing tasks in $totalGroups groups " +
-      s"($batchSize tasks/group, $maxConcurrentBatches concurrent), " +
+    logger.info(s"Batched sync: $totalTasks indexing tasks in $totalBatches batches " +
+      s"($batchSize tasks/batch, $maxConcurrentBatches concurrent), " +
       f"$grandTotalFiles files, ${grandTotalBytes / 1024.0 / 1024.0 / 1024.0}%.2f GB total input")
 
-    // Broadcast config once for all groups
+    // Broadcast config once for all batches
     val broadcastConfig = sparkSession.sparkContext.broadcast(syncConfig)
 
     // Thread-safe accumulators
     val allResults = new java.util.concurrent.ConcurrentLinkedQueue[io.indextables.spark.sync.SyncTaskResult]()
     val commitLock = new Object()
     val removesCommitted = new java.util.concurrent.atomic.AtomicBoolean(false)
-    val completedGroups = new java.util.concurrent.atomic.AtomicInteger(0)
+    val completedBatches = new java.util.concurrent.atomic.AtomicInteger(0)
 
-    // Fixed thread pool — exactly maxConcurrentBatches threads (no compensation threads)
-    val executor = java.util.concurrent.Executors.newFixedThreadPool(maxConcurrentBatches)
+    // Scala parallel collections with ForkJoinPool for controlled concurrency
+    // (same pattern as MergeSplitsCommand — proven to run concurrent Spark jobs)
+    val parBatches = batches.zipWithIndex.par
+    val forkJoinPool = new java.util.concurrent.ForkJoinPool(maxConcurrentBatches)
+    parBatches.tasksupport = new ForkJoinTaskSupport(forkJoinPool)
 
-    // Define task function OUTSIDE Callable to avoid capturing non-serializable Callable in closure
+    // Define task function OUTSIDE parallel block to avoid closure capture issues
     val taskFunc = (_: org.apache.spark.TaskContext, iter: Iterator[SyncIndexingGroup]) => {
       val group = iter.next()
       SyncTaskExecutor.execute(group, broadcastConfig.value)
     }
 
     try {
-      val futures = batches.zipWithIndex.map { case (batch, batchIdx) =>
-        executor.submit(new java.util.concurrent.Callable[Unit] {
-          override def call(): Unit = {
-            val groupNum = batchIdx + 1
-            val (batchFiles, batchBytes) = batchInputSizes(batchIdx)
-            val batchSizeGB = batchBytes / 1024.0 / 1024.0 / 1024.0
+      parBatches.foreach { case (batch, batchIdx) =>
+        val batchNum = batchIdx + 1
+        val (batchFiles, batchBytes) = batchInputSizes(batchIdx)
+        val batchSizeGB = batchBytes / 1024.0 / 1024.0 / 1024.0
 
-            // Set job group for Spark UI visibility (thread-local, safe for concurrent use)
-            sparkSession.sparkContext.setJobGroup(
-              s"tantivy4spark-build-companion-group-$groupNum",
-              f"BUILD COMPANION Group $groupNum/$totalGroups: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)",
-              interruptOnCancel = true
-            )
+        // Set job group for Spark UI visibility (thread-local, safe for concurrent use)
+        sparkSession.sparkContext.setJobGroup(
+          s"tantivy4spark-build-companion-batch-$batchNum",
+          f"BUILD COMPANION Batch $batchNum/$totalBatches: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)",
+          interruptOnCancel = true
+        )
 
-            val batchRDD = sparkSession.sparkContext
-              .parallelize(batch, batch.size)
-              .setName(f"Building group $groupNum of $totalGroups: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)")
+        try {
+          val batchRDD = sparkSession.sparkContext
+            .parallelize(batch, batch.size)
+            .setName(f"Building batch $batchNum of $totalBatches: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)")
 
-            // Run Spark job for this group
-            val batchResults = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
+          // Run Spark job for this batch
+          val batchResults = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
 
-            sparkSession.sparkContext.runJob(
-              batchRDD,
-              taskFunc,
-              0 until batch.size,
-              (_: Int, result: io.indextables.spark.sync.SyncTaskResult) => {
-                batchResults.add(result)
-                allResults.add(result)
-              }
-            )
-
-            // Commit this group's results (synchronized for thread safety)
-            val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
-              companionDeltaVersion = Some(deltaVersion)
-            ))
-
-            // First group to commit also includes RemoveActions for invalidated splits
-            val removeActions = if (removesCommitted.compareAndSet(false, true)) {
-              buildRemoveActions(splitsToInvalidate)
-            } else {
-              Seq.empty
+          sparkSession.sparkContext.runJob(
+            batchRDD,
+            taskFunc,
+            0 until batch.size,
+            (_: Int, result: io.indextables.spark.sync.SyncTaskResult) => {
+              batchResults.add(result)
+              allResults.add(result)
             }
+          )
 
-            // Last group to complete includes metadata update
-            val completed = completedGroups.incrementAndGet()
-            val metadataUpdate = if (completed == totalGroups) {
-              Some(buildCompanionMetadata(
-                transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
-            } else {
-              None
-            }
+          // Commit this batch's results (synchronized for thread safety)
+          val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
+            companionDeltaVersion = Some(deltaVersion)
+          ))
 
-            commitLock.synchronized {
-              if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
-                val version = transactionLog.commitSyncActions(
-                  removeActions, addActions, metadataUpdate)
-                transactionLog.invalidateCache()
-                logger.info(s"Group $groupNum/$totalGroups committed: " +
-                  s"${addActions.size} adds at version $version " +
-                  s"($completed/$totalGroups groups complete)")
-              }
+          // First batch to commit also includes RemoveActions for invalidated splits
+          val removeActions = if (removesCommitted.compareAndSet(false, true)) {
+            buildRemoveActions(splitsToInvalidate)
+          } else {
+            Seq.empty
+          }
+
+          // Last batch to complete includes metadata update
+          val completed = completedBatches.incrementAndGet()
+          val metadataUpdate = if (completed == totalBatches) {
+            Some(buildCompanionMetadata(
+              transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
+          } else {
+            None
+          }
+
+          commitLock.synchronized {
+            if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
+              val version = transactionLog.commitSyncActions(
+                removeActions, addActions, metadataUpdate)
+              transactionLog.invalidateCache()
+              logger.info(s"Batch $batchNum/$totalBatches committed: " +
+                s"${addActions.size} adds at version $version " +
+                s"($completed/$totalBatches batches complete)")
             }
           }
-        })
-      }
-
-      // Wait for all groups, propagating first exception
-      futures.foreach { f =>
-        try {
-          f.get()
-        } catch {
-          case e: java.util.concurrent.ExecutionException => throw e.getCause
+        } finally {
+          sparkSession.sparkContext.clearJobGroup()
         }
       }
     } finally {
-      executor.shutdownNow()
+      forkJoinPool.shutdown()
       broadcastConfig.destroy()
-      sparkSession.sparkContext.clearJobGroup()
     }
 
     buildResultRow(allResults.asScala.toSeq, splitsToInvalidate.size, deltaVersion, startTime)

@@ -95,7 +95,7 @@ object ConfigUtils {
     SplitCacheConfig(
       cacheName = {
         val configName = getConfig("spark.indextables.cache.name", "")
-        val baseName = if (configName.trim().nonEmpty) {
+        if (configName.trim().nonEmpty) {
           configName.trim()
         } else {
           // Use table path as cache name for table-specific caching
@@ -105,14 +105,6 @@ object ConfigUtils {
             case None =>
               s"tantivy4spark-default-${System.currentTimeMillis()}"
           }
-        }
-        // For companion mode, include parquetTableRoot in cache name to force a
-        // separate SplitCacheManager instance. The singleton cache key doesn't include
-        // parquetTableRoot or parquetStorageConfig, so without this, a cached instance
-        // from a non-companion read would be returned with these fields null.
-        companionTableRoot match {
-          case Some(root) => s"$baseName-companion-${root.hashCode.abs}"
-          case None       => baseName
         }
       },
       maxCacheSize = {

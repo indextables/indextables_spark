@@ -115,13 +115,16 @@ class SplitSearchEngine private (
   protected lazy val splitSearcher =
     try {
       logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
-      // Pass parquetTableRoot directly via per-split override to ensure it reaches
-      // the native layer regardless of SplitCacheManager singleton caching.
-      val companionRoot = cacheConfig.companionSourceTableRoot
-      companionRoot match {
+      // Use per-split overrides for parquetTableRoot and parquetStorageConfig.
+      // This ensures the correct values reach the native layer regardless of
+      // SplitCacheManager singleton caching (getCacheKey() intentionally omits
+      // parquet fields so a single cache manager can serve multiple table roots).
+      cacheConfig.companionSourceTableRoot match {
         case Some(tableRoot) =>
-          logger.warn(s"Companion mode: passing parquetTableRoot=$tableRoot to createSplitSearcher for $splitPath")
-          cacheManager.createSplitSearcher(splitPath, metadata, tableRoot)
+          val pqStorageConfig = buildParquetStorageConfig()
+          logger.info(s"Companion mode: per-split parquetTableRoot=$tableRoot, " +
+            s"parquetStorageConfig=${if (pqStorageConfig != null) "present" else "null"} for $splitPath")
+          cacheManager.createSplitSearcher(splitPath, metadata, tableRoot, pqStorageConfig)
         case None =>
           cacheManager.createSplitSearcher(splitPath, metadata)
       }
@@ -361,6 +364,27 @@ class SplitSearchEngine private (
   private def createEmptyRow(): InternalRow = {
     val values = sparkSchema.fields.map(field => SchemaMapping.Read.getDefaultValue(field.dataType))
     org.apache.spark.sql.catalyst.InternalRow.fromSeq(values)
+  }
+
+  /**
+   * Build a per-split ParquetStorageConfig from cacheConfig's parquet credential fields.
+   * Returns null if no separate parquet credentials are configured (native layer falls back
+   * to the split's own credentials).
+   */
+  private def buildParquetStorageConfig(): io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig = {
+    (cacheConfig.parquetAwsAccessKey, cacheConfig.parquetAwsSecretKey) match {
+      case (Some(key), Some(secret)) =>
+        val pqStorage = new io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig()
+        cacheConfig.parquetAwsSessionToken match {
+          case Some(token) => pqStorage.withAwsCredentials(key, secret, token)
+          case None        => pqStorage.withAwsCredentials(key, secret)
+        }
+        cacheConfig.parquetAwsRegion.foreach(pqStorage.withAwsRegion)
+        cacheConfig.parquetAwsEndpoint.foreach(pqStorage.withAwsEndpoint)
+        pqStorage
+      case _ =>
+        null // No separate parquet credentials — native layer will fall back to split credentials
+    }
   }
 
   /**
