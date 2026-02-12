@@ -115,7 +115,15 @@ class SplitSearchEngine private (
   protected lazy val splitSearcher =
     try {
       logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
-      cacheManager.createSplitSearcher(splitPath, metadata)
+      // Pass parquetTableRoot directly to work around SplitCacheManager singleton caching
+      // (cache key doesn't include parquetTableRoot, so a cached instance may lack it)
+      cacheConfig.companionSourceTableRoot match {
+        case Some(tableRoot) =>
+          logger.info(s"Companion mode: passing parquetTableRoot=$tableRoot to createSplitSearcher")
+          cacheManager.createSplitSearcher(splitPath, metadata, tableRoot)
+        case None =>
+          cacheManager.createSplitSearcher(splitPath, metadata)
+      }
     } catch {
       case ex: RuntimeException if ex.getMessage.contains("region must be set") =>
         logger.error(s"❌ CONFIRMED: tantivy4java region error when creating SplitSearcher for $splitPath")

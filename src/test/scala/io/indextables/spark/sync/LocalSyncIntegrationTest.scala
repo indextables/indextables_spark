@@ -411,6 +411,55 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     }
   }
 
+  test("partitioned companion read-back should return correct data via docBatchProjected") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_part_readback").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_part_readback").getAbsolutePath
+
+      // Create a partitioned Delta table
+      val ss = spark
+      import ss.implicits._
+      val data = Seq(
+        (1L, "morning report", 1.5, true, "2025-01-01", "08"),
+        (2L, "mid-morning update", 3.0, false, "2025-01-01", "10"),
+        (3L, "afternoon summary", 4.5, true, "2025-01-01", "14"),
+        (4L, "early data", 6.0, false, "2025-01-02", "06"),
+        (5L, "noon analysis", 7.5, true, "2025-01-02", "12"),
+        (6L, "evening wrap", 9.0, false, "2025-01-02", "18")
+      )
+      data.toDF("id", "name", "score", "active", "load_date", "load_hour")
+        .write
+        .format("delta")
+        .partitionBy("load_date", "load_hour")
+        .save(deltaPath)
+
+      // Build companion index
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      // Read back companion index
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      val allRecords = companionDf.collect()
+      allRecords.length shouldBe 6
+
+      // Verify data is not null
+      allRecords.foreach { row =>
+        row.get(0) should not be (null: Any)
+      }
+
+      // Verify partition filtering works
+      val jan01Records = companionDf.filter(
+        org.apache.spark.sql.functions.col("load_date") === "2025-01-01"
+      ).collect()
+      jan01Records.length shouldBe 3
+    }
+  }
+
   test("write guard should reject normal writes to companion-mode table") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta_guard").getAbsolutePath

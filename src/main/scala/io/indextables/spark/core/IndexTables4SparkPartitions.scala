@@ -438,8 +438,29 @@ class IndexTables4SparkPartitionReader(
         val searchResults = splitSearchEngine.search(splitQuery, limit = effectiveLimit)
         logger.info(s"Search returned ${searchResults.length} results (pushed limit: $effectiveLimit)")
 
-        // Partition values are stored directly in splits, so no reconstruction needed
-        resultIterator = searchResults.iterator
+        // For companion splits, partition column values are NOT stored in the parquet data
+        // (Delta/Iceberg store them in directory paths). Inject from AddAction.partitionValues.
+        val isCompanionSplit = config.contains("spark.indextables.companion.parquetTableRoot")
+        resultIterator = if (isCompanionSplit && addAction.partitionValues.nonEmpty) {
+          val partitionIndices = readSchema.fields.zipWithIndex.collect {
+            case (field, idx) if addAction.partitionValues.contains(field.name) =>
+              (idx, field.dataType, addAction.partitionValues(field.name))
+          }
+          if (partitionIndices.nonEmpty) {
+            logger.info(s"Companion split: injecting ${partitionIndices.length} partition column value(s)")
+            searchResults.iterator.map { row =>
+              val values = row.toSeq(readSchema).toArray
+              partitionIndices.foreach { case (idx, dataType, strVal) =>
+                values(idx) = convertPartitionValue(strVal, dataType)
+              }
+              InternalRow.fromSeq(values)
+            }
+          } else {
+            searchResults.iterator
+          }
+        } else {
+          searchResults.iterator
+        }
         initialized = true
         logger.info(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', limit=$effectiveLimit, results=${searchResults.length}")
 
@@ -712,6 +733,24 @@ class IndexTables4SparkPartitionReader(
         isRangeFilterRedundantByStats(right, minValues, maxValues, schema)
 
       case _ => false
+    }
+  }
+
+  /** Convert a partition value string to the appropriate Spark internal representation. */
+  private def convertPartitionValue(value: String, dataType: org.apache.spark.sql.types.DataType): Any = {
+    import org.apache.spark.sql.types._
+    import org.apache.spark.unsafe.types.UTF8String
+    if (value == null) return null
+    dataType match {
+      case StringType    => UTF8String.fromString(value)
+      case IntegerType   => value.toInt
+      case LongType      => value.toLong
+      case DoubleType    => value.toDouble
+      case FloatType     => value.toFloat
+      case BooleanType   => value.toBoolean
+      case ShortType     => value.toShort
+      case ByteType      => value.toByte
+      case _             => UTF8String.fromString(value) // fallback: treat as string
     }
   }
 }
