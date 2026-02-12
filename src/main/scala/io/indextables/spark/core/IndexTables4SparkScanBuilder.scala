@@ -92,8 +92,10 @@ class IndexTables4SparkScanBuilder(
   // Inject companion mode config from transaction log metadata (lazy, computed once).
   // Resolves credentials for parquet file access on the driver so executors can use them.
   private lazy val effectiveConfig: Map[String, String] = {
-    if (config.contains("spark.indextables.companion.parquetTableRoot")) config
-    else {
+    if (config.contains("spark.indextables.companion.parquetTableRoot")) {
+      logger.info(s"effectiveConfig: companion parquetTableRoot already in config: ${config("spark.indextables.companion.parquetTableRoot")}")
+      config
+    } else {
       try {
         val metadata = transactionLog.getMetadata()
         val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
@@ -140,10 +142,13 @@ class IndexTables4SparkScanBuilder(
               logger.warn("Companion mode enabled but no sourceTablePath in metadata")
               config
           }
-        } else config
+        } else {
+          logger.info(s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})")
+          config
+        }
       } catch {
         case e: Exception =>
-          logger.debug(s"Could not read metadata for companion mode detection: ${e.getMessage}")
+          logger.warn(s"Could not read metadata for companion mode detection: ${e.getMessage}", e)
           config
       }
     }

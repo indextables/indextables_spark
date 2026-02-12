@@ -126,6 +126,8 @@ class SplitSearchEngine private (
             s"parquetStorageConfig=${if (pqStorageConfig != null) "present" else "null"} for $splitPath")
           cacheManager.createSplitSearcher(splitPath, metadata, tableRoot, pqStorageConfig)
         case None =>
+          logger.info(s"Non-companion mode: companionSourceTableRoot=None for $splitPath " +
+            s"(parquetAwsAccessKey=${cacheConfig.parquetAwsAccessKey.map(_.take(4) + "...").getOrElse("None")})")
           cacheManager.createSplitSearcher(splitPath, metadata)
       }
     } catch {

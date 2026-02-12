@@ -257,11 +257,19 @@ class IndexTables4SparkPartitionReader(
     new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)
   }
 
-  private def createCacheConfig(): SplitCacheConfig =
+  private def createCacheConfig(): SplitCacheConfig = {
+    // Diagnostic: log companion config state on executor
+    val hasCompanionKey = config.contains("spark.indextables.companion.parquetTableRoot")
+    val companionRoot = config.get("spark.indextables.companion.parquetTableRoot")
+    logger.info(s"[EXECUTOR] createCacheConfig for ${addAction.path}: " +
+      s"companionMode=$hasCompanionKey, " +
+      s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
+      s"totalConfigKeys=${config.size}")
     io.indextables.spark.util.ConfigUtils.createSplitCacheConfig(
       config,
       Some(tablePath.toString)
     )
+  }
 
   private def initialize(): Unit = {
     if (!initialized) {

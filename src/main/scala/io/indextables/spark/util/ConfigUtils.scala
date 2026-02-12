@@ -89,8 +89,11 @@ object ConfigUtils {
     }
 
     // Companion mode: parquet table root (normalized for native layer)
-    val companionTableRoot = getConfigOption("spark.indextables.companion.parquetTableRoot")
-      .map(normalizeStorageUrl)
+    val rawCompanionTableRoot = getConfigOption("spark.indextables.companion.parquetTableRoot")
+    val companionTableRoot = rawCompanionTableRoot.map(normalizeStorageUrl)
+    logger.info(s"createSplitCacheConfig: companion.parquetTableRoot raw=${rawCompanionTableRoot.getOrElse("NONE")}, " +
+      s"normalized=${companionTableRoot.getOrElse("NONE")}, " +
+      s"parquetCredentials=${getConfigOption("spark.indextables.companion.parquet.aws.accessKey").map(_.take(4) + "...").getOrElse("NONE")}")
 
     SplitCacheConfig(
       cacheName = {
