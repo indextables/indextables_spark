@@ -292,66 +292,15 @@ class SplitSearchEngine private (
       // Sort by (segmentOrd, docId) for sequential reads within segments
       val docAddresses = hits.map(hit => hit.getDocAddress()).sortBy(addr => (addr.getSegmentOrd, addr.getDoc))
 
-      // Extract field names from sparkSchema for native-side filtering (byte buffer protocol optimization)
-      // This reduces serialization overhead by only retrieving needed fields (8-12x faster per developer guide)
-      val fieldNames: java.util.Set[String] = {
-        import scala.jdk.CollectionConverters._
-        sparkSchema.fields.map(_.name).toSet.asJava
+      // Use docBatchProjected for all splits (standard and companion).
+      // Returns List<Document> with native-side field projection for both split types.
+      val fieldNames = sparkSchema.fields.map(_.name)
+      logger.debug(s"Using docBatchProjected for ${docAddresses.length} addresses, ${fieldNames.length} fields")
+
+      val documents: Array[io.indextables.tantivy4java.core.Document] = {
+        val javaDocuments = splitSearcher.docBatchProjected(docAddresses, fieldNames: _*)
+        javaDocuments.asScala.toArray
       }
-      logger.debug(s"Using native-side field filtering for ${fieldNames.size()} fields: ${sparkSchema.fields.map(_.name).mkString(", ")}")
-
-      // Use configurable document retrieval strategy
-      val documents: Array[io.indextables.tantivy4java.core.Document] =
-        if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
-          logger.debug(
-            s"Using docBatch for ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})"
-          )
-
-          // Process in batches to respect maximum batch size
-          val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
-
-          batches.flatMap { batchAddresses =>
-            try {
-              import scala.jdk.CollectionConverters._
-              val javaAddresses = batchAddresses.toList.asJava
-              // Use docBatch with field filtering for native-side optimization (byte buffer protocol)
-              val javaDocuments = splitSearcher.docBatch(javaAddresses, fieldNames)
-              javaDocuments.asScala
-            } catch {
-              case e: Exception =>
-                logger.warn(
-                  s"Error retrieving document batch of size ${batchAddresses.length}, falling back to individual retrieval",
-                  e
-                )
-                // Fallback to individual doc calls for this batch - fail fast on errors
-                batchAddresses.map { address =>
-                  try
-                    splitSearcher.doc(address)
-                  catch {
-                    case ex: Exception =>
-                      // Fail fast instead of silently returning null
-                      throw new RuntimeException(
-                        s"Failed to retrieve document at address $address from split $splitPath",
-                        ex
-                      )
-                  }
-                }
-            }
-          }
-        } else {
-          logger.debug(s"Using individual document retrieval: enableDocBatch=${cacheConfig.enableDocBatch}, docCount=${docAddresses.length}")
-          // Use individual doc calls when batch is disabled or only one document - fail fast on errors
-          // Use sorted docAddresses for sequential I/O access (not hits which is in score order)
-          docAddresses.map { address =>
-            try
-              splitSearcher.doc(address)
-            catch {
-              case ex: Exception =>
-                // Fail fast instead of silently returning null
-                throw new RuntimeException(s"Failed to retrieve document at address $address from split $splitPath", ex)
-            }
-          }
-        }
 
       // Build field type cache once before processing documents (avoids N×M JNI calls)
       val fieldTypeCache = SchemaMapping.Read.buildFieldTypeCache(splitSchema, sparkSchema)

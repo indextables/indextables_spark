@@ -186,7 +186,7 @@ case class SyncToExternalCommand(
     // Max concurrent groups (Spark jobs) running simultaneously.
     val maxConcurrentBatches = mergedConfigs.get("spark.indextables.companion.sync.maxConcurrentBatches")
       .map(_.toInt)
-      .getOrElse(3)
+      .getOrElse(6)
 
     // 4. Open IndexTables transaction log at destination
     val destTablePath = new Path(destPath)
@@ -379,10 +379,11 @@ case class SyncToExternalCommand(
             val (batchFiles, batchBytes) = batchInputSizes(batchIdx)
             val batchSizeGB = batchBytes / 1024.0 / 1024.0 / 1024.0
 
-            // Set job group for Spark UI (thread-local, safe for concurrent use)
+            // Set job group for Spark UI visibility (thread-local, safe for concurrent use)
             sparkSession.sparkContext.setJobGroup(
               s"tantivy4spark-build-companion-group-$groupNum",
-              f"BUILD COMPANION Group $groupNum/$totalGroups: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)"
+              f"BUILD COMPANION Group $groupNum/$totalGroups: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)",
+              interruptOnCancel = true
             )
 
             val batchRDD = sparkSession.sparkContext
@@ -669,25 +670,44 @@ case class SyncToExternalCommand(
     val byPartition = files.groupBy(_.partitionValues)
 
     byPartition.flatMap { case (partValues, partFiles) =>
-      val groups = scala.collection.mutable.ArrayBuffer[SyncIndexingGroupPlan]()
-      var currentFiles = scala.collection.mutable.ArrayBuffer[DeltaAddFile]()
-      var currentSize = 0L
+      val totalBytes = partFiles.map(_.size).sum
+      val numGroups = math.max(1, math.ceil(totalBytes.toDouble / maxGroupSize).toInt)
 
-      partFiles.foreach { file =>
-        if (currentSize + file.size > maxGroupSize && currentFiles.nonEmpty) {
-          groups += SyncIndexingGroupPlan(currentFiles.toSeq, partValues)
-          currentFiles = scala.collection.mutable.ArrayBuffer[DeltaAddFile]()
-          currentSize = 0L
+      if (numGroups == 1) {
+        // All files fit in one group
+        Seq(SyncIndexingGroupPlan(partFiles.toSeq, partValues))
+      } else {
+        // Distribute files evenly: target per group = totalBytes / numGroups
+        val targetPerGroup = totalBytes.toDouble / numGroups
+        val groups = Array.fill(numGroups)(scala.collection.mutable.ArrayBuffer[DeltaAddFile]())
+        val groupSizes = Array.fill(numGroups)(0L)
+
+        // Sort largest files first (First Fit Decreasing) for better bin-packing balance
+        partFiles.sortBy(-_.size).foreach { file =>
+          // Assign to the group that is most under its target
+          // (i.e., the group with the largest remaining capacity relative to target)
+          var bestIdx = 0
+          var bestDeficit = groupSizes(0) - targetPerGroup
+          var i = 1
+          while (i < numGroups) {
+            val deficit = groupSizes(i) - targetPerGroup
+            if (deficit < bestDeficit) {
+              bestDeficit = deficit
+              bestIdx = i
+            }
+            i += 1
+          }
+          groups(bestIdx) += file
+          groupSizes(bestIdx) += file.size
         }
-        currentFiles += file
-        currentSize += file.size
-      }
 
-      if (currentFiles.nonEmpty) {
-        groups += SyncIndexingGroupPlan(currentFiles.toSeq, partValues)
+        val nonEmpty = groups.filter(_.nonEmpty)
+        if (logger.isInfoEnabled) {
+          val sizesStr = groupSizes.filter(_ > 0).map(s => f"${s / 1024.0 / 1024.0}%.1fMB").mkString(", ")
+          logger.info(s"Partition $partValues: $numGroups groups, target ${targetPerGroup / 1024 / 1024}MB each, actual: [$sizesStr]")
+        }
+        nonEmpty.map(g => SyncIndexingGroupPlan(g.toSeq, partValues)).toSeq
       }
-
-      groups.toSeq
     }.toSeq
   }
 

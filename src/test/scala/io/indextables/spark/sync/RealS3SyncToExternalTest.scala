@@ -304,6 +304,96 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     row2.getString(2) shouldBe "no_action"
   }
 
+  test("SYNC with multi-level partitioned Delta table should create readable companion splits") {
+    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test")
+
+    val deltaPath = s"$testBasePath/delta_multi_partition"
+    val indexPath = s"$testBasePath/companion_multi_partition"
+
+    // Step 1: Create a Delta table partitioned by load_date AND load_hour
+    val _spark = spark
+    import _spark.implicits._
+    val df = Seq(
+      (1, "morning report", "2025-01-01", "08"),
+      (2, "mid-morning update", "2025-01-01", "10"),
+      (3, "afternoon summary", "2025-01-01", "14"),
+      (4, "early data", "2025-01-02", "06"),
+      (5, "noon analysis", "2025-01-02", "12"),
+      (6, "evening wrap", "2025-01-02", "18"),
+      (7, "late night batch", "2025-01-03", "22"),
+      (8, "overnight sync", "2025-01-03", "03")
+    ).toDF("id", "content", "load_date", "load_hour")
+
+    df.write
+      .format("delta")
+      .partitionBy("load_date", "load_hour")
+      .mode("overwrite")
+      .save(deltaPath)
+
+    // Step 2: Build companion index
+    val result = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+    )
+
+    val rows = result.collect()
+    rows.length shouldBe 1
+    val row = rows(0)
+    row.getString(2) shouldBe "success" // status
+    row.getInt(4) should be > 0 // splits_created
+    row.getInt(6) should be > 0 // parquet_files_indexed
+
+    // Step 3: Verify transaction log has correct partition structure
+    import org.apache.hadoop.fs.Path
+    import io.indextables.spark.transaction.TransactionLogFactory
+    val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+    try {
+      val files = txLog.listFiles()
+      files should not be empty
+
+      // Every AddAction should have both partition keys
+      files.foreach { file =>
+        file.partitionValues should contain key "load_date"
+        file.partitionValues should contain key "load_hour"
+        // Path should include partition directory structure
+        file.path should include("load_date=")
+        file.path should include("load_hour=")
+      }
+
+      // Verify we have files for multiple partitions
+      val uniquePartitions = files.map(_.partitionValues).toSet
+      uniquePartitions.size should be >= 3 // at least 3 distinct (load_date, load_hour) combos
+    } finally {
+      txLog.close()
+    }
+
+    // Step 4: Read the companion index back and verify splits are physically accessible in S3
+    val (accessKey, secretKey) = awsCredentials.get
+    val companionDf = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .load(indexPath)
+
+    // Force actual split reading (collect, not count which uses aggregate pushdown)
+    val allRecords = companionDf.collect()
+    allRecords.length shouldBe 8
+
+    // Verify partition columns are present in the schema
+    companionDf.schema.fieldNames should contain("load_date")
+    companionDf.schema.fieldNames should contain("load_hour")
+
+    // Verify partition filtering works
+    val jan01Records = companionDf.filter($"load_date" === "2025-01-01").collect()
+    jan01Records.length shouldBe 3
+
+    val jan02Hour12 = companionDf
+      .filter($"load_date" === "2025-01-02" && $"load_hour" === "12")
+      .collect()
+    jan02Hour12.length shouldBe 1
+  }
+
   test("SYNC with FASTFIELDS MODE should be reflected in companion splits") {
     assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
       "AWS credentials or Delta Spark DataSource not available - skipping test")

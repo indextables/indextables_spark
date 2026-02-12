@@ -151,7 +151,7 @@ object SyncTaskExecutor {
       } else {
         ""
       }
-      val destSplitPath = s"${config.splitTablePath}/$partitionPrefix$splitFileName"
+      val destSplitPath = s"${config.splitTablePath.stripSuffix("/")}/$partitionPrefix$splitFileName"
       val splitSize = uploadSplit(localSplitPath, destSplitPath, config.splitCredentials, config.splitTablePath)
 
       OutputMetricsUpdater.updateOutputMetrics(splitSize, 1)
