@@ -980,18 +980,16 @@ class OptimizedTransactionLog(
           }
         }
 
-        // Check versions AFTER checkpoint for MetadataAction updates
-        // Even in Avro mode, post-checkpoint versions may contain MetadataAction updates
-        // (e.g., BUILD COMPANION writes companion metadata in its last batch, which may
-        // be after the checkpoint created mid-BUILD)
-        val latestVersion = getLatestVersion()
-        val startVersion  = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
-
-        // In Avro mode with no post-checkpoint versions, checkpoint is the complete source of truth
-        if (isAvroMode && baseMetadata.isDefined && latestVersion < startVersion) {
-          logger.info(s"Avro mode: using checkpoint metadata directly (checkpoint at ${checkpointVersion.getOrElse("unknown")}, latest=$latestVersion, no post-checkpoint versions)")
+        // In Avro mode, checkpoint is the complete source of truth - no JSON versions to scan
+        if (isAvroMode && baseMetadata.isDefined) {
+          logger.info("Avro mode: using checkpoint metadata directly (no version scanning needed)")
           return baseMetadata.get
         }
+
+        // JSON mode: Check versions AFTER checkpoint for MetadataAction updates
+        // Schema deduplication may have registered new schemas after the checkpoint
+        val latestVersion = getLatestVersion()
+        val startVersion  = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
 
         // Search from checkpoint+1 to latest for any metadata updates
         for (version <- latestVersion to startVersion by -1) {
@@ -1740,16 +1738,20 @@ class OptimizedTransactionLog(
       val newHashes = newSchemas.keys.map(_.stripPrefix(SchemaDeduplication.SCHEMA_KEY_PREFIX))
       logger.info(s"Schema deduplication: found ${newSchemas.size} new schemas to register: ${newHashes.mkString(", ")}")
 
-      // Get current metadata to merge new schemas
-      val currentMetadata =
-        try
-          getMetadata()
-        catch {
-          case _: RuntimeException =>
-            // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
-            // but handle gracefully by skipping deduplication
-            logger.warn("No existing metadata found during write - skipping schema deduplication")
-            return (actions, None)
+      // Use MetadataAction from input actions if present (e.g., BUILD COMPANION includes
+      // companion metadata), otherwise fall back to current metadata from transaction log.
+      // This preserves companion keys and other metadata set by the caller.
+      val currentMetadata = actions.collectFirst { case m: MetadataAction => m }
+        .getOrElse {
+          try
+            getMetadata()
+          catch {
+            case _: RuntimeException =>
+              // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
+              // but handle gracefully by skipping deduplication
+              logger.warn("No existing metadata found during write - skipping schema deduplication")
+              return (actions, None)
+          }
         }
 
       // Merge new schemas into metadata configuration
