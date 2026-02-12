@@ -293,6 +293,14 @@ class IndexTables4SparkPartitionReader(
         // Create cache configuration from Spark options
         val cacheConfig = createCacheConfig()
 
+        // Defensive check: detect companion splits that are missing companion config
+        if (addAction.companionDeltaVersion.isDefined && cacheConfig.companionSourceTableRoot.isEmpty) {
+          logger.error(s"COMPANION CONFIG MISSING: Split ${addAction.path} has companionDeltaVersion=" +
+            s"${addAction.companionDeltaVersion.get} but companionSourceTableRoot is None. " +
+            s"Config keys: ${config.keys.filter(_.contains("companion")).mkString(", ")}. " +
+            s"This will cause 'parquet_table_root was not set' error during document retrieval.")
+        }
+
         // Create split search engine using footer offset optimization when available
         // Normalize URLs for tantivy4java compatibility (S3, Azure, etc.)
         // Uses centralized normalization: s3a://->s3://, abfss://->azure://, etc.

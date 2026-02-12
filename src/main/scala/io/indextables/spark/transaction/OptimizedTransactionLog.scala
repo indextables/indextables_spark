@@ -980,16 +980,18 @@ class OptimizedTransactionLog(
           }
         }
 
-        // In Avro mode, checkpoint is the complete source of truth - no JSON versions to scan
-        if (isAvroMode && baseMetadata.isDefined) {
-          logger.info("Avro mode: using checkpoint metadata directly (no version scanning needed)")
-          return baseMetadata.get
-        }
-
-        // JSON mode: Check versions AFTER checkpoint for MetadataAction updates
-        // Schema deduplication may have registered new schemas after the checkpoint
+        // Check versions AFTER checkpoint for MetadataAction updates
+        // Even in Avro mode, post-checkpoint versions may contain MetadataAction updates
+        // (e.g., BUILD COMPANION writes companion metadata in its last batch, which may
+        // be after the checkpoint created mid-BUILD)
         val latestVersion = getLatestVersion()
         val startVersion  = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
+
+        // In Avro mode with no post-checkpoint versions, checkpoint is the complete source of truth
+        if (isAvroMode && baseMetadata.isDefined && latestVersion < startVersion) {
+          logger.info(s"Avro mode: using checkpoint metadata directly (checkpoint at ${checkpointVersion.getOrElse("unknown")}, latest=$latestVersion, no post-checkpoint versions)")
+          return baseMetadata.get
+        }
 
         // Search from checkpoint+1 to latest for any metadata updates
         for (version <- latestVersion to startVersion by -1) {
