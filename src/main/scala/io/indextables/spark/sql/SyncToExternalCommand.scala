@@ -409,28 +409,31 @@ case class SyncToExternalCommand(
             }
           )
 
-          // Commit this batch's results (synchronized for thread safety)
+          // Commit this batch's results (synchronized for thread safety).
+          // The entire commit sequence (build actions, read metadata, write)
+          // must be inside the lock because concurrent threads invalidate the
+          // transaction log cache after each commit.
           val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
             companionDeltaVersion = Some(deltaVersion)
           ))
 
-          // First batch to commit also includes RemoveActions for invalidated splits
-          val removeActions = if (removesCommitted.compareAndSet(false, true)) {
-            buildRemoveActions(splitsToInvalidate)
-          } else {
-            Seq.empty
-          }
-
-          // Last batch to complete includes metadata update
-          val completed = completedBatches.incrementAndGet()
-          val metadataUpdate = if (completed == totalBatches) {
-            Some(buildCompanionMetadata(
-              transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
-          } else {
-            None
-          }
-
           commitLock.synchronized {
+            // First batch to commit also includes RemoveActions for invalidated splits
+            val removeActions = if (removesCommitted.compareAndSet(false, true)) {
+              buildRemoveActions(splitsToInvalidate)
+            } else {
+              Seq.empty
+            }
+
+            // Last batch to complete includes metadata update
+            val completed = completedBatches.incrementAndGet()
+            val metadataUpdate = if (completed == totalBatches) {
+              Some(buildCompanionMetadata(
+                transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
+            } else {
+              None
+            }
+
             if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
               val version = transactionLog.commitSyncActions(
                 removeActions, addActions, metadataUpdate)
