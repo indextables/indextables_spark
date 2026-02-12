@@ -89,7 +89,8 @@ class IndexTables4SparkScanBuilder(
   // Bucket aggregation state (DateHistogram, Histogram, Range)
   private var _bucketConfig: Option[BucketAggregationConfig] = None
 
-  // Inject companion mode config from transaction log metadata (lazy, computed once)
+  // Inject companion mode config from transaction log metadata (lazy, computed once).
+  // Resolves credentials for parquet file access on the driver so executors can use them.
   private lazy val effectiveConfig: Map[String, String] = {
     if (config.contains("spark.indextables.companion.parquetTableRoot")) config
     else {
@@ -100,7 +101,41 @@ class IndexTables4SparkScanBuilder(
           metadata.configuration.get("indextables.companion.sourceTablePath") match {
             case Some(path) =>
               logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
-              config + ("spark.indextables.companion.parquetTableRoot" -> path)
+              var enrichedConfig = config + ("spark.indextables.companion.parquetTableRoot" -> path)
+              // Resolve credentials for the parquet table root (Delta table) on the driver.
+              // On Databricks/Unity Catalog, the companion index and Delta table may need
+              // different credentials (different external locations or vended tokens).
+              try {
+                io.indextables.spark.utils.CredentialProviderFactory
+                  .resolveAWSCredentialsFromConfig(config, path)
+                  .foreach { creds =>
+                    logger.info(s"Companion mode: resolved parquet credentials for $path (accessKey=${creds.accessKey.take(4)}...)")
+                    enrichedConfig = enrichedConfig +
+                      ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
+                      ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
+                    creds.sessionToken.foreach { token =>
+                      enrichedConfig = enrichedConfig +
+                        ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
+                    }
+                  }
+                // Propagate region and endpoint from main config
+                config.get("spark.indextables.aws.region")
+                  .orElse(config.get("spark.indextables.aws.region".toLowerCase))
+                  .foreach { region =>
+                    enrichedConfig = enrichedConfig +
+                      ("spark.indextables.companion.parquet.aws.region" -> region)
+                  }
+                config.get("spark.indextables.s3.endpoint")
+                  .orElse(config.get("spark.indextables.s3.endpoint".toLowerCase))
+                  .foreach { endpoint =>
+                    enrichedConfig = enrichedConfig +
+                      ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+                  }
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"Failed to resolve parquet credentials for companion mode: ${e.getMessage}")
+              }
+              enrichedConfig
             case None =>
               logger.warn("Companion mode enabled but no sourceTablePath in metadata")
               config

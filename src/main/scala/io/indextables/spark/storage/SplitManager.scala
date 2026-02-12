@@ -450,7 +450,13 @@ case class SplitCacheConfig(
   diskCacheMinCompressSize: Option[Long] = None,    // Skip compression below threshold (default: 4096)
   diskCacheManifestSyncInterval: Option[Int] = None, // Seconds between manifest writes (default: 30)
   // Companion mode (parquet companion splits)
-  companionSourceTableRoot: Option[String] = None // Root path of parquet table for companion splits
+  companionSourceTableRoot: Option[String] = None, // Root path of parquet table for companion splits
+  // Parquet-specific credentials (resolved for the Delta table path, may differ from split credentials)
+  parquetAwsAccessKey: Option[String] = None,
+  parquetAwsSecretKey: Option[String] = None,
+  parquetAwsSessionToken: Option[String] = None,
+  parquetAwsRegion: Option[String] = None,
+  parquetAwsEndpoint: Option[String] = None
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
@@ -607,6 +613,24 @@ case class SplitCacheConfig(
     companionSourceTableRoot.foreach { tableRoot =>
       logger.info(s"Companion mode: parquet table root = $tableRoot")
       config = config.withParquetTableRoot(tableRoot)
+
+      // Configure separate parquet storage credentials if available.
+      // On Databricks/Unity Catalog, the Delta table may need different
+      // credentials than the companion index.
+      (parquetAwsAccessKey, parquetAwsSecretKey) match {
+        case (Some(key), Some(secret)) =>
+          val pqStorage = new io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig()
+          parquetAwsSessionToken match {
+            case Some(token) => pqStorage.withAwsCredentials(key, secret, token)
+            case None        => pqStorage.withAwsCredentials(key, secret)
+          }
+          parquetAwsRegion.foreach(pqStorage.withAwsRegion)
+          parquetAwsEndpoint.foreach(pqStorage.withAwsEndpoint)
+          config = config.withParquetStorage(pqStorage)
+          logger.info(s"Companion mode: configured separate parquet credentials (accessKey=${key.take(4)}...)")
+        case _ =>
+          logger.debug("Companion mode: no separate parquet credentials, using split credentials for parquet access")
+      }
     }
 
     logger.debug(s"Final tantivy4java CacheConfig: $config")

@@ -115,11 +115,12 @@ class SplitSearchEngine private (
   protected lazy val splitSearcher =
     try {
       logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
-      // Pass parquetTableRoot directly to work around SplitCacheManager singleton caching
-      // (cache key doesn't include parquetTableRoot, so a cached instance may lack it)
-      cacheConfig.companionSourceTableRoot match {
+      // Pass parquetTableRoot directly via per-split override to ensure it reaches
+      // the native layer regardless of SplitCacheManager singleton caching.
+      val companionRoot = cacheConfig.companionSourceTableRoot
+      companionRoot match {
         case Some(tableRoot) =>
-          logger.info(s"Companion mode: passing parquetTableRoot=$tableRoot to createSplitSearcher")
+          logger.warn(s"Companion mode: passing parquetTableRoot=$tableRoot to createSplitSearcher for $splitPath")
           cacheManager.createSplitSearcher(splitPath, metadata, tableRoot)
         case None =>
           cacheManager.createSplitSearcher(splitPath, metadata)

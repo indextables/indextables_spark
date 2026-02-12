@@ -175,7 +175,16 @@ object ConfigUtils {
         .map(SplitCacheConfig.parseSizeString),
       diskCacheManifestSyncInterval = getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt),
       // Companion mode (parquet companion splits)
+      // Normalize Hadoop URLs (s3a://, s3n://) to native S3 URLs (s3://) since the
+      // native Rust layer (Quickwit URI parser) only understands s3:// protocol.
       companionSourceTableRoot = getConfigOption("spark.indextables.companion.parquetTableRoot")
+        .map(normalizeStorageUrl),
+      // Parquet-specific credentials (resolved on driver for the Delta table path)
+      parquetAwsAccessKey = getConfigOption("spark.indextables.companion.parquet.aws.accessKey"),
+      parquetAwsSecretKey = getConfigOption("spark.indextables.companion.parquet.aws.secretKey"),
+      parquetAwsSessionToken = getConfigOption("spark.indextables.companion.parquet.aws.sessionToken"),
+      parquetAwsRegion = getConfigOption("spark.indextables.companion.parquet.aws.region"),
+      parquetAwsEndpoint = getConfigOption("spark.indextables.companion.parquet.aws.endpoint")
     )
   }
 
@@ -377,4 +386,16 @@ object ConfigUtils {
     hadoopConfigCache.invalidateAll()
     logger.debug("Cleared Hadoop Configuration cache")
   }
+
+  /**
+   * Normalize Hadoop filesystem URLs to native storage URLs.
+   *
+   * Hadoop uses protocol schemes (s3a://, s3n://) that the native Rust layer
+   * (Quickwit URI parser) doesn't understand. This converts them to the
+   * standard protocols that the native layer expects.
+   */
+  private def normalizeStorageUrl(url: String): String =
+    if (url.startsWith("s3a://")) url.replaceFirst("s3a://", "s3://")
+    else if (url.startsWith("s3n://")) url.replaceFirst("s3n://", "s3://")
+    else url
 }
