@@ -479,8 +479,7 @@ class CompanionModeTest extends TestBase {
     val config = SyncConfig(
       indexingModes = Map("title" -> "text", "status" -> "string"),
       fastFieldMode = "HYBRID",
-      splitCredentials = Map("spark.indextables.aws.accessKey" -> "key1"),
-      parquetCredentials = Map("spark.indextables.aws.accessKey" -> "key2"),
+      storageConfig = Map("spark.indextables.aws.accessKey" -> "key1", "spark.indextables.aws.secretKey" -> "secret1"),
       splitTablePath = "s3://bucket/index",
       writerHeapSize = 4L * 1024L * 1024L * 1024L, // 4GB
       readerBatchSize = 16384
@@ -507,8 +506,7 @@ class CompanionModeTest extends TestBase {
     val config = SyncConfig(
       indexingModes = Map.empty,
       fastFieldMode = "HYBRID",
-      splitCredentials = Map.empty,
-      parquetCredentials = Map.empty,
+      storageConfig = Map.empty,
       splitTablePath = "s3://bucket/index"
     )
     config.writerHeapSize shouldBe 2L * 1024L * 1024L * 1024L

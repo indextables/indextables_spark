@@ -272,9 +272,10 @@ case class SyncToExternalCommand(
         s"${parquetFilesToIndex.size} parquet files, " +
         s"${splitsToInvalidate.size} splits to invalidate")
 
-      // 9. Resolve credentials for both split and parquet storage
-      val splitCredentials = resolveCredentials(mergedConfigs, destPath)
-      val parquetCredentials = resolveCredentials(mergedConfigs, sourcePath)
+      // 9. Pass raw merged config to executors for JIT credential resolution.
+      // Executors resolve credentials just-in-time before each download/upload via
+      // CredentialProviderFactory, ensuring temporary credentials (e.g., Unity Catalog)
+      // are always fresh regardless of task queue delay.
 
       // 9b. Read companion indexing config from Spark properties
       val writerHeapSize = mergedConfigs.get("spark.indextables.companion.writerHeapSize")
@@ -287,8 +288,7 @@ case class SyncToExternalCommand(
       val syncConfig = SyncConfig(
         indexingModes = effectiveIndexingModes,
         fastFieldMode = fastFieldMode,
-        splitCredentials = splitCredentials,
-        parquetCredentials = parquetCredentials,
+        storageConfig = mergedConfigs,
         splitTablePath = destPath,
         writerHeapSize = writerHeapSize,
         readerBatchSize = readerBatchSize
@@ -738,7 +738,12 @@ case class SyncToExternalCommand(
 
   /**
    * Resolve credentials for a given storage path. Returns a flat map of
-   * credential properties suitable for serialization to executors.
+   * credential properties suitable for immediate use.
+   *
+   * Note: This is used only for driver-side operations (e.g., DeltaLogReader).
+   * Executor credential resolution happens JIT via
+   * CredentialProviderFactory.resolveAWSCredentialsFromConfig() using the raw
+   * storageConfig passed through SyncConfig.
    */
   private def resolveCredentials(
     configs: Map[String, String],

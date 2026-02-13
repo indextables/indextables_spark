@@ -37,8 +37,7 @@ import org.slf4j.LoggerFactory
 case class SyncConfig(
   indexingModes: Map[String, String],
   fastFieldMode: String,
-  splitCredentials: Map[String, String],
-  parquetCredentials: Map[String, String],
+  storageConfig: Map[String, String],
   splitTablePath: String,
   writerHeapSize: Long = 2L * 1024L * 1024L * 1024L, // 2GB default
   readerBatchSize: Int = 8192)
@@ -103,7 +102,7 @@ object SyncTaskExecutor {
             val localFile = new File(tempDir, relativePath)
             localFile.getParentFile.mkdirs()
 
-            val bytesDownloaded = downloadFile(parquetPath, localFile, config.parquetCredentials)
+            val bytesDownloaded = downloadFile(parquetPath, localFile, config.storageConfig, group.parquetTableRoot)
             totalBytesDownloaded.addAndGet(bytesDownloaded)
             localFile.getAbsolutePath
           }
@@ -180,7 +179,7 @@ object SyncTaskExecutor {
         ""
       }
       val destSplitPath = s"${config.splitTablePath.stripSuffix("/")}/$partitionPrefix$splitFileName"
-      val splitSize = uploadSplit(localSplitPath, destSplitPath, config.splitCredentials, config.splitTablePath)
+      val splitSize = uploadSplit(localSplitPath, destSplitPath, config.storageConfig, config.splitTablePath)
 
       OutputMetricsUpdater.updateOutputMetrics(splitSize, 1)
 
@@ -252,14 +251,15 @@ object SyncTaskExecutor {
   private def downloadFile(
     sourcePath: String,
     destFile: File,
-    credentials: Map[String, String]
+    storageConfig: Map[String, String],
+    tableRoot: String
   ): Long = {
     logger.debug(s"Downloading $sourcePath to ${destFile.getAbsolutePath}")
 
     if (sourcePath.startsWith("s3://") || sourcePath.startsWith("s3a://")) {
-      downloadFromS3(sourcePath, destFile, credentials)
+      downloadFromS3(sourcePath, destFile, storageConfig, tableRoot)
     } else if (sourcePath.startsWith("abfss://") || sourcePath.startsWith("wasbs://")) {
-      downloadFromAzure(sourcePath, destFile, credentials)
+      downloadFromAzure(sourcePath, destFile, storageConfig)
     } else {
       // Local filesystem copy
       val sourceFile = new File(sourcePath)
@@ -271,11 +271,17 @@ object SyncTaskExecutor {
   private def downloadFromS3(
     s3Path: String,
     destFile: File,
-    credentials: Map[String, String]
+    storageConfig: Map[String, String],
+    tableRoot: String
   ): Long = {
     import io.indextables.spark.utils.CredentialProviderFactory
 
-    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(credentials, s3Path)
+    // Resolve credentials JIT using the table root path (not the individual file path).
+    // Individual file paths like part-00001.parquet don't normalize properly in
+    // TablePathNormalizer, causing cache fragmentation and redundant provider API calls.
+    // With storageConfig (raw config without pre-resolved keys), this falls through to
+    // Priority 2 (credential provider class) for fresh temporary credentials.
+    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(storageConfig, tableRoot)
 
     val (bucket, key) = parseS3Path(s3Path)
     val clientBuilder = software.amazon.awssdk.services.s3.S3Client.builder()
@@ -300,7 +306,7 @@ object SyncTaskExecutor {
       clientBuilder.credentialsProvider(credProvider)
     }
 
-    credentials.get("spark.indextables.aws.region").foreach { region =>
+    storageConfig.get("spark.indextables.aws.region").foreach { region =>
       clientBuilder.region(software.amazon.awssdk.regions.Region.of(region))
     }
 
@@ -321,11 +327,11 @@ object SyncTaskExecutor {
   private def downloadFromAzure(
     azurePath: String,
     destFile: File,
-    credentials: Map[String, String]
+    storageConfig: Map[String, String]
   ): Long = {
     // For Azure, use Hadoop FileSystem API since azure-storage-blob has different URL formats
     val hadoopConf = new org.apache.hadoop.conf.Configuration()
-    credentials.foreach { case (k, v) => hadoopConf.set(k, v) }
+    storageConfig.foreach { case (k, v) => hadoopConf.set(k, v) }
     val fs = org.apache.hadoop.fs.FileSystem.get(new java.net.URI(azurePath), hadoopConf)
     val path = new org.apache.hadoop.fs.Path(azurePath)
     val inputStream = fs.open(path)
@@ -340,11 +346,11 @@ object SyncTaskExecutor {
   private def uploadSplit(
     localPath: String,
     destPath: String,
-    credentials: Map[String, String],
+    storageConfig: Map[String, String],
     tablePath: String
   ): Long =
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
-      localPath, destPath, credentials, tablePath)
+      localPath, destPath, storageConfig, tablePath)
 
   private def parseS3Path(s3Path: String): (String, String) = {
     val path = s3Path.replaceFirst("^s3a?://", "")
