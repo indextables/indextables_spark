@@ -1591,16 +1591,17 @@ object FiltersToQueryConverter {
         val fieldType = getFieldType(schema, attribute)
         queryLog(s"Creating IsNotNull query for '$attribute' (fieldType=$fieldType)")
         if (fieldType == FieldType.TEXT || fieldType == FieldType.JSON) {
-          // TEXT/JSON fields: wildcard doesn't work, use match-all as pass-through.
-          // The paired filter handles null exclusion through tantivy's inverted index.
-          Some(new SplitMatchAllQuery())
+          // TEXT/JSON fields: wildcard doesn't work, use SplitExistsQuery (requires FAST field).
+          // Driver-side isSupportedFilter already verified the field is fast.
+          queryLog(s"Creating IsNotNull SplitExistsQuery for TEXT/JSON field: $attribute IS NOT NULL")
+          Some(new SplitExistsQuery(attribute))
         } else {
           try {
             Some(splitSearchEngine.parseQuery(s"$attribute:*"))
           } catch {
             case e: Exception =>
-              queryLog(s"Failed to create IsNotNull wildcard query for '$attribute': ${e.getMessage}")
-              Some(new SplitMatchAllQuery())
+              queryLog(s"Failed to create IsNotNull wildcard query for '$attribute', falling back to SplitExistsQuery: ${e.getMessage}")
+              Some(new SplitExistsQuery(attribute))
           }
         }
 
