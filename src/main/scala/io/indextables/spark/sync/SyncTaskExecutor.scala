@@ -150,6 +150,14 @@ object SyncTaskExecutor {
           logger.info(s"Sync task ${group.groupIndex}: applying IP address fields: ${ipFields.mkString(", ")}")
           companionConfig.withIpAddressFields(ipFields: _*)
         }
+
+        val jsonFields = config.indexingModes.collect {
+          case (field, mode) if mode.toLowerCase == "json" => field
+        }.toArray
+        if (jsonFields.nonEmpty) {
+          logger.info(s"Sync task ${group.groupIndex}: applying JSON fields: ${jsonFields.mkString(", ")}")
+          companionConfig.withJsonFields(jsonFields: _*)
+        }
       }
 
       // 3. Call QuickwitSplit.createFromParquet()

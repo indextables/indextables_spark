@@ -952,7 +952,9 @@ class IndexTables4SparkScanBuilder(
 
     // Check the field type configuration for top-level fields.
     // Use effectiveConfig (not raw config) so companion indexingModes are visible.
-    val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
+    // Use lowercase attribute: CaseInsensitiveStringMap lowercases keys, so config has
+    // "spark.indextables.indexing.typemap.myfield" even if user wrote "typemap.myField".
+    val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     val fieldType    = effectiveConfig.get(fieldTypeKey)
 
     fieldType match {

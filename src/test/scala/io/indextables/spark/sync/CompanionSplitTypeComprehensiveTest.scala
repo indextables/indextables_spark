@@ -917,4 +917,204 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       statusResult.map(_.getAs[Int]("id")).toSet shouldBe Set(1, 3)
     }
   }
+
+  test("INDEXING MODES ipaddress field supports IP indexquery") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create Delta table with a STRING column holding IP addresses
+      spark.sql(
+        s"""CREATE TABLE delta.`$deltaPath` (
+           |  id INT,
+           |  name STRING,
+           |  ip STRING
+           |) USING DELTA""".stripMargin)
+
+      spark.sql(
+        s"""INSERT INTO delta.`$deltaPath` VALUES
+           |  (1, 'server1', '192.168.1.1'),
+           |  (2, 'server2', '192.168.1.2'),
+           |  (3, 'server3', '192.168.1.10'),
+           |  (4, 'server4', '10.0.0.1'),
+           |  (5, 'server5', '10.0.0.2')
+           |""".stripMargin)
+
+      // Build companion with INDEXING MODES: ip as ipaddress
+      val syncResult = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+           |  INDEXING MODES ('ip': 'ipaddress')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .load(indexPath)
+      df.createOrReplaceTempView("ip_modes_test")
+
+      // Exact IP match via indexquery
+      val exact = spark.sql(
+        "SELECT id FROM ip_modes_test WHERE ip indexquery '192.168.1.1'"
+      ).collect()
+      exact.length shouldBe 1
+      exact.head.getInt(0) shouldBe 1
+
+      // IP range query via indexquery
+      val range = spark.sql(
+        "SELECT id FROM ip_modes_test WHERE ip indexquery '[192.168.1.0 TO 192.168.1.5]'"
+      ).collect()
+      range.length shouldBe 2
+      range.map(_.getInt(0)).toSet shouldBe Set(1, 2)
+
+      // Exact match on non-IP field should still work
+      val nameResult = df.filter(col("name") === "server4").collect()
+      nameResult.length shouldBe 1
+      nameResult.head.getAs[Int]("id") shouldBe 4
+    }
+  }
+
+  test("INDEXING MODES json field supports nested field filter pushdown") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create Delta table with a Struct column (auto-detected as JSON)
+      spark.sql(
+        s"""CREATE TABLE delta.`$deltaPath` (
+           |  id INT,
+           |  label STRING,
+           |  metadata STRUCT<color: STRING, size: INT>
+           |) USING DELTA""".stripMargin)
+
+      spark.sql(
+        s"""INSERT INTO delta.`$deltaPath`
+           |SELECT 1, 'item-a', named_struct('color', 'red', 'size', 10)
+           |UNION ALL
+           |SELECT 2, 'item-b', named_struct('color', 'blue', 'size', 20)
+           |UNION ALL
+           |SELECT 3, 'item-c', named_struct('color', 'red', 'size', 30)
+           |""".stripMargin)
+
+      // Build companion — Struct fields are auto-detected as JSON
+      val syncResult = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .load(indexPath)
+
+      // All rows present
+      df.collect().length shouldBe 3
+
+      // Nested field filter pushdown on struct (equality)
+      val colorResult = df.filter(col("metadata.color") === "red").collect()
+      colorResult.length shouldBe 2
+      colorResult.map(_.getAs[Int]("id")).toSet shouldBe Set(1, 3)
+
+      // Equality filter on nested numeric field
+      val sizeResult = df.filter(col("metadata.size") === 20).collect()
+      sizeResult.length shouldBe 1
+      sizeResult.head.getAs[Int]("id") shouldBe 2
+
+      // Label (non-struct) filter still works
+      val labelResult = df.filter(col("label") === "item-b").collect()
+      labelResult.length shouldBe 1
+      labelResult.head.getAs[Int]("id") shouldBe 2
+    }
+  }
+
+  test("INDEXING MODES json on STRING column indexes raw JSON for nested queries") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create Delta table with a plain STRING column containing raw JSON strings
+      spark.sql(
+        s"""CREATE TABLE delta.`$deltaPath` (
+           |  id INT,
+           |  label STRING,
+           |  payload STRING
+           |) USING DELTA""".stripMargin)
+
+      spark.sql(
+        s"""INSERT INTO delta.`$deltaPath` VALUES
+           |  (1, 'first',  '{"user":"alice","score":42}'),
+           |  (2, 'second', '{"user":"bob","score":99}'),
+           |  (3, 'third',  '{"user":"alice","score":7}')
+           |""".stripMargin)
+
+      // Build companion with INDEXING MODES: payload as JSON
+      val syncResult = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+           |  INDEXING MODES ('payload': 'json')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .load(indexPath)
+      df.createOrReplaceTempView("json_string_test")
+
+      // All rows present
+      df.collect().length shouldBe 3
+
+      // Nested field query via indexquery (tantivy JSON path syntax: field.key:value)
+      val aliceResults = spark.sql(
+        "SELECT id FROM json_string_test WHERE payload indexquery 'payload.user:alice'"
+      ).collect()
+      aliceResults.length shouldBe 2
+      aliceResults.map(_.getInt(0)).toSet shouldBe Set(1, 3)
+
+      // Another nested field query
+      val bobResults = spark.sql(
+        "SELECT id FROM json_string_test WHERE payload indexquery 'payload.user:bob'"
+      ).collect()
+      bobResults.length shouldBe 1
+      bobResults.head.getInt(0) shouldBe 2
+
+      // Non-JSON field filter still works
+      val labelResult = df.filter(col("label") === "first").collect()
+      labelResult.length shouldBe 1
+      labelResult.head.getAs[Int]("id") shouldBe 1
+    }
+  }
+
+  test("Mixed-case column names should work in SQL query predicates") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val ss = spark; import ss.implicits._
+      Seq(
+        (1, "alice", "Engineering"),
+        (2, "bob", "Marketing"),
+        (3, "charlie", "Engineering")
+      ).toDF("userId", "userName", "deptName")
+        .write.format("delta").save(deltaPath)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+      df.createOrReplaceTempView("mixed_case_test")
+
+      // Verify all rows readable via SQL
+      val allRows = spark.sql("SELECT * FROM mixed_case_test").collect()
+      allRows.length shouldBe 3
+
+      // Filter on mixed-case column via SQL (this is where the user sees the error)
+      val result = spark.sql("SELECT * FROM mixed_case_test WHERE userName = 'bob'").collect()
+      result.length shouldBe 1
+      result.head.getAs[String]("userName") shouldBe "bob"
+
+      // Filter on another mixed-case column via SQL
+      val deptResult = spark.sql("SELECT * FROM mixed_case_test WHERE deptName = 'Engineering'").collect()
+      deptResult.length shouldBe 2
+    }
+  }
 }
