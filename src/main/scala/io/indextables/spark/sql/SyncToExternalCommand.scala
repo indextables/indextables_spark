@@ -197,21 +197,10 @@ case class SyncToExternalCommand(
 
     try {
       // 5. Determine sync mode: initial vs incremental
-      val (existingFiles, lastSyncedVersion, isInitialSync) = determineSyncMode(transactionLog,
+      val (existingFiles, isInitialSync) = determineSyncMode(transactionLog,
         deltaReader.schema(), partitionColumns)
 
-      // 6. Check if already up-to-date
-      if (!isInitialSync && lastSyncedVersion >= deltaVersion) {
-        val durationMs = System.currentTimeMillis() - startTime
-        logger.info(s"Already synced to delta version $deltaVersion, nothing to do")
-        return Seq(Row(
-          destPath, sourcePath, "no_action", deltaVersion.asInstanceOf[java.lang.Long],
-          0, 0, 0, 0L, 0L, durationMs,
-          s"Already synced to delta version $deltaVersion"
-        ))
-      }
-
-      // 6b. On incremental sync, fall back to stored indexing modes/WHERE if not specified
+      // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
       val effectiveIndexingModes = if (indexingModes.nonEmpty) {
         indexingModes
       } else if (!isInitialSync) {
@@ -425,14 +414,13 @@ case class SyncToExternalCommand(
               Seq.empty
             }
 
-            // Last batch to complete includes metadata update
+            // Write companion metadata on every batch so that any Avro state
+            // written mid-sync contains the full companion config. Without this,
+            // a reader in a different process would fail with "parquet_table_root
+            // was not set" because intermediate states had no MetadataAction.
             val completed = completedBatches.incrementAndGet()
-            val metadataUpdate = if (completed == totalBatches) {
-              Some(buildCompanionMetadata(
-                transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
-            } else {
-              None
-            }
+            val metadataUpdate = Some(buildCompanionMetadata(
+              transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
 
             if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
               val version = transactionLog.commitSyncActions(
@@ -559,26 +547,24 @@ case class SyncToExternalCommand(
    * Determine whether this is an initial sync or incremental, by reading
    * the existing transaction log state.
    *
-   * @return (existingFiles, lastSyncedVersion, isInitialSync)
+   * The "already synced" check is intentionally omitted here. The anti-join
+   * at computeAntiJoinChanges() handles this correctly — if everything is
+   * already synced, parquetFilesToIndex will be empty and the command returns
+   * "No changes to sync". This avoids a false-positive "already synced" when
+   * a previous run committed some batches but not all (partial failure).
+   *
+   * @return (existingFiles, isInitialSync)
    */
   private def determineSyncMode(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     deltaSchema: org.apache.spark.sql.types.StructType,
     partitionColumns: Seq[String]
-  ): (Seq[AddAction], Long, Boolean) =
+  ): (Seq[AddAction], Boolean) =
     try {
-      val metadata = transactionLog.getMetadata()
+      transactionLog.getMetadata()
       val files = transactionLog.listFiles()
-      // Use the metadata's lastSyncedVersion (written only when ALL batches complete)
-      // rather than max(companionDeltaVersion) across files. The per-file version is
-      // set as soon as each batch commits, so a partial failure (some batches committed,
-      // others not) would incorrectly report "already synced" on restart.
-      val lastSyncedVersion = metadata.configuration
-        .get("indextables.companion.lastSyncedVersion")
-        .map(_.toLong)
-        .getOrElse(-1L)
-      logger.info(s"Existing table: ${files.size} files, lastSyncedVersion=$lastSyncedVersion")
-      (files, lastSyncedVersion, false)
+      logger.info(s"Existing table: ${files.size} files")
+      (files, false)
     } catch {
       // Only catch the specific exception thrown by TransactionLog.getMetadata() when no
       // table/metadata exists. All other exceptions (network errors, credential failures,
@@ -588,7 +574,7 @@ case class SyncToExternalCommand(
           e.getMessage.contains("No metadata found in transaction log") =>
         logger.info(s"No existing table at $destPath, initializing for initial sync")
         transactionLog.initialize(deltaSchema, partitionColumns)
-        (Seq.empty[AddAction], -1L, true)
+        (Seq.empty[AddAction], true)
     }
 
   /**
