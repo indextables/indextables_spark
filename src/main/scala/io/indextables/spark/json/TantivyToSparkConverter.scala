@@ -222,29 +222,48 @@ class TantivyToSparkConverter(
     val jsonValue = document.getFirst(field.name)
     if (jsonValue == null) return null
 
-    // Parse JSON string to Map (tantivy4java stores JSON fields as strings)
-    // Use parseAsJava to avoid DefaultScalaModule interference with Java collections
+    // tantivy4java stores JSON fields as strings
     val jsonString = jsonValue.asInstanceOf[String]
-    val jsonMap = io.indextables.spark.util.JsonUtil.parseAsJava(
-      jsonString,
-      classOf[java.util.Map[String, Object]]
-    )
 
     field.dataType match {
-      case st: StructType =>
-        jsonMapToRow(jsonMap, st)
-
       case at: ArrayType =>
-        // Arrays are wrapped in "_values" key
-        val jsonList = jsonMap.get("_values")
-        if (jsonList == null) {
-          org.apache.spark.sql.catalyst.util.ArrayData.toArrayData(Array.empty[Any])
+        // Handle both raw JSON arrays and wrapped format:
+        // - Raw JSON array: ["a","b","c"] (from companion splits / parquet)
+        // - Wrapped format: {"_values": ["a","b","c"]} (from standard index writes)
+        val trimmed = jsonString.trim
+        if (trimmed.startsWith("[")) {
+          // Raw JSON array - parse directly as List
+          val jsonList = io.indextables.spark.util.JsonUtil.parseAsJava(
+            jsonString,
+            classOf[java.util.List[Object]]
+          )
+          jsonListToArray(jsonList, at)
         } else {
-          jsonListToArray(jsonList.asInstanceOf[java.util.List[Object]], at)
+          // Wrapped format - parse as Map and extract "_values"
+          val jsonMap = io.indextables.spark.util.JsonUtil.parseAsJava(
+            jsonString,
+            classOf[java.util.Map[String, Object]]
+          )
+          val jsonList = jsonMap.get("_values")
+          if (jsonList == null) {
+            org.apache.spark.sql.catalyst.util.ArrayData.toArrayData(Array.empty[Any])
+          } else {
+            jsonListToArray(jsonList.asInstanceOf[java.util.List[Object]], at)
+          }
         }
 
+      case st: StructType =>
+        val jsonMap = io.indextables.spark.util.JsonUtil.parseAsJava(
+          jsonString,
+          classOf[java.util.Map[String, Object]]
+        )
+        jsonMapToRow(jsonMap, st)
+
       case mt: MapType =>
-        // Maps are stored directly as JSON objects
+        val jsonMap = io.indextables.spark.util.JsonUtil.parseAsJava(
+          jsonString,
+          classOf[java.util.Map[String, Object]]
+        )
         jsonMapToMapData(jsonMap, mt)
 
       case StringType if schemaMapper.getFieldType(field.name) == "json" =>

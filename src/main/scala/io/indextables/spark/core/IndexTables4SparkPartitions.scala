@@ -450,9 +450,7 @@ class IndexTables4SparkPartitionReader(
         }
 
         // Push down SplitQuery and limit to split searcher
-        logger.info(s"Executing search with SplitQuery object and limit: $effectiveLimit")
         val searchResults = splitSearchEngine.search(splitQuery, limit = effectiveLimit)
-        logger.info(s"Search returned ${searchResults.length} results (pushed limit: $effectiveLimit)")
 
         // For companion splits, partition column values are NOT stored in the parquet data
         // (Delta/Iceberg store them in directory paths). Inject from AddAction.partitionValues.
@@ -766,6 +764,17 @@ class IndexTables4SparkPartitionReader(
       case BooleanType   => value.toBoolean
       case ShortType     => value.toShort
       case ByteType      => value.toByte
+      case DateType      =>
+        // Spark stores DateType as Int (days since epoch 1970-01-01)
+        java.time.LocalDate.parse(value).toEpochDay.toInt
+      case TimestampType =>
+        // Spark stores TimestampType as Long (microseconds since epoch)
+        val instant = if (value.contains("T")) {
+          java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant
+        } else {
+          java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+        }
+        instant.getEpochSecond * 1000000L + instant.getNano / 1000L
       case _             => UTF8String.fromString(value) // fallback: treat as string
     }
   }
