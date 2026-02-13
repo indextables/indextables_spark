@@ -857,4 +857,64 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       noMatchName.length shouldBe 0
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  INDEXING MODES: verify TEXT mode enables full-text search
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("INDEXING MODES text field supports indexquery full-text search") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create Delta table with a message column (STRING in Delta, but we want TEXT indexing)
+      spark.sql(
+        s"""CREATE TABLE delta.`$deltaPath` (
+           |  id INT,
+           |  status STRING,
+           |  message STRING
+           |) USING DELTA""".stripMargin)
+
+      spark.sql(
+        s"""INSERT INTO delta.`$deltaPath` VALUES
+           |  (1, 'open', 'the quick brown fox jumps over the lazy dog'),
+           |  (2, 'closed', 'machine learning is transforming the world'),
+           |  (3, 'open', 'apache spark processes big data efficiently'),
+           |  (4, 'closed', 'the lazy cat sleeps all day long')
+           |""".stripMargin)
+
+      // Build companion with INDEXING MODES: message as TEXT
+      val syncResult = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .load(indexPath)
+      df.createOrReplaceTempView("indexing_modes_test")
+
+      // indexquery on TEXT field should find tokenized matches
+      val iqResults = spark.sql(
+        "SELECT id, message FROM indexing_modes_test WHERE message indexquery 'lazy'"
+      ).collect()
+      iqResults.length shouldBe 2
+      iqResults.map(_.getInt(0)).toSet shouldBe Set(1, 4)
+
+      // indexquery with multiple terms
+      val iqMulti = spark.sql(
+        "SELECT id FROM indexing_modes_test WHERE message indexquery 'machine learning'"
+      ).collect()
+      iqMulti.length shouldBe 1
+      iqMulti.head.getInt(0) shouldBe 2
+
+      // Exact match on non-text field (status) should still work via pushdown
+      val statusResult = df.filter(col("status") === "open").collect()
+      statusResult.length shouldBe 2
+      statusResult.map(_.getAs[Int]("id")).toSet shouldBe Set(1, 3)
+    }
+  }
 }

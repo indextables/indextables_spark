@@ -132,6 +132,26 @@ object SyncTaskExecutor {
         .withWriterHeapSize(config.writerHeapSize)
         .withReaderBatchSize(config.readerBatchSize)
 
+      // Apply indexing modes: "text" fields get a tokenizer override (forces TEXT indexing),
+      // "ip"/"ipaddress" fields get registered as IP address fields
+      if (config.indexingModes.nonEmpty) {
+        val tokenizerOverrides = config.indexingModes.collect {
+          case (field, mode) if mode.toLowerCase == "text" => field -> "default"
+        }
+        if (tokenizerOverrides.nonEmpty) {
+          logger.info(s"Sync task ${group.groupIndex}: applying tokenizer overrides for TEXT fields: ${tokenizerOverrides.keys.mkString(", ")}")
+          companionConfig.withTokenizerOverrides(tokenizerOverrides.asJava)
+        }
+
+        val ipFields = config.indexingModes.collect {
+          case (field, mode) if mode.toLowerCase == "ipaddress" || mode.toLowerCase == "ip" => field
+        }.toArray
+        if (ipFields.nonEmpty) {
+          logger.info(s"Sync task ${group.groupIndex}: applying IP address fields: ${ipFields.mkString(", ")}")
+          companionConfig.withIpAddressFields(ipFields: _*)
+        }
+      }
+
       // 3. Call QuickwitSplit.createFromParquet()
       val splitId = UUID.randomUUID().toString
       val splitFileName = s"companion-${group.groupIndex}-$splitId.split"

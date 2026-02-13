@@ -137,6 +137,28 @@ class IndexTables4SparkScanBuilder(
                 case e: Exception =>
                   logger.warn(s"Failed to resolve parquet credentials for companion mode: ${e.getMessage}")
               }
+              // Propagate stored indexing modes as typemap entries so that
+              // isFieldSuitableForExactMatching() knows which fields are TEXT vs STRING.
+              // Without this, TEXT fields default to "string" and get incorrect EqualTo pushdown.
+              metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
+                try {
+                  val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                  import scala.jdk.CollectionConverters._
+                  val modes: java.util.Map[String, String] = mapper.readValue(
+                    json, classOf[java.util.HashMap[String, String]])
+                  modes.asScala.foreach { case (field, mode) =>
+                    val key = s"spark.indextables.indexing.typemap.$field"
+                    if (!enrichedConfig.contains(key)) {
+                      logger.info(s"Companion mode: propagating indexingMode $field -> $mode as typemap entry")
+                      enrichedConfig = enrichedConfig + (key -> mode)
+                    }
+                  }
+                } catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to parse companion indexingModes: ${e.getMessage}")
+                }
+              }
+
               enrichedConfig
             case None =>
               logger.warn("Companion mode enabled but no sourceTablePath in metadata")
@@ -928,9 +950,10 @@ class IndexTables4SparkScanBuilder(
       return true
     }
 
-    // Check the field type configuration for top-level fields
+    // Check the field type configuration for top-level fields.
+    // Use effectiveConfig (not raw config) so companion indexingModes are visible.
     val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
-    val fieldType    = config.get(fieldTypeKey)
+    val fieldType    = effectiveConfig.get(fieldTypeKey)
 
     fieldType match {
       case Some("string") =>
