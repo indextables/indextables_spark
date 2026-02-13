@@ -567,12 +567,18 @@ case class SyncToExternalCommand(
     partitionColumns: Seq[String]
   ): (Seq[AddAction], Long, Boolean) =
     try {
-      transactionLog.getMetadata()
+      val metadata = transactionLog.getMetadata()
       val files = transactionLog.listFiles()
-      val versions = files.flatMap(_.companionDeltaVersion)
-      val maxDeltaVersion = if (versions.nonEmpty) versions.max else -1L
-      logger.info(s"Existing table: ${files.size} files, lastSyncedVersion=$maxDeltaVersion")
-      (files, maxDeltaVersion, false)
+      // Use the metadata's lastSyncedVersion (written only when ALL batches complete)
+      // rather than max(companionDeltaVersion) across files. The per-file version is
+      // set as soon as each batch commits, so a partial failure (some batches committed,
+      // others not) would incorrectly report "already synced" on restart.
+      val lastSyncedVersion = metadata.configuration
+        .get("indextables.companion.lastSyncedVersion")
+        .map(_.toLong)
+        .getOrElse(-1L)
+      logger.info(s"Existing table: ${files.size} files, lastSyncedVersion=$lastSyncedVersion")
+      (files, lastSyncedVersion, false)
     } catch {
       // Only catch the specific exception thrown by TransactionLog.getMetadata() when no
       // table/metadata exists. All other exceptions (network errors, credential failures,
