@@ -238,6 +238,28 @@ trait TransactionLogInterface extends AutoCloseable {
     throw new UnsupportedOperationException("commitMergeSplits must be implemented by subclass")
 
   /**
+   * Commits a sync operation atomically, optionally including a metadata update.
+   *
+   * This is used by BUILD INDEXTABLES COMPANION FROM DELTA to commit companion split changes
+   * along with companion metadata (source path, synced version, etc.) in a single
+   * transaction.
+   *
+   * @param removeActions
+   *   Sequence of remove actions for invalidated splits
+   * @param addActions
+   *   Sequence of add actions for new companion splits
+   * @param metadataUpdate
+   *   Optional metadata action to include in the transaction
+   * @return
+   *   The transaction version number for this operation
+   */
+  def commitSyncActions(
+    removeActions: Seq[RemoveAction],
+    addActions: Seq[AddAction],
+    metadataUpdate: Option[MetadataAction] = None
+  ): Long = commitMergeSplits(removeActions, addActions)
+
+  /**
    * Commits remove actions to mark files as logically deleted.
    *
    * This operation marks files as removed in the transaction log without physically deleting them. The files become

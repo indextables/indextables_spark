@@ -383,7 +383,17 @@ class IndexTables4SparkScan(
     // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
     // For UnityCatalogAWSCredentialProvider, this means a single HTTP call on the driver
     // instead of N calls from N executors
+    // Note: companion mode config (parquetTableRoot) is already injected by ScanBuilder.effectiveConfig
     val resolvedConfig = resolveCredentialsOnDriver(config, tablePath)
+
+    // Diagnostic: log companion config state on driver before serialization to executors
+    val hasCompanionKey = resolvedConfig.contains("spark.indextables.companion.parquetTableRoot")
+    val companionRoot = resolvedConfig.get("spark.indextables.companion.parquetTableRoot")
+    val hasParquetCreds = resolvedConfig.contains("spark.indextables.companion.parquet.aws.accessKey")
+    logger.info(s"[DRIVER] createReaderFactory: companionMode=$hasCompanionKey, " +
+      s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
+      s"parquetCredentials=$hasParquetCreds, " +
+      s"totalConfigKeys=${resolvedConfig.size}")
 
     new IndexTables4SparkReaderFactory(readSchema, limit, resolvedConfig, tablePath, metricsAccumulator)
   }

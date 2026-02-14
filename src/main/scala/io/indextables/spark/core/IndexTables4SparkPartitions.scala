@@ -257,11 +257,19 @@ class IndexTables4SparkPartitionReader(
     new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)
   }
 
-  private def createCacheConfig(): SplitCacheConfig =
+  private def createCacheConfig(): SplitCacheConfig = {
+    // Diagnostic: log companion config state on executor
+    val hasCompanionKey = config.contains("spark.indextables.companion.parquetTableRoot")
+    val companionRoot = config.get("spark.indextables.companion.parquetTableRoot")
+    logger.info(s"[EXECUTOR] createCacheConfig for ${addAction.path}: " +
+      s"companionMode=$hasCompanionKey, " +
+      s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
+      s"totalConfigKeys=${config.size}")
     io.indextables.spark.util.ConfigUtils.createSplitCacheConfig(
       config,
       Some(tablePath.toString)
     )
+  }
 
   private def initialize(): Unit = {
     if (!initialized) {
@@ -284,6 +292,14 @@ class IndexTables4SparkPartitionReader(
 
         // Create cache configuration from Spark options
         val cacheConfig = createCacheConfig()
+
+        // Defensive check: detect companion splits that are missing companion config
+        if (addAction.companionDeltaVersion.isDefined && cacheConfig.companionSourceTableRoot.isEmpty) {
+          logger.error(s"COMPANION CONFIG MISSING: Split ${addAction.path} has companionDeltaVersion=" +
+            s"${addAction.companionDeltaVersion.get} but companionSourceTableRoot is None. " +
+            s"Config keys: ${config.keys.filter(_.contains("companion")).mkString(", ")}. " +
+            s"This will cause 'parquet_table_root was not set' error during document retrieval.")
+        }
 
         // Create split search engine using footer offset optimization when available
         // Normalize URLs for tantivy4java compatibility (S3, Azure, etc.)
@@ -434,12 +450,31 @@ class IndexTables4SparkPartitionReader(
         }
 
         // Push down SplitQuery and limit to split searcher
-        logger.info(s"Executing search with SplitQuery object and limit: $effectiveLimit")
         val searchResults = splitSearchEngine.search(splitQuery, limit = effectiveLimit)
-        logger.info(s"Search returned ${searchResults.length} results (pushed limit: $effectiveLimit)")
 
-        // Partition values are stored directly in splits, so no reconstruction needed
-        resultIterator = searchResults.iterator
+        // For companion splits, partition column values are NOT stored in the parquet data
+        // (Delta/Iceberg store them in directory paths). Inject from AddAction.partitionValues.
+        val isCompanionSplit = config.contains("spark.indextables.companion.parquetTableRoot")
+        resultIterator = if (isCompanionSplit && addAction.partitionValues.nonEmpty) {
+          val partitionIndices = readSchema.fields.zipWithIndex.collect {
+            case (field, idx) if addAction.partitionValues.contains(field.name) =>
+              (idx, field.dataType, addAction.partitionValues(field.name))
+          }
+          if (partitionIndices.nonEmpty) {
+            logger.info(s"Companion split: injecting ${partitionIndices.length} partition column value(s)")
+            searchResults.iterator.map { row =>
+              val values = row.toSeq(readSchema).toArray
+              partitionIndices.foreach { case (idx, dataType, strVal) =>
+                values(idx) = convertPartitionValue(strVal, dataType)
+              }
+              InternalRow.fromSeq(values)
+            }
+          } else {
+            searchResults.iterator
+          }
+        } else {
+          searchResults.iterator
+        }
         initialized = true
         logger.info(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', limit=$effectiveLimit, results=${searchResults.length}")
 
@@ -712,6 +747,35 @@ class IndexTables4SparkPartitionReader(
         isRangeFilterRedundantByStats(right, minValues, maxValues, schema)
 
       case _ => false
+    }
+  }
+
+  /** Convert a partition value string to the appropriate Spark internal representation. */
+  private def convertPartitionValue(value: String, dataType: org.apache.spark.sql.types.DataType): Any = {
+    import org.apache.spark.sql.types._
+    import org.apache.spark.unsafe.types.UTF8String
+    if (value == null) return null
+    dataType match {
+      case StringType    => UTF8String.fromString(value)
+      case IntegerType   => value.toInt
+      case LongType      => value.toLong
+      case DoubleType    => value.toDouble
+      case FloatType     => value.toFloat
+      case BooleanType   => value.toBoolean
+      case ShortType     => value.toShort
+      case ByteType      => value.toByte
+      case DateType      =>
+        // Spark stores DateType as Int (days since epoch 1970-01-01)
+        java.time.LocalDate.parse(value).toEpochDay.toInt
+      case TimestampType =>
+        // Spark stores TimestampType as Long (microseconds since epoch)
+        val instant = if (value.contains("T")) {
+          java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant
+        } else {
+          java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+        }
+        instant.getEpochSecond * 1000000L + instant.getNano / 1000L
+      case _             => UTF8String.fromString(value) // fallback: treat as string
     }
   }
 }

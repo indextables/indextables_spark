@@ -1087,6 +1087,21 @@ class MergeSplitsExecutor(
                           logger.error(s"❌ TRANSACTION LOG: AddAction has NO docMappingJson - fast fields will be lost!")
                       }
 
+                      // Merge companion fields from all source splits
+                      val mergedCompanionSourceFiles = {
+                        val allSources = result.mergeGroup.files
+                          .flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
+                          .distinct
+                        if (allSources.nonEmpty) Some(allSources) else None
+                      }
+                      val mergedCompanionDeltaVersion = {
+                        val versions = result.mergeGroup.files.flatMap(_.companionDeltaVersion)
+                        if (versions.nonEmpty) Some(versions.max) else None
+                      }
+                      val mergedCompanionFastFieldMode = result.mergeGroup.files
+                        .flatMap(_.companionFastFieldMode)
+                        .headOption
+
                       val addAction = AddAction(
                         path = result.mergedSplitInfo.path,
                         partitionValues = result.mergeGroup.partitionValues,
@@ -1109,7 +1124,11 @@ class MergeSplitsExecutor(
                         deleteOpstamp = deleteOpstamp,
                         numMergeOps = numMergeOps,
                         docMappingJson = docMappingJson,
-                        uncompressedSizeBytes = uncompressedSizeBytes
+                        uncompressedSizeBytes = uncompressedSizeBytes,
+                        // Companion mode fields (combined from all source splits)
+                        companionSourceFiles = mergedCompanionSourceFiles,
+                        companionDeltaVersion = mergedCompanionDeltaVersion,
+                        companionFastFieldMode = mergedCompanionFastFieldMode
                       )
 
                       // Collect actions for batch commit instead of committing individually

@@ -96,7 +96,11 @@ case class FileEntry(
   uncompressedSizeBytes: Option[Long] = None,
   // Streaming (140-149)
   addedAtVersion: Long,
-  addedAtTimestamp: Long)
+  addedAtTimestamp: Long,
+  // Companion mode (150-159)
+  companionSourceFiles: Option[Seq[String]] = None,
+  companionDeltaVersion: Option[Long] = None,
+  companionFastFieldMode: Option[String] = None)
     extends Serializable
 
 object FileEntry {
@@ -136,7 +140,10 @@ object FileEntry {
       docMappingRef = add.docMappingRef,
       uncompressedSizeBytes = add.uncompressedSizeBytes,
       addedAtVersion = version,
-      addedAtTimestamp = timestamp
+      addedAtTimestamp = timestamp,
+      companionSourceFiles = add.companionSourceFiles,
+      companionDeltaVersion = add.companionDeltaVersion,
+      companionFastFieldMode = add.companionFastFieldMode
     )
 
   /**
@@ -176,7 +183,10 @@ object FileEntry {
       numMergeOps = entry.numMergeOps,
       docMappingRef = entry.docMappingRef,
       docMappingJson = docMappingJson,
-      uncompressedSizeBytes = entry.uncompressedSizeBytes
+      uncompressedSizeBytes = entry.uncompressedSizeBytes,
+      companionSourceFiles = entry.companionSourceFiles,
+      companionDeltaVersion = entry.companionDeltaVersion,
+      companionFastFieldMode = entry.companionFastFieldMode
     )
   }
 }

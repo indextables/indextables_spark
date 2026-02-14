@@ -206,6 +206,16 @@ class TransactionLogAdapter(
     result
   }
 
+  override def commitSyncActions(
+    removeActions: Seq[RemoveAction],
+    addActions: Seq[AddAction],
+    metadataUpdate: Option[MetadataAction] = None
+  ): Long = {
+    val result = optimizedLog.commitSyncActions(removeActions, addActions, metadataUpdate)
+    super.invalidateCache()
+    result
+  }
+
   override def getCacheStats(): Option[CacheStats] = {
     // Convert EnhancedTransactionLogCache statistics to legacy CacheStats format
     val enhancedStats = optimizedLog.getCacheStatistics()

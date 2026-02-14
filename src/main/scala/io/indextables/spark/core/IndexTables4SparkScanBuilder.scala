@@ -89,6 +89,93 @@ class IndexTables4SparkScanBuilder(
   // Bucket aggregation state (DateHistogram, Histogram, Range)
   private var _bucketConfig: Option[BucketAggregationConfig] = None
 
+  // Inject companion mode config from transaction log metadata (lazy, computed once).
+  // Resolves credentials for parquet file access on the driver so executors can use them.
+  private lazy val effectiveConfig: Map[String, String] = {
+    if (config.contains("spark.indextables.companion.parquetTableRoot")) {
+      logger.info(s"effectiveConfig: companion parquetTableRoot already in config: ${config("spark.indextables.companion.parquetTableRoot")}")
+      config
+    } else {
+      try {
+        val metadata = transactionLog.getMetadata()
+        val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
+        if (isCompanion) {
+          metadata.configuration.get("indextables.companion.sourceTablePath") match {
+            case Some(path) =>
+              logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
+              var enrichedConfig = config + ("spark.indextables.companion.parquetTableRoot" -> path)
+              // Resolve credentials for the parquet table root (Delta table) on the driver.
+              // On Databricks/Unity Catalog, the companion index and Delta table may need
+              // different credentials (different external locations or vended tokens).
+              try {
+                io.indextables.spark.utils.CredentialProviderFactory
+                  .resolveAWSCredentialsFromConfig(config, path)
+                  .foreach { creds =>
+                    logger.info(s"Companion mode: resolved parquet credentials for $path (accessKey=${creds.accessKey.take(4)}...)")
+                    enrichedConfig = enrichedConfig +
+                      ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
+                      ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
+                    creds.sessionToken.foreach { token =>
+                      enrichedConfig = enrichedConfig +
+                        ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
+                    }
+                  }
+                // Propagate region and endpoint from main config
+                config.get("spark.indextables.aws.region")
+                  .orElse(config.get("spark.indextables.aws.region".toLowerCase))
+                  .foreach { region =>
+                    enrichedConfig = enrichedConfig +
+                      ("spark.indextables.companion.parquet.aws.region" -> region)
+                  }
+                config.get("spark.indextables.s3.endpoint")
+                  .orElse(config.get("spark.indextables.s3.endpoint".toLowerCase))
+                  .foreach { endpoint =>
+                    enrichedConfig = enrichedConfig +
+                      ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+                  }
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"Failed to resolve parquet credentials for companion mode: ${e.getMessage}")
+              }
+              // Propagate stored indexing modes as typemap entries so that
+              // isFieldSuitableForExactMatching() knows which fields are TEXT vs STRING.
+              // Without this, TEXT fields default to "string" and get incorrect EqualTo pushdown.
+              metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
+                try {
+                  val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                  import scala.jdk.CollectionConverters._
+                  val modes: java.util.Map[String, String] = mapper.readValue(
+                    json, classOf[java.util.HashMap[String, String]])
+                  modes.asScala.foreach { case (field, mode) =>
+                    val key = s"spark.indextables.indexing.typemap.$field"
+                    if (!enrichedConfig.contains(key)) {
+                      logger.info(s"Companion mode: propagating indexingMode $field -> $mode as typemap entry")
+                      enrichedConfig = enrichedConfig + (key -> mode)
+                    }
+                  }
+                } catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to parse companion indexingModes: ${e.getMessage}")
+                }
+              }
+
+              enrichedConfig
+            case None =>
+              logger.warn("Companion mode enabled but no sourceTablePath in metadata")
+              config
+          }
+        } else {
+          logger.info(s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})")
+          config
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Could not read metadata for companion mode detection: ${e.getMessage}", e)
+          config
+      }
+    }
+  }
+
   // IMPORTANT: Do NOT capture relation at construction time!
   // ScanBuilders may be created before V2IndexQueryExpressionRule runs.
   // Instead, look up the relation from ThreadLocal at usage time (in build() and pushFilters()).
@@ -245,7 +332,7 @@ class IndexTables4SparkScanBuilder(
           effectiveFilters,
           options,
           _limit,
-          config,
+          effectiveConfig,
           extractedIndexQueryFilters
         )
     }
@@ -335,7 +422,7 @@ class IndexTables4SparkScanBuilder(
         transactionLog,
         effectiveFilters,
         options,
-        config,
+        effectiveConfig,
         Some(groupByColumns), // Pass GROUP BY columns for grouped aggregation
         hasAggregations,      // Indicate if this has aggregations or is just DISTINCT
         Some(schema)          // Pass table schema for proper type conversion
@@ -350,7 +437,7 @@ class IndexTables4SparkScanBuilder(
         schema,
         effectiveFilters,
         options,
-        config,
+        effectiveConfig,
         aggregation,
         groupByColumns,
         extractedIndexQueryFilters,
@@ -370,7 +457,7 @@ class IndexTables4SparkScanBuilder(
       schema,
       effectiveFilters,
       options,
-      config,
+      effectiveConfig,
       aggregation,
       extractedIndexQueryFilters
     )
@@ -413,7 +500,7 @@ class IndexTables4SparkScanBuilder(
       schema,
       effectiveFilters,
       options,
-      config,
+      effectiveConfig,
       aggregation,
       groupByColumns,
       extractedIndexQueryFilters,
@@ -526,7 +613,7 @@ class IndexTables4SparkScanBuilder(
       transactionLog,
       effectiveFilters,
       options,
-      config,
+      effectiveConfig,
       None,        // No GROUP BY columns for simple count
       true,        // hasAggregations
       Some(schema) // Pass table schema for proper type conversion
@@ -863,9 +950,12 @@ class IndexTables4SparkScanBuilder(
       return true
     }
 
-    // Check the field type configuration for top-level fields
-    val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
-    val fieldType    = config.get(fieldTypeKey)
+    // Check the field type configuration for top-level fields.
+    // Use effectiveConfig (not raw config) so companion indexingModes are visible.
+    // Use lowercase attribute: CaseInsensitiveStringMap lowercases keys, so config has
+    // "spark.indextables.indexing.typemap.myfield" even if user wrote "typemap.myField".
+    val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
+    val fieldType    = effectiveConfig.get(fieldTypeKey)
 
     fieldType match {
       case Some("string") =>
@@ -1860,7 +1950,12 @@ class IndexTables4SparkScanBuilder(
     // Read actual fast fields from transaction log (docMappingJson), not from configuration
     val fastFields = getActualFastFieldsFromSchema()
 
-    groupByColumns.foreach { columnName =>
+    // Partition columns are resolved from split metadata at execution time,
+    // not from tantivy fast fields - skip them in validation
+    val partitionColumns = getPartitionColumns()
+    val dataGroupByColumns = groupByColumns.filterNot(partitionColumns.contains)
+
+    dataGroupByColumns.foreach { columnName =>
       // Check if the column exists in the schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>

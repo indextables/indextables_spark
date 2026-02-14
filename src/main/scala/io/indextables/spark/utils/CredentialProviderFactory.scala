@@ -394,6 +394,59 @@ object CredentialProviderFactory {
   }
 
   /**
+   * Resolve AWS credentials for companion parquet storage.
+   *
+   * Priority order:
+   *   1. Explicit companion credentials: `spark.indextables.companion.aws.accessKey/secretKey`
+   *   2. Credential provider called with the parquet table path
+   *   3. Fall back to standard split credentials via `resolveAWSCredentialsFromConfig`
+   */
+  def resolveCompanionAWSCredentials(
+    configs: Map[String, String],
+    parquetTablePath: String
+  ): Option[BasicAWSCredentials] = {
+    def getConfig(key: String): Option[String] =
+      configs.get(key).orElse(configs.get(key.toLowerCase))
+
+    // Priority 1: Explicit companion credentials
+    (
+      getConfig("spark.indextables.companion.aws.accessKey").filter(_.nonEmpty),
+      getConfig("spark.indextables.companion.aws.secretKey").filter(_.nonEmpty)
+    ) match {
+      case (Some(key), Some(secret)) =>
+        logger.debug(s"Using explicit companion credentials: accessKey=${key.take(4)}...")
+        return Some(BasicAWSCredentials(key, secret,
+          getConfig("spark.indextables.companion.aws.sessionToken").filter(_.nonEmpty)))
+      case _ => // continue
+    }
+
+    // Priority 2: Use credential provider with parquet table path (resolves path-specific creds)
+    getConfig("spark.indextables.aws.credentialsProviderClass").filter(_.nonEmpty) match {
+      case Some(className) =>
+        try {
+          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(parquetTablePath)
+          val uri = new URI(normalizedPath)
+          val provider = if (className.contains("UnityCatalogAWSCredentialProvider")) {
+            io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider.fromConfig(uri, configs)
+          } else {
+            val hadoopConf = io.indextables.spark.util.ConfigUtils.getOrCreateHadoopConfiguration(configs)
+            createCredentialProvider(className, uri, hadoopConf)
+          }
+          val creds = extractCredentialsViaReflection(provider)
+          logger.debug(s"Resolved companion credentials from provider $className: accessKey=${creds.accessKey.take(4)}...")
+          return Some(creds)
+        } catch {
+          case ex: Exception =>
+            logger.debug(s"Companion credential provider failed for $parquetTablePath: ${ex.getMessage}")
+        }
+      case None =>
+    }
+
+    // Priority 3: Fall back to standard split credentials
+    resolveAWSCredentialsFromConfig(configs, parquetTablePath)
+  }
+
+  /**
    * Create a credential provider using the fast path (Map-based) when possible.
    *
    * For UnityCatalogAWSCredentialProvider, this uses the Map-based factory method that bypasses Hadoop Configuration

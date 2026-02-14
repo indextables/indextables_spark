@@ -593,6 +593,34 @@ class OptimizedTransactionLog(
     version
   }
 
+  override def commitSyncActions(
+    removeActions: Seq[RemoveAction],
+    addActions: Seq[AddAction],
+    metadataUpdate: Option[MetadataAction] = None
+  ): Long = {
+    val actions: Seq[Action] = metadataUpdate.toSeq ++ removeActions ++ addActions
+    val version              = writeActionsWithRetry(actions)
+
+    // Invalidate caches
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
+    currentSnapshot.set(None)
+
+    // Re-cache metadata after invalidation
+    try {
+      val metadata = getMetadata()
+      val companionEnabled = metadata.configuration.getOrElse("indextables.companion.enabled", "NOT SET")
+      logger.info(s"commitSyncActions: re-cached metadata for ${tablePath.toString}, " +
+        s"companion.enabled=$companionEnabled, totalConfigKeys=${metadata.configuration.size}")
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after commitSyncActions: ${e.getMessage}", e)
+    }
+
+    version
+  }
+
   /**
    * Commits remove actions to mark files as logically deleted with retry on concurrent conflict.
    *
@@ -943,13 +971,21 @@ class OptimizedTransactionLog(
         val checkpointInfoOpt = getLastCheckpointInfoCached()
         val checkpointVersion = checkpointInfoOpt.map(_.version)
 
+        logger.info(s"getMetadata: checkpointInfo=${checkpointInfoOpt.map(i => s"v${i.version},format=${i.format},stateDir=${i.stateDir}").getOrElse("NONE")}")
+
         // Fast path for Avro mode: checkpoint contains complete state, no JSON versions to scan
         val isAvroMode = checkpointInfoOpt.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
 
         // Try checkpoint first if available - uses cached checkpoint actions
         val baseMetadata: Option[MetadataAction] = getCheckpointActionsCached().flatMap { checkpointActions =>
+          val actionTypes = checkpointActions.map(_.getClass.getSimpleName).groupBy(identity).map { case (k, v) => s"$k:${v.size}" }
+          logger.info(s"getMetadata: checkpoint actions types: ${actionTypes.mkString(", ")}")
           checkpointActions.collectFirst { case metadata: MetadataAction => metadata }.map { metadata =>
-            logger.info(s"Found metadata in checkpoint (version ${checkpointVersion.getOrElse("unknown")})")
+            val companionEnabled = metadata.configuration.getOrElse("indextables.companion.enabled", "NOT SET")
+            val configKeys = metadata.configuration.keys.filter(_.contains("companion")).toSeq.sorted
+            logger.info(s"Found metadata in checkpoint (version ${checkpointVersion.getOrElse("unknown")}): " +
+              s"companion.enabled=$companionEnabled, companionKeys=${configKeys.mkString(",")}, " +
+              s"totalConfigKeys=${metadata.configuration.size}")
             metadata
           }
         }
@@ -959,6 +995,8 @@ class OptimizedTransactionLog(
           logger.info("Avro mode: using checkpoint metadata directly (no version scanning needed)")
           return baseMetadata.get
         }
+
+        logger.info(s"getMetadata: NOT using Avro shortcut (isAvroMode=$isAvroMode, baseMetadata=${baseMetadata.isDefined})")
 
         // JSON mode: Check versions AFTER checkpoint for MetadataAction updates
         // Schema deduplication may have registered new schemas after the checkpoint
@@ -1712,16 +1750,20 @@ class OptimizedTransactionLog(
       val newHashes = newSchemas.keys.map(_.stripPrefix(SchemaDeduplication.SCHEMA_KEY_PREFIX))
       logger.info(s"Schema deduplication: found ${newSchemas.size} new schemas to register: ${newHashes.mkString(", ")}")
 
-      // Get current metadata to merge new schemas
-      val currentMetadata =
-        try
-          getMetadata()
-        catch {
-          case _: RuntimeException =>
-            // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
-            // but handle gracefully by skipping deduplication
-            logger.warn("No existing metadata found during write - skipping schema deduplication")
-            return (actions, None)
+      // Use MetadataAction from input actions if present (e.g., BUILD COMPANION includes
+      // companion metadata), otherwise fall back to current metadata from transaction log.
+      // This preserves companion keys and other metadata set by the caller.
+      val currentMetadata = actions.collectFirst { case m: MetadataAction => m }
+        .getOrElse {
+          try
+            getMetadata()
+          catch {
+            case _: RuntimeException =>
+              // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
+              // but handle gracefully by skipping deduplication
+              logger.warn("No existing metadata found during write - skipping schema deduplication")
+              return (actions, None)
+          }
         }
 
       // Merge new schemas into metadata configuration
@@ -1767,6 +1809,25 @@ class OptimizedTransactionLog(
     val removeActions = actions.collect { case remove: RemoveAction => remove }
     val removedPaths  = removeActions.map(_.path).toSet
 
+    // Extract MetadataAction if present (for BUILD COMPANION operations that update metadata)
+    // Wrap in {"metaData": ...} format to match the checkpoint reader expectation
+    val inputMetadata = actions.collectFirst { case m: MetadataAction => m }
+    inputMetadata.foreach { m =>
+      val companionEnabled = m.configuration.getOrElse("indextables.companion.enabled", "NOT SET")
+      val companionKeys = m.configuration.keys.filter(_.contains("companion")).toSeq.sorted
+      logger.info(s"writeActionsToAvroState: MetadataAction found with companion.enabled=$companionEnabled, " +
+        s"companionKeys=${companionKeys.mkString(",")}, totalConfigKeys=${m.configuration.size}")
+    }
+    if (inputMetadata.isEmpty) {
+      logger.info(s"writeActionsToAvroState: NO MetadataAction in input actions (${actions.size} actions, types: ${actions.map(_.getClass.getSimpleName).distinct.mkString(",")})")
+    }
+    val metadataJson = actions.collectFirst { case m: MetadataAction =>
+      val node = JsonUtil.mapper.createObjectNode()
+      node.set[com.fasterxml.jackson.databind.JsonNode](
+        "metaData", JsonUtil.mapper.valueToTree(m))
+      JsonUtil.mapper.writeValueAsString(node)
+    }
+
     // Build schema registry from NEW AddActions only
     // Existing schemas are already in the base state's schema registry
     val newSchemaRegistry = scala.collection.mutable.Map[String, String]()
@@ -1807,7 +1868,8 @@ class OptimizedTransactionLog(
       newFileEntries,
       removedPaths,
       newSchemaRegistry.toMap,
-      compactionConfig
+      compactionConfig,
+      metadata = metadataJson
     )
 
     // Update _last_checkpoint to point to new Avro state
