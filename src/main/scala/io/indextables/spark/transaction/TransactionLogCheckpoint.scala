@@ -20,6 +20,7 @@ package io.indextables.spark.transaction
 import java.io.{BufferedReader, ByteArrayInputStream, InputStreamReader}
 import java.util.concurrent.{Executors, ThreadPoolExecutor}
 
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -680,14 +681,20 @@ class TransactionLogCheckpoint(
 
     // Add MetadataAction from state manifest if present
     // This enables fast getMetadata() without scanning version files
+    logger.info(s"readAvroStateCheckpoint: stateManifest.metadata=${if (stateManifest.metadata.isDefined) s"present(${stateManifest.metadata.get.take(200)}...)" else "NONE"}")
     stateManifest.metadata.foreach { metadataJson =>
       try {
         EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode = JsonUtil.mapper.readTree(metadataJson)
         if (jsonNode.has("metaData")) {
           val metadata = JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+          val companionEnabled = metadata.configuration.getOrElse("indextables.companion.enabled", "NOT SET")
+          val companionKeys = metadata.configuration.keys.filter(_.contains("companion")).toSeq.sorted
+          logger.info(s"readAvroStateCheckpoint: Restored MetadataAction, companion.enabled=$companionEnabled, " +
+            s"companionKeys=${companionKeys.mkString(",")}, totalConfigKeys=${metadata.configuration.size}")
           actions += metadata
-          logger.debug(s"Restored MetadataAction from Avro state checkpoint")
+        } else {
+          logger.warn(s"readAvroStateCheckpoint: metadata JSON has no 'metaData' key, keys=${jsonNode.fieldNames().asScala.mkString(",")}")
         }
       } catch {
         case e: Exception =>

@@ -115,7 +115,21 @@ class SplitSearchEngine private (
   protected lazy val splitSearcher =
     try {
       logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
-      cacheManager.createSplitSearcher(splitPath, metadata)
+      // Use per-split overrides for parquetTableRoot and parquetStorageConfig.
+      // This ensures the correct values reach the native layer regardless of
+      // SplitCacheManager singleton caching (getCacheKey() intentionally omits
+      // parquet fields so a single cache manager can serve multiple table roots).
+      cacheConfig.companionSourceTableRoot match {
+        case Some(tableRoot) =>
+          val pqStorageConfig = buildParquetStorageConfig()
+          logger.info(s"Companion mode: per-split parquetTableRoot=$tableRoot, " +
+            s"parquetStorageConfig=${if (pqStorageConfig != null) "present" else "null"} for $splitPath")
+          cacheManager.createSplitSearcher(splitPath, metadata, tableRoot, pqStorageConfig)
+        case None =>
+          logger.info(s"Non-companion mode: companionSourceTableRoot=None for $splitPath " +
+            s"(parquetAwsAccessKey=${cacheConfig.parquetAwsAccessKey.map(_.take(4) + "...").getOrElse("None")})")
+          cacheManager.createSplitSearcher(splitPath, metadata)
+      }
     } catch {
       case ex: RuntimeException if ex.getMessage.contains("region must be set") =>
         logger.error(s"❌ CONFIRMED: tantivy4java region error when creating SplitSearcher for $splitPath")
@@ -292,66 +306,15 @@ class SplitSearchEngine private (
       // Sort by (segmentOrd, docId) for sequential reads within segments
       val docAddresses = hits.map(hit => hit.getDocAddress()).sortBy(addr => (addr.getSegmentOrd, addr.getDoc))
 
-      // Extract field names from sparkSchema for native-side filtering (byte buffer protocol optimization)
-      // This reduces serialization overhead by only retrieving needed fields (8-12x faster per developer guide)
-      val fieldNames: java.util.Set[String] = {
-        import scala.jdk.CollectionConverters._
-        sparkSchema.fields.map(_.name).toSet.asJava
+      // Use docBatchProjected for all splits (standard and companion).
+      // Returns List<Document> with native-side field projection for both split types.
+      val fieldNames = sparkSchema.fields.map(_.name)
+      logger.debug(s"Using docBatchProjected for ${docAddresses.length} addresses, ${fieldNames.length} fields")
+
+      val documents: Array[io.indextables.tantivy4java.core.Document] = {
+        val javaDocuments = splitSearcher.docBatchProjected(docAddresses, fieldNames: _*)
+        javaDocuments.asScala.toArray
       }
-      logger.debug(s"Using native-side field filtering for ${fieldNames.size()} fields: ${sparkSchema.fields.map(_.name).mkString(", ")}")
-
-      // Use configurable document retrieval strategy
-      val documents: Array[io.indextables.tantivy4java.core.Document] =
-        if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
-          logger.debug(
-            s"Using docBatch for ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})"
-          )
-
-          // Process in batches to respect maximum batch size
-          val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
-
-          batches.flatMap { batchAddresses =>
-            try {
-              import scala.jdk.CollectionConverters._
-              val javaAddresses = batchAddresses.toList.asJava
-              // Use docBatch with field filtering for native-side optimization (byte buffer protocol)
-              val javaDocuments = splitSearcher.docBatch(javaAddresses, fieldNames)
-              javaDocuments.asScala
-            } catch {
-              case e: Exception =>
-                logger.warn(
-                  s"Error retrieving document batch of size ${batchAddresses.length}, falling back to individual retrieval",
-                  e
-                )
-                // Fallback to individual doc calls for this batch - fail fast on errors
-                batchAddresses.map { address =>
-                  try
-                    splitSearcher.doc(address)
-                  catch {
-                    case ex: Exception =>
-                      // Fail fast instead of silently returning null
-                      throw new RuntimeException(
-                        s"Failed to retrieve document at address $address from split $splitPath",
-                        ex
-                      )
-                  }
-                }
-            }
-          }
-        } else {
-          logger.debug(s"Using individual document retrieval: enableDocBatch=${cacheConfig.enableDocBatch}, docCount=${docAddresses.length}")
-          // Use individual doc calls when batch is disabled or only one document - fail fast on errors
-          // Use sorted docAddresses for sequential I/O access (not hits which is in score order)
-          docAddresses.map { address =>
-            try
-              splitSearcher.doc(address)
-            catch {
-              case ex: Exception =>
-                // Fail fast instead of silently returning null
-                throw new RuntimeException(s"Failed to retrieve document at address $address from split $splitPath", ex)
-            }
-          }
-        }
 
       // Build field type cache once before processing documents (avoids N×M JNI calls)
       val fieldTypeCache = SchemaMapping.Read.buildFieldTypeCache(splitSchema, sparkSchema)
@@ -403,6 +366,27 @@ class SplitSearchEngine private (
   private def createEmptyRow(): InternalRow = {
     val values = sparkSchema.fields.map(field => SchemaMapping.Read.getDefaultValue(field.dataType))
     org.apache.spark.sql.catalyst.InternalRow.fromSeq(values)
+  }
+
+  /**
+   * Build a per-split ParquetStorageConfig from cacheConfig's parquet credential fields.
+   * Returns null if no separate parquet credentials are configured (native layer falls back
+   * to the split's own credentials).
+   */
+  private def buildParquetStorageConfig(): io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig = {
+    (cacheConfig.parquetAwsAccessKey, cacheConfig.parquetAwsSecretKey) match {
+      case (Some(key), Some(secret)) =>
+        val pqStorage = new io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig()
+        cacheConfig.parquetAwsSessionToken match {
+          case Some(token) => pqStorage.withAwsCredentials(key, secret, token)
+          case None        => pqStorage.withAwsCredentials(key, secret)
+        }
+        cacheConfig.parquetAwsRegion.foreach(pqStorage.withAwsRegion)
+        cacheConfig.parquetAwsEndpoint.foreach(pqStorage.withAwsEndpoint)
+        pqStorage
+      case _ =>
+        null // No separate parquet credentials — native layer will fall back to split credentials
+    }
   }
 
   /**

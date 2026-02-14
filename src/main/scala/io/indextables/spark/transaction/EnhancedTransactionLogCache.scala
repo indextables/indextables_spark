@@ -412,6 +412,8 @@ object EnhancedTransactionLogCache {
   /** Invalidate global caches for a specific table */
   def invalidateGlobalCachesForTable(tablePath: String): Unit = {
     globalLastCheckpointInfoCache.invalidate(tablePath)
+    globalMetadataCache.invalidate(tablePath)
+    globalProtocolCache.invalidate(tablePath)
     import scala.jdk.CollectionConverters._
     globalCheckpointActionsCache
       .asMap()
@@ -433,6 +435,13 @@ object EnhancedTransactionLogCache {
       .asScala
       .filter(_.tablePath == tablePath)
       .foreach(globalAvroFileListCache.invalidate)
+    // Invalidate version cache entries for this table
+    globalVersionCache
+      .asMap()
+      .keySet()
+      .asScala
+      .filter(_.tablePath == tablePath)
+      .foreach(globalVersionCache.invalidate)
   }
 
   /** Get global cache statistics */

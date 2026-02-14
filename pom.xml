@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.4.6_spark_3.5.3</version>
+    <version>0.5.0_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>IndexTables4Spark</name>
@@ -171,13 +171,39 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.28.8: IP address field type support -->
+        <!-- Version 0.29.4: Per-split ParquetStorageConfig via 4-arg createSplitSearcher() -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.28.8</version>
+            <version>0.29.5</version>
             <classifier>${platform.classifier}</classifier>
+        </dependency>
+
+        <!-- Delta Spark DataSource for integration tests (write Delta tables) -->
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-spark_${scala.compat.version}</artifactId>
+            <version>3.3.2</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Hadoop Azure ABFS filesystem for Azure integration tests -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-azure</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->

@@ -244,6 +244,11 @@ class StateWriter(
         case None                => (0L, None)
       }
 
+      // Safety net: preserve existing metadata from the base state when the
+      // caller passes None. This ensures companion config (and any other
+      // metadata) is never silently dropped during incremental writes.
+      val effectiveMetadata = metadata.orElse(baseManifest.flatMap(_.metadata))
+
       val newVersion = math.max(baseVersion + 1, minVersion.getOrElse(1L))
       val stateDir   = s"$transactionLogPath/${manifestIO.formatStateDir(newVersion)}"
 
@@ -276,7 +281,7 @@ class StateWriter(
                 removedPaths,
                 newVersion,
                 schemaRegistry,
-                metadata,
+                effectiveMetadata,
                 compactionConfig
               )
             } else {
@@ -288,12 +293,12 @@ class StateWriter(
                 removedPaths,
                 newVersion,
                 schemaRegistry,
-                metadata
+                effectiveMetadata
               )
             }
           case None =>
             log.info(s"Writing initial state for version $newVersion")
-            tryWriteInitialStateToShared(stateDir, newFiles, newVersion, schemaRegistry, metadata)
+            tryWriteInitialStateToShared(stateDir, newFiles, newVersion, schemaRegistry, effectiveMetadata)
         }
 
         if (success) {

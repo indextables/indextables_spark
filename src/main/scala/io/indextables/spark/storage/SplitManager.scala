@@ -448,7 +448,15 @@ case class SplitCacheConfig(
   diskCacheMaxSize: Option[Long] = None,            // Max size in bytes (0 = auto: 2/3 available disk)
   diskCacheCompression: Option[String] = None,      // "lz4" (default), "zstd", "none"
   diskCacheMinCompressSize: Option[Long] = None,    // Skip compression below threshold (default: 4096)
-  diskCacheManifestSyncInterval: Option[Int] = None // Seconds between manifest writes (default: 30)
+  diskCacheManifestSyncInterval: Option[Int] = None, // Seconds between manifest writes (default: 30)
+  // Companion mode (parquet companion splits)
+  companionSourceTableRoot: Option[String] = None, // Root path of parquet table for companion splits
+  // Parquet-specific credentials (resolved for the Delta table path, may differ from split credentials)
+  parquetAwsAccessKey: Option[String] = None,
+  parquetAwsSecretKey: Option[String] = None,
+  parquetAwsSessionToken: Option[String] = None,
+  parquetAwsRegion: Option[String] = None,
+  parquetAwsEndpoint: Option[String] = None
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
@@ -600,6 +608,11 @@ case class SplitCacheConfig(
       logger.info(s"L2 Disk cache configured")
       config = config.withTieredCache(tieredConfig)
     }
+
+    // Note: Companion mode parquet config (parquetTableRoot and parquetStorageConfig)
+    // is passed per-split via the 4-arg createSplitSearcher() overload in SplitSearchEngine,
+    // NOT set on CacheConfig. This allows a single SplitCacheManager to serve multiple
+    // table roots and credential sets without duplicating the expensive native cache.
 
     logger.debug(s"Final tantivy4java CacheConfig: $config")
     config

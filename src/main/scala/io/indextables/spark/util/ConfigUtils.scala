@@ -88,6 +88,13 @@ object ConfigUtils {
       }
     }
 
+    // Companion mode: parquet table root (normalized for native layer)
+    val rawCompanionTableRoot = getConfigOption("spark.indextables.companion.parquetTableRoot")
+    val companionTableRoot = rawCompanionTableRoot.map(normalizeStorageUrl)
+    logger.info(s"createSplitCacheConfig: companion.parquetTableRoot raw=${rawCompanionTableRoot.getOrElse("NONE")}, " +
+      s"normalized=${companionTableRoot.getOrElse("NONE")}, " +
+      s"parquetCredentials=${getConfigOption("spark.indextables.companion.parquet.aws.accessKey").map(_.take(4) + "...").getOrElse("NONE")}")
+
     SplitCacheConfig(
       cacheName = {
         val configName = getConfig("spark.indextables.cache.name", "")
@@ -173,7 +180,15 @@ object ConfigUtils {
       diskCacheCompression = getConfigOption("spark.indextables.cache.disk.compression"),
       diskCacheMinCompressSize = getConfigOption("spark.indextables.cache.disk.minCompressSize")
         .map(SplitCacheConfig.parseSizeString),
-      diskCacheManifestSyncInterval = getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt)
+      diskCacheManifestSyncInterval = getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt),
+      // Companion mode (parquet companion splits)
+      companionSourceTableRoot = companionTableRoot,
+      // Parquet-specific credentials (resolved on driver for the Delta table path)
+      parquetAwsAccessKey = getConfigOption("spark.indextables.companion.parquet.aws.accessKey"),
+      parquetAwsSecretKey = getConfigOption("spark.indextables.companion.parquet.aws.secretKey"),
+      parquetAwsSessionToken = getConfigOption("spark.indextables.companion.parquet.aws.sessionToken"),
+      parquetAwsRegion = getConfigOption("spark.indextables.companion.parquet.aws.region"),
+      parquetAwsEndpoint = getConfigOption("spark.indextables.companion.parquet.aws.endpoint")
     )
   }
 
@@ -375,4 +390,16 @@ object ConfigUtils {
     hadoopConfigCache.invalidateAll()
     logger.debug("Cleared Hadoop Configuration cache")
   }
+
+  /**
+   * Normalize Hadoop filesystem URLs to native storage URLs.
+   *
+   * Hadoop uses protocol schemes (s3a://, s3n://) that the native Rust layer
+   * (Quickwit URI parser) doesn't understand. This converts them to the
+   * standard protocols that the native layer expects.
+   */
+  private def normalizeStorageUrl(url: String): String =
+    if (url.startsWith("s3a://")) url.replaceFirst("s3a://", "s3://")
+    else if (url.startsWith("s3n://")) url.replaceFirst("s3n://", "s3://")
+    else url
 }

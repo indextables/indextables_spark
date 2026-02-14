@@ -66,6 +66,24 @@ object IndexComponentMapping {
   )
 
   /**
+   * Companion mode parquet preload aliases. These are NOT IndexComponent values —
+   * they trigger separate parquet-specific preloading via SplitSearcher.
+   *
+   * PARQUET_FAST / PARQUET_FAST_FIELDS → preloadParquetFastFields()
+   * PARQUET_COLS / PARQUET_COLUMNS     → preloadParquetColumns()
+   */
+  val parquetAliases: Map[String, String] = Map(
+    "PARQUET_FAST"        -> "PARQUET_FAST_FIELDS",
+    "PARQUET_FAST_FIELDS" -> "PARQUET_FAST_FIELDS",
+    "PARQUET_COLS"        -> "PARQUET_COLUMNS",
+    "PARQUET_COLUMNS"     -> "PARQUET_COLUMNS"
+  )
+
+  /** Check if a segment alias is a parquet companion alias. */
+  def isParquetAlias(alias: String): Boolean =
+    parquetAliases.contains(alias.trim.toUpperCase)
+
+  /**
    * Default components to prewarm when no segments are specified. Includes TERM and POSTINGS which are essential for
    * query operations. Add POSITIONS, FASTFIELD, FIELDNORM, or STORE explicitly if needed.
    */
@@ -103,14 +121,32 @@ object IndexComponentMapping {
         .split(",")
         .map(_.trim.toUpperCase)
         .filter(_.nonEmpty)
+        .filterNot(isParquetAlias) // Parquet aliases handled separately
         .map { alias =>
           aliasToComponent.getOrElse(
             alias,
             throw new IllegalArgumentException(
-              s"Unknown segment type: $alias. Valid types: ${aliasToComponent.keys.toSeq.sorted.mkString(", ")}"
+              s"Unknown segment type: $alias. Valid types: ${(aliasToComponent.keys ++ parquetAliases.keys).toSeq.sorted.mkString(", ")}"
             )
           )
         }
+        .toSet
+    }
+  }
+
+  /**
+   * Extract parquet companion preload types from a segment string.
+   * Returns the set of parquet alias types found (e.g., "PARQUET_FAST_FIELDS", "PARQUET_COLUMNS").
+   */
+  def parseParquetSegments(segmentString: String): Set[String] = {
+    val trimmed = segmentString.trim
+    if (trimmed.isEmpty) Set.empty
+    else {
+      trimmed
+        .split(",")
+        .map(_.trim.toUpperCase)
+        .filter(_.nonEmpty)
+        .flatMap(parquetAliases.get)
         .toSet
     }
   }

@@ -195,14 +195,12 @@ class BatchMetricsBehaviorTest extends TestBase {
     assert(global.totalOperations >= 3, s"Expected at least 3 ops globally, got ${global.totalOperations}")
   }
 
-  test("docBatchMaxSize=5000 with 10000 docs should result in exactly 2 batch operations") {
-    info("\n=== BATCH SIZE VALIDATION: 10000 docs / 5000 batch size = 2 ops ===")
+  test("docBatchProjected with 10000 docs should result in a single batch operation") {
+    info("\n=== BATCH SIZE VALIDATION: 10000 docs via docBatchProjected = 1 op ===")
 
-    // Read all 10000 docs with docBatchMaxSize=5000
-    // Expected: 10000 / 5000 = 2 batch operations
+    // Read all 10000 docs — docBatchProjected sends all addresses in one native call
     val result = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .option("spark.indextables.docBatch.maxSize", "5000")
       .load(testPath)
       .limit(Int.MaxValue)
       .collect()
@@ -215,8 +213,8 @@ class BatchMetricsBehaviorTest extends TestBase {
     // Validate we got all 10000 rows
     assert(result.length == 10000, s"Expected 10000 rows, got ${result.length}")
 
-    // Validate exactly 2 batch operations (10000 docs / 5000 per batch = 2)
-    assert(delta.totalOperations == 2, s"Expected exactly 2 batch ops (10000/5000), got ${delta.totalOperations}")
+    // docBatchProjected processes all addresses in a single native call
+    assert(delta.totalOperations == 1, s"Expected 1 batch op via docBatchProjected, got ${delta.totalOperations}")
 
     // Validate total docs matches rows returned
     assert(delta.totalDocuments == 10000, s"Expected 10000 docs in metrics, got ${delta.totalDocuments}")

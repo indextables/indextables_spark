@@ -692,6 +692,15 @@ class TransactionLog(
     writeActionsWithRetry(actions)
   }
 
+  override def commitSyncActions(
+    removeActions: Seq[RemoveAction],
+    addActions: Seq[AddAction],
+    metadataUpdate: Option[MetadataAction] = None
+  ): Long = {
+    val actions: Seq[Action] = metadataUpdate.toSeq ++ removeActions ++ addActions
+    writeActionsWithRetry(actions)
+  }
+
   /**
    * Commits remove actions to mark files as logically deleted.
    *

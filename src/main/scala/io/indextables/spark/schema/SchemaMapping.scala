@@ -535,11 +535,14 @@ object SchemaMapping {
 
         // IP_ADDR -> StringType (IP addresses stored as StringType in Spark)
         case (FieldType.IP_ADDR, StringType) =>
-          // IP addresses are returned as strings (IPv4 or IPv6 format)
-          val ipString = rawValue match {
+          // IP addresses are returned as strings. The TANT binary protocol returns
+          // IPv4-mapped IPv6 format (::ffff:x.x.x.x) — strip the prefix to return
+          // canonical IPv4 addresses as users expect.
+          val rawIp = rawValue match {
             case s: String => s
             case other     => other.toString
           }
+          val ipString = if (rawIp.startsWith("::ffff:")) rawIp.substring(7) else rawIp
           org.apache.spark.unsafe.types.UTF8String.fromString(ipString)
 
         // Unsupported conversion

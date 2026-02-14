@@ -361,25 +361,29 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     val tokenLengthOverrides     = getMaxTokenLengthOverrides
     val defaultTokenLength       = getDefaultMaxTokenLength
 
+    // Use case-insensitive lookup: parseDualSyntaxConfig lowercases keys, and field names
+    // from Spark schema preserve original case (e.g., "myField" vs "myfield").
+    val fieldNameLower = fieldName.toLowerCase
+
     // DEBUG: Log what we're checking
     import org.slf4j.LoggerFactory
     val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkOptions])
-    logger.debug(s"getFieldIndexingConfig DEBUG: fieldName=$fieldName")
+    logger.debug(s"getFieldIndexingConfig DEBUG: fieldName=$fieldName (lowercase=$fieldNameLower)")
     logger.debug(s"getFieldIndexingConfig DEBUG: fastFields=${fastFields.mkString(", ")}")
-    logger.debug(s"getFieldIndexingConfig DEBUG: fastFields.contains($fieldName)=${fastFields.contains(fieldName)}")
+    logger.debug(s"getFieldIndexingConfig DEBUG: fastFields.contains($fieldNameLower)=${fastFields.map(_.toLowerCase).contains(fieldNameLower)}")
 
     // Get index record option: per-field override, or default
-    val indexRecord = indexRecordOverrides.get(fieldName.toLowerCase).orElse(Some(defaultIndexRecordOption))
+    val indexRecord = indexRecordOverrides.get(fieldNameLower).orElse(Some(defaultIndexRecordOption))
 
     // Get max token length: per-field override, or default
-    val tokenLength = tokenLengthOverrides.get(fieldName.toLowerCase).orElse(Some(defaultTokenLength))
+    val tokenLength = tokenLengthOverrides.get(fieldNameLower).orElse(Some(defaultTokenLength))
 
     FieldIndexingConfig(
-      fieldType = fieldTypeMapping.get(fieldName),
-      isFast = fastFields.contains(fieldName),
-      isStoreOnly = storeOnlyFields.contains(fieldName),
-      isIndexOnly = indexOnlyFields.contains(fieldName),
-      tokenizerOverride = tokenizerOverrides.get(fieldName),
+      fieldType = fieldTypeMapping.get(fieldNameLower),
+      isFast = fastFields.map(_.toLowerCase).contains(fieldNameLower),
+      isStoreOnly = storeOnlyFields.map(_.toLowerCase).contains(fieldNameLower),
+      isIndexOnly = indexOnlyFields.map(_.toLowerCase).contains(fieldNameLower),
+      tokenizerOverride = tokenizerOverrides.get(fieldNameLower),
       indexRecordOption = indexRecord,
       maxTokenLength = tokenLength
     )

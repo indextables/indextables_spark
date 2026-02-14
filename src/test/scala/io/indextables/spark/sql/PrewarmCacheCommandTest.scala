@@ -169,11 +169,11 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     assert(prewarmRows.length > 0, "Prewarm should return results")
 
-    // Status may be success (validation skipped) or partial (fields skipped)
+    // Status may be success (validation skipped) or partial (fields skipped) or error with details
     val status = prewarmRows.head.getAs[String]("status")
     logger.info(s"Prewarm with nonexistent field status: $status")
     assert(
-      status == "success" || status == "partial" || status == "error",
+      status == "success" || status == "partial" || status.startsWith("error"),
       s"Status should indicate how the request was handled, got: $status"
     )
 

@@ -84,6 +84,15 @@ statement
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
         (DRY RUN)?                                              #truncateTimeTravel
+    | BUILD indexTablesKeyword COMPANION (FROM | WITH) DELTA sourcePath=STRING
+        (INDEXING MODES '(' indexingModeList ')')?
+        (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
+        (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
+        (WRITER HEAP SIZE writerHeapSize=alphanumericValue)?
+        (FROM VERSION fromVersion=INTEGER_VALUE)?
+        (WHERE whereClause=predicateToken)?
+        AT LOCATION destPath=STRING
+        (DRY RUN)?                                            #syncToExternal
     | .*?                                                       #passThrough
     ;
 
@@ -99,6 +108,18 @@ identifierList
     : identifier (',' identifier)*
     ;
 
+indexingModeList
+    : indexingModeEntry (',' indexingModeEntry)*
+    ;
+
+indexingModeEntry
+    : fieldName=STRING ':' fieldMode=STRING
+    ;
+
+// Non-greedy match for WHERE predicate text. ANTLR's .*? stops at the first
+// token that allows the enclosing rule to continue (e.g., AT LOCATION, DRY RUN).
+// This is safe because the subsequent keywords are multi-token sequences that
+// won't appear in normal SQL predicate expressions.
 predicateToken
     : .*?
     ;
@@ -124,6 +145,7 @@ nonReserved
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
+    | BUILD | COMPANION | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
     ;
 
 // Keywords (case-insensitive)
@@ -192,6 +214,19 @@ WAIT: [Ww][Aa][Ii][Tt];
 TIMEOUT: [Tt][Ii][Mm][Ee][Oo][Uu][Tt];
 COMPONENT: [Cc][Oo][Mm][Pp][Oo][Nn][Ee][Nn][Tt];
 SIZES: [Ss][Ii][Zz][Ee][Ss];
+BUILD: [Bb][Uu][Ii][Ll][Dd];
+COMPANION: [Cc][Oo][Mm][Pp][Aa][Nn][Ii][Oo][Nn];
+DELTA: [Dd][Ee][Ll][Tt][Aa];
+INDEXING: [Ii][Nn][Dd][Ee][Xx][Ii][Nn][Gg];
+MODES: [Mm][Oo][Dd][Ee][Ss];
+FASTFIELDS: [Ff][Aa][Ss][Tt][Ff][Ii][Ee][Ll][Dd][Ss];
+HYBRID: [Hh][Yy][Bb][Rr][Ii][Dd];
+DISABLED: [Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd];
+PARQUET_ONLY: [Pp][Aa][Rr][Qq][Uu][Ee][Tt]'_'[Oo][Nn][Ll][Yy];
+INPUT: [Ii][Nn][Pp][Uu][Tt];
+VERSION: [Vv][Ee][Rr][Ss][Ii][Oo][Nn];
+WRITER: [Ww][Rr][Ii][Tt][Ee][Rr];
+HEAP: [Hh][Ee][Aa][Pp];
 
 // Literals
 STRING

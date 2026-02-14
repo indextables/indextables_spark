@@ -18,7 +18,7 @@
 package io.indextables.spark.transaction.avro
 
 import scala.io.Source
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
 
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.Schema
@@ -160,6 +160,27 @@ object AvroSchemas {
       |      "type": "long",
       |      "field-id": 141,
       |      "doc": "Timestamp when this file was added (epoch milliseconds)"
+      |    },
+      |    {
+      |      "name": "companionSourceFiles",
+      |      "type": ["null", {"type": "array", "items": "string"}],
+      |      "default": null,
+      |      "field-id": 150,
+      |      "doc": "Relative parquet file paths indexed into this companion split"
+      |    },
+      |    {
+      |      "name": "companionDeltaVersion",
+      |      "type": ["null", "long"],
+      |      "default": null,
+      |      "field-id": 151,
+      |      "doc": "Delta version this companion split was built from"
+      |    },
+      |    {
+      |      "name": "companionFastFieldMode",
+      |      "type": ["null", "string"],
+      |      "default": null,
+      |      "field-id": 152,
+      |      "doc": "Fast field mode: DISABLED, HYBRID, or PARQUET_ONLY"
       |    }
       |  ]
       |}""".stripMargin
@@ -412,6 +433,11 @@ object AvroSchemas {
         value.asInstanceOf[java.util.Collection[CharSequence]].asScala.map(_.toString).toSet
       }
 
+    def getOptionalStringSeq(field: String): Option[Seq[String]] =
+      Try(Option(record.get(field))).getOrElse(None).map { value =>
+        value.asInstanceOf[java.util.Collection[CharSequence]].asScala.map(_.toString).toSeq
+      }
+
     FileEntry(
       path = record.get("path").toString,
       partitionValues = record
@@ -437,7 +463,10 @@ object AvroSchemas {
       docMappingRef = getOptionalString("docMappingRef"),
       uncompressedSizeBytes = getOptionalLong("uncompressedSizeBytes"),
       addedAtVersion = record.get("addedAtVersion").asInstanceOf[Long],
-      addedAtTimestamp = record.get("addedAtTimestamp").asInstanceOf[Long]
+      addedAtTimestamp = record.get("addedAtTimestamp").asInstanceOf[Long],
+      companionSourceFiles = Try(getOptionalStringSeq("companionSourceFiles")).getOrElse(None),
+      companionDeltaVersion = Try(getOptionalLong("companionDeltaVersion")).getOrElse(None),
+      companionFastFieldMode = Try(getOptionalString("companionFastFieldMode")).getOrElse(None)
     )
   }
 
@@ -475,6 +504,9 @@ object AvroSchemas {
     record.put("uncompressedSizeBytes", entry.uncompressedSizeBytes.map(java.lang.Long.valueOf).orNull)
     record.put("addedAtVersion", entry.addedAtVersion)
     record.put("addedAtTimestamp", entry.addedAtTimestamp)
+    record.put("companionSourceFiles", entry.companionSourceFiles.map(_.asJava).orNull)
+    record.put("companionDeltaVersion", entry.companionDeltaVersion.map(java.lang.Long.valueOf).orNull)
+    record.put("companionFastFieldMode", entry.companionFastFieldMode.orNull)
 
     record
   }

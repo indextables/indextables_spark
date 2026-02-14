@@ -131,6 +131,46 @@ object FiltersToQueryConverter {
     nonRangeFilters ++ remainingFilters
   }
 
+  /**
+   * Remove IsNotNull filters that are redundant because a value-bearing sibling filter
+   * already references the same attribute. A document matching EqualTo(X, v) or
+   * GreaterThan(X, v) inherently has a non-null X, so the existence check is meaningless.
+   */
+  private def removeRedundantIsNotNull(filters: Array[Filter]): Array[Filter] = {
+    import org.apache.spark.sql.sources._
+
+    def getValueAttributes(f: Filter): Set[String] = f match {
+      case EqualTo(attr, _)            => Set(attr)
+      case EqualNullSafe(attr, _)      => Set(attr)
+      case GreaterThan(attr, _)        => Set(attr)
+      case GreaterThanOrEqual(attr, _) => Set(attr)
+      case LessThan(attr, _)           => Set(attr)
+      case LessThanOrEqual(attr, _)    => Set(attr)
+      case In(attr, _)                 => Set(attr)
+      case StringStartsWith(attr, _)   => Set(attr)
+      case StringEndsWith(attr, _)     => Set(attr)
+      case StringContains(attr, _)     => Set(attr)
+      case And(left, right)            => getValueAttributes(left) ++ getValueAttributes(right)
+      case Or(left, right)             => getValueAttributes(left) ++ getValueAttributes(right)
+      case _                           => Set.empty
+    }
+
+    val attributesWithValues = filters.flatMap(getValueAttributes).toSet
+
+    if (attributesWithValues.isEmpty) {
+      filters
+    } else {
+      val (removed, kept) = filters.partition {
+        case IsNotNull(attr) => attributesWithValues.contains(attr)
+        case _               => false
+      }
+      if (removed.nonEmpty) {
+        queryLog(s"Removed ${removed.length} redundant IsNotNull filter(s): ${removed.mkString(", ")}")
+      }
+      kept
+    }
+  }
+
   /** Analyze range filters for a field and extract range information. */
   private def analyzeRangeFilters(filters: Array[Filter]): RangeInfo = {
     var min: Option[Any] = None
@@ -346,7 +386,12 @@ object FiltersToQueryConverter {
     }
 
     // Optimize range filters before conversion
-    val optimizedFilters = optimizeRangeFilters(filters)
+    val rangeOptimized = optimizeRangeFilters(filters)
+
+    // Remove redundant IsNotNull filters: when a value-bearing filter (EqualTo, GreaterThan, In,
+    // etc.) references the same attribute, IsNotNull is semantically meaningless — a document
+    // matching a value filter inherently has a non-null value for that attribute.
+    val optimizedFilters = removeRedundantIsNotNull(rangeOptimized)
 
     // Filter out filters that reference non-existent fields
     val validFilters = schemaFieldNames match {
@@ -1543,18 +1588,51 @@ object FiltersToQueryConverter {
         }
 
       case IsNotNull(attribute) =>
-        queryLog(s"Creating IsNotNull SplitExistsQuery: $attribute IS NOT NULL")
-        // SplitExistsQuery requires FAST field - validation done on driver side
-        Some(new SplitExistsQuery(attribute))
+        val fieldType = getFieldType(schema, attribute)
+        queryLog(s"Creating IsNotNull query for '$attribute' (fieldType=$fieldType)")
+        if (fieldType == FieldType.TEXT || fieldType == FieldType.JSON) {
+          // TEXT/JSON fields: wildcard doesn't work, use SplitExistsQuery (requires FAST field).
+          // Driver-side isSupportedFilter already verified the field is fast.
+          queryLog(s"Creating IsNotNull SplitExistsQuery for TEXT/JSON field: $attribute IS NOT NULL")
+          Some(new SplitExistsQuery(attribute))
+        } else {
+          try {
+            Some(splitSearchEngine.parseQuery(s"$attribute:*"))
+          } catch {
+            case e: Exception =>
+              queryLog(s"Failed to create IsNotNull wildcard query for '$attribute', falling back to SplitExistsQuery: ${e.getMessage}")
+              Some(new SplitExistsQuery(attribute))
+          }
+        }
 
       case IsNull(attribute) =>
         queryLog(s"Creating IsNull query via boolean negation: $attribute IS NULL")
         // IS NULL = All documents EXCEPT those where field exists
-        // Pattern: MUST(MatchAllQuery) + MUST_NOT(ExistsQuery)
-        val boolQuery = new SplitBooleanQuery()
-        boolQuery.addMust(new SplitMatchAllQuery())
-        boolQuery.addMustNot(new SplitExistsQuery(attribute))
-        Some(boolQuery)
+        // For non-TEXT fields, use parseQuery("field:*") to find docs with values,
+        // then negate. For TEXT fields, fall back to SplitExistsQuery (requires fast field).
+        val isNullFieldType = getFieldType(schema, attribute)
+        if (isNullFieldType == FieldType.TEXT || isNullFieldType == FieldType.JSON) {
+          // TEXT/JSON fields: can't reliably check existence without fast fields.
+          // Use SplitExistsQuery as best-effort (requires fast field).
+          val boolQuery = new SplitBooleanQuery()
+          boolQuery.addMust(new SplitMatchAllQuery())
+          boolQuery.addMustNot(new SplitExistsQuery(attribute))
+          Some(boolQuery)
+        } else {
+          try {
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addMust(new SplitMatchAllQuery())
+            boolQuery.addMustNot(splitSearchEngine.parseQuery(s"$attribute:*"))
+            Some(boolQuery)
+          } catch {
+            case e: Exception =>
+              queryLog(s"Failed to create IsNull wildcard query for '$attribute': ${e.getMessage}")
+              val boolQuery = new SplitBooleanQuery()
+              boolQuery.addMust(new SplitMatchAllQuery())
+              boolQuery.addMustNot(new SplitExistsQuery(attribute))
+              Some(boolQuery)
+          }
+        }
 
       // For complex operations like range queries, wildcard queries, etc., fall back to string parsing
       case GreaterThan(attribute, value) =>
