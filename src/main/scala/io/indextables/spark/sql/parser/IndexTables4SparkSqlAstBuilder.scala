@@ -738,6 +738,14 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Target input size: $targetInputSize")
 
+      // Writer heap size
+      val writerHeapSize = if (ctx.writerHeapSize != null) {
+        Some(parseAlphanumericSize(ctx.writerHeapSize.getText))
+      } else {
+        None
+      }
+      logger.debug(s"Writer heap size: $writerHeapSize")
+
       // Indexing modes
       val indexingModes: Map[String, String] = if (ctx.indexingModeList() != null) {
         ctx.indexingModeList().indexingModeEntry().asScala.map { entry =>
@@ -779,6 +787,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         indexingModes = indexingModes,
         fastFieldMode = fastFieldMode,
         targetInputSize = targetInputSize,
+        writerHeapSize = writerHeapSize,
         fromVersion = fromVersion,
         wherePredicates = wherePredicates,
         dryRun = dryRun

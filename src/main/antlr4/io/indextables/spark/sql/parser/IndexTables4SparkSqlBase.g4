@@ -88,6 +88,7 @@ statement
         (INDEXING MODES '(' indexingModeList ')')?
         (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
         (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
+        (WRITER HEAP SIZE writerHeapSize=alphanumericValue)?
         (FROM VERSION fromVersion=INTEGER_VALUE)?
         (WHERE whereClause=predicateToken)?
         AT LOCATION destPath=STRING
@@ -144,7 +145,7 @@ nonReserved
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
-    | BUILD | COMPANION | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION
+    | BUILD | COMPANION | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
     ;
 
 // Keywords (case-insensitive)
@@ -224,6 +225,8 @@ DISABLED: [Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd];
 PARQUET_ONLY: [Pp][Aa][Rr][Qq][Uu][Ee][Tt]'_'[Oo][Nn][Ll][Yy];
 INPUT: [Ii][Nn][Pp][Uu][Tt];
 VERSION: [Vv][Ee][Rr][Ss][Ii][Oo][Nn];
+WRITER: [Ww][Rr][Ii][Tt][Ee][Rr];
+HEAP: [Hh][Ee][Aa][Pp];
 
 // Literals
 STRING

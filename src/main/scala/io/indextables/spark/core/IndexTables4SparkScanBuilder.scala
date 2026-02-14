@@ -1950,7 +1950,12 @@ class IndexTables4SparkScanBuilder(
     // Read actual fast fields from transaction log (docMappingJson), not from configuration
     val fastFields = getActualFastFieldsFromSchema()
 
-    groupByColumns.foreach { columnName =>
+    // Partition columns are resolved from split metadata at execution time,
+    // not from tantivy fast fields - skip them in validation
+    val partitionColumns = getPartitionColumns()
+    val dataGroupByColumns = groupByColumns.filterNot(partitionColumns.contains)
+
+    dataGroupByColumns.foreach { columnName =>
       // Check if the column exists in the schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>

@@ -196,6 +196,37 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.dryRun shouldBe false
   }
 
+  // --- WRITER HEAP SIZE tests ---
+
+  test("parse SYNC with WRITER HEAP SIZE 512M") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WRITER HEAP SIZE 512M AT LOCATION '/tmp/index'"
+    )
+    cmd.writerHeapSize shouldBe Some(512L * 1024L * 1024L)
+  }
+
+  test("parse SYNC with WRITER HEAP SIZE 2G") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WRITER HEAP SIZE 2G AT LOCATION '/tmp/index'"
+    )
+    cmd.writerHeapSize shouldBe Some(2L * 1024L * 1024L * 1024L)
+  }
+
+  test("default writerHeapSize should be None") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.writerHeapSize shouldBe None
+  }
+
+  test("parse SYNC with TARGET INPUT SIZE and WRITER HEAP SIZE combined") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' TARGET INPUT SIZE 4G WRITER HEAP SIZE 1G AT LOCATION '/tmp/index'"
+    )
+    cmd.targetInputSize shouldBe Some(4L * 1024L * 1024L * 1024L)
+    cmd.writerHeapSize shouldBe Some(1L * 1024L * 1024L * 1024L)
+  }
+
   // --- WHERE clause tests ---
 
   test("parse SYNC with WHERE clause") {
@@ -272,6 +303,7 @@ class SyncToExternalParsingTest extends TestBase {
         |  INDEXING MODES ('content':'text')
         |  FASTFIELDS MODE HYBRID
         |  TARGET INPUT SIZE 2G
+        |  WRITER HEAP SIZE 512M
         |  FROM VERSION 42
         |  WHERE year = '2024'
         |  AT LOCATION 's3://bucket/index'
@@ -281,6 +313,7 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.destPath shouldBe "s3://bucket/index"
     cmd.fastFieldMode shouldBe "HYBRID"
     cmd.targetInputSize shouldBe Some(2L * 1024L * 1024L * 1024L)
+    cmd.writerHeapSize shouldBe Some(512L * 1024L * 1024L)
     cmd.fromVersion shouldBe Some(42L)
     cmd.wherePredicates should have size 1
     cmd.wherePredicates.head should include("year")
