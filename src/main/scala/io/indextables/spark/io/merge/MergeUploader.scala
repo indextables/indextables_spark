@@ -393,19 +393,18 @@ object MergeUploader {
       .replaceFirst("^abfss?://", "azure://")
 
     val uri = new URI(normalizedPath)
-
-    // Container is the host or first path component depending on URL format
-    // azure://container/path or azure://container@account/path
-    val hostPart = uri.getHost
     val pathPart = uri.getPath.stripPrefix("/")
 
-    // If host contains @, it's in format container@account
-    if (hostPart.contains("@")) {
-      val container = hostPart.split("@")(0)
-      (container, pathPart)
+    // Hadoop-style URLs use container@account.host format:
+    //   wasbs://container@account.blob.core.windows.net/path
+    //   abfss://container@account.dfs.core.windows.net/path
+    // In URI parsing, the part before @ becomes userInfo, not part of host.
+    val userInfo = uri.getUserInfo
+    if (userInfo != null && userInfo.nonEmpty) {
+      (userInfo, pathPart)
     } else {
-      // Host is the container
-      (hostPart, pathPart)
+      // Simple format: azure://container/path
+      (uri.getHost, pathPart)
     }
   }
 

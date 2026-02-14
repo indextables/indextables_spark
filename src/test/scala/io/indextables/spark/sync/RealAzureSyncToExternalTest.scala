@@ -37,9 +37,9 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
 
-  private lazy val hasAzureAbfs: Boolean = {
+  private lazy val hasAzureWasbs: Boolean = {
     try {
-      Class.forName("org.apache.hadoop.fs.azurebfs.SecureAzureBlobFileSystem")
+      Class.forName("org.apache.hadoop.fs.azure.NativeAzureFileSystem")
       true
     } catch {
       case _: ClassNotFoundException => false
@@ -55,9 +55,11 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
     }
   }
 
+  // Use wasbs:// (Blob endpoint) instead of abfss:// (DFS endpoint) because storage
+  // accounts with BlobStorageEvents or SoftDelete enabled reject DFS requests with 409.
   private def azureBasePath: String = {
     val account = getStorageAccount.getOrElse("devstoreaccount1")
-    s"abfss://$testContainer@$account.dfs.core.windows.net/sync-test-$testRunId"
+    s"wasbs://$testContainer@$account.blob.core.windows.net/sync-test-$testRunId"
   }
 
   override def beforeAll(): Unit = {
@@ -95,15 +97,13 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
       spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("WARN")
 
-      // Set Hadoop ABFS credentials for Delta Lake writes
+      // Set Hadoop credentials for wasbs:// (Blob endpoint) for Delta Lake writes.
+      // We use the Blob endpoint instead of the DFS endpoint because storage accounts
+      // with BlobStorageEvents or SoftDelete enabled reject DFS requests with 409.
       (account, key) match {
         case (Some(a), Some(k)) =>
           val hadoopConf = spark.sparkContext.hadoopConfiguration
-          hadoopConf.set(s"fs.azure.account.key.$a.dfs.core.windows.net", k)
-          // Disable ACL check and remote filesystem creation to avoid 409 errors
-          // on storage accounts with BlobStorageEvents/SoftDelete enabled
-          hadoopConf.set("fs.azure.enable.check.access", "false")
-          hadoopConf.set("fs.azure.createRemoteFileSystemDuringInitialization", "false")
+          hadoopConf.set(s"fs.azure.account.key.$a.blob.core.windows.net", k)
         case _ =>
       }
     }
@@ -143,8 +143,8 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   // --- Real Azure Integration Tests ---
 
   test("SYNC should create companion index from Azure Delta table") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureAbfs,
-      "Azure credentials, Delta Spark DataSource, or Azure ABFS not available - skipping test")
+    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
 
     val deltaPath = s"$azureBasePath/delta_table"
     val indexPath = s"$azureBasePath/companion_index"
@@ -182,8 +182,8 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("SYNC should support DRY RUN mode on Azure") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureAbfs,
-      "Azure credentials, Delta Spark DataSource, or Azure ABFS not available - skipping test")
+    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
 
     val deltaPath = s"$azureBasePath/delta_dryrun"
     val indexPath = s"$azureBasePath/companion_dryrun"
@@ -209,8 +209,8 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("SYNC should handle partitioned Delta tables on Azure") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureAbfs,
-      "Azure credentials, Delta Spark DataSource, or Azure ABFS not available - skipping test")
+    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
 
     val deltaPath = s"$azureBasePath/delta_partitioned"
     val indexPath = s"$azureBasePath/companion_partitioned"
@@ -242,8 +242,8 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("incremental SYNC should detect no-op when already synced on Azure") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureAbfs,
-      "Azure credentials, Delta Spark DataSource, or Azure ABFS not available - skipping test")
+    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
 
     val deltaPath = s"$azureBasePath/delta_incremental"
     val indexPath = s"$azureBasePath/companion_incremental"
@@ -273,8 +273,8 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("SYNC with FASTFIELDS MODE on Azure should be reflected in companion splits") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureAbfs,
-      "Azure credentials, Delta Spark DataSource, or Azure ABFS not available - skipping test")
+    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
 
     val deltaPath = s"$azureBasePath/delta_fastfield"
     val indexPath = s"$azureBasePath/companion_fastfield"

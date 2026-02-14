@@ -48,13 +48,18 @@ case class DeltaAddFile(
 class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, String]) {
   private val logger = LoggerFactory.getLogger(classOf[DeltaLogReader])
 
+  // delta-kernel-rs (object_store) doesn't support wasbs:// URLs.
+  // Convert to az:// which routes through the Azure Blob endpoint.
+  private val deltaKernelPath: String = normalizeForDeltaKernel(deltaTablePath)
+
   private val deltaConfig: java.util.Map[String, String] =
     translateCredentials(sourceCredentials)
 
   // Lazily list files once and cache (used by currentVersion, getAllFiles, partitionColumns)
   private lazy val fileEntries: java.util.List[DeltaFileEntry] = {
-    logger.info(s"Reading Delta table at $deltaTablePath via DeltaTableReader")
-    DeltaTableReader.listFiles(deltaTablePath, deltaConfig)
+    logger.info(s"Reading Delta table at $deltaTablePath via DeltaTableReader" +
+      (if (deltaKernelPath != deltaTablePath) s" (normalized to $deltaKernelPath)" else ""))
+    DeltaTableReader.listFiles(deltaKernelPath, deltaConfig)
   }
 
   /** Get the current (latest) version of the Delta table. */
@@ -87,10 +92,29 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
 
   /** Get the schema from Delta table metadata as a Spark StructType. */
   def schema(): StructType = {
-    val deltaSchema = DeltaTableReader.readSchema(deltaTablePath, deltaConfig)
+    val deltaSchema = DeltaTableReader.readSchema(deltaKernelPath, deltaConfig)
     logger.info(s"Delta schema at $deltaTablePath: ${deltaSchema.getFieldCount} fields, " +
       s"version=${deltaSchema.getTableVersion}")
     DataType.fromJson(deltaSchema.getSchemaJson()).asInstanceOf[StructType]
+  }
+
+  /**
+   * Normalize URL scheme for delta-kernel-rs compatibility.
+   *
+   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's
+   * wasbs:// URL scheme. Convert wasbs:// to az:// which object_store recognizes as
+   * Azure Blob Storage (using the Blob endpoint, not the DFS endpoint).
+   *
+   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or
+   * SoftDelete enabled, which reject requests on the DFS endpoint.
+   */
+  private def normalizeForDeltaKernel(path: String): String = {
+    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
+    path match {
+      case wasbsRegex(container, rest) =>
+        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
+      case _ => path
+    }
   }
 
   /**
