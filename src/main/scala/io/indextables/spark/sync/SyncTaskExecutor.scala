@@ -281,12 +281,18 @@ object SyncTaskExecutor {
   ): Long = {
     import io.indextables.spark.utils.CredentialProviderFactory
 
-    // Resolve credentials JIT using the table root path (not the individual file path).
-    // Individual file paths like part-00001.parquet don't normalize properly in
-    // TablePathNormalizer, causing cache fragmentation and redundant provider API calls.
-    // With storageConfig (raw config without pre-resolved keys), this falls through to
-    // Priority 2 (credential provider class) for fresh temporary credentials.
-    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(storageConfig, tableRoot)
+    // Resolve credentials JIT using a path suitable for the credential provider.
+    // For Delta/Parquet, tableRoot is an S3 path — use it directly for cache-friendly resolution.
+    // For Iceberg, tableRoot is a table identifier (e.g., "default.my_table") — not a valid S3 URI.
+    // In that case, derive the table base path from the file being downloaded by stripping
+    // the filename and any Hive-style partition segments (key=value/), so the credential
+    // provider (e.g., UnityCatalogAWSCredentialProvider) receives a properly scoped S3 URI.
+    val credentialPath = if (tableRoot.startsWith("s3://") || tableRoot.startsWith("s3a://")) {
+      tableRoot
+    } else {
+      extractTableBasePath(s3Path)
+    }
+    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(storageConfig, credentialPath)
 
     val (bucket, key) = parseS3Path(s3Path)
     val clientBuilder = software.amazon.awssdk.services.s3.S3Client.builder()
@@ -376,6 +382,28 @@ object SyncTaskExecutor {
     } else {
       (path.substring(0, slashIndex), path.substring(slashIndex + 1))
     }
+  }
+
+  /**
+   * Extract the table base path from a full file path by stripping the filename and
+   * any trailing Hive-style partition segments (key=value/).
+   *
+   * Example: s3://bucket/warehouse/db/table/data/region=us-east/file.parquet
+   *       -> s3://bucket/warehouse/db/table/data
+   */
+  private def extractTableBasePath(filePath: String): String = {
+    // Strip scheme prefix, remember it for reconstruction
+    val schemePattern = "^(s3a?://|abfss?://|wasbs?://)".r
+    val scheme = schemePattern.findFirstIn(filePath).getOrElse("")
+    val pathWithoutScheme = filePath.substring(scheme.length)
+
+    // Split into segments, drop the filename (last segment)
+    val segments = pathWithoutScheme.split("/").dropRight(1)
+
+    // Walk backwards, dropping Hive-style partition segments (contain '=')
+    val baseSegments = segments.reverse.dropWhile(_.contains("=")).reverse
+
+    scheme + baseSegments.mkString("/")
   }
 
   private def deleteRecursively(file: File): Unit =
