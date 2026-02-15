@@ -25,13 +25,6 @@ import org.apache.spark.sql.types._
 
 import org.slf4j.LoggerFactory
 
-/** Backward-compatible alias for CompanionSourceFile. */
-@deprecated("Use CompanionSourceFile instead", "0.5.0")
-object DeltaAddFile {
-  def apply(path: String, partitionValues: Map[String, String], size: Long): CompanionSourceFile =
-    CompanionSourceFile(path, partitionValues, size)
-}
-
 /**
  * Wraps tantivy4java's DeltaTableReader (delta-kernel-rs) to provide a simple
  * interface for reading Delta transaction logs.

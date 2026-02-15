@@ -143,7 +143,7 @@ case class SyncToExternalCommand(
       case "delta" =>
         new DeltaSourceReader(sourcePath, sourceCredentials)
       case "parquet" =>
-        new ParquetDirectoryReader(sourcePath, sourceCredentials, hadoopConf, schemaSourcePath)
+        new ParquetDirectoryReader(sourcePath, sourceCredentials, schemaSourcePath)
       case "iceberg" =>
         val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials)
         new IcebergSourceReader(

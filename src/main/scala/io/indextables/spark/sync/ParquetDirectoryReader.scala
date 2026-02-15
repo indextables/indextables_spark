@@ -19,8 +19,6 @@ package io.indextables.spark.sync
 
 import scala.collection.mutable
 
-import org.apache.hadoop.conf.Configuration
-
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.tantivy4java.parquet.ParquetSchemaReader
 
@@ -36,13 +34,11 @@ import org.slf4j.LoggerFactory
  *
  * @param directoryPath Root directory containing parquet files
  * @param credentials Credential map (spark.indextables.* keys)
- * @param hadoopConf Hadoop configuration (passed to CloudStorageProviderFactory)
  * @param schemaSourcePath Optional path to a specific parquet file for schema extraction
  */
 class ParquetDirectoryReader(
     directoryPath: String,
     credentials: Map[String, String],
-    hadoopConf: Configuration,
     schemaSourcePath: Option[String] = None
 ) extends CompanionSourceReader {
 
@@ -172,6 +168,7 @@ class ParquetDirectoryReader(
       .replaceFirst("^s3a?://[^/]+/", "")
       .replaceFirst("^abfss?://[^/]+/", "")
       .replaceFirst("^wasbs?://[^/]+/", "")
+      .replaceFirst("^azure://[^/]+/", "")
     stripped.stripSuffix("/")
   }
 
@@ -222,8 +219,11 @@ class ParquetDirectoryReader(
         s"No parquet files found in $directoryPath for schema extraction")
     )
 
-    logger.info(s"Reading schema from parquet file via ParquetSchemaReader: $schemaFile")
-    val parquetSchema = ParquetSchemaReader.readSchema(schemaFile, nativeConfig)
+    // For wasbs:// paths, normalize to az:// for Rust's object_store crate.
+    // tantivy4java 0.29.6+ uses HEAD + .with_file_size() to avoid suffix range requests.
+    val effectiveSchemaFile = normalizeForObjectStore(schemaFile)
+    logger.info(s"Reading schema from parquet file via ParquetSchemaReader: $effectiveSchemaFile")
+    val parquetSchema = ParquetSchemaReader.readSchema(effectiveSchemaFile, nativeConfig)
     val schemaJson = parquetSchema.getSchemaJson()
 
     // Try to extract the Spark schema from parquet metadata first
@@ -305,6 +305,20 @@ class ParquetDirectoryReader(
     case other =>
       logger.warn(s"Unknown Arrow type '$other', defaulting to StringType")
       StringType
+  }
+
+  /**
+   * Normalize URL scheme for Rust's object_store crate.
+   * wasbs:// is not recognized by object_store; convert to az:// (Azure Blob).
+   * Same normalization as DeltaLogReader.normalizeForDeltaKernel().
+   */
+  private def normalizeForObjectStore(path: String): String = {
+    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
+    path match {
+      case wasbsRegex(container, rest) =>
+        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
+      case _ => path
+    }
   }
 
   /**

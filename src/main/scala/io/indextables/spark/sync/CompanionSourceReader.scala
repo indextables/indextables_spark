@@ -21,7 +21,6 @@ import org.apache.spark.sql.types.StructType
 
 /**
  * A source file from a companion source (Delta, Parquet directory, Iceberg).
- * Replaces the former DeltaAddFile with a format-agnostic name.
  */
 case class CompanionSourceFile(
   path: String,
