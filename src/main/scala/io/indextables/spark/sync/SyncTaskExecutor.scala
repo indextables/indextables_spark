@@ -40,7 +40,8 @@ case class SyncConfig(
   storageConfig: Map[String, String],
   splitTablePath: String,
   writerHeapSize: Long = 2L * 1024L * 1024L * 1024L, // 2GB default
-  readerBatchSize: Int = 8192)
+  readerBatchSize: Int = 8192,
+  schemaSourceParquetFile: Option[String] = None)
     extends Serializable
 
 /**
@@ -242,9 +243,13 @@ object SyncTaskExecutor {
     val normalizedRoot = tableRoot.stripSuffix("/")
     if (normalizedPath.startsWith(normalizedRoot)) {
       normalizedPath.substring(normalizedRoot.length).stripPrefix("/")
-    } else {
-      // For cloud paths, extract the last path components
+    } else if (tableRoot.contains("/") || tableRoot.contains(":\\")) {
+      // tableRoot is a filesystem path but doesn't match — extract filename
       new File(absolutePath).getName
+    } else {
+      // tableRoot is not a filesystem path (e.g., Iceberg table identifier "default.table")
+      // — store the full path so anti-join can match on re-sync
+      normalizedPath
     }
   }
 
@@ -308,6 +313,17 @@ object SyncTaskExecutor {
 
     storageConfig.get("spark.indextables.aws.region").foreach { region =>
       clientBuilder.region(software.amazon.awssdk.regions.Region.of(region))
+    }
+
+    storageConfig.get("spark.indextables.s3.endpoint").foreach { endpoint =>
+      clientBuilder.endpointOverride(java.net.URI.create(endpoint))
+    }
+
+    val pathStyle = storageConfig.get("spark.indextables.s3.pathStyleAccess")
+      .orElse(storageConfig.get("spark.indextables.aws.pathStyleAccess"))
+      .exists(_.equalsIgnoreCase("true"))
+    if (pathStyle) {
+      clientBuilder.forcePathStyle(true)
     }
 
     val client = clientBuilder.build()

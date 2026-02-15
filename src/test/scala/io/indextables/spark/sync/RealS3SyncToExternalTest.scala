@@ -143,7 +143,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     columns should contain("table_path")
     columns should contain("source_path")
     columns should contain("status")
-    columns should contain("delta_version")
+    columns should contain("source_version")
     columns should contain("splits_created")
     columns should contain("splits_invalidated")
     columns should contain("parquet_files_indexed")

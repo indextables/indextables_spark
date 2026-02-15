@@ -161,7 +161,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       row.getString(0) shouldBe indexPath // table_path
       row.getString(1) shouldBe deltaPath // source_path
       row.getString(2) shouldBe "success" // status
-      row.getAs[Long](3) shouldBe 0L // delta_version
+      row.getAs[Long](3) shouldBe 0L // source_version
       row.getInt(4) should be > 0 // splits_created
       row.getInt(6) should be > 0 // parquet_files_indexed
     }

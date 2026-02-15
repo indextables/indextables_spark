@@ -440,7 +440,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       // Second SYNC: jump from v0 to v10
       val row = syncAndCollect(deltaPath, indexPath)
       row.getString(2) shouldBe "success"
-      row.getAs[Long](3) shouldBe 10L // delta_version
+      row.getAs[Long](3) shouldBe 10L // source_version
       row.getInt(4) should be > 0 // new splits created
       row.getInt(5) shouldBe 0 // no invalidations (all appends, no removals)
       row.getInt(6) should be >= 10 // at least 10 new parquet files indexed
@@ -1144,7 +1144,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       // SYNC should reference the latest delta version
       val row = syncAndCollect(deltaPath, indexPath)
       row.getString(2) shouldBe "success"
-      row.getAs[Long](3) shouldBe 1L // delta_version = 1 (0=create, 1=append)
+      row.getAs[Long](3) shouldBe 1L // source_version = 1 (0=create, 1=append)
 
       val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
       try {

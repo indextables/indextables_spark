@@ -320,4 +320,210 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.dryRun shouldBe true
     cmd.indexingModes("content") shouldBe "text"
   }
+
+  // ==========================================================================
+  // FROM PARQUET tests
+  // ==========================================================================
+
+  test("parse basic BUILD COMPANION FROM PARQUET syntax") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM PARQUET 's3://bucket/parquet_dir' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.sourcePath shouldBe "s3://bucket/parquet_dir"
+    cmd.destPath shouldBe "s3://bucket/index"
+    cmd.indexingModes shouldBe empty
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.targetInputSize shouldBe None
+    cmd.fromVersion shouldBe None
+    cmd.fromSnapshot shouldBe None
+    cmd.schemaSourcePath shouldBe None
+    cmd.catalogName shouldBe None
+    cmd.dryRun shouldBe false
+  }
+
+  test("parse PARQUET with SCHEMA SOURCE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM PARQUET 's3://bucket/data' SCHEMA SOURCE 's3://bucket/data/part-00000.parquet' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.schemaSourcePath shouldBe Some("s3://bucket/data/part-00000.parquet")
+  }
+
+  test("parse PARQUET with all options") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FROM PARQUET 's3://bucket/events'
+        |  SCHEMA SOURCE 's3://bucket/events/year=2024/part-00000.parquet'
+        |  INDEXING MODES ('content':'text', 'src_ip':'ipaddress')
+        |  FASTFIELDS MODE PARQUET_ONLY
+        |  TARGET INPUT SIZE 2G
+        |  WRITER HEAP SIZE 1G
+        |  WHERE year >= 2024
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.sourcePath shouldBe "s3://bucket/events"
+    cmd.schemaSourcePath shouldBe Some("s3://bucket/events/year=2024/part-00000.parquet")
+    cmd.fastFieldMode shouldBe "PARQUET_ONLY"
+    cmd.targetInputSize shouldBe Some(2L * 1024L * 1024L * 1024L)
+    cmd.writerHeapSize shouldBe Some(1L * 1024L * 1024L * 1024L)
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("year")
+    cmd.dryRun shouldBe true
+    cmd.indexingModes("content") shouldBe "text"
+    cmd.indexingModes("src_ip") shouldBe "ipaddress"
+  }
+
+  test("parse PARQUET with local filesystem path") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM PARQUET '/data/my_parquet_dir' AT LOCATION '/data/my_index'"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.sourcePath shouldBe "/data/my_parquet_dir"
+    cmd.destPath shouldBe "/data/my_index"
+  }
+
+  test("parse PARQUET with Azure path") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM PARQUET 'abfss://container@account.dfs.core.windows.net/data' AT LOCATION 'abfss://container@account.dfs.core.windows.net/index'"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.sourcePath shouldBe "abfss://container@account.dfs.core.windows.net/data"
+  }
+
+  test("PARQUET should not accept FROM VERSION") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FROM PARQUET '/tmp/data' FROM VERSION 5 AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("PARQUET should not accept FROM SNAPSHOT") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FROM PARQUET '/tmp/data' FROM SNAPSHOT 123 AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("PARQUET should not accept CATALOG") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FROM PARQUET '/tmp/data' CATALOG 'my_catalog' AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("parse PARQUET with WITH keyword (backward compat)") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION WITH PARQUET 's3://bucket/data' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.sourcePath shouldBe "s3://bucket/data"
+  }
+
+  // ==========================================================================
+  // FROM ICEBERG tests
+  // ==========================================================================
+
+  test("parse basic BUILD COMPANION FROM ICEBERG syntax") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'my_namespace.my_table' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "my_namespace.my_table"
+    cmd.destPath shouldBe "s3://bucket/index"
+    cmd.catalogName shouldBe None
+    cmd.fromSnapshot shouldBe None
+    cmd.schemaSourcePath shouldBe None
+    cmd.fromVersion shouldBe None
+  }
+
+  test("parse ICEBERG with CATALOG") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'prod.events' CATALOG 'unity_catalog' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "prod.events"
+    cmd.catalogName shouldBe Some("unity_catalog")
+  }
+
+  test("parse ICEBERG with FROM SNAPSHOT") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'ns.table' FROM SNAPSHOT 1234567890 AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.fromSnapshot shouldBe Some(1234567890L)
+  }
+
+  test("parse ICEBERG with CATALOG and FROM SNAPSHOT") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'analytics.events' CATALOG 'glue_catalog' FROM SNAPSHOT 9876543210 AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "analytics.events"
+    cmd.catalogName shouldBe Some("glue_catalog")
+    cmd.fromSnapshot shouldBe Some(9876543210L)
+  }
+
+  test("parse ICEBERG with all options") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FROM ICEBERG 'prod.web_events'
+        |  CATALOG 'rest_catalog'
+        |  INDEXING MODES ('message':'text', 'client_ip':'ip')
+        |  FASTFIELDS MODE HYBRID
+        |  TARGET INPUT SIZE 4G
+        |  WRITER HEAP SIZE 2G
+        |  FROM SNAPSHOT 5555555555
+        |  WHERE region = 'us-east'
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "prod.web_events"
+    cmd.catalogName shouldBe Some("rest_catalog")
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.targetInputSize shouldBe Some(4L * 1024L * 1024L * 1024L)
+    cmd.writerHeapSize shouldBe Some(2L * 1024L * 1024L * 1024L)
+    cmd.fromSnapshot shouldBe Some(5555555555L)
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("region")
+    cmd.dryRun shouldBe true
+    cmd.indexingModes("message") shouldBe "text"
+    cmd.indexingModes("client_ip") shouldBe "ip"
+  }
+
+  test("ICEBERG should not accept FROM VERSION") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FROM ICEBERG 'ns.table' FROM VERSION 5 AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("ICEBERG should not accept SCHEMA SOURCE") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FROM ICEBERG 'ns.table' SCHEMA SOURCE '/tmp/file.parquet' AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("parse ICEBERG with WITH keyword (backward compat)") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION WITH ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "ns.table"
+  }
+
+  test("parse ICEBERG with TANTIVY4SPARK keyword") {
+    val cmd = parseSync(
+      "BUILD TANTIVY4SPARK COMPANION FROM ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "ns.table"
+  }
 }

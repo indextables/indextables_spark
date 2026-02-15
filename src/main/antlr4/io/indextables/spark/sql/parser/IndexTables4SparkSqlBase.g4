@@ -84,12 +84,16 @@ statement
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
         (DRY RUN)?                                              #truncateTimeTravel
-    | BUILD indexTablesKeyword COMPANION (FROM | WITH) DELTA sourcePath=STRING
+    | BUILD indexTablesKeyword COMPANION (FROM | WITH)
+        sourceFormat=(DELTA | PARQUET | ICEBERG) sourcePath=STRING
+        (SCHEMA SOURCE schemaSourcePath=STRING)?
+        (CATALOG catalogName=STRING)?
         (INDEXING MODES '(' indexingModeList ')')?
         (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
         (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
         (WRITER HEAP SIZE writerHeapSize=alphanumericValue)?
         (FROM VERSION fromVersion=INTEGER_VALUE)?
+        (FROM SNAPSHOT fromSnapshot=INTEGER_VALUE)?
         (WHERE whereClause=predicateToken)?
         AT LOCATION destPath=STRING
         (DRY RUN)?                                            #syncToExternal
@@ -145,7 +149,8 @@ nonReserved
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
-    | BUILD | COMPANION | DELTA | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
+    | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
+    | SCHEMA | CATALOG | SNAPSHOT
     ;
 
 // Keywords (case-insensitive)
@@ -227,6 +232,11 @@ INPUT: [Ii][Nn][Pp][Uu][Tt];
 VERSION: [Vv][Ee][Rr][Ss][Ii][Oo][Nn];
 WRITER: [Ww][Rr][Ii][Tt][Ee][Rr];
 HEAP: [Hh][Ee][Aa][Pp];
+PARQUET: [Pp][Aa][Rr][Qq][Uu][Ee][Tt];
+ICEBERG: [Ii][Cc][Ee][Bb][Ee][Rr][Gg];
+SCHEMA: [Ss][Cc][Hh][Ee][Mm][Aa];
+CATALOG: [Cc][Aa][Tt][Aa][Ll][Oo][Gg];
+SNAPSHOT: [Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt];
 
 // Literals
 STRING
