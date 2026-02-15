@@ -396,7 +396,7 @@ object SyncTaskExecutor {
    * Example: s3://bucket/warehouse/db/table/data/region=us-east/file.parquet
    *       -> s3://bucket/warehouse/db/table/data
    */
-  private def extractTableBasePath(filePath: String): String = {
+  def extractTableBasePath(filePath: String): String = {
     // Strip scheme prefix, remember it for reconstruction
     val schemePattern = "^(s3a?://|abfss?://|wasbs?://)".r
     val scheme = schemePattern.findFirstIn(filePath).getOrElse("")

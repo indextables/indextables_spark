@@ -242,6 +242,15 @@ case class SyncToExternalCommand(
       ))
     }
 
+    // For Iceberg: extract the actual S3 storage root from the first source file.
+    // This is needed because sourcePath is a table identifier (e.g., "prod.events"),
+    // not an S3 path, so tantivy4java can't resolve relative parquet paths from it.
+    val icebergStorageRoot: Option[String] = if (sourceFormat == "iceberg" && allSourceFiles.nonEmpty) {
+      val root = SyncTaskExecutor.extractTableBasePath(allSourceFiles.head.path)
+      logger.info(s"Iceberg storage root extracted from file listing: $root")
+      Some(root)
+    } else None
+
     val partitionColumns = reader.partitionColumns()
 
     logger.info(s"Source table at $sourcePath: version=${sourceVersionOpt.getOrElse("none")}, " +
@@ -382,7 +391,8 @@ case class SyncToExternalCommand(
       dispatchSyncTasksBatched(
         sparkSession, groups, syncConfig, transactionLog,
         splitsToInvalidate, effectiveIndexingModes,
-        effectiveWherePredicates, sourceVersion, batchSize, maxConcurrentBatches, startTime)
+        effectiveWherePredicates, sourceVersion, batchSize, maxConcurrentBatches,
+        icebergStorageRoot, startTime)
     } finally {
       transactionLog.close()
     }
@@ -407,17 +417,22 @@ case class SyncToExternalCommand(
     sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
+    icebergStorageRoot: Option[String],
     startTime: Long
   ): Seq[Row] = {
     import java.util.concurrent.{Executors, Callable, ExecutionException}
 
     val totalTasks = groups.size
 
-    // Convert plans to serializable groups
+    // Convert plans to serializable groups.
+    // For Iceberg, use the actual S3 storage root as parquetTableRoot so that
+    // extractRelativePath() can compute correct relative paths (sourcePath is a
+    // table identifier like "prod.events", not an S3 path).
+    val effectiveParquetTableRoot = icebergStorageRoot.getOrElse(sourcePath)
     val syncGroups = groups.zipWithIndex.map { case (plan, idx) =>
       SyncIndexingGroup(
         parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, sourcePath)),
-        parquetTableRoot = sourcePath,
+        parquetTableRoot = effectiveParquetTableRoot,
         partitionValues = plan.partitionValues,
         groupIndex = idx
       )
@@ -516,7 +531,8 @@ case class SyncToExternalCommand(
                 // was not set" because intermediate states had no MetadataAction.
                 val completed = completedBatches.incrementAndGet()
                 val metadataUpdate = Some(buildCompanionMetadata(
-                  transactionLog, effectiveIndexingModes, effectiveWherePredicates, sourceVersion))
+                  transactionLog, effectiveIndexingModes, effectiveWherePredicates,
+                  sourceVersion, icebergStorageRoot))
 
                 if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
                   val version = transactionLog.commitSyncActions(
@@ -585,7 +601,8 @@ case class SyncToExternalCommand(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
-    sourceVersion: Long
+    sourceVersion: Long,
+    icebergStorageRoot: Option[String] = None
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
     val companionConfig = existingMetadata.configuration ++ Map(
@@ -597,6 +614,12 @@ case class SyncToExternalCommand(
     ) ++ (if (sourceFormat == "iceberg") {
       Map(
         "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
+      ) ++ effectiveWarehouse.map(w =>
+        "indextables.companion.icebergWarehouse" -> w
+      ) ++ catalogType.map(ct =>
+        "indextables.companion.icebergCatalogType" -> ct
+      ) ++ icebergStorageRoot.map(root =>
+        "indextables.companion.parquetStorageRoot" -> root
       )
     } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
       import com.fasterxml.jackson.databind.ObjectMapper
