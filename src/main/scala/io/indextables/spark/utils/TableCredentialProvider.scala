@@ -63,4 +63,22 @@ trait TableCredentialProvider {
     tableId: String,
     config: Map[String, String]
   ): CredentialProviderFactory.BasicAWSCredentials
+
+  /**
+   * Provide default Iceberg catalog configuration derived from the provider's settings.
+   *
+   * Returns a map of `spark.indextables.iceberg.*` keys that will be merged into the
+   * config with lower precedence than user-explicit values. This allows providers to
+   * auto-derive catalog connection settings (URI, token, catalog type) from their own
+   * configuration, so users don't need to set them manually.
+   *
+   * For example, a Unity Catalog provider can derive the Iceberg REST endpoint from
+   * the workspace URL and reuse the API token for catalog authentication.
+   *
+   * Default implementation returns an empty map (no auto-derived config).
+   *
+   * @param config Configuration map with provider-specific settings
+   * @return Map of `spark.indextables.iceberg.*` defaults to merge
+   */
+  def icebergCatalogDefaults(config: Map[String, String]): Map[String, String] = Map.empty
 }

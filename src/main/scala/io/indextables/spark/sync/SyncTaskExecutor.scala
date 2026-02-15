@@ -370,9 +370,14 @@ object SyncTaskExecutor {
     destPath: String,
     storageConfig: Map[String, String],
     tablePath: String
-  ): Long =
+  ): Long = {
+    // Remove source table ID from config so uploads resolve credentials for the
+    // DESTINATION path, not the source Iceberg table. The table ID is only valid
+    // for the source table's storage location.
+    val uploadConfig = storageConfig - "spark.indextables.iceberg.uc.tableId"
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
-      localPath, destPath, storageConfig, tablePath)
+      localPath, destPath, uploadConfig, tablePath)
+  }
 
   private def parseS3Path(s3Path: String): (String, String) = {
     val path = s3Path.replaceFirst("^s3a?://", "")

@@ -643,6 +643,31 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       cached.sessionToken
     )
 
+  /**
+   * Auto-derive Iceberg catalog configuration from Databricks Unity Catalog settings.
+   *
+   * When Unity Catalog is the credential provider, we can derive:
+   *   - `spark.indextables.iceberg.uri` from the workspace URL (Iceberg REST endpoint)
+   *   - `spark.indextables.iceberg.token` from the Databricks API token
+   *   - `spark.indextables.iceberg.catalogType` defaults to "rest"
+   *
+   * These are returned as defaults — user-explicit values always take precedence.
+   */
+  override def icebergCatalogDefaults(config: Map[String, String]): Map[String, String] = {
+    val (workspaceUrl, token, _, _, _) = resolveConfigFromMap(config)
+
+    val defaults = Map(
+      "spark.indextables.iceberg.uri" -> s"$workspaceUrl/api/2.1/unity-catalog/iceberg-rest",
+      "spark.indextables.iceberg.token" -> token,
+      "spark.indextables.iceberg.catalogType" -> "rest"
+    )
+
+    logger.info(s"Auto-derived Iceberg catalog defaults from Unity Catalog: " +
+      s"uri=${defaults("spark.indextables.iceberg.uri")}, catalogType=rest")
+
+    defaults
+  }
+
   /** Internal case class for cached credentials with expiration tracking. */
   private[unity] case class CachedCredentials(
     accessKeyId: String,

@@ -86,6 +86,14 @@ case class SyncToExternalCommand(
 
   private val logger = LoggerFactory.getLogger(classOf[SyncToExternalCommand])
 
+  /**
+   * CATALOG and WAREHOUSE are interchangeable in SQL syntax: "CATALOG" is the UC term,
+   * "WAREHOUSE" is the Iceberg REST term, but they refer to the same concept.
+   * When only one is specified, it fills in the other.
+   */
+  private def effectiveCatalogName: Option[String] = catalogName.orElse(warehouse)
+  private def effectiveWarehouse: Option[String] = warehouse.orElse(catalogName)
+
   /** Default target input size per indexing group: 2GB */
   private val DEFAULT_TARGET_INPUT_SIZE: Long = 2L * 1024L * 1024L * 1024L
 
@@ -135,16 +143,26 @@ case class SyncToExternalCommand(
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // For Iceberg + table credential providers: resolve the table UUID on the driver
-    // and inject into configs so executors can use the table-based credential API.
+    // For Iceberg + table credential providers: auto-derive catalog config defaults,
+    // resolve the table UUID on the driver, and inject into configs so executors can
+    // use the table-based credential API.
     val mergedConfigs = if (sourceFormat == "iceberg") {
       resolveTableCredentialProvider(baseMergedConfigs) match {
         case Some(provider) =>
-          val fullTableName = buildFullTableName(catalogName, sourcePath)
+          // Merge auto-derived catalog defaults (URI, token, catalogType) with lower
+          // precedence than user-explicit values. This lets Unity Catalog users skip
+          // manual spark.indextables.iceberg.* configuration.
+          val catalogDefaults = provider.icebergCatalogDefaults(baseMergedConfigs)
+          val withDefaults = catalogDefaults.foldLeft(baseMergedConfigs) {
+            case (acc, (key, value)) =>
+              if (acc.contains(key)) acc else acc + (key -> value)
+          }
+
+          val fullTableName = buildFullTableName(effectiveCatalogName, sourcePath)
           logger.info(s"Resolving table ID for '$fullTableName' via ${provider.getClass.getName}")
           try {
-            val tableId = provider.resolveTableId(fullTableName, baseMergedConfigs)
-            baseMergedConfigs + ("spark.indextables.iceberg.uc.tableId" -> tableId)
+            val tableId = provider.resolveTableId(fullTableName, withDefaults)
+            withDefaults + ("spark.indextables.iceberg.uc.tableId" -> tableId)
           } catch {
             case e: Exception =>
               throw new RuntimeException(
@@ -169,7 +187,7 @@ case class SyncToExternalCommand(
       case "iceberg" =>
         val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials)
         new IcebergSourceReader(
-          sourcePath, catalogName.getOrElse("default"), icebergConfig, fromSnapshot)
+          sourcePath, effectiveCatalogName.getOrElse("default"), icebergConfig, fromSnapshot)
       case other =>
         throw new IllegalArgumentException(s"Unsupported source format: $other")
     }
@@ -578,7 +596,7 @@ case class SyncToExternalCommand(
       "indextables.companion.fastFieldMode" -> fastFieldMode
     ) ++ (if (sourceFormat == "iceberg") {
       Map(
-        "indextables.companion.icebergCatalog" -> catalogName.getOrElse("default")
+        "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
       )
     } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
       import com.fasterxml.jackson.databind.ObjectMapper
@@ -835,12 +853,12 @@ case class SyncToExternalCommand(
     // Catalog config: SQL clause values take precedence over spark.indextables.iceberg.*
     val effectiveCatalogType = catalogType
       .orElse(mergedConfigs.get("spark.indextables.iceberg.catalogType"))
-    val effectiveWarehouse = warehouse
+    val effectiveWh = effectiveWarehouse
       .orElse(mergedConfigs.get("spark.indextables.iceberg.warehouse"))
 
     effectiveCatalogType.foreach(v => config.put("catalog_type", v))
     mergedConfigs.get("spark.indextables.iceberg.uri").foreach(v => config.put("uri", v))
-    effectiveWarehouse.foreach(v => config.put("warehouse", v))
+    effectiveWh.foreach(v => config.put("warehouse", v))
     mergedConfigs.get("spark.indextables.iceberg.token").foreach(v => config.put("token", v))
     mergedConfigs.get("spark.indextables.iceberg.credential").foreach(v => config.put("credential", v))
 

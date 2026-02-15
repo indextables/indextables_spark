@@ -618,4 +618,35 @@ class SyncToExternalParsingTest extends TestBase {
       )
     }
   }
+
+  // ==========================================================================
+  // CATALOG / WAREHOUSE interchangeability tests
+  // ==========================================================================
+
+  test("WAREHOUSE-only should parse as warehouse (catalog remains None)") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' WAREHOUSE 'my_catalog' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.warehouse shouldBe Some("my_catalog")
+    cmd.catalogName shouldBe None
+  }
+
+  test("CATALOG-only should parse as catalogName (warehouse remains None)") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' CATALOG 'my_catalog' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.catalogName shouldBe Some("my_catalog")
+    cmd.warehouse shouldBe None
+  }
+
+  test("WAREHOUSE with TYPE should parse correctly") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' CATALOG 'uc' TYPE 'rest' WAREHOUSE 'my_wh' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.catalogName shouldBe Some("uc")
+    cmd.catalogType shouldBe Some("rest")
+    cmd.warehouse shouldBe Some("my_wh")
+  }
 }
