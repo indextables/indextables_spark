@@ -25,7 +25,7 @@ import scala.util.Using
 import io.indextables.spark.RealS3TestBase
 
 /**
- * Real S3 integration tests for BUILD INDEXTABLES COMPANION FROM PARQUET.
+ * Real S3 integration tests for BUILD INDEXTABLES COMPANION FOR PARQUET.
  *
  * These tests require:
  * 1. AWS credentials in ~/.aws/credentials
@@ -92,7 +92,7 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
 
   test("output schema should have source_version column") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '/nonexistent/parquet' AT LOCATION '/nonexistent/index' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '/nonexistent/parquet' AT LOCATION '/nonexistent/index' DRY RUN"
     )
     val columns = result.columns.toSet
     columns should contain("table_path")
@@ -126,7 +126,7 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
     df.write.parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -160,7 +160,7 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
     df.write.partitionBy("date").parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -181,7 +181,7 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
     Seq((1, "test data")).toDF("id", "content").write.parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath' DRY RUN"
     )
     result.collect()(0).getString(2) shouldBe "dry_run"
   }
@@ -204,7 +204,7 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
     df.write.parquet(parquetPath)
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
     val (accessKey, secretKey) = awsCredentials.get

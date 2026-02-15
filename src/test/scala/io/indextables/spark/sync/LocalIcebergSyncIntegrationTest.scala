@@ -33,7 +33,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Local integration tests for BUILD INDEXTABLES COMPANION FROM ICEBERG.
+ * Local integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
  * Requires Docker containers running locally:
  *   cd docker/iceberg-local && docker compose up -d && ./seed-data.sh
@@ -134,7 +134,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -153,7 +153,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -169,7 +169,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath' DRY RUN"
     )
 
@@ -186,7 +186,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -207,13 +207,13 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     // First sync
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
     // Re-sync should detect no new files
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     )
     result.collect()(0).getString(2) shouldBe "no_action"
@@ -225,7 +225,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -243,7 +243,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -265,7 +265,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -285,7 +285,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '$TABLE_IDENTIFIER' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
         s"AT LOCATION '$indexPath'"
     )
 

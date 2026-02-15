@@ -730,7 +730,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val schemaSourcePath: Option[String] = if (ctx.schemaSourcePath != null) {
         val path = ParserUtils.string(ctx.schemaSourcePath)
         if (sourceFormat != "parquet") {
-          throw new IllegalArgumentException("SCHEMA SOURCE is only valid with FROM PARQUET")
+          throw new IllegalArgumentException("SCHEMA SOURCE is only valid with FOR PARQUET")
         }
         logger.debug(s"Schema source path: $path")
         Some(path)
@@ -742,7 +742,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val catalogName: Option[String] = if (ctx.catalogName != null) {
         val name = ParserUtils.string(ctx.catalogName)
         if (sourceFormat != "iceberg") {
-          throw new IllegalArgumentException("CATALOG is only valid with FROM ICEBERG")
+          throw new IllegalArgumentException("CATALOG is only valid with FOR ICEBERG")
         }
         logger.debug(s"Catalog name: $name")
         Some(name)
@@ -789,7 +789,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       // FROM VERSION (Delta only)
       val fromVersion: Option[Long] = if (ctx.fromVersion != null) {
         if (sourceFormat != "delta") {
-          throw new IllegalArgumentException("FROM VERSION is only valid with FROM DELTA")
+          throw new IllegalArgumentException("FROM VERSION is only valid with FOR DELTA")
         }
         val v = ctx.fromVersion.getText.toLong
         logger.debug(s"FROM VERSION: $v")
@@ -801,7 +801,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       // FROM SNAPSHOT (Iceberg only)
       val fromSnapshot: Option[Long] = if (ctx.fromSnapshot != null) {
         if (sourceFormat != "iceberg") {
-          throw new IllegalArgumentException("FROM SNAPSHOT is only valid with FROM ICEBERG")
+          throw new IllegalArgumentException("FROM SNAPSHOT is only valid with FOR ICEBERG")
         }
         val s = ctx.fromSnapshot.getText.toLong
         logger.debug(s"FROM SNAPSHOT: $s")

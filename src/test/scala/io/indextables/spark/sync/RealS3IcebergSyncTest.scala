@@ -25,7 +25,7 @@ import scala.util.Using
 import io.indextables.spark.RealS3TestBase
 
 /**
- * Real S3 + Iceberg REST catalog integration tests for BUILD INDEXTABLES COMPANION FROM ICEBERG.
+ * Real S3 + Iceberg REST catalog integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
  * These tests require:
  * 1. AWS credentials in ~/.aws/credentials
@@ -89,9 +89,9 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
 
   // --- Parsing Test (no credentials needed) ---
 
-  test("BUILD COMPANION FROM ICEBERG should parse with catalog config") {
+  test("BUILD COMPANION FOR ICEBERG should parse with catalog config") {
     val result = spark.sql(
-      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'default.test_table' " +
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.test_table' " +
         "CATALOG 'my_catalog' " +
         "AT LOCATION '/tmp/iceberg_index' DRY RUN"
     )
@@ -115,7 +115,7 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
     val indexPath = s"$testBasePath/iceberg_companion"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -150,7 +150,7 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
     val indexPath = s"$testBasePath/iceberg_dryrun"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath' DRY RUN"
     )
     result.collect()(0).getString(2) shouldBe "dry_run"
@@ -167,7 +167,7 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
 
     // First: get the current snapshot ID via a normal sync
     val firstResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
     val firstRow = firstResult.collect()(0)
@@ -177,7 +177,7 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
     // Use that snapshot ID for a FROM SNAPSHOT query (should result in no_action since same snapshot)
     val indexPath2 = s"$testBasePath/iceberg_snapshot_2"
     val secondResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"FROM SNAPSHOT $snapshotId " +
         s"AT LOCATION '$indexPath2'"
     )
@@ -196,7 +196,7 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
     val indexPath = s"$testBasePath/iceberg_readback"
 
     val syncResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
     syncResult.collect()(0).getString(2) shouldBe "success"
@@ -224,13 +224,13 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
 
     // First sync
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
     // Re-sync with same snapshot should be no_action
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
     result.collect()(0).getString(2) shouldBe "no_action"

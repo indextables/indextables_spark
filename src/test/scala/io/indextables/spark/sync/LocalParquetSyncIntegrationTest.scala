@@ -30,10 +30,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FROM PARQUET.
+ * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FOR PARQUET.
  *
  * Uses Spark to write Parquet data with known schemas, then exercises the
- * BUILD INDEXTABLES COMPANION FROM PARQUET command pipeline.
+ * BUILD INDEXTABLES COMPANION FOR PARQUET command pipeline.
  *
  * No cloud credentials needed -- runs entirely on local filesystem.
  */
@@ -134,11 +134,11 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
   }
 
   /**
-   * Run BUILD COMPANION FROM PARQUET and collect the result row.
+   * Run BUILD COMPANION FOR PARQUET and collect the result row.
    */
   private def syncParquetAndCollect(parquetPath: String, indexPath: String): Row = {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -192,7 +192,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       createLocalParquetData(parquetPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath' DRY RUN"
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath' DRY RUN"
       )
       val rows = result.collect()
       rows.length shouldBe 1
@@ -267,7 +267,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       val schemaFile = parquetFiles.head.getAbsolutePath
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' " +
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
         s"SCHEMA SOURCE '$schemaFile' " +
         s"AT LOCATION '$indexPath'"
       )
@@ -333,7 +333,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       createLocalParquetData(parquetPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' " +
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
         s"FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
       )
       result.collect()(0).getString(2) shouldBe "success"
@@ -359,7 +359,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       createLocalParquetData(parquetPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' " +
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
         s"INDEXING MODES ('name':'text') " +
         s"AT LOCATION '$indexPath'"
       )
@@ -413,7 +413,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Use a very small target to force multiple groups
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' " +
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
         s"TARGET INPUT SIZE 1024 " +
         s"AT LOCATION '$indexPath'"
       )
@@ -430,7 +430,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       val indexPath = new File(tempDir, "companion_noexist").getAbsolutePath
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
       )
       val rows = result.collect()
       rows.length shouldBe 1

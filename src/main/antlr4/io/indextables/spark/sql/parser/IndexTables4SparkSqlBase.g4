@@ -84,7 +84,7 @@ statement
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
         (DRY RUN)?                                              #truncateTimeTravel
-    | BUILD indexTablesKeyword COMPANION (FROM | WITH)
+    | BUILD indexTablesKeyword COMPANION FOR
         sourceFormat=(DELTA | PARQUET | ICEBERG) sourcePath=STRING
         (SCHEMA SOURCE schemaSourcePath=STRING)?
         (CATALOG catalogName=STRING)?

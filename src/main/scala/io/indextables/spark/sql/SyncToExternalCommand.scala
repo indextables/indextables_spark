@@ -46,13 +46,13 @@ import io.indextables.spark.util.{ConfigNormalization, SizeParser}
 import org.slf4j.LoggerFactory
 
 /**
- * SQL command to sync an IndexTables companion index from a Delta table.
+ * SQL command to sync an IndexTables companion index from a source table.
  *
  * Creates minimal Quickwit splits that reference external parquet files instead
  * of duplicating data (45-70% split size reduction).
  *
  * Syntax:
- *   BUILD INDEXTABLES COMPANION FROM DELTA '<delta_table_path>'
+ *   BUILD INDEXTABLES COMPANION FOR (DELTA|PARQUET|ICEBERG) '<source_path>'
  *     [INDEXING MODES (field1:mode1, field2:mode2)]
  *     [FASTFIELDS MODE (HYBRID | DISABLED | PARQUET_ONLY)]
  *     [TARGET INPUT SIZE <size>]
@@ -61,12 +61,10 @@ import org.slf4j.LoggerFactory
  *     AT LOCATION '<index_table_path>'
  *     [DRY RUN]
  *
- * Note: "WITH DELTA" is also accepted for backward compatibility.
- *
  * Examples:
- *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
- *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' WHERE year >= 2024 AT LOCATION 's3://index/events'
- *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' FROM VERSION 500 AT LOCATION 's3://index/events'
+ *   - BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
+ *   - BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data' AT LOCATION 's3://bucket/index'
+ *   - BUILD INDEXTABLES COMPANION FOR ICEBERG 'db.events' CATALOG 'glue' AT LOCATION 's3://bucket/index'
  */
 case class SyncToExternalCommand(
   sourceFormat: String,
@@ -108,7 +106,7 @@ case class SyncToExternalCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val startTime = System.currentTimeMillis()
-    logger.info(s"Starting BUILD INDEXTABLES COMPANION FROM ${sourceFormat.toUpperCase}: " +
+    logger.info(s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
       s"source=$sourcePath, dest=$destPath, " +
       s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, " +
       s"wherePredicates=${wherePredicates.mkString(",")}, dryRun=$dryRun")

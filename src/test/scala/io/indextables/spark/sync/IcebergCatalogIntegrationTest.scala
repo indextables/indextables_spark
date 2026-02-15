@@ -28,7 +28,7 @@ import io.indextables.spark.RealS3TestBase
 import io.indextables.spark.transaction.TransactionLogFactory
 
 /**
- * Per-catalog-type integration tests for BUILD INDEXTABLES COMPANION FROM ICEBERG.
+ * Per-catalog-type integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
  * Tests REST, Glue, and HMS catalog types independently, each gated on
  * catalog-specific credentials from ~/.iceberg/credentials.
@@ -105,7 +105,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/rest_companion"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -125,7 +125,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/rest_metadata"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -149,7 +149,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/rest_readback"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -178,7 +178,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/glue_companion"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -197,7 +197,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/glue_creds"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -223,7 +223,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/glue_readback"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -252,7 +252,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/hms_companion"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -271,7 +271,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/hms_metadata"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 
@@ -295,7 +295,7 @@ class IcebergCatalogIntegrationTest extends RealS3TestBase with IcebergTestSuppo
     val indexPath = s"$testBasePath/hms_readback"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 

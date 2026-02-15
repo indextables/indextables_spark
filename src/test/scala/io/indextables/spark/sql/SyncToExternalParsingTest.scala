@@ -20,11 +20,10 @@ package io.indextables.spark.sql
 import io.indextables.spark.TestBase
 
 /**
- * Tests for BUILD INDEXTABLES COMPANION FROM DELTA SQL parsing.
+ * Tests for BUILD INDEXTABLES COMPANION FOR (DELTA|PARQUET|ICEBERG) SQL parsing.
  *
  * Validates that the ANTLR grammar correctly parses all BUILD COMPANION command variants
  * and produces the correct SyncToExternalCommand parameters.
- * Both "FROM DELTA" (preferred) and "WITH DELTA" (backward-compatible) syntaxes are tested.
  */
 class SyncToExternalParsingTest extends TestBase {
 
@@ -35,26 +34,11 @@ class SyncToExternalParsingTest extends TestBase {
     plan.asInstanceOf[SyncToExternalCommand]
   }
 
-  // --- Basic syntax tests (WITH DELTA - backward compatibility) ---
+  // --- FOR DELTA syntax ---
 
-  test("parse basic BUILD INDEXTABLES COMPANION WITH DELTA syntax (backward compat)") {
+  test("parse basic BUILD INDEXTABLES COMPANION FOR DELTA syntax") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION WITH DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'"
-    )
-    cmd.sourceFormat shouldBe "delta"
-    cmd.sourcePath shouldBe "s3://bucket/delta_table"
-    cmd.destPath shouldBe "s3://bucket/index"
-    cmd.indexingModes shouldBe empty
-    cmd.fastFieldMode shouldBe "HYBRID"
-    cmd.targetInputSize shouldBe None
-    cmd.dryRun shouldBe false
-  }
-
-  // --- Primary syntax: FROM DELTA ---
-
-  test("parse basic BUILD INDEXTABLES COMPANION FROM DELTA syntax") {
-    val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "delta"
     cmd.sourcePath shouldBe "s3://bucket/delta_table"
@@ -69,7 +53,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with TANTIVY4SPARK keyword") {
     val cmd = parseSync(
-      "BUILD TANTIVY4SPARK COMPANION FROM DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'"
+      "BUILD TANTIVY4SPARK COMPANION FOR DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "delta"
     cmd.sourcePath shouldBe "s3://bucket/delta_table"
@@ -78,7 +62,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with DRY RUN") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' AT LOCATION 's3://idx/events' DRY RUN"
+      "BUILD INDEXTABLES COMPANION FOR DELTA 's3://data/events' AT LOCATION 's3://idx/events' DRY RUN"
     )
     cmd.dryRun shouldBe true
     cmd.sourcePath shouldBe "s3://data/events"
@@ -87,28 +71,28 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with FASTFIELDS MODE HYBRID") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' FASTFIELDS MODE HYBRID AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' FASTFIELDS MODE HYBRID AT LOCATION '/tmp/index'"
     )
     cmd.fastFieldMode shouldBe "HYBRID"
   }
 
   test("parse SYNC with FASTFIELDS MODE DISABLED") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' FASTFIELDS MODE DISABLED AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' FASTFIELDS MODE DISABLED AT LOCATION '/tmp/index'"
     )
     cmd.fastFieldMode shouldBe "DISABLED"
   }
 
   test("parse SYNC with FASTFIELDS MODE PARQUET_ONLY") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '/tmp/index'"
     )
     cmd.fastFieldMode shouldBe "PARQUET_ONLY"
   }
 
   test("parse SYNC with TARGET INPUT SIZE") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' TARGET INPUT SIZE 2G AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' TARGET INPUT SIZE 2G AT LOCATION '/tmp/index'"
     )
     cmd.targetInputSize shouldBe defined
     cmd.targetInputSize.get shouldBe (2L * 1024L * 1024L * 1024L)
@@ -116,7 +100,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with TARGET INPUT SIZE in megabytes") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' TARGET INPUT SIZE 500M AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' TARGET INPUT SIZE 500M AT LOCATION '/tmp/index'"
     )
     cmd.targetInputSize shouldBe defined
     cmd.targetInputSize.get shouldBe (500L * 1024L * 1024L)
@@ -124,7 +108,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with INDEXING MODES") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' INDEXING MODES ('title':'text', 'ip_addr':'ipaddress') AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' INDEXING MODES ('title':'text', 'ip_addr':'ipaddress') AT LOCATION '/tmp/index'"
     )
     cmd.indexingModes should contain key "title"
     cmd.indexingModes("title") shouldBe "text"
@@ -134,7 +118,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with all options combined") {
     val cmd = parseSync(
-      """BUILD INDEXTABLES COMPANION FROM DELTA 's3://bucket/delta'
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
         |  INDEXING MODES ('content':'text', 'status':'string')
         |  FASTFIELDS MODE PARQUET_ONLY
         |  TARGET INPUT SIZE 1G
@@ -154,7 +138,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with local filesystem paths") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/data/my_delta_table' AT LOCATION '/data/my_index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/data/my_delta_table' AT LOCATION '/data/my_index'"
     )
     cmd.sourcePath shouldBe "/data/my_delta_table"
     cmd.destPath shouldBe "/data/my_index"
@@ -162,7 +146,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with Azure paths") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA 'abfss://container@account.dfs.core.windows.net/delta' AT LOCATION 'abfss://container@account.dfs.core.windows.net/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA 'abfss://container@account.dfs.core.windows.net/delta' AT LOCATION 'abfss://container@account.dfs.core.windows.net/index'"
     )
     cmd.sourcePath shouldBe "abfss://container@account.dfs.core.windows.net/delta"
     cmd.destPath shouldBe "abfss://container@account.dfs.core.windows.net/index"
@@ -170,28 +154,28 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("default fastFieldMode should be HYBRID") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.fastFieldMode shouldBe "HYBRID"
   }
 
   test("default indexingModes should be empty") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.indexingModes shouldBe empty
   }
 
   test("default targetInputSize should be None") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.targetInputSize shouldBe None
   }
 
   test("default dryRun should be false") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.dryRun shouldBe false
   }
@@ -200,28 +184,28 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with WRITER HEAP SIZE 512M") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WRITER HEAP SIZE 512M AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WRITER HEAP SIZE 512M AT LOCATION '/tmp/index'"
     )
     cmd.writerHeapSize shouldBe Some(512L * 1024L * 1024L)
   }
 
   test("parse SYNC with WRITER HEAP SIZE 2G") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WRITER HEAP SIZE 2G AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WRITER HEAP SIZE 2G AT LOCATION '/tmp/index'"
     )
     cmd.writerHeapSize shouldBe Some(2L * 1024L * 1024L * 1024L)
   }
 
   test("default writerHeapSize should be None") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.writerHeapSize shouldBe None
   }
 
   test("parse SYNC with TARGET INPUT SIZE and WRITER HEAP SIZE combined") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' TARGET INPUT SIZE 4G WRITER HEAP SIZE 1G AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' TARGET INPUT SIZE 4G WRITER HEAP SIZE 1G AT LOCATION '/tmp/index'"
     )
     cmd.targetInputSize shouldBe Some(4L * 1024L * 1024L * 1024L)
     cmd.writerHeapSize shouldBe Some(1L * 1024L * 1024L * 1024L)
@@ -231,7 +215,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with WHERE clause") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WHERE year >= 2024 AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 AT LOCATION '/tmp/index'"
     )
     cmd.wherePredicates should have size 1
     cmd.wherePredicates.head should include("year")
@@ -240,7 +224,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with compound WHERE clause") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WHERE year >= 2024 AND region = 'us-east' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 AND region = 'us-east' AT LOCATION '/tmp/index'"
     )
     cmd.wherePredicates should have size 1
     cmd.wherePredicates.head should include("year")
@@ -249,7 +233,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with WHERE and DRY RUN") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' WHERE status = 'active' AT LOCATION '/tmp/index' DRY RUN"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE status = 'active' AT LOCATION '/tmp/index' DRY RUN"
     )
     cmd.wherePredicates should have size 1
     cmd.wherePredicates.head should include("status")
@@ -258,7 +242,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("default wherePredicates should be empty") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.wherePredicates shouldBe empty
   }
@@ -267,21 +251,21 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with FROM VERSION") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' FROM VERSION 500 AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' FROM VERSION 500 AT LOCATION '/tmp/index'"
     )
     cmd.fromVersion shouldBe Some(500L)
   }
 
   test("parse SYNC with FROM VERSION 0") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' FROM VERSION 0 AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' FROM VERSION 0 AT LOCATION '/tmp/index'"
     )
     cmd.fromVersion shouldBe Some(0L)
   }
 
   test("default fromVersion should be None") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
     )
     cmd.fromVersion shouldBe None
   }
@@ -290,7 +274,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with FROM VERSION and WHERE") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/delta' FROM VERSION 100 WHERE region = 'us-east' AT LOCATION '/tmp/index'"
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' FROM VERSION 100 WHERE region = 'us-east' AT LOCATION '/tmp/index'"
     )
     cmd.fromVersion shouldBe Some(100L)
     cmd.wherePredicates should have size 1
@@ -299,7 +283,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse SYNC with all options including WHERE and FROM VERSION") {
     val cmd = parseSync(
-      """BUILD INDEXTABLES COMPANION FROM DELTA 's3://bucket/delta'
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
         |  INDEXING MODES ('content':'text')
         |  FASTFIELDS MODE HYBRID
         |  TARGET INPUT SIZE 2G
@@ -322,12 +306,12 @@ class SyncToExternalParsingTest extends TestBase {
   }
 
   // ==========================================================================
-  // FROM PARQUET tests
+  // FOR PARQUET tests
   // ==========================================================================
 
-  test("parse basic BUILD COMPANION FROM PARQUET syntax") {
+  test("parse basic BUILD COMPANION FOR PARQUET syntax") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM PARQUET 's3://bucket/parquet_dir' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/parquet_dir' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "parquet"
     cmd.sourcePath shouldBe "s3://bucket/parquet_dir"
@@ -344,7 +328,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse PARQUET with SCHEMA SOURCE") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM PARQUET 's3://bucket/data' SCHEMA SOURCE 's3://bucket/data/part-00000.parquet' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data' SCHEMA SOURCE 's3://bucket/data/part-00000.parquet' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "parquet"
     cmd.schemaSourcePath shouldBe Some("s3://bucket/data/part-00000.parquet")
@@ -352,7 +336,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse PARQUET with all options") {
     val cmd = parseSync(
-      """BUILD INDEXTABLES COMPANION FROM PARQUET 's3://bucket/events'
+      """BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/events'
         |  SCHEMA SOURCE 's3://bucket/events/year=2024/part-00000.parquet'
         |  INDEXING MODES ('content':'text', 'src_ip':'ipaddress')
         |  FASTFIELDS MODE PARQUET_ONLY
@@ -377,7 +361,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse PARQUET with local filesystem path") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM PARQUET '/data/my_parquet_dir' AT LOCATION '/data/my_index'"
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data/my_parquet_dir' AT LOCATION '/data/my_index'"
     )
     cmd.sourceFormat shouldBe "parquet"
     cmd.sourcePath shouldBe "/data/my_parquet_dir"
@@ -386,7 +370,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse PARQUET with Azure path") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM PARQUET 'abfss://container@account.dfs.core.windows.net/data' AT LOCATION 'abfss://container@account.dfs.core.windows.net/index'"
+      "BUILD INDEXTABLES COMPANION FOR PARQUET 'abfss://container@account.dfs.core.windows.net/data' AT LOCATION 'abfss://container@account.dfs.core.windows.net/index'"
     )
     cmd.sourceFormat shouldBe "parquet"
     cmd.sourcePath shouldBe "abfss://container@account.dfs.core.windows.net/data"
@@ -395,7 +379,7 @@ class SyncToExternalParsingTest extends TestBase {
   test("PARQUET should not accept FROM VERSION") {
     an[Exception] should be thrownBy {
       parseSync(
-        "BUILD INDEXTABLES COMPANION FROM PARQUET '/tmp/data' FROM VERSION 5 AT LOCATION '/tmp/index'"
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '/tmp/data' FROM VERSION 5 AT LOCATION '/tmp/index'"
       )
     }
   }
@@ -403,7 +387,7 @@ class SyncToExternalParsingTest extends TestBase {
   test("PARQUET should not accept FROM SNAPSHOT") {
     an[Exception] should be thrownBy {
       parseSync(
-        "BUILD INDEXTABLES COMPANION FROM PARQUET '/tmp/data' FROM SNAPSHOT 123 AT LOCATION '/tmp/index'"
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '/tmp/data' FROM SNAPSHOT 123 AT LOCATION '/tmp/index'"
       )
     }
   }
@@ -411,26 +395,26 @@ class SyncToExternalParsingTest extends TestBase {
   test("PARQUET should not accept CATALOG") {
     an[Exception] should be thrownBy {
       parseSync(
-        "BUILD INDEXTABLES COMPANION FROM PARQUET '/tmp/data' CATALOG 'my_catalog' AT LOCATION '/tmp/index'"
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '/tmp/data' CATALOG 'my_catalog' AT LOCATION '/tmp/index'"
       )
     }
   }
 
-  test("parse PARQUET with WITH keyword (backward compat)") {
+  test("parse PARQUET basic syntax") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION WITH PARQUET 's3://bucket/data' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "parquet"
     cmd.sourcePath shouldBe "s3://bucket/data"
   }
 
   // ==========================================================================
-  // FROM ICEBERG tests
+  // FOR ICEBERG tests
   // ==========================================================================
 
-  test("parse basic BUILD COMPANION FROM ICEBERG syntax") {
+  test("parse basic BUILD COMPANION FOR ICEBERG syntax") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'my_namespace.my_table' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'my_namespace.my_table' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "iceberg"
     cmd.sourcePath shouldBe "my_namespace.my_table"
@@ -443,7 +427,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse ICEBERG with CATALOG") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'prod.events' CATALOG 'unity_catalog' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'prod.events' CATALOG 'unity_catalog' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "iceberg"
     cmd.sourcePath shouldBe "prod.events"
@@ -452,7 +436,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse ICEBERG with FROM SNAPSHOT") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'ns.table' FROM SNAPSHOT 1234567890 AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' FROM SNAPSHOT 1234567890 AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "iceberg"
     cmd.fromSnapshot shouldBe Some(1234567890L)
@@ -460,7 +444,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse ICEBERG with CATALOG and FROM SNAPSHOT") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION FROM ICEBERG 'analytics.events' CATALOG 'glue_catalog' FROM SNAPSHOT 9876543210 AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.events' CATALOG 'glue_catalog' FROM SNAPSHOT 9876543210 AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "iceberg"
     cmd.sourcePath shouldBe "analytics.events"
@@ -470,7 +454,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse ICEBERG with all options") {
     val cmd = parseSync(
-      """BUILD INDEXTABLES COMPANION FROM ICEBERG 'prod.web_events'
+      """BUILD INDEXTABLES COMPANION FOR ICEBERG 'prod.web_events'
         |  CATALOG 'rest_catalog'
         |  INDEXING MODES ('message':'text', 'client_ip':'ip')
         |  FASTFIELDS MODE HYBRID
@@ -498,7 +482,7 @@ class SyncToExternalParsingTest extends TestBase {
   test("ICEBERG should not accept FROM VERSION") {
     an[Exception] should be thrownBy {
       parseSync(
-        "BUILD INDEXTABLES COMPANION FROM ICEBERG 'ns.table' FROM VERSION 5 AT LOCATION '/tmp/index'"
+        "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' FROM VERSION 5 AT LOCATION '/tmp/index'"
       )
     }
   }
@@ -506,14 +490,14 @@ class SyncToExternalParsingTest extends TestBase {
   test("ICEBERG should not accept SCHEMA SOURCE") {
     an[Exception] should be thrownBy {
       parseSync(
-        "BUILD INDEXTABLES COMPANION FROM ICEBERG 'ns.table' SCHEMA SOURCE '/tmp/file.parquet' AT LOCATION '/tmp/index'"
+        "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' SCHEMA SOURCE '/tmp/file.parquet' AT LOCATION '/tmp/index'"
       )
     }
   }
 
-  test("parse ICEBERG with WITH keyword (backward compat)") {
+  test("parse ICEBERG basic syntax (alternate)") {
     val cmd = parseSync(
-      "BUILD INDEXTABLES COMPANION WITH ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "iceberg"
     cmd.sourcePath shouldBe "ns.table"
@@ -521,7 +505,7 @@ class SyncToExternalParsingTest extends TestBase {
 
   test("parse ICEBERG with TANTIVY4SPARK keyword") {
     val cmd = parseSync(
-      "BUILD TANTIVY4SPARK COMPANION FROM ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
+      "BUILD TANTIVY4SPARK COMPANION FOR ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
     )
     cmd.sourceFormat shouldBe "iceberg"
     cmd.sourcePath shouldBe "ns.table"

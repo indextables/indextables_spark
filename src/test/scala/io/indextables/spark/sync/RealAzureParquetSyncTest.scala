@@ -22,7 +22,7 @@ import java.util.UUID
 import io.indextables.spark.RealAzureTestBase
 
 /**
- * Real Azure Blob Storage integration tests for BUILD INDEXTABLES COMPANION FROM PARQUET.
+ * Real Azure Blob Storage integration tests for BUILD INDEXTABLES COMPANION FOR PARQUET.
  *
  * These tests require:
  * 1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
@@ -64,7 +64,7 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
 
   test("output schema should parse correctly with Azure paths") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET 'abfss://container@account.dfs.core.windows.net/parquet' " +
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET 'abfss://container@account.dfs.core.windows.net/parquet' " +
         s"AT LOCATION 'abfss://container@account.dfs.core.windows.net/index' DRY RUN"
     )
     val columns = result.columns.toSet
@@ -95,7 +95,7 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
     df.write.parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -124,7 +124,7 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
       .parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
     )
     result.collect()(0).getString(2) shouldBe "success"
   }
@@ -141,7 +141,7 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
     Seq((1, "test")).toDF("id", "content").write.parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' AT LOCATION '$indexPath' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath' DRY RUN"
     )
     result.collect()(0).getString(2) shouldBe "dry_run"
   }
@@ -158,7 +158,7 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
     Seq((1, "test", 100.0)).toDF("id", "content", "score").write.parquet(parquetPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM PARQUET '$parquetPath' " +
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
         s"FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
     )
 

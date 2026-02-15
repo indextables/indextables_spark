@@ -22,7 +22,7 @@ import java.util.UUID
 import io.indextables.spark.RealAzureTestBase
 
 /**
- * Real Azure + Iceberg catalog integration tests for BUILD INDEXTABLES COMPANION FROM ICEBERG.
+ * Real Azure + Iceberg catalog integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
  * These tests require:
  * 1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
@@ -85,7 +85,7 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
     val indexPath = s"$azureBasePath/iceberg_companion"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
 
@@ -106,7 +106,7 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
     val indexPath = s"$azureBasePath/iceberg_dryrun"
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath' DRY RUN"
     )
     result.collect()(0).getString(2) shouldBe "dry_run"
@@ -123,7 +123,7 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
 
     // First sync to get snapshot ID
     val firstResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     )
     val firstRow = firstResult.collect()(0)
@@ -133,7 +133,7 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
     // Use snapshot ID for FROM SNAPSHOT
     val indexPath2 = s"$azureBasePath/iceberg_snapshot_2"
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"FROM SNAPSHOT $snapshotId " +
         s"AT LOCATION '$indexPath2'"
     )
@@ -152,7 +152,7 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
     val indexPath = s"$azureBasePath/iceberg_readback"
 
     spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM ICEBERG '${config.tableIdentifier}' " +
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
         s"AT LOCATION '$indexPath'"
     ).collect()(0).getString(2) shouldBe "success"
 

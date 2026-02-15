@@ -20,7 +20,7 @@ package io.indextables.spark.sync
 import org.apache.spark.util.AccumulatorV2
 
 /**
- * Metrics collected during a BUILD INDEXTABLES COMPANION FROM DELTA operation.
+ * Metrics collected during a BUILD INDEXTABLES COMPANION operation.
  *
  * Aggregated across all executor tasks via Spark accumulators, then reported
  * in the result rows and Spark UI.

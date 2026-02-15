@@ -126,7 +126,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Build companion index
       val syncResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
 
@@ -184,7 +184,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Build companion index
       val syncResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
 
@@ -234,7 +234,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Build companion index
       val syncResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
 
@@ -316,7 +316,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Build companion index
       val syncResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
 
