@@ -171,12 +171,11 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.29.4: Per-split ParquetStorageConfig via 4-arg createSplitSearcher() -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.29.6</version>
+            <version>0.29.7</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 
