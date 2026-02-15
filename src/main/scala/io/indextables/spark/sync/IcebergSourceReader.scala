@@ -20,6 +20,7 @@ package io.indextables.spark.sync
 import scala.jdk.CollectionConverters._
 
 import io.indextables.tantivy4java.iceberg.IcebergTableReader
+import io.indextables.tantivy4java.parquet.ParquetSchemaReader
 
 import org.apache.spark.sql.types._
 
@@ -72,6 +73,22 @@ class IcebergSourceReader(
     else Some(entries.get(0).getSnapshotId)
   }
 
+  // Lazily compute the S3/Azure storage root from the first file's absolute path.
+  // This is the base path with partition segments stripped, e.g.:
+  //   s3://warehouse/db/table/data/region=us-east/file.parquet
+  //   → s3://warehouse/db/table/data
+  private lazy val computedStorageRoot: Option[String] = {
+    val entries = fileEntries
+    if (entries.isEmpty) None
+    else {
+      val root = SyncTaskExecutor.extractTableBasePath(entries.get(0).getPath)
+      logger.info(s"Iceberg storage root: $root")
+      Some(root)
+    }
+  }
+
+  override def storageRoot(): Option[String] = computedStorageRoot
+
   override def getAllFiles(): Seq[CompanionSourceFile] = {
     val entries = fileEntries
     val parquetFiles = entries.asScala.toSeq.filter { entry =>
@@ -86,7 +103,10 @@ class IcebergSourceReader(
         "BUILD COMPANION only supports parquet-format data files.")
     }
 
-    val files = parquetFiles.map { entry =>
+    val root = computedStorageRoot
+
+    // Build files with absolute paths first (needed for partition value extraction)
+    val absoluteFiles = parquetFiles.map { entry =>
       CompanionSourceFile(
         path = entry.getPath,
         partitionValues = entry.getPartitionValues.asScala.toMap,
@@ -96,25 +116,44 @@ class IcebergSourceReader(
 
     // Fallback: if all partition values from the catalog are empty but file paths
     // contain Hive-style partitions (key=value/), extract partition values from the
-    // paths. Spark's Iceberg writer uses Hive-style directory layout by default.
-    val allPartitionsEmpty = files.nonEmpty && files.forall(_.partitionValues.isEmpty)
-    if (allPartitionsEmpty) {
-      val basePathOpt = files.headOption.map(f => SyncTaskExecutor.extractTableBasePath(f.path))
-      basePathOpt match {
-        case Some(basePath) =>
-          val enriched = files.map { f =>
-            val pv = extractPartitionValuesFromPath(f.path, basePath)
-            if (pv.nonEmpty) f.copy(partitionValues = pv) else f
-          }
-          val partCols = enriched.headOption.flatMap(f =>
-            if (f.partitionValues.nonEmpty) Some(f.partitionValues.keys.toSeq.sorted) else None)
-          partCols.foreach(cols =>
-            logger.info(s"Extracted partition columns from file paths (catalog returned empty): ${cols.mkString(", ")}"))
-          enriched
-        case None => files
+    // absolute paths. Spark's Iceberg writer uses Hive-style directory layout by default.
+    val enrichedFiles = {
+      val allPartitionsEmpty = absoluteFiles.nonEmpty && absoluteFiles.forall(_.partitionValues.isEmpty)
+      if (allPartitionsEmpty) {
+        root match {
+          case Some(basePath) =>
+            val enriched = absoluteFiles.map { f =>
+              val pv = extractPartitionValuesFromPath(f.path, basePath)
+              if (pv.nonEmpty) f.copy(partitionValues = pv) else f
+            }
+            val partCols = enriched.headOption.flatMap(f =>
+              if (f.partitionValues.nonEmpty) Some(f.partitionValues.keys.toSeq.sorted) else None)
+            partCols.foreach(cols =>
+              logger.info(s"Extracted partition columns from file paths (catalog returned empty): ${cols.mkString(", ")}"))
+            enriched
+          case None => absoluteFiles
+        }
+      } else {
+        absoluteFiles
       }
-    } else {
-      files
+    }
+
+    // Convert absolute paths to relative (bucket-independent for cross-region failover).
+    // E.g., s3://bucket/warehouse/db/table/data/region=us-east/file.parquet
+    //     → region=us-east/file.parquet
+    root match {
+      case Some(basePath) =>
+        val normalizedBase = basePath.stripSuffix("/")
+        enrichedFiles.map { f =>
+          val normalizedPath = f.path.stripSuffix("/")
+          val relativePath = if (normalizedPath.startsWith(normalizedBase)) {
+            normalizedPath.substring(normalizedBase.length).stripPrefix("/")
+          } else {
+            f.path // shouldn't happen, but keep absolute as fallback
+          }
+          f.copy(path = relativePath)
+        }
+      case None => enrichedFiles
     }
   }
 
@@ -145,15 +184,19 @@ class IcebergSourceReader(
     }.toMap
   }
 
-  override def schema(): StructType = {
+  // Lazily read and cache the IcebergTableSchema (used by schema() and columnNameMapping())
+  private lazy val icebergTableSchema = {
     logger.info(s"Reading Iceberg schema for $catalogName.$namespace.$tableName")
-    val icebergSchema = snapshotId match {
+    snapshotId match {
       case Some(id) =>
         IcebergTableReader.readSchema(catalogName, namespace, tableName, icebergConfig, id)
       case None =>
         IcebergTableReader.readSchema(catalogName, namespace, tableName, icebergConfig)
     }
-    val schemaJson = icebergSchema.getSchemaJson()
+  }
+
+  override def schema(): StructType = {
+    val schemaJson = icebergTableSchema.getSchemaJson()
     val sparkSchema = try {
       DataType.fromJson(schemaJson).asInstanceOf[StructType]
     } catch {
@@ -166,6 +209,60 @@ class IcebergSourceReader(
   }
 
   override def schemaSourceParquetFile(): Option[String] = None // Iceberg provides schema via catalog
+
+  override def columnNameMapping(): Map[String, String] = {
+    val entries = fileEntries
+    if (entries.isEmpty) return Map.empty
+
+    val sampleUrl = entries.get(0).getPath
+    val fieldIdToName = icebergTableSchema.getFieldIdToNameMap
+
+    try {
+      // Translate icebergConfig (s3.access-key-id format) to ParquetSchemaReader format
+      // (aws_access_key_id format) for reading the sample parquet file's metadata
+      val storageConfig = buildParquetReaderStorageConfig()
+
+      logger.info(s"Resolving Iceberg column name mapping from sample parquet: $sampleUrl")
+      val mapping = ParquetSchemaReader.readColumnMapping(sampleUrl, fieldIdToName, storageConfig)
+
+      if (mapping != null && !mapping.isEmpty) {
+        val nonIdentity = mapping.asScala.count { case (k, v) => k != v }
+        if (nonIdentity > 0) {
+          logger.info(s"Iceberg column name mapping: ${mapping.size} columns, $nonIdentity non-identity mappings")
+        } else {
+          logger.info("Iceberg column names match parquet physical names (identity mapping)")
+        }
+        mapping.asScala.toMap
+      } else {
+        Map.empty
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to resolve Iceberg column name mapping from sample parquet: ${e.getMessage}. " +
+          "Will rely on auto-detection from parquet metadata at indexing time.")
+        Map.empty
+    }
+  }
+
+  /**
+   * Translate Iceberg catalog config keys to ParquetSchemaReader storage config keys.
+   * Iceberg uses: s3.access-key-id, s3.secret-access-key, s3.session-token, s3.region
+   * ParquetSchemaReader uses: aws_access_key_id, aws_secret_access_key, aws_session_token, aws_region
+   */
+  private def buildParquetReaderStorageConfig(): java.util.Map[String, String] = {
+    val config = new java.util.HashMap[String, String]()
+    val icebergMap = icebergConfig.asScala
+    icebergMap.get("s3.access-key-id").foreach(v => config.put("aws_access_key_id", v))
+    icebergMap.get("s3.secret-access-key").foreach(v => config.put("aws_secret_access_key", v))
+    icebergMap.get("s3.session-token").foreach(v => config.put("aws_session_token", v))
+    icebergMap.get("s3.region").foreach(v => config.put("aws_region", v))
+    icebergMap.get("s3.endpoint").foreach(v => config.put("aws_endpoint", v))
+    icebergMap.get("s3.path-style-access").foreach(v => config.put("aws_force_path_style", v))
+    // Azure credentials
+    icebergMap.get("adls.account-name").foreach(v => config.put("azure_account_name", v))
+    icebergMap.get("adls.account-key").foreach(v => config.put("azure_access_key", v))
+    config
+  }
 
   /**
    * Convert Iceberg-format schema JSON to Spark StructType.

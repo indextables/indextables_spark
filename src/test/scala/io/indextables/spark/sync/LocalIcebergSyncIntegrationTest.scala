@@ -298,4 +298,36 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     companionDf.columns should contain("region")
   }
+
+  test("aggregation by partition column (GROUP BY region)") {
+    assume(restAvailable, "REST catalog not available")
+
+    val indexPath = newIndexPath()
+
+    // Build companion from partitioned Iceberg table
+    val result = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
+        s"AT LOCATION '$indexPath'"
+    )
+    result.collect()(0).getString(2) shouldBe "success"
+
+    val companionDf = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(indexPath)
+
+    // GROUP BY partition column with COUNT(*)
+    val aggDf = companionDf.groupBy("region").count().orderBy("region")
+    val aggRows = aggDf.collect()
+
+    // Seed data: eu-west=3, us-east=5, us-west=4 (sorted alphabetically)
+    aggRows.length shouldBe 3
+
+    val regionCounts = aggRows.map(r => r.getString(0) -> r.getLong(1)).toMap
+    regionCounts("eu-west") shouldBe 3L
+    regionCounts("us-east") shouldBe 5L
+    regionCounts("us-west") shouldBe 4L
+
+    // Total should be 12
+    regionCounts.values.sum shouldBe 12L
+  }
 }

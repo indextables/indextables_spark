@@ -53,6 +53,29 @@ trait CompanionSourceReader {
    */
   def schemaSourceParquetFile(): Option[String]
 
+  /**
+   * Physical-to-logical column name mapping for sources where parquet files use
+   * physical column names that differ from logical schema names.
+   *
+   * Examples:
+   *   - Iceberg via Databricks: col_1 -> id, col_2 -> name
+   *   - Delta with columnMapping.mode=name: col-abc123 -> id
+   *
+   * Returns empty map if physical names equal logical names (identity mapping).
+   */
+  def columnNameMapping(): Map[String, String] = Map.empty
+
+  /**
+   * The root storage path for resolving relative file paths returned by getAllFiles().
+   * For Iceberg, this is the actual S3/Azure base path (e.g., "s3://bucket/warehouse/db/table/data").
+   * For Delta/Parquet, file paths are relative to sourcePath so this returns None.
+   *
+   * When present, relative paths from getAllFiles() are resolved against this root
+   * for downloads, while the anti-join uses the relative paths directly for
+   * bucket-independent comparison (supports cross-region failover).
+   */
+  def storageRoot(): Option[String] = None
+
   /** Release any resources held by this reader. */
   def close(): Unit = {}
 }

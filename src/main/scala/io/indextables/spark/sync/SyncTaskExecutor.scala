@@ -41,7 +41,9 @@ case class SyncConfig(
   splitTablePath: String,
   writerHeapSize: Long = 2L * 1024L * 1024L * 1024L, // 2GB default
   readerBatchSize: Int = 8192,
-  schemaSourceParquetFile: Option[String] = None)
+  schemaSourceParquetFile: Option[String] = None,
+  columnNameMapping: Map[String, String] = Map.empty,
+  autoDetectNameMapping: Boolean = false)
     extends Serializable
 
 /**
@@ -158,6 +160,15 @@ object SyncTaskExecutor {
           logger.info(s"Sync task ${group.groupIndex}: applying JSON fields: ${jsonFields.mkString(", ")}")
           companionConfig.withJsonFields(jsonFields: _*)
         }
+      }
+
+      // Apply column name mapping (physical → logical) for Iceberg/Delta with column mapping
+      if (config.columnNameMapping.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying column name mapping (${config.columnNameMapping.size} columns)")
+        companionConfig.withFieldIdMapping(config.columnNameMapping.asJava)
+      }
+      if (config.autoDetectNameMapping) {
+        companionConfig.withAutoDetectNameMapping(true)
       }
 
       // 3. Call QuickwitSplit.createFromParquet()

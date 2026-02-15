@@ -35,7 +35,6 @@ import io.indextables.spark.sync.{
   IcebergSourceReader,
   SyncConfig,
   SyncIndexingGroup,
-  SyncMetricsAccumulator,
   SyncTaskExecutor
 }
 import io.indextables.spark.transaction.{
@@ -242,14 +241,10 @@ case class SyncToExternalCommand(
       ))
     }
 
-    // For Iceberg: extract the actual S3 storage root from the first source file.
-    // This is needed because sourcePath is a table identifier (e.g., "prod.events"),
-    // not an S3 path, so tantivy4java can't resolve relative parquet paths from it.
-    val icebergStorageRoot: Option[String] = if (sourceFormat == "iceberg" && allSourceFiles.nonEmpty) {
-      val root = SyncTaskExecutor.extractTableBasePath(allSourceFiles.head.path)
-      logger.info(s"Iceberg storage root extracted from file listing: $root")
-      Some(root)
-    } else None
+    // For Iceberg: the storage root is the actual S3/Azure base path. This is needed
+    // because sourcePath is a table identifier (e.g., "prod.events"), not an S3 path.
+    // The reader computes this internally and returns relative file paths from getAllFiles().
+    val icebergStorageRoot: Option[String] = reader.storageRoot()
 
     val partitionColumns = reader.partitionColumns()
 
@@ -333,7 +328,9 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
-      // 7. Determine what needs indexing via anti-join (works for both initial and incremental)
+      // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
+      // All source readers return relative paths, so the anti-join is bucket-independent
+      // and works across cross-region failover (different S3 buckets, same relative paths).
       val (rawParquetFiles, splitsToInvalidate) =
         computeAntiJoinChanges(allSourceFiles, existingFiles, isInitialSync)
 
@@ -384,7 +381,9 @@ case class SyncToExternalCommand(
         splitTablePath = destPath,
         writerHeapSize = resolvedWriterHeapSize,
         readerBatchSize = readerBatchSize,
-        schemaSourceParquetFile = reader.schemaSourceParquetFile()
+        schemaSourceParquetFile = reader.schemaSourceParquetFile(),
+        columnNameMapping = reader.columnNameMapping(),
+        autoDetectNameMapping = sourceFormat == "iceberg"
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
@@ -431,7 +430,7 @@ case class SyncToExternalCommand(
     val effectiveParquetTableRoot = icebergStorageRoot.getOrElse(sourcePath)
     val syncGroups = groups.zipWithIndex.map { case (plan, idx) =>
       SyncIndexingGroup(
-        parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, sourcePath)),
+        parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, effectiveParquetTableRoot)),
         parquetTableRoot = effectiveParquetTableRoot,
         partitionValues = plan.partitionValues,
         groupIndex = idx
@@ -602,7 +601,7 @@ case class SyncToExternalCommand(
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
     sourceVersion: Long,
-    icebergStorageRoot: Option[String] = None
+    icebergStorageRoot: Option[String]
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
     val companionConfig = existingMetadata.configuration ++ Map(
@@ -732,9 +731,12 @@ case class SyncToExternalCommand(
       return (currentSourceFiles, Seq.empty[AddAction])
     }
 
-    val currentDeltaPaths = currentSourceFiles.map(f => normalizePath(f.path)).toSet
+    val currentSourcePaths = currentSourceFiles.map(f => normalizePath(f.path)).toSet
 
-    // Collect all parquet file paths tracked by existing companion splits
+    // Collect all parquet file paths tracked by existing companion splits.
+    // All source readers return relative paths (bucket-independent), and companion
+    // splits store the same relative paths. Direct comparison works across
+    // cross-region failover (different S3 buckets, same relative paths).
     val companionPaths = existingFiles
       .flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
       .map(normalizePath).toSet
@@ -744,7 +746,7 @@ case class SyncToExternalCommand(
       companionPaths.contains(normalizePath(f.path)))
 
     // Files tracked by companion splits but no longer in source → gone
-    val pathsGoneFromSource = companionPaths -- currentDeltaPaths
+    val pathsGoneFromSource = companionPaths -- currentSourcePaths
 
     // Find companion splits that reference files gone from source → need invalidation
     val splitsToInvalidate = if (pathsGoneFromSource.nonEmpty) {
@@ -764,8 +766,9 @@ case class SyncToExternalCommand(
       split.companionSourceFiles.getOrElse(Seq.empty)
         .filterNot(f => pathsGoneFromSource.contains(normalizePath(f)))
         .map { relPath =>
-          val size = sourceSizeByPath.getOrElse(normalizePath(relPath), 0L)
-          CompanionSourceFile(relPath, split.partitionValues, size)
+          val normalized = normalizePath(relPath)
+          val size = sourceSizeByPath.getOrElse(normalized, 0L)
+          CompanionSourceFile(normalized, split.partitionValues, size)
         }
     }.groupBy(f => normalizePath(f.path)).map(_._2.head).toSeq
 
