@@ -481,4 +481,49 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       companionDf.count() shouldBe 15
     }
   }
+
+  test("GROUP BY string column should return rows") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_groupby").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_groupby").getAbsolutePath
+
+      // Create parquet data with repeating name values for grouping
+      val ss = spark
+      import ss.implicits._
+      val data = Seq(
+        (1L, "alice", 10.0),
+        (2L, "bob",   20.0),
+        (3L, "alice", 30.0),
+        (4L, "bob",   40.0),
+        (5L, "alice", 50.0)
+      )
+      data.toDF("id", "name", "score")
+        .repartition(1)
+        .write.parquet(parquetPath)
+
+      // Build companion (default HYBRID mode should make string fields fast)
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // First verify regular count works
+      companionDf.count() shouldBe 5
+
+      // Now try GROUP BY on name column
+      val groupByResult = companionDf.groupBy("name").count().orderBy("name").collect()
+
+      println(s"GROUP BY result rows: ${groupByResult.length}")
+      groupByResult.foreach(r => println(s"  ${r.getString(0)} -> ${r.getLong(1)}"))
+
+      // Should have 2 groups: alice=3, bob=2
+      groupByResult.length shouldBe 2
+      groupByResult(0).getString(0) shouldBe "alice"
+      groupByResult(0).getLong(1) shouldBe 3L
+      groupByResult(1).getString(0) shouldBe "bob"
+      groupByResult(1).getLong(1) shouldBe 2L
+    }
+  }
 }

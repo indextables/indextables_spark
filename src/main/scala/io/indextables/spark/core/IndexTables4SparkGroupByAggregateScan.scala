@@ -49,7 +49,7 @@ import io.indextables.spark.expressions.{
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
-import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery}
+import io.indextables.tantivy4java.split.SplitMatchAllQuery
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -670,7 +670,6 @@ class IndexTables4SparkGroupByAggregateReader(
     try {
       // Create cache configuration from broadcast config
       val splitCacheConfig = createCacheConfig()
-      val cacheManager     = SplitCacheManager.getInstance(splitCacheConfig.toJavaCacheConfig())
 
       logger.debug(s"GROUP BY EXECUTION: Creating searcher for split: ${partition.split.path}")
 
@@ -707,8 +706,11 @@ class IndexTables4SparkGroupByAggregateReader(
 
       logger.debug(s"GROUP BY EXECUTION: SplitSearchEngine created successfully")
 
-      // Get the searcher from the engine
-      val searcher = cacheManager.createSplitSearcher(splitPath, splitMetadata)
+      // Get the searcher from the SplitSearchEngine (NOT from cacheManager directly).
+      // SplitSearchEngine handles companion mode by passing parquetTableRoot and
+      // parquetStorageConfig to the native layer, which is required for fast field
+      // access in companion (HYBRID/PARQUET_ONLY) mode.
+      val searcher = splitSearchEngine.getSplitSearcher()
 
       // Dispatch to bucket aggregation if bucketConfig is present
       partition.bucketConfig match {
