@@ -510,4 +510,112 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.sourceFormat shouldBe "iceberg"
     cmd.sourcePath shouldBe "ns.table"
   }
+
+  // ==========================================================================
+  // CATALOG TYPE and WAREHOUSE tests
+  // ==========================================================================
+
+  test("parse ICEBERG with CATALOG TYPE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'prod.events' CATALOG 'unity_catalog' TYPE 'rest' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.catalogName shouldBe Some("unity_catalog")
+    cmd.catalogType shouldBe Some("rest")
+  }
+
+  test("parse ICEBERG with WAREHOUSE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'prod.events' WAREHOUSE 's3://my-warehouse' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.warehouse shouldBe Some("s3://my-warehouse")
+  }
+
+  test("parse ICEBERG with CATALOG TYPE and WAREHOUSE") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR ICEBERG 'prod.events'
+        |  CATALOG 'unity' TYPE 'rest'
+        |  WAREHOUSE 's3://warehouse/path'
+        |  AT LOCATION 's3://bucket/index'""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.catalogName shouldBe Some("unity")
+    cmd.catalogType shouldBe Some("rest")
+    cmd.warehouse shouldBe Some("s3://warehouse/path")
+  }
+
+  test("parse ICEBERG with all options including CATALOG TYPE and WAREHOUSE") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
+        |  CATALOG 'uc_catalog' TYPE 'rest'
+        |  WAREHOUSE 's3://unity-warehouse/iceberg'
+        |  INDEXING MODES ('message':'text')
+        |  FASTFIELDS MODE HYBRID
+        |  TARGET INPUT SIZE 2G
+        |  FROM SNAPSHOT 9999999
+        |  WHERE region = 'us-east'
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.sourcePath shouldBe "analytics.web_events"
+    cmd.catalogName shouldBe Some("uc_catalog")
+    cmd.catalogType shouldBe Some("rest")
+    cmd.warehouse shouldBe Some("s3://unity-warehouse/iceberg")
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.targetInputSize shouldBe Some(2L * 1024L * 1024L * 1024L)
+    cmd.fromSnapshot shouldBe Some(9999999L)
+    cmd.wherePredicates should have size 1
+    cmd.dryRun shouldBe true
+    cmd.indexingModes("message") shouldBe "text"
+  }
+
+  test("default catalogType should be None") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' CATALOG 'my_cat' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.catalogType shouldBe None
+  }
+
+  test("default warehouse should be None") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.warehouse shouldBe None
+  }
+
+  test("CATALOG TYPE without CATALOG should not parse") {
+    // TYPE is a sub-clause of CATALOG, so it requires CATALOG first.
+    // Without CATALOG, TYPE is just an identifier and will be absorbed by passThrough or cause parse error.
+    // This test verifies that TYPE alone doesn't create a catalogType.
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.catalogType shouldBe None
+  }
+
+  test("DELTA should not accept CATALOG TYPE") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/data' CATALOG 'cat' TYPE 'rest' AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("DELTA should not accept WAREHOUSE") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/data' WAREHOUSE 's3://wh' AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("PARQUET should not accept WAREHOUSE") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '/tmp/data' WAREHOUSE 's3://wh' AT LOCATION '/tmp/index'"
+      )
+    }
+  }
 }

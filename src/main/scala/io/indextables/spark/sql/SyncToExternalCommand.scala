@@ -78,6 +78,8 @@ case class SyncToExternalCommand(
   fromSnapshot: Option[Long] = None,
   schemaSourcePath: Option[String] = None,
   catalogName: Option[String] = None,
+  catalogType: Option[String] = None,
+  warehouse: Option[String] = None,
   wherePredicates: Seq[String] = Seq.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
@@ -131,7 +133,29 @@ case class SyncToExternalCommand(
     val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // For Iceberg + table credential providers: resolve the table UUID on the driver
+    // and inject into configs so executors can use the table-based credential API.
+    val mergedConfigs = if (sourceFormat == "iceberg") {
+      resolveTableCredentialProvider(baseMergedConfigs) match {
+        case Some(provider) =>
+          val fullTableName = buildFullTableName(catalogName, sourcePath)
+          logger.info(s"Resolving table ID for '$fullTableName' via ${provider.getClass.getName}")
+          try {
+            val tableId = provider.resolveTableId(fullTableName, baseMergedConfigs)
+            baseMergedConfigs + ("spark.indextables.iceberg.uc.tableId" -> tableId)
+          } catch {
+            case e: Exception =>
+              throw new RuntimeException(
+                s"Failed to resolve table ID for '$fullTableName': ${e.getMessage}", e)
+          }
+        case None =>
+          baseMergedConfigs
+      }
+    } else {
+      baseMergedConfigs
+    }
 
     // Resolve credentials for the SOURCE table (not the destination split table).
     val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -156,6 +180,27 @@ case class SyncToExternalCommand(
       reader.close()
     }
   }
+
+  /**
+   * Check if the credential provider implements the TableCredentialProvider trait.
+   * Delegates to CredentialProviderFactory for consistent reflection-based detection.
+   */
+  private def resolveTableCredentialProvider(
+    configs: Map[String, String]
+  ): Option[io.indextables.spark.utils.TableCredentialProvider] =
+    configs.get("spark.indextables.aws.credentialsProviderClass")
+      .filter(_.nonEmpty)
+      .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
+
+  /**
+   * Build the full three-part table name for Unity Catalog table resolution.
+   * Format: {catalog}.{sourcePath} where sourcePath is "namespace.table".
+   */
+  private def buildFullTableName(catalogNameOpt: Option[String], path: String): String =
+    catalogNameOpt match {
+      case Some(catalog) => s"$catalog.$path"
+      case None => path
+    }
 
   private def executeSyncWithReader(
     sparkSession: SparkSession,
@@ -787,10 +832,15 @@ case class SyncToExternalCommand(
   ): java.util.Map[String, String] = {
     val config = new java.util.HashMap[String, String]()
 
-    // Catalog config from spark.indextables.iceberg.*
-    mergedConfigs.get("spark.indextables.iceberg.catalogType").foreach(v => config.put("catalog_type", v))
+    // Catalog config: SQL clause values take precedence over spark.indextables.iceberg.*
+    val effectiveCatalogType = catalogType
+      .orElse(mergedConfigs.get("spark.indextables.iceberg.catalogType"))
+    val effectiveWarehouse = warehouse
+      .orElse(mergedConfigs.get("spark.indextables.iceberg.warehouse"))
+
+    effectiveCatalogType.foreach(v => config.put("catalog_type", v))
     mergedConfigs.get("spark.indextables.iceberg.uri").foreach(v => config.put("uri", v))
-    mergedConfigs.get("spark.indextables.iceberg.warehouse").foreach(v => config.put("warehouse", v))
+    effectiveWarehouse.foreach(v => config.put("warehouse", v))
     mergedConfigs.get("spark.indextables.iceberg.token").foreach(v => config.put("token", v))
     mergedConfigs.get("spark.indextables.iceberg.credential").foreach(v => config.put("credential", v))
 

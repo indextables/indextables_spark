@@ -218,7 +218,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
           )
         }
 
-        parseCredentialsResponse(response.body())
+        UnityCatalogAWSCredentialProvider.parseCredentialsResponse(response.body())
       } match {
         case Success(creds) => return creds
         case Failure(e: Exception) =>
@@ -235,51 +235,6 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
       s"Failed to fetch $operation credentials after $retryAttempts attempts",
       lastException.orNull
     )
-  }
-
-  /** Parse the API response JSON into CachedCredentials. */
-  private def parseCredentialsResponse(json: String): CachedCredentials = {
-    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
-    val root     = objectMapper.readTree(json)
-    val awsCreds = root.get("aws_temp_credentials")
-
-    if (awsCreds == null) {
-      throw new RuntimeException(s"Response missing 'aws_temp_credentials' field: $json")
-    }
-
-    val accessKeyId     = getRequiredField(awsCreds, "access_key_id")
-    val secretAccessKey = getRequiredField(awsCreds, "secret_access_key")
-    val sessionToken    = Option(awsCreds.get("session_token")).map(_.asText())
-    val expirationTime  = parseExpirationTime(root)
-
-    CachedCredentials(
-      accessKeyId = accessKeyId,
-      secretAccessKey = secretAccessKey,
-      sessionToken = sessionToken,
-      expirationTime = expirationTime,
-      fetchedAt = System.currentTimeMillis()
-    )
-  }
-
-  /** Get a required field from JSON, throwing if missing. */
-  private def getRequiredField(node: JsonNode, fieldName: String): String = {
-    val field = node.get(fieldName)
-    if (field == null || field.isNull) {
-      throw new RuntimeException(s"Missing required field: $fieldName")
-    }
-    field.asText()
-  }
-
-  /** Parse expiration time from API response (epoch milliseconds). */
-  private def parseExpirationTime(root: JsonNode): Long = {
-    val expirationNode = root.get("expiration_time")
-    if (expirationNode != null && !expirationNode.isNull) {
-      expirationNode.asLong()
-    } else {
-      // Default: 1 hour from now if not provided
-      logger.warn("No expiration_time in response, using default 1 hour")
-      System.currentTimeMillis() + 3600000L
-    }
   }
 
   /** Extract the path from the URI. */
@@ -300,7 +255,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   }
 }
 
-object UnityCatalogAWSCredentialProvider {
+object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.TableCredentialProvider {
   private val logger = LoggerFactory.getLogger(classOf[UnityCatalogAWSCredentialProvider])
 
   // Configuration keys - Databricks connection
@@ -454,6 +409,239 @@ object UnityCatalogAWSCredentialProvider {
         globalCredentialsCache = null
       }
     }
+
+  // ===== Shared response parsing (used by both path and table credential flows) =====
+
+  /** Parse the API response JSON into CachedCredentials. */
+  private[unity] def parseCredentialsResponse(json: String): CachedCredentials = {
+    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
+    val root     = objectMapper.readTree(json)
+    val awsCreds = root.get("aws_temp_credentials")
+
+    if (awsCreds == null) {
+      throw new RuntimeException(s"Response missing 'aws_temp_credentials' field: $json")
+    }
+
+    val accessKeyId     = getRequiredField(awsCreds, "access_key_id")
+    val secretAccessKey = getRequiredField(awsCreds, "secret_access_key")
+    val sessionToken    = Option(awsCreds.get("session_token")).map(_.asText())
+    val expirationTime  = parseExpirationTime(root)
+
+    CachedCredentials(
+      accessKeyId = accessKeyId,
+      secretAccessKey = secretAccessKey,
+      sessionToken = sessionToken,
+      expirationTime = expirationTime,
+      fetchedAt = System.currentTimeMillis()
+    )
+  }
+
+  /** Get a required field from JSON, throwing if missing. */
+  private def getRequiredField(node: JsonNode, fieldName: String): String = {
+    val field = node.get(fieldName)
+    if (field == null || field.isNull) {
+      throw new RuntimeException(s"Missing required field: $fieldName")
+    }
+    field.asText()
+  }
+
+  /** Parse expiration time from API response (epoch milliseconds). */
+  private def parseExpirationTime(root: JsonNode): Long = {
+    val expirationNode = root.get("expiration_time")
+    if (expirationNode != null && !expirationNode.isNull) {
+      expirationNode.asLong()
+    } else {
+      // Default: 1 hour from now if not provided
+      logger.warn("No expiration_time in response, using default 1 hour")
+      System.currentTimeMillis() + 3600000L
+    }
+  }
+
+  // ===== Table-based credential API (for Iceberg via Unity Catalog) =====
+
+  /**
+   * Resolve a Unity Catalog table name to its table_id UUID.
+   * Called once on the driver side.
+   *
+   * @param fullTableName Three-part name: catalog.namespace.table
+   * @param config        Config map with workspace URL and API token
+   * @return The table_id UUID string
+   */
+  def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
+    val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
+    initializeGlobalCacheFromMap(config)
+
+    val encodedName = java.net.URLEncoder.encode(fullTableName, "UTF-8")
+    var lastException: Option[Exception] = None
+
+    for (attempt <- 1 to retryAttempts) {
+      Try {
+        logger.info(s"Resolving table ID for '$fullTableName' (attempt $attempt/$retryAttempts)")
+
+        val request = HttpRequest
+          .newBuilder()
+          .uri(URI.create(s"$workspaceUrl/api/2.1/unity-catalog/tables/$encodedName"))
+          .header("Authorization", s"Bearer $token")
+          .header("Content-Type", "application/json")
+          .timeout(Duration.ofSeconds(30))
+          .GET()
+          .build()
+
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+
+        if (response.statusCode() != 200) {
+          throw new RuntimeException(
+            s"Unity Catalog GET /tables/$encodedName returned ${response.statusCode()}: ${response.body()}"
+          )
+        }
+
+        val root = objectMapper.readTree(response.body())
+        val tableIdNode = root.get("table_id")
+        if (tableIdNode == null || tableIdNode.isNull) {
+          throw new RuntimeException(
+            s"Response missing 'table_id' for table '$fullTableName': ${response.body()}"
+          )
+        }
+        val tableId = tableIdNode.asText()
+        logger.info(s"Resolved table '$fullTableName' -> table_id=$tableId")
+        tableId
+      } match {
+        case Success(tableId) => return tableId
+        case Failure(e: Exception) =>
+          lastException = Some(e)
+          if (attempt < retryAttempts) {
+            val backoffMillis = Math.pow(2, attempt - 1).toLong * 1000
+            logger.warn(s"Attempt $attempt failed, retrying in $backoffMillis ms: ${e.getMessage}")
+            Thread.sleep(backoffMillis)
+          }
+        case Failure(t) => throw t
+      }
+    }
+
+    throw new RuntimeException(
+      s"Failed to resolve table ID for '$fullTableName' after $retryAttempts attempts",
+      lastException.orNull
+    )
+  }
+
+  /**
+   * Get AWS credentials for a Unity Catalog table using the table-based credential API.
+   * Used by executors when `spark.indextables.iceberg.uc.tableId` is present in config.
+   *
+   * @param tableId The table UUID (resolved on the driver via resolveTableId)
+   * @param config  Config map with workspace URL and API token
+   * @return BasicAWSCredentials suitable for S3 access
+   */
+  def getTableCredentials(
+    tableId: String,
+    config: Map[String, String]
+  ): io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials = {
+    val (workspaceUrl, token, refreshBufferMinutes, fallbackEnabled, retryAttempts) =
+      resolveConfigFromMap(config)
+    initializeGlobalCacheFromMap(config)
+
+    val tokenHash = Integer.toHexString(token.hashCode)
+    val cacheKey = s"$tokenHash:table:$tableId"
+
+    // Check cache first
+    val cached = globalCredentialsCache.getIfPresent(cacheKey)
+    if (cached != null) {
+      val refreshBufferMs = refreshBufferMinutes.toLong * 60 * 1000
+      val now = System.currentTimeMillis()
+      if (now < cached.expirationTime - refreshBufferMs) {
+        logger.debug(s"Using cached table credentials for tableId=$tableId")
+        return toBasicCredentials(cached)
+      }
+    }
+
+    // Fetch with READ_WRITE -> READ fallback
+    val creds = Try {
+      logger.debug(s"Fetching READ_WRITE table credentials for tableId=$tableId")
+      fetchTableCredentials(tableId, "READ_WRITE", workspaceUrl, token, retryAttempts)
+    } match {
+      case Success(c) => c
+      case Failure(e) =>
+        if (!fallbackEnabled) throw e
+        logger.info(s"READ_WRITE table credentials failed for tableId=$tableId, falling back to READ")
+        Try {
+          fetchTableCredentials(tableId, "READ", workspaceUrl, token, retryAttempts)
+        } match {
+          case Success(c) => c
+          case Failure(readEx) =>
+            throw new RuntimeException(
+              s"Failed to obtain table credentials for tableId=$tableId. " +
+                s"READ_WRITE: ${e.getMessage}, READ: ${readEx.getMessage}",
+              readEx
+            )
+        }
+    }
+
+    globalCredentialsCache.put(cacheKey, creds)
+    toBasicCredentials(creds)
+  }
+
+  /** Fetch table credentials from Unity Catalog temporary-table-credentials API. */
+  private def fetchTableCredentials(
+    tableId: String,
+    operation: String,
+    workspaceUrl: String,
+    token: String,
+    retryAttempts: Int
+  ): CachedCredentials = {
+    var lastException: Option[Exception] = None
+
+    for (attempt <- 1 to retryAttempts) {
+      Try {
+        logger.debug(s"Fetching $operation table credentials for tableId=$tableId (attempt $attempt/$retryAttempts)")
+
+        val requestBody = s"""{"table_id": "$tableId", "operation": "$operation"}"""
+
+        val request = HttpRequest
+          .newBuilder()
+          .uri(URI.create(s"$workspaceUrl/api/2.1/unity-catalog/temporary-table-credentials"))
+          .header("Authorization", s"Bearer $token")
+          .header("Content-Type", "application/json")
+          .timeout(Duration.ofSeconds(30))
+          .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+          .build()
+
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+
+        if (response.statusCode() != 200) {
+          throw new RuntimeException(
+            s"Unity Catalog table credentials API returned ${response.statusCode()}: ${response.body()}"
+          )
+        }
+
+        parseCredentialsResponse(response.body())
+      } match {
+        case Success(creds) => return creds
+        case Failure(e: Exception) =>
+          lastException = Some(e)
+          if (attempt < retryAttempts) {
+            val backoffMillis = Math.pow(2, attempt - 1).toLong * 1000
+            logger.warn(s"Attempt $attempt failed, retrying in $backoffMillis ms: ${e.getMessage}")
+            Thread.sleep(backoffMillis)
+          }
+        case Failure(t) => throw t
+      }
+    }
+
+    throw new RuntimeException(
+      s"Failed to fetch $operation table credentials after $retryAttempts attempts",
+      lastException.orNull
+    )
+  }
+
+  /** Convert CachedCredentials to CredentialProviderFactory.BasicAWSCredentials. */
+  private def toBasicCredentials(
+    cached: CachedCredentials
+  ): io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials =
+    io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials(
+      cached.accessKeyId,
+      cached.secretAccessKey,
+      cached.sessionToken
+    )
 
   /** Internal case class for cached credentials with expiration tracking. */
   private[unity] case class CachedCredentials(

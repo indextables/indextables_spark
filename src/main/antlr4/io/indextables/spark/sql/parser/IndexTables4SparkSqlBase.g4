@@ -87,7 +87,8 @@ statement
     | BUILD indexTablesKeyword COMPANION FOR
         sourceFormat=(DELTA | PARQUET | ICEBERG) sourcePath=STRING
         (SCHEMA SOURCE schemaSourcePath=STRING)?
-        (CATALOG catalogName=STRING)?
+        (CATALOG catalogName=STRING (TYPE catalogType=STRING)?)?
+        (WAREHOUSE warehouse=STRING)?
         (INDEXING MODES '(' indexingModeList ')')?
         (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
         (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
@@ -150,7 +151,7 @@ nonReserved
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
     | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
-    | SCHEMA | CATALOG | SNAPSHOT
+    | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE
     ;
 
 // Keywords (case-insensitive)
@@ -237,6 +238,8 @@ ICEBERG: [Ii][Cc][Ee][Bb][Ee][Rr][Gg];
 SCHEMA: [Ss][Cc][Hh][Ee][Mm][Aa];
 CATALOG: [Cc][Aa][Tt][Aa][Ll][Oo][Gg];
 SNAPSHOT: [Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt];
+TYPE: [Tt][Yy][Pp][Ee];
+WAREHOUSE: [Ww][Aa][Rr][Ee][Hh][Oo][Uu][Ss][Ee];
 
 // Literals
 STRING

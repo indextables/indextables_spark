@@ -750,6 +750,30 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         None
       }
 
+      // CATALOG TYPE (Iceberg only, sub-clause of CATALOG)
+      val catalogType: Option[String] = if (ctx.catalogType != null) {
+        val ct = ParserUtils.string(ctx.catalogType)
+        if (sourceFormat != "iceberg") {
+          throw new IllegalArgumentException("CATALOG TYPE is only valid with FOR ICEBERG")
+        }
+        logger.debug(s"Catalog type: $ct")
+        Some(ct)
+      } else {
+        None
+      }
+
+      // WAREHOUSE (Iceberg only)
+      val warehouse: Option[String] = if (ctx.warehouse != null) {
+        val w = ParserUtils.string(ctx.warehouse)
+        if (sourceFormat != "iceberg") {
+          throw new IllegalArgumentException("WAREHOUSE is only valid with FOR ICEBERG")
+        }
+        logger.debug(s"Warehouse: $w")
+        Some(w)
+      } else {
+        None
+      }
+
       // Fast field mode (default: HYBRID)
       val fastFieldMode = if (ctx.fastFieldMode != null) {
         ctx.fastFieldMode.getText.toUpperCase
@@ -835,6 +859,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         fromSnapshot = fromSnapshot,
         schemaSourcePath = schemaSourcePath,
         catalogName = catalogName,
+        catalogType = catalogType,
+        warehouse = warehouse,
         wherePredicates = wherePredicates,
         dryRun = dryRun
       )
