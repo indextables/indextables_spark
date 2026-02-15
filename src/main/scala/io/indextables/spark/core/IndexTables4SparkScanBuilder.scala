@@ -180,7 +180,11 @@ class IndexTables4SparkScanBuilder(
                 }
               }
 
-              enrichedConfig
+              // Strip tableId from the final config so that split credential resolution
+              // uses path-based credentials (for the indextables split storage), not
+              // table-based credentials (scoped to the Iceberg source table). Companion
+              // parquet credentials are already stored in separate companion.parquet.* keys.
+              enrichedConfig - "spark.indextables.iceberg.uc.tableId"
             case None =>
               logger.warn("Companion mode enabled but no sourceTablePath in metadata")
               config

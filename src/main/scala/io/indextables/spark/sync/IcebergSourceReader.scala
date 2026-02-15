@@ -86,12 +86,35 @@ class IcebergSourceReader(
         "BUILD COMPANION only supports parquet-format data files.")
     }
 
-    parquetFiles.map { entry =>
+    val files = parquetFiles.map { entry =>
       CompanionSourceFile(
         path = entry.getPath,
         partitionValues = entry.getPartitionValues.asScala.toMap,
         size = entry.getFileSizeBytes
       )
+    }
+
+    // Fallback: if all partition values from the catalog are empty but file paths
+    // contain Hive-style partitions (key=value/), extract partition values from the
+    // paths. Spark's Iceberg writer uses Hive-style directory layout by default.
+    val allPartitionsEmpty = files.nonEmpty && files.forall(_.partitionValues.isEmpty)
+    if (allPartitionsEmpty) {
+      val basePathOpt = files.headOption.map(f => SyncTaskExecutor.extractTableBasePath(f.path))
+      basePathOpt match {
+        case Some(basePath) =>
+          val enriched = files.map { f =>
+            val pv = extractPartitionValuesFromPath(f.path, basePath)
+            if (pv.nonEmpty) f.copy(partitionValues = pv) else f
+          }
+          val partCols = enriched.headOption.flatMap(f =>
+            if (f.partitionValues.nonEmpty) Some(f.partitionValues.keys.toSeq.sorted) else None)
+          partCols.foreach(cols =>
+            logger.info(s"Extracted partition columns from file paths (catalog returned empty): ${cols.mkString(", ")}"))
+          enriched
+        case None => files
+      }
+    } else {
+      files
     }
   }
 
@@ -99,6 +122,28 @@ class IcebergSourceReader(
     getAllFiles().headOption
       .map(_.partitionValues.keys.toSeq.sorted)
       .getOrElse(Seq.empty)
+
+  /**
+   * Extract Hive-style partition values from a file path relative to a base path.
+   * E.g., for base="s3://bucket/data" and path="s3://bucket/data/region=us/year=2024/file.parquet",
+   * returns Map("region" -> "us", "year" -> "2024").
+   */
+  private def extractPartitionValuesFromPath(filePath: String, basePath: String): Map[String, String] = {
+    val normalizedFile = filePath.stripSuffix("/")
+    val normalizedBase = basePath.stripSuffix("/")
+    val relative = if (normalizedFile.startsWith(normalizedBase)) {
+      normalizedFile.substring(normalizedBase.length).stripPrefix("/")
+    } else {
+      return Map.empty
+    }
+    // Split into components, drop the filename (last), collect key=value segments
+    val components = relative.split("/").dropRight(1)
+    components.flatMap { component =>
+      val eqIdx = component.indexOf('=')
+      if (eqIdx > 0) Some(component.substring(0, eqIdx) -> component.substring(eqIdx + 1))
+      else None
+    }.toMap
+  }
 
   override def schema(): StructType = {
     logger.info(s"Reading Iceberg schema for $catalogName.$namespace.$tableName")
