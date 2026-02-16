@@ -26,7 +26,7 @@ IndexTables runs entirely within your existing Spark cluster with no additional 
 
 ### Installation
 
-1. Add the [IndexTables JAR](https://repo1.maven.org/maven2/io/indextables/indextables_spark/0.4.6_spark_3.5.3/indextables_spark-0.4.6_spark_3.5.3-linux-x86_64-shaded.jar) to your Spark classpath
+1. Add the [IndexTables JAR](https://repo1.maven.org/maven2/io/indextables/indextables_spark/0.5.0_spark_3.5.3/indextables_spark-0.4.6_spark_3.5.3-linux-x86_64-shaded.jar) to your Spark classpath
 2. Set `spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`
 3. Requires Java 11+
 
