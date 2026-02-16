@@ -1893,19 +1893,17 @@ class IndexTables4SparkGroupByAggregateReader(
     import java.time.LocalDate
 
     try {
-      // Use format detection to avoid expensive exception-based control flow
-      val localDate = if (dateStr.contains("T")) {
+      if (dateStr.contains("T")) {
         // ISO datetime format - extract date part
-        if (dateStr.endsWith("Z")) {
-          LocalDate.parse(dateStr.substring(0, 10))
-        } else {
-          LocalDate.parse(dateStr.substring(0, 10))
-        }
-      } else {
+        LocalDate.parse(dateStr.substring(0, 10)).toEpochDay.toInt
+      } else if (dateStr.contains("-")) {
         // Simple date format YYYY-MM-DD
-        LocalDate.parse(dateStr)
+        LocalDate.parse(dateStr).toEpochDay.toInt
+      } else {
+        // Numeric string: already days-since-epoch (from Tantivy fast field
+        // aggregation or Iceberg partition values)
+        dateStr.toInt
       }
-      localDate.toEpochDay.toInt
     } catch {
       case e: Exception =>
         throw new IllegalArgumentException(

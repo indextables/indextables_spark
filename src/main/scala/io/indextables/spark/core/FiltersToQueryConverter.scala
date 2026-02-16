@@ -152,6 +152,7 @@ object FiltersToQueryConverter {
       case StringContains(attr, _)     => Set(attr)
       case And(left, right)            => getValueAttributes(left) ++ getValueAttributes(right)
       case Or(left, right)             => getValueAttributes(left) ++ getValueAttributes(right)
+      case Not(child)                  => getValueAttributes(child)
       case _                           => Set.empty
     }
 
@@ -1910,14 +1911,17 @@ object FiltersToQueryConverter {
         }
 
       case Not(child) =>
-        // Handle NOT by using pure MUST_NOT logic - now works correctly with tantivy4java fix
+        // Handle NOT by using MUST(match_all) + MUST_NOT(child) logic.
+        // A boolean query with only MUST_NOT and no positive clause returns zero
+        // results in Tantivy (same as Lucene). Adding a MUST(match_all) ensures
+        // the query starts with all documents and then excludes matches.
         val childQuery = convertFilterToSplitQuery(child, schema, splitSearchEngine, options)
 
         childQuery match {
           case Some(cq) =>
             val boolQuery = new SplitBooleanQuery()
-            // With tantivy4java fix, pure mustNot queries work correctly
-            boolQuery.addMustNot(cq) // Documents that don't match the child condition
+            boolQuery.addMust(new SplitMatchAllQuery())
+            boolQuery.addMustNot(cq)
             Some(boolQuery)
           case None =>
             None // Fall back to Query conversion if child can't be converted

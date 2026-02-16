@@ -526,4 +526,89 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       groupByResult(1).getLong(1) shouldBe 2L
     }
   }
+
+  test("NOT EQUAL (<>) filter should return rows") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_neq").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_neq").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = Seq(
+        (1L, "alice", 10.0),
+        (2L, "bob",   20.0),
+        (3L, "carol", 30.0),
+        (4L, "dave",  40.0),
+        (5L, "eve",   50.0)
+      )
+      data.toDF("id", "name", "score")
+        .repartition(1)
+        .write.parquet(parquetPath)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Verify total count
+      companionDf.count() shouldBe 5
+
+      // Test <> on string column
+      val neqResult = companionDf.filter("name <> 'alice'").collect()
+      println(s"NOT EQUAL string result rows: ${neqResult.length}")
+      neqResult.foreach(r => println(s"  ${r}"))
+      neqResult.length shouldBe 4  // Everyone except alice
+
+      // Test <> on numeric column
+      val neqNumResult = companionDf.filter("id <> 1").collect()
+      println(s"NOT EQUAL numeric result rows: ${neqNumResult.length}")
+      neqNumResult.foreach(r => println(s"  ${r}"))
+      neqNumResult.length shouldBe 4  // Everyone except id=1
+    }
+  }
+
+  test("GROUP BY date column (non-partition) should handle date values") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_datecol").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_datecol").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+
+      // Create data with Date as a regular (non-partition) column
+      val data = Seq(
+        (1L, "alice", Date.valueOf("2025-01-15")),
+        (2L, "bob",   Date.valueOf("2025-01-15")),
+        (3L, "carol", Date.valueOf("2025-02-10")),
+        (4L, "dave",  Date.valueOf("2025-02-10")),
+        (5L, "eve",   Date.valueOf("2025-02-10"))
+      )
+      data.toDF("id", "name", "dt")
+        .repartition(1)
+        .write.parquet(parquetPath)
+
+      // Build companion
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Verify total count
+      companionDf.count() shouldBe 5
+
+      // GROUP BY date non-partition column (Tantivy returns days-since-epoch as numeric)
+      val groupByResult = companionDf.groupBy("dt").count().orderBy("dt").collect()
+      println(s"GROUP BY date column result rows: ${groupByResult.length}")
+      groupByResult.foreach(r => println(s"  ${r}"))
+
+      // Should have 2 date groups: 2025-01-15 (2 rows) and 2025-02-10 (3 rows)
+      groupByResult.length shouldBe 2
+    }
+  }
 }

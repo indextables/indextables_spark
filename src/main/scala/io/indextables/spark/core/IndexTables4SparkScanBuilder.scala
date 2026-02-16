@@ -1977,6 +1977,8 @@ class IndexTables4SparkScanBuilder(
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
       case f: org.apache.spark.sql.sources.Or =>
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
+      case f: org.apache.spark.sql.sources.Not =>
+        extractFieldNamesFromFilter(f.child)
       case other =>
         logger.debug(s"FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
         Set.empty[String]
