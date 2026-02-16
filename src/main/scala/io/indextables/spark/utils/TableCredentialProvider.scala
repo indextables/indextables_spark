@@ -18,6 +18,15 @@
 package io.indextables.spark.utils
 
 /**
+ * Contains both the table UUID and the storage location (e.g., S3 path) for a catalog table.
+ * Used by catalog-aware credential providers that can resolve both in a single API call.
+ *
+ * @param tableId         The unique table identifier (e.g., a UUID string)
+ * @param storageLocation The table's storage location (e.g., "s3://bucket/path/to/table")
+ */
+case class TableInfo(tableId: String, storageLocation: String)
+
+/**
  * Trait for credential providers that support table-level credential resolution.
  *
  * Credential provider companion objects that implement this trait declare that they
@@ -80,5 +89,22 @@ trait TableCredentialProvider {
    * @param config Configuration map with provider-specific settings
    * @return Map of `spark.indextables.iceberg.*` defaults to merge
    */
+  /**
+   * Resolve a catalog table name to both its unique table identifier and storage location.
+   * Called once on the driver side during BUILD COMPANION setup.
+   *
+   * This is useful for formats like Delta where the storage location is needed to read
+   * the table's data files, but the table is identified by name in a catalog.
+   *
+   * Default implementation delegates to resolveTableId and returns an empty storage location
+   * for backward compatibility with providers that don't implement this method.
+   *
+   * @param fullTableName The fully-qualified table name (e.g., "catalog.namespace.table")
+   * @param config        Configuration map with provider-specific settings
+   * @return TableInfo containing the table ID and storage location
+   */
+  def resolveTableInfo(fullTableName: String, config: Map[String, String]): TableInfo =
+    TableInfo(resolveTableId(fullTableName, config), "")
+
   def icebergCatalogDefaults(config: Map[String, String]): Map[String, String] = Map.empty
 }

@@ -457,26 +457,24 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     }
   }
 
-  // ===== Table-based credential API (for Iceberg via Unity Catalog) =====
+  // ===== Table-based credential API (for Iceberg and Delta via Unity Catalog) =====
 
   /**
-   * Resolve a Unity Catalog table name to its table_id UUID.
-   * Called once on the driver side.
-   *
-   * @param fullTableName Three-part name: catalog.namespace.table
-   * @param config        Config map with workspace URL and API token
-   * @return The table_id UUID string
+   * Shared implementation: call GET /tables/{name} and return both table_id and storage_location.
+   * Used by both resolveTableId (returns ID only) and resolveTableInfo (returns both).
    */
-  def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
-    val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
-    initializeGlobalCacheFromMap(config)
-
+  private def fetchTableInfoInternal(
+    fullTableName: String,
+    workspaceUrl: String,
+    token: String,
+    retryAttempts: Int
+  ): io.indextables.spark.utils.TableInfo = {
     val encodedName = java.net.URLEncoder.encode(fullTableName, "UTF-8")
     var lastException: Option[Exception] = None
 
     for (attempt <- 1 to retryAttempts) {
       Try {
-        logger.info(s"Resolving table ID for '$fullTableName' (attempt $attempt/$retryAttempts)")
+        logger.info(s"Resolving table info for '$fullTableName' (attempt $attempt/$retryAttempts)")
 
         val request = HttpRequest
           .newBuilder()
@@ -503,10 +501,16 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           )
         }
         val tableId = tableIdNode.asText()
-        logger.info(s"Resolved table '$fullTableName' -> table_id=$tableId")
-        tableId
+
+        val storageLocation = Option(root.get("storage_location"))
+          .filterNot(_.isNull)
+          .map(_.asText())
+          .getOrElse("")
+
+        logger.info(s"Resolved table '$fullTableName' -> table_id=$tableId, storage_location=$storageLocation")
+        io.indextables.spark.utils.TableInfo(tableId, storageLocation)
       } match {
-        case Success(tableId) => return tableId
+        case Success(info) => return info
         case Failure(e: Exception) =>
           lastException = Some(e)
           if (attempt < retryAttempts) {
@@ -519,9 +523,41 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     }
 
     throw new RuntimeException(
-      s"Failed to resolve table ID for '$fullTableName' after $retryAttempts attempts",
+      s"Failed to resolve table info for '$fullTableName' after $retryAttempts attempts",
       lastException.orNull
     )
+  }
+
+  /**
+   * Resolve a Unity Catalog table name to its table_id UUID.
+   * Called once on the driver side.
+   *
+   * @param fullTableName Three-part name: catalog.namespace.table
+   * @param config        Config map with workspace URL and API token
+   * @return The table_id UUID string
+   */
+  def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
+    val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
+    initializeGlobalCacheFromMap(config)
+    fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts).tableId
+  }
+
+  /**
+   * Resolve a Unity Catalog table name to both its table_id UUID and storage_location.
+   * Called once on the driver side. Uses the same GET /tables/{name} API as resolveTableId
+   * but also extracts storage_location from the response.
+   *
+   * @param fullTableName Three-part name: catalog.namespace.table
+   * @param config        Config map with workspace URL and API token
+   * @return TableInfo containing table_id and storage_location
+   */
+  override def resolveTableInfo(
+    fullTableName: String,
+    config: Map[String, String]
+  ): io.indextables.spark.utils.TableInfo = {
+    val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
+    initializeGlobalCacheFromMap(config)
+    fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts)
   }
 
   /**

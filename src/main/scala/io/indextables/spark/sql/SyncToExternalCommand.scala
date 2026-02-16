@@ -142,45 +142,61 @@ case class SyncToExternalCommand(
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // For Iceberg + table credential providers: auto-derive catalog config defaults,
-    // resolve the table UUID on the driver, and inject into configs so executors can
-    // use the table-based credential API.
-    val mergedConfigs = if (sourceFormat == "iceberg") {
+    // For Iceberg and Delta + table credential providers: auto-derive catalog config
+    // defaults, resolve the table UUID (and storage location for Delta) on the driver,
+    // and inject into configs so executors can use the table-based credential API.
+    val (mergedConfigs, resolvedStorageLocation) = if (sourceFormat == "iceberg" || sourceFormat == "delta") {
       resolveTableCredentialProvider(baseMergedConfigs) match {
-        case Some(provider) =>
-          // Merge auto-derived catalog defaults (URI, token, catalogType) with lower
-          // precedence than user-explicit values. This lets Unity Catalog users skip
-          // manual spark.indextables.iceberg.* configuration.
-          val catalogDefaults = provider.icebergCatalogDefaults(baseMergedConfigs)
-          val withDefaults = catalogDefaults.foldLeft(baseMergedConfigs) {
-            case (acc, (key, value)) =>
-              if (acc.contains(key)) acc else acc + (key -> value)
-          }
+        case Some(provider) if isTableName(sourcePath) =>
+          // Auto-derive catalog defaults for Iceberg (URI, token, catalogType)
+          val withDefaults = if (sourceFormat == "iceberg") {
+            val catalogDefaults = provider.icebergCatalogDefaults(baseMergedConfigs)
+            catalogDefaults.foldLeft(baseMergedConfigs) {
+              case (acc, (key, value)) =>
+                if (acc.contains(key)) acc else acc + (key -> value)
+            }
+          } else baseMergedConfigs
 
           val fullTableName = buildFullTableName(effectiveCatalogName, sourcePath)
-          logger.info(s"Resolving table ID for '$fullTableName' via ${provider.getClass.getName}")
+          logger.info(s"Resolving table info for '$fullTableName' via ${provider.getClass.getName}")
           try {
-            val tableId = provider.resolveTableId(fullTableName, withDefaults)
-            withDefaults + ("spark.indextables.iceberg.uc.tableId" -> tableId)
+            val tableInfo = provider.resolveTableInfo(fullTableName, withDefaults)
+            // Inject tableId so executors can use table-based credential API (Priority 1.5
+            // in CredentialProviderFactory). Key name is spark.indextables.iceberg.uc.tableId
+            // for both Iceberg and Delta (internal key, checked generically by the factory).
+            val configWithTableId = withDefaults +
+              ("spark.indextables.iceberg.uc.tableId" -> tableInfo.tableId)
+
+            if (sourceFormat == "delta" && tableInfo.storageLocation.nonEmpty) {
+              (configWithTableId, Some(tableInfo.storageLocation))
+            } else {
+              (configWithTableId, None)
+            }
           } catch {
             case e: Exception =>
               throw new RuntimeException(
-                s"Failed to resolve table ID for '$fullTableName': ${e.getMessage}", e)
+                s"Failed to resolve table info for '$fullTableName': ${e.getMessage}", e)
           }
+        case Some(_) =>
+          // Provider exists but sourcePath looks like a storage path, not a table name
+          (baseMergedConfigs, None)
         case None =>
-          baseMergedConfigs
+          (baseMergedConfigs, None)
       }
     } else {
-      baseMergedConfigs
+      (baseMergedConfigs, None)
     }
 
     // Resolve credentials for the SOURCE table (not the destination split table).
-    val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+    // For Delta UC table name resolution, use the resolved storage location for credential resolution.
+    val credentialPath = resolvedStorageLocation.getOrElse(sourcePath)
+    val sourceCredentials = resolveCredentials(mergedConfigs, credentialPath)
 
     // Create format-specific source reader
     val reader: CompanionSourceReader = sourceFormat match {
       case "delta" =>
-        new DeltaSourceReader(sourcePath, sourceCredentials)
+        val deltaPath = resolvedStorageLocation.getOrElse(sourcePath)
+        new DeltaSourceReader(deltaPath, sourceCredentials)
       case "parquet" =>
         new ParquetDirectoryReader(sourcePath, sourceCredentials, schemaSourcePath)
       case "iceberg" =>
@@ -192,7 +208,7 @@ case class SyncToExternalCommand(
     }
 
     try {
-      executeSyncWithReader(sparkSession, reader, mergedConfigs, startTime)
+      executeSyncWithReader(sparkSession, reader, mergedConfigs, resolvedStorageLocation, startTime)
     } finally {
       reader.close()
     }
@@ -210,6 +226,14 @@ case class SyncToExternalCommand(
       .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
 
   /**
+   * Determine whether a source path looks like a catalog table name (e.g., "schema.table")
+   * vs a storage path (e.g., "s3://bucket/path" or "/local/path").
+   * Table names don't contain "://" and don't start with "/".
+   */
+  private def isTableName(path: String): Boolean =
+    !path.contains("://") && !path.startsWith("/")
+
+  /**
    * Build the full three-part table name for Unity Catalog table resolution.
    * Format: {catalog}.{sourcePath} where sourcePath is "namespace.table".
    */
@@ -223,6 +247,7 @@ case class SyncToExternalCommand(
     sparkSession: SparkSession,
     reader: CompanionSourceReader,
     mergedConfigs: Map[String, String],
+    resolvedStorageLocation: Option[String],
     startTime: Long
   ): Seq[Row] = {
     val sourceVersionOpt = reader.sourceVersion()
@@ -387,11 +412,14 @@ case class SyncToExternalCommand(
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
+      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
+      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
+      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
       dispatchSyncTasksBatched(
         sparkSession, groups, syncConfig, transactionLog,
         splitsToInvalidate, effectiveIndexingModes,
         effectiveWherePredicates, sourceVersion, batchSize, maxConcurrentBatches,
-        icebergStorageRoot, startTime)
+        externalStorageRoot, startTime)
     } finally {
       transactionLog.close()
     }
@@ -416,7 +444,7 @@ case class SyncToExternalCommand(
     sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
-    icebergStorageRoot: Option[String],
+    externalStorageRoot: Option[String],
     startTime: Long
   ): Seq[Row] = {
     import java.util.concurrent.{Executors, Callable, ExecutionException}
@@ -427,7 +455,7 @@ case class SyncToExternalCommand(
     // For Iceberg, use the actual S3 storage root as parquetTableRoot so that
     // extractRelativePath() can compute correct relative paths (sourcePath is a
     // table identifier like "prod.events", not an S3 path).
-    val effectiveParquetTableRoot = icebergStorageRoot.getOrElse(sourcePath)
+    val effectiveParquetTableRoot = externalStorageRoot.getOrElse(sourcePath)
     val syncGroups = groups.zipWithIndex.map { case (plan, idx) =>
       SyncIndexingGroup(
         parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, effectiveParquetTableRoot)),
@@ -531,7 +559,7 @@ case class SyncToExternalCommand(
                 val completed = completedBatches.incrementAndGet()
                 val metadataUpdate = Some(buildCompanionMetadata(
                   transactionLog, effectiveIndexingModes, effectiveWherePredicates,
-                  sourceVersion, icebergStorageRoot))
+                  sourceVersion, externalStorageRoot))
 
                 if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
                   val version = transactionLog.commitSyncActions(
@@ -595,13 +623,17 @@ case class SyncToExternalCommand(
 
   /**
    * Build companion metadata configuration for transaction log commit.
+   *
+   * @param externalStorageRoot For Iceberg: the S3 storage root from catalog.
+   *                            For Delta UC: the storage_location from UC API.
+   *                            None for path-based Delta/Parquet.
    */
   private def buildCompanionMetadata(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
     sourceVersion: Long,
-    icebergStorageRoot: Option[String]
+    externalStorageRoot: Option[String]
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
     val companionConfig = existingMetadata.configuration ++ Map(
@@ -617,8 +649,15 @@ case class SyncToExternalCommand(
         "indextables.companion.icebergWarehouse" -> w
       ) ++ catalogType.map(ct =>
         "indextables.companion.icebergCatalogType" -> ct
-      ) ++ icebergStorageRoot.map(root =>
+      ) ++ externalStorageRoot.map(root =>
         "indextables.companion.parquetStorageRoot" -> root
+      )
+    } else if (sourceFormat == "delta" && isTableName(sourcePath) && externalStorageRoot.isDefined) {
+      // Delta UC table name resolution: store metadata for read-path credential resolution
+      Map(
+        "indextables.companion.parquetStorageRoot" -> externalStorageRoot.get,
+        "indextables.companion.deltaTableName" -> sourcePath,
+        "indextables.companion.deltaCatalog" -> effectiveCatalogName.getOrElse("")
       )
     } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
       import com.fasterxml.jackson.databind.ObjectMapper
