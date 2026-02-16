@@ -25,13 +25,6 @@ import org.apache.spark.sql.types._
 
 import org.slf4j.LoggerFactory
 
-/** Simplified representation of a Delta AddFile action. */
-case class DeltaAddFile(
-  path: String,
-  partitionValues: Map[String, String],
-  size: Long)
-    extends Serializable
-
 /**
  * Wraps tantivy4java's DeltaTableReader (delta-kernel-rs) to provide a simple
  * interface for reading Delta transaction logs.
@@ -71,11 +64,11 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
   }
 
   /** Get all AddFile actions at the current snapshot (full file listing). */
-  def getAllFiles(): Seq[DeltaAddFile] = {
+  def getAllFiles(): Seq[CompanionSourceFile] = {
     val entries = fileEntries
     logger.info(s"Delta snapshot contains ${entries.size} files")
     entries.asScala.toSeq.map { entry =>
-      DeltaAddFile(
+      CompanionSourceFile(
         path = entry.getPath,
         partitionValues = entry.getPartitionValues.asScala.toMap,
         size = entry.getSize

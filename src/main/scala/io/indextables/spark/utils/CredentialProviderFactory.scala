@@ -359,6 +359,27 @@ object CredentialProviderFactory {
       case _ => // continue to provider
     }
 
+    // Priority 1.5: Table-based credentials (for Iceberg tables via catalog providers)
+    // When tableId is present and the provider implements TableCredentialProvider,
+    // use the table credential API instead of path-based.
+    getConfig("spark.indextables.iceberg.uc.tableId").filter(_.nonEmpty) match {
+      case Some(tableId) =>
+        getConfig("spark.indextables.aws.credentialsProviderClass").filter(_.nonEmpty).foreach { className =>
+          resolveTableCredentialProvider(className).foreach { provider =>
+            try {
+              logger.debug(s"Using table credentials for tableId=$tableId via $className")
+              val creds = provider.getTableCredentials(tableId, configs)
+              return Some(creds)
+            } catch {
+              case ex: Exception =>
+                logger.warn(s"Table credential lookup failed for tableId=$tableId via $className, " +
+                  s"falling through to path-based flow: ${ex.getMessage}")
+            }
+          }
+        }
+      case None => // continue
+    }
+
     // Priority 2: Use custom provider if configured
     getConfig("spark.indextables.aws.credentialsProviderClass").filter(_.nonEmpty) match {
       case Some(className) =>
@@ -445,6 +466,35 @@ object CredentialProviderFactory {
     // Priority 3: Fall back to standard split credentials
     resolveAWSCredentialsFromConfig(configs, parquetTablePath)
   }
+
+  /**
+   * Resolve a TableCredentialProvider from the provider class name, if its companion object
+   * implements the TableCredentialProvider trait.
+   *
+   * This uses reflection to load the companion object (className + "$") and check if it
+   * implements the trait, making table credential support fully extensible without hardcoding
+   * specific provider class names.
+   */
+  def resolveTableCredentialProvider(className: String): Option[TableCredentialProvider] =
+    Try {
+      // Scala companion objects are compiled to className$ with a MODULE$ static field
+      val companionClass = Class.forName(className + "$")
+      val moduleField = companionClass.getField("MODULE$")
+      val companionObj = moduleField.get(null)
+      companionObj match {
+        case tcp: TableCredentialProvider =>
+          logger.debug(s"Provider $className supports table credentials via TableCredentialProvider trait")
+          Some(tcp)
+        case _ =>
+          logger.debug(s"Provider $className does not implement TableCredentialProvider")
+          None
+      }
+    } match {
+      case Success(result) => result
+      case Failure(ex) =>
+        logger.debug(s"Could not resolve TableCredentialProvider for $className: ${ex.getMessage}")
+        None
+    }
 
   /**
    * Create a credential provider using the fast path (Map-based) when possible.

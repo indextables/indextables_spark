@@ -40,7 +40,10 @@ case class SyncConfig(
   storageConfig: Map[String, String],
   splitTablePath: String,
   writerHeapSize: Long = 2L * 1024L * 1024L * 1024L, // 2GB default
-  readerBatchSize: Int = 8192)
+  readerBatchSize: Int = 8192,
+  schemaSourceParquetFile: Option[String] = None,
+  columnNameMapping: Map[String, String] = Map.empty,
+  autoDetectNameMapping: Boolean = false)
     extends Serializable
 
 /**
@@ -159,6 +162,15 @@ object SyncTaskExecutor {
         }
       }
 
+      // Apply column name mapping (physical → logical) for Iceberg/Delta with column mapping
+      if (config.columnNameMapping.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying column name mapping (${config.columnNameMapping.size} columns)")
+        companionConfig.withFieldIdMapping(config.columnNameMapping.asJava)
+      }
+      if (config.autoDetectNameMapping) {
+        companionConfig.withAutoDetectNameMapping(true)
+      }
+
       // 3. Call QuickwitSplit.createFromParquet()
       val splitId = UUID.randomUUID().toString
       val splitFileName = s"companion-${group.groupIndex}-$splitId.split"
@@ -242,9 +254,13 @@ object SyncTaskExecutor {
     val normalizedRoot = tableRoot.stripSuffix("/")
     if (normalizedPath.startsWith(normalizedRoot)) {
       normalizedPath.substring(normalizedRoot.length).stripPrefix("/")
-    } else {
-      // For cloud paths, extract the last path components
+    } else if (tableRoot.contains("/") || tableRoot.contains(":\\")) {
+      // tableRoot is a filesystem path but doesn't match — extract filename
       new File(absolutePath).getName
+    } else {
+      // tableRoot is not a filesystem path (e.g., Iceberg table identifier "default.table")
+      // — store the full path so anti-join can match on re-sync
+      normalizedPath
     }
   }
 
@@ -276,12 +292,18 @@ object SyncTaskExecutor {
   ): Long = {
     import io.indextables.spark.utils.CredentialProviderFactory
 
-    // Resolve credentials JIT using the table root path (not the individual file path).
-    // Individual file paths like part-00001.parquet don't normalize properly in
-    // TablePathNormalizer, causing cache fragmentation and redundant provider API calls.
-    // With storageConfig (raw config without pre-resolved keys), this falls through to
-    // Priority 2 (credential provider class) for fresh temporary credentials.
-    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(storageConfig, tableRoot)
+    // Resolve credentials JIT using a path suitable for the credential provider.
+    // For Delta/Parquet, tableRoot is an S3 path — use it directly for cache-friendly resolution.
+    // For Iceberg, tableRoot is a table identifier (e.g., "default.my_table") — not a valid S3 URI.
+    // In that case, derive the table base path from the file being downloaded by stripping
+    // the filename and any Hive-style partition segments (key=value/), so the credential
+    // provider (e.g., UnityCatalogAWSCredentialProvider) receives a properly scoped S3 URI.
+    val credentialPath = if (tableRoot.startsWith("s3://") || tableRoot.startsWith("s3a://")) {
+      tableRoot
+    } else {
+      extractTableBasePath(s3Path)
+    }
+    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(storageConfig, credentialPath)
 
     val (bucket, key) = parseS3Path(s3Path)
     val clientBuilder = software.amazon.awssdk.services.s3.S3Client.builder()
@@ -308,6 +330,17 @@ object SyncTaskExecutor {
 
     storageConfig.get("spark.indextables.aws.region").foreach { region =>
       clientBuilder.region(software.amazon.awssdk.regions.Region.of(region))
+    }
+
+    storageConfig.get("spark.indextables.s3.endpoint").foreach { endpoint =>
+      clientBuilder.endpointOverride(java.net.URI.create(endpoint))
+    }
+
+    val pathStyle = storageConfig.get("spark.indextables.s3.pathStyleAccess")
+      .orElse(storageConfig.get("spark.indextables.aws.pathStyleAccess"))
+      .exists(_.equalsIgnoreCase("true"))
+    if (pathStyle) {
+      clientBuilder.forcePathStyle(true)
     }
 
     val client = clientBuilder.build()
@@ -348,9 +381,14 @@ object SyncTaskExecutor {
     destPath: String,
     storageConfig: Map[String, String],
     tablePath: String
-  ): Long =
+  ): Long = {
+    // Remove source table ID from config so uploads resolve credentials for the
+    // DESTINATION path, not the source Iceberg table. The table ID is only valid
+    // for the source table's storage location.
+    val uploadConfig = storageConfig - "spark.indextables.iceberg.uc.tableId"
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
-      localPath, destPath, storageConfig, tablePath)
+      localPath, destPath, uploadConfig, tablePath)
+  }
 
   private def parseS3Path(s3Path: String): (String, String) = {
     val path = s3Path.replaceFirst("^s3a?://", "")
@@ -360,6 +398,28 @@ object SyncTaskExecutor {
     } else {
       (path.substring(0, slashIndex), path.substring(slashIndex + 1))
     }
+  }
+
+  /**
+   * Extract the table base path from a full file path by stripping the filename and
+   * any trailing Hive-style partition segments (key=value/).
+   *
+   * Example: s3://bucket/warehouse/db/table/data/region=us-east/file.parquet
+   *       -> s3://bucket/warehouse/db/table/data
+   */
+  def extractTableBasePath(filePath: String): String = {
+    // Strip scheme prefix, remember it for reconstruction
+    val schemePattern = "^(s3a?://|abfss?://|wasbs?://)".r
+    val scheme = schemePattern.findFirstIn(filePath).getOrElse("")
+    val pathWithoutScheme = filePath.substring(scheme.length)
+
+    // Split into segments, drop the filename (last segment)
+    val segments = pathWithoutScheme.split("/").dropRight(1)
+
+    // Walk backwards, dropping Hive-style partition segments (contain '=')
+    val baseSegments = segments.reverse.dropWhile(_.contains("=")).reverse
+
+    scheme + baseSegments.mkString("/")
   }
 
   private def deleteRecursively(file: File): Unit =

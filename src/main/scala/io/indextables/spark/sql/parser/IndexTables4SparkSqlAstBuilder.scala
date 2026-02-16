@@ -714,13 +714,65 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     logger.debug(s"visitSyncToExternal called with context: $ctx")
 
     try {
-      // Source path (Delta table)
+      // Source format (delta, parquet, iceberg)
+      val sourceFormat = ctx.sourceFormat.getText.toLowerCase
+      logger.debug(s"Source format: $sourceFormat")
+
+      // Source path
       val sourcePath = ParserUtils.string(ctx.sourcePath)
       logger.debug(s"Source path: $sourcePath")
 
       // Destination path (IndexTables output)
       val destPath = ParserUtils.string(ctx.destPath)
       logger.debug(s"Destination path: $destPath")
+
+      // SCHEMA SOURCE (Parquet only)
+      val schemaSourcePath: Option[String] = if (ctx.schemaSourcePath != null) {
+        val path = ParserUtils.string(ctx.schemaSourcePath)
+        if (sourceFormat != "parquet") {
+          throw new IllegalArgumentException("SCHEMA SOURCE is only valid with FOR PARQUET")
+        }
+        logger.debug(s"Schema source path: $path")
+        Some(path)
+      } else {
+        None
+      }
+
+      // CATALOG (Iceberg only)
+      val catalogName: Option[String] = if (ctx.catalogName != null) {
+        val name = ParserUtils.string(ctx.catalogName)
+        if (sourceFormat != "iceberg") {
+          throw new IllegalArgumentException("CATALOG is only valid with FOR ICEBERG")
+        }
+        logger.debug(s"Catalog name: $name")
+        Some(name)
+      } else {
+        None
+      }
+
+      // CATALOG TYPE (Iceberg only, sub-clause of CATALOG)
+      val catalogType: Option[String] = if (ctx.catalogType != null) {
+        val ct = ParserUtils.string(ctx.catalogType)
+        if (sourceFormat != "iceberg") {
+          throw new IllegalArgumentException("CATALOG TYPE is only valid with FOR ICEBERG")
+        }
+        logger.debug(s"Catalog type: $ct")
+        Some(ct)
+      } else {
+        None
+      }
+
+      // WAREHOUSE (Iceberg only)
+      val warehouse: Option[String] = if (ctx.warehouse != null) {
+        val w = ParserUtils.string(ctx.warehouse)
+        if (sourceFormat != "iceberg") {
+          throw new IllegalArgumentException("WAREHOUSE is only valid with FOR ICEBERG")
+        }
+        logger.debug(s"Warehouse: $w")
+        Some(w)
+      } else {
+        None
+      }
 
       // Fast field mode (default: HYBRID)
       val fastFieldMode = if (ctx.fastFieldMode != null) {
@@ -758,11 +810,26 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Indexing modes: $indexingModes")
 
-      // FROM VERSION
+      // FROM VERSION (Delta only)
       val fromVersion: Option[Long] = if (ctx.fromVersion != null) {
+        if (sourceFormat != "delta") {
+          throw new IllegalArgumentException("FROM VERSION is only valid with FOR DELTA")
+        }
         val v = ctx.fromVersion.getText.toLong
         logger.debug(s"FROM VERSION: $v")
         Some(v)
+      } else {
+        None
+      }
+
+      // FROM SNAPSHOT (Iceberg only)
+      val fromSnapshot: Option[Long] = if (ctx.fromSnapshot != null) {
+        if (sourceFormat != "iceberg") {
+          throw new IllegalArgumentException("FROM SNAPSHOT is only valid with FOR ICEBERG")
+        }
+        val s = ctx.fromSnapshot.getText.toLong
+        logger.debug(s"FROM SNAPSHOT: $s")
+        Some(s)
       } else {
         None
       }
@@ -781,7 +848,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       logger.debug(s"DRY RUN flag: $dryRun")
 
       val result = SyncToExternalCommand(
-        sourceFormat = "delta",
+        sourceFormat = sourceFormat,
         sourcePath = sourcePath,
         destPath = destPath,
         indexingModes = indexingModes,
@@ -789,6 +856,11 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         targetInputSize = targetInputSize,
         writerHeapSize = writerHeapSize,
         fromVersion = fromVersion,
+        fromSnapshot = fromSnapshot,
+        schemaSourcePath = schemaSourcePath,
+        catalogName = catalogName,
+        catalogType = catalogType,
+        warehouse = warehouse,
         wherePredicates = wherePredicates,
         dryRun = dryRun
       )

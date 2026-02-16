@@ -27,7 +27,7 @@ import org.apache.spark.sql.SparkSession
 import io.indextables.spark.RealS3TestBase
 
 /**
- * Real S3 integration tests for BUILD INDEXTABLES COMPANION FROM DELTA.
+ * Real S3 integration tests for BUILD INDEXTABLES COMPANION FOR DELTA.
  *
  * These tests require:
  * 1. AWS credentials in ~/.aws/credentials
@@ -132,9 +132,9 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
   // --- Parsing Tests (no credentials needed) ---
 
-  test("BUILD INDEXTABLES COMPANION FROM DELTA should parse with S3 paths") {
+  test("BUILD INDEXTABLES COMPANION FOR DELTA should parse with S3 paths") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '${testBasePath}/delta_source' AT LOCATION '${testBasePath}/index_dest' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '${testBasePath}/delta_source' AT LOCATION '${testBasePath}/index_dest' DRY RUN"
     )
 
     // DRY RUN should return a result even without a real Delta table
@@ -143,7 +143,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     columns should contain("table_path")
     columns should contain("source_path")
     columns should contain("status")
-    columns should contain("delta_version")
+    columns should contain("source_version")
     columns should contain("splits_created")
     columns should contain("splits_invalidated")
     columns should contain("parquet_files_indexed")
@@ -155,14 +155,14 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
   test("SYNC command output schema should have 11 columns") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '/nonexistent/delta' AT LOCATION '/nonexistent/index' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '/nonexistent/delta' AT LOCATION '/nonexistent/index' DRY RUN"
     )
     result.columns.length shouldBe 11
   }
 
   test("SYNC command should return error status for non-existent Delta table") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/nonexistent_delta_${testRunId}' AT LOCATION '/tmp/nonexistent_index_${testRunId}'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/nonexistent_delta_${testRunId}' AT LOCATION '/tmp/nonexistent_index_${testRunId}'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -196,7 +196,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
     // Step 2: Run SYNC to create companion index
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -231,7 +231,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
     // Run SYNC with DRY RUN
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
     )
 
     val rows = result.collect()
@@ -263,7 +263,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
       .save(deltaPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -292,13 +292,13 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
     // First sync
     val result1 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
     result1.collect()(0).getString(2) shouldBe "success"
 
     // Second sync (same delta version) - should be no_action
     val result2 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
     val row2 = result2.collect()(0)
     row2.getString(2) shouldBe "no_action"
@@ -333,7 +333,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
     // Step 2: Build companion index
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -413,7 +413,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
       .save(deltaPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()

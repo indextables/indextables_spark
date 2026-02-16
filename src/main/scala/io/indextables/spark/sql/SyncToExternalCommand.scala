@@ -28,11 +28,13 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.sync.{
-  DeltaAddFile,
-  DeltaLogReader,
+  CompanionSourceFile,
+  CompanionSourceReader,
+  DeltaSourceReader,
+  ParquetDirectoryReader,
+  IcebergSourceReader,
   SyncConfig,
   SyncIndexingGroup,
-  SyncMetricsAccumulator,
   SyncTaskExecutor
 }
 import io.indextables.spark.transaction.{
@@ -43,13 +45,13 @@ import io.indextables.spark.util.{ConfigNormalization, SizeParser}
 import org.slf4j.LoggerFactory
 
 /**
- * SQL command to sync an IndexTables companion index from a Delta table.
+ * SQL command to sync an IndexTables companion index from a source table.
  *
  * Creates minimal Quickwit splits that reference external parquet files instead
  * of duplicating data (45-70% split size reduction).
  *
  * Syntax:
- *   BUILD INDEXTABLES COMPANION FROM DELTA '<delta_table_path>'
+ *   BUILD INDEXTABLES COMPANION FOR (DELTA|PARQUET|ICEBERG) '<source_path>'
  *     [INDEXING MODES (field1:mode1, field2:mode2)]
  *     [FASTFIELDS MODE (HYBRID | DISABLED | PARQUET_ONLY)]
  *     [TARGET INPUT SIZE <size>]
@@ -58,12 +60,10 @@ import org.slf4j.LoggerFactory
  *     AT LOCATION '<index_table_path>'
  *     [DRY RUN]
  *
- * Note: "WITH DELTA" is also accepted for backward compatibility.
- *
  * Examples:
- *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
- *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' WHERE year >= 2024 AT LOCATION 's3://index/events'
- *   - BUILD INDEXTABLES COMPANION FROM DELTA 's3://data/events' FROM VERSION 500 AT LOCATION 's3://index/events'
+ *   - BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
+ *   - BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data' AT LOCATION 's3://bucket/index'
+ *   - BUILD INDEXTABLES COMPANION FOR ICEBERG 'db.events' CATALOG 'glue' AT LOCATION 's3://bucket/index'
  */
 case class SyncToExternalCommand(
   sourceFormat: String,
@@ -74,11 +74,24 @@ case class SyncToExternalCommand(
   targetInputSize: Option[Long],
   writerHeapSize: Option[Long] = None,
   fromVersion: Option[Long] = None,
+  fromSnapshot: Option[Long] = None,
+  schemaSourcePath: Option[String] = None,
+  catalogName: Option[String] = None,
+  catalogType: Option[String] = None,
+  warehouse: Option[String] = None,
   wherePredicates: Seq[String] = Seq.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[SyncToExternalCommand])
+
+  /**
+   * CATALOG and WAREHOUSE are interchangeable in SQL syntax: "CATALOG" is the UC term,
+   * "WAREHOUSE" is the Iceberg REST term, but they refer to the same concept.
+   * When only one is specified, it fills in the other.
+   */
+  private def effectiveCatalogName: Option[String] = catalogName.orElse(warehouse)
+  private def effectiveWarehouse: Option[String] = warehouse.orElse(catalogName)
 
   /** Default target input size per indexing group: 2GB */
   private val DEFAULT_TARGET_INPUT_SIZE: Long = 2L * 1024L * 1024L * 1024L
@@ -90,7 +103,7 @@ case class SyncToExternalCommand(
     AttributeReference("table_path", StringType)(),
     AttributeReference("source_path", StringType)(),
     AttributeReference("status", StringType)(),
-    AttributeReference("delta_version", LongType, nullable = true)(),
+    AttributeReference("source_version", LongType, nullable = true)(),
     AttributeReference("splits_created", IntegerType)(),
     AttributeReference("splits_invalidated", IntegerType)(),
     AttributeReference("parquet_files_indexed", IntegerType)(),
@@ -102,7 +115,8 @@ case class SyncToExternalCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val startTime = System.currentTimeMillis()
-    logger.info(s"Starting BUILD INDEXTABLES COMPANION FROM DELTA: source=$sourcePath, dest=$destPath, " +
+    logger.info(s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
+      s"source=$sourcePath, dest=$destPath, " +
       s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, " +
       s"wherePredicates=${wherePredicates.mkString(",")}, dryRun=$dryRun")
 
@@ -114,7 +128,7 @@ case class SyncToExternalCommand(
         logger.error(s"BUILD COMPANION failed: ${e.getMessage}", e)
         Seq(Row(
           destPath, sourcePath, "error",
-          null, // delta_version
+          null, // source_version
           0, 0, 0, 0L, 0L, durationMs,
           s"Error: ${e.getMessage}"
         ))
@@ -122,56 +136,130 @@ case class SyncToExternalCommand(
   }
 
   private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
-    // 1. Extract merged configuration and resolve credentials for Delta table access
+    // 1. Extract merged configuration and resolve credentials for source table access
     val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // Resolve credentials for the SOURCE Delta table (not the destination split table).
-    // These are passed to DeltaLogReader which uses tantivy4java's DeltaTableReader
-    // (delta-kernel-rs) — no Hadoop dependency, native S3/Azure support.
+    // For Iceberg + table credential providers: auto-derive catalog config defaults,
+    // resolve the table UUID on the driver, and inject into configs so executors can
+    // use the table-based credential API.
+    val mergedConfigs = if (sourceFormat == "iceberg") {
+      resolveTableCredentialProvider(baseMergedConfigs) match {
+        case Some(provider) =>
+          // Merge auto-derived catalog defaults (URI, token, catalogType) with lower
+          // precedence than user-explicit values. This lets Unity Catalog users skip
+          // manual spark.indextables.iceberg.* configuration.
+          val catalogDefaults = provider.icebergCatalogDefaults(baseMergedConfigs)
+          val withDefaults = catalogDefaults.foldLeft(baseMergedConfigs) {
+            case (acc, (key, value)) =>
+              if (acc.contains(key)) acc else acc + (key -> value)
+          }
+
+          val fullTableName = buildFullTableName(effectiveCatalogName, sourcePath)
+          logger.info(s"Resolving table ID for '$fullTableName' via ${provider.getClass.getName}")
+          try {
+            val tableId = provider.resolveTableId(fullTableName, withDefaults)
+            withDefaults + ("spark.indextables.iceberg.uc.tableId" -> tableId)
+          } catch {
+            case e: Exception =>
+              throw new RuntimeException(
+                s"Failed to resolve table ID for '$fullTableName': ${e.getMessage}", e)
+          }
+        case None =>
+          baseMergedConfigs
+      }
+    } else {
+      baseMergedConfigs
+    }
+
+    // Resolve credentials for the SOURCE table (not the destination split table).
     val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
-    val deltaReader = new DeltaLogReader(sourcePath, sourceCredentials)
-    executeSyncWithReader(sparkSession, deltaReader, mergedConfigs, startTime)
+
+    // Create format-specific source reader
+    val reader: CompanionSourceReader = sourceFormat match {
+      case "delta" =>
+        new DeltaSourceReader(sourcePath, sourceCredentials)
+      case "parquet" =>
+        new ParquetDirectoryReader(sourcePath, sourceCredentials, schemaSourcePath)
+      case "iceberg" =>
+        val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials)
+        new IcebergSourceReader(
+          sourcePath, effectiveCatalogName.getOrElse("default"), icebergConfig, fromSnapshot)
+      case other =>
+        throw new IllegalArgumentException(s"Unsupported source format: $other")
+    }
+
+    try {
+      executeSyncWithReader(sparkSession, reader, mergedConfigs, startTime)
+    } finally {
+      reader.close()
+    }
   }
+
+  /**
+   * Check if the credential provider implements the TableCredentialProvider trait.
+   * Delegates to CredentialProviderFactory for consistent reflection-based detection.
+   */
+  private def resolveTableCredentialProvider(
+    configs: Map[String, String]
+  ): Option[io.indextables.spark.utils.TableCredentialProvider] =
+    configs.get("spark.indextables.aws.credentialsProviderClass")
+      .filter(_.nonEmpty)
+      .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
+
+  /**
+   * Build the full three-part table name for Unity Catalog table resolution.
+   * Format: {catalog}.{sourcePath} where sourcePath is "namespace.table".
+   */
+  private def buildFullTableName(catalogNameOpt: Option[String], path: String): String =
+    catalogNameOpt match {
+      case Some(catalog) => s"$catalog.$path"
+      case None => path
+    }
 
   private def executeSyncWithReader(
     sparkSession: SparkSession,
-    deltaReader: DeltaLogReader,
+    reader: CompanionSourceReader,
     mergedConfigs: Map[String, String],
     startTime: Long
   ): Seq[Row] = {
-    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
-    val deltaVersion = deltaReader.currentVersion()
+    val sourceVersionOpt = reader.sourceVersion()
+    val sourceVersionLong: java.lang.Long = sourceVersionOpt.map(Long.box).orNull
 
-    // Check for non-existent Delta table (version -1 means no commits exist)
-    if (deltaVersion < 0) {
+    // Check for non-existent source (Delta: version -1, Parquet: empty dir, Iceberg: no snapshot)
+    val allSourceFiles = reader.getAllFiles()
+    if (allSourceFiles.isEmpty && sourceFormat == "delta" && sourceVersionOpt.isEmpty) {
       val durationMs = System.currentTimeMillis() - startTime
-      logger.error(s"Delta table at $sourcePath does not exist or has no commits (version=$deltaVersion)")
+      logger.error(s"Source table at $sourcePath does not exist or has no data")
       return Seq(Row(
         destPath, sourcePath, "error",
-        null, // delta_version
+        null, // source_version
         0, 0, 0, 0L, 0L, durationMs,
-        s"Delta table at $sourcePath does not exist or has no commits"
+        s"Source table at $sourcePath does not exist or has no data"
       ))
     }
 
-    val partitionColumns = deltaReader.partitionColumns()
-    val allDeltaFiles = deltaReader.getAllFiles()
+    // For Iceberg: the storage root is the actual S3/Azure base path. This is needed
+    // because sourcePath is a table identifier (e.g., "prod.events"), not an S3 path.
+    // The reader computes this internally and returns relative file paths from getAllFiles().
+    val icebergStorageRoot: Option[String] = reader.storageRoot()
 
-    logger.info(s"Delta table at $sourcePath: version=$deltaVersion, " +
-      s"partitionColumns=${partitionColumns.mkString(",")}, files=${allDeltaFiles.size}")
+    val partitionColumns = reader.partitionColumns()
 
-    // 2. DRY RUN mode: compute plan from Delta table only, no filesystem modifications
+    logger.info(s"Source table at $sourcePath: version=${sourceVersionOpt.getOrElse("none")}, " +
+      s"partitionColumns=${partitionColumns.mkString(",")}, files=${allSourceFiles.size}")
+
+    // 2. DRY RUN mode: compute plan from source table only, no filesystem modifications
     if (dryRun) {
-      var allFiles = allDeltaFiles
+      var allFiles = allSourceFiles
       allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups = planIndexingGroups(allFiles, maxGroupSize)
       val durationMs = System.currentTimeMillis() - startTime
       return Seq(Row(
-        destPath, sourcePath, "dry_run", deltaVersion.asInstanceOf[java.lang.Long],
+        destPath, sourcePath, "dry_run", sourceVersionLong,
         groups.size, 0, allFiles.size,
         0L, 0L, durationMs,
         s"Would create ${groups.size} companion splits from ${allFiles.size} parquet files"
@@ -202,7 +290,7 @@ case class SyncToExternalCommand(
     try {
       // 5. Determine sync mode: initial vs incremental
       val (existingFiles, isInitialSync) = determineSyncMode(transactionLog,
-        deltaReader.schema(), partitionColumns)
+        reader.schema(), partitionColumns)
 
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
       val effectiveIndexingModes = if (indexingModes.nonEmpty) {
@@ -240,18 +328,23 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
-      // 7. Determine what needs indexing via anti-join (works for both initial and incremental)
+      // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
+      // All source readers return relative paths, so the anti-join is bucket-independent
+      // and works across cross-region failover (different S3 buckets, same relative paths).
       val (rawParquetFiles, splitsToInvalidate) =
-        computeAntiJoinChanges(deltaReader, existingFiles, isInitialSync)
+        computeAntiJoinChanges(allSourceFiles, existingFiles, isInitialSync)
 
       // 7b. Apply WHERE partition filter
       val parquetFilesToIndex = applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession,
         effectiveWherePredicates)
 
+      // Source version for commits (Delta version, Iceberg snapshot ID, or -1 for Parquet)
+      val sourceVersion = sourceVersionOpt.getOrElse(-1L)
+
       if (parquetFilesToIndex.isEmpty && splitsToInvalidate.isEmpty) {
         val durationMs = System.currentTimeMillis() - startTime
         return Seq(Row(
-          destPath, sourcePath, "no_action", deltaVersion.asInstanceOf[java.lang.Long],
+          destPath, sourcePath, "no_action", sourceVersionLong,
           0, 0, 0, 0L, 0L, durationMs,
           "No changes to sync"
         ))
@@ -287,14 +380,18 @@ case class SyncToExternalCommand(
         storageConfig = mergedConfigs,
         splitTablePath = destPath,
         writerHeapSize = resolvedWriterHeapSize,
-        readerBatchSize = readerBatchSize
+        readerBatchSize = readerBatchSize,
+        schemaSourceParquetFile = reader.schemaSourceParquetFile(),
+        columnNameMapping = reader.columnNameMapping(),
+        autoDetectNameMapping = sourceFormat == "iceberg"
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
       dispatchSyncTasksBatched(
         sparkSession, groups, syncConfig, transactionLog,
         splitsToInvalidate, effectiveIndexingModes,
-        effectiveWherePredicates, deltaVersion, batchSize, maxConcurrentBatches, startTime)
+        effectiveWherePredicates, sourceVersion, batchSize, maxConcurrentBatches,
+        icebergStorageRoot, startTime)
     } finally {
       transactionLog.close()
     }
@@ -316,20 +413,25 @@ case class SyncToExternalCommand(
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
-    deltaVersion: Long,
+    sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
+    icebergStorageRoot: Option[String],
     startTime: Long
   ): Seq[Row] = {
     import java.util.concurrent.{Executors, Callable, ExecutionException}
 
     val totalTasks = groups.size
 
-    // Convert plans to serializable groups
+    // Convert plans to serializable groups.
+    // For Iceberg, use the actual S3 storage root as parquetTableRoot so that
+    // extractRelativePath() can compute correct relative paths (sourcePath is a
+    // table identifier like "prod.events", not an S3 path).
+    val effectiveParquetTableRoot = icebergStorageRoot.getOrElse(sourcePath)
     val syncGroups = groups.zipWithIndex.map { case (plan, idx) =>
       SyncIndexingGroup(
-        parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, sourcePath)),
-        parquetTableRoot = sourcePath,
+        parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, effectiveParquetTableRoot)),
+        parquetTableRoot = effectiveParquetTableRoot,
         partitionValues = plan.partitionValues,
         groupIndex = idx
       )
@@ -411,7 +513,7 @@ case class SyncToExternalCommand(
               // must be inside the lock because concurrent threads invalidate the
               // transaction log cache after each commit.
               val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
-                companionDeltaVersion = Some(deltaVersion)
+                companionDeltaVersion = Some(sourceVersion)
               ))
 
               commitLock.synchronized {
@@ -428,7 +530,8 @@ case class SyncToExternalCommand(
                 // was not set" because intermediate states had no MetadataAction.
                 val completed = completedBatches.incrementAndGet()
                 val metadataUpdate = Some(buildCompanionMetadata(
-                  transactionLog, effectiveIndexingModes, effectiveWherePredicates, deltaVersion))
+                  transactionLog, effectiveIndexingModes, effectiveWherePredicates,
+                  sourceVersion, icebergStorageRoot))
 
                 if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
                   val version = transactionLog.commitSyncActions(
@@ -460,19 +563,19 @@ case class SyncToExternalCommand(
       broadcastConfig.destroy()
     }
 
-    buildResultRow(allResults.asScala.toSeq, splitsToInvalidate.size, deltaVersion, startTime)
+    buildResultRow(allResults.asScala.toSeq, splitsToInvalidate.size, sourceVersion, startTime)
   }
 
   /**
-   * Apply WHERE partition filter to DeltaAddFile list.
+   * Apply WHERE partition filter to CompanionSourceFile list.
    * Uses the explicitly provided predicates, or falls back to effectiveWherePredicates.
    */
   private def applyWhereFilter(
-    files: Seq[DeltaAddFile],
+    files: Seq[CompanionSourceFile],
     partitionColumns: Seq[String],
     sparkSession: SparkSession,
     predicates: Seq[String] = Seq.empty
-  ): Seq[DeltaAddFile] = {
+  ): Seq[CompanionSourceFile] = {
     val effectivePreds = if (predicates.nonEmpty) predicates else wherePredicates
     if (effectivePreds.isEmpty || partitionColumns.isEmpty) return files
 
@@ -497,16 +600,27 @@ case class SyncToExternalCommand(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
-    deltaVersion: Long
+    sourceVersion: Long,
+    icebergStorageRoot: Option[String]
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
     val companionConfig = existingMetadata.configuration ++ Map(
       "indextables.companion.enabled" -> "true",
       "indextables.companion.sourceTablePath" -> sourcePath,
       "indextables.companion.sourceFormat" -> sourceFormat,
-      "indextables.companion.lastSyncedVersion" -> deltaVersion.toString,
+      "indextables.companion.lastSyncedVersion" -> sourceVersion.toString,
       "indextables.companion.fastFieldMode" -> fastFieldMode
-    ) ++ (if (effectiveIndexingModes.nonEmpty) {
+    ) ++ (if (sourceFormat == "iceberg") {
+      Map(
+        "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
+      ) ++ effectiveWarehouse.map(w =>
+        "indextables.companion.icebergWarehouse" -> w
+      ) ++ catalogType.map(ct =>
+        "indextables.companion.icebergCatalogType" -> ct
+      ) ++ icebergStorageRoot.map(root =>
+        "indextables.companion.parquetStorageRoot" -> root
+      )
+    } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
       import com.fasterxml.jackson.databind.ObjectMapper
       val mapper = new ObjectMapper()
       Map("indextables.companion.indexingModes" -> mapper.writeValueAsString(
@@ -541,7 +655,7 @@ case class SyncToExternalCommand(
   private def buildResultRow(
     results: Seq[io.indextables.spark.sync.SyncTaskResult],
     splitsInvalidated: Int,
-    deltaVersion: Long,
+    sourceVersion: Long,
     startTime: Long
   ): Seq[Row] = {
     val totalBytesDownloaded = results.map(_.bytesDownloaded).sum
@@ -555,8 +669,9 @@ case class SyncToExternalCommand(
       s"downloaded ${totalBytesDownloaded} bytes, uploaded ${totalBytesUploaded} bytes, " +
       s"duration ${durationMs}ms")
 
+    val versionLong: java.lang.Long = if (sourceVersion >= 0) sourceVersion else null
     Seq(Row(
-      destPath, sourcePath, "success", deltaVersion.asInstanceOf[java.lang.Long],
+      destPath, sourcePath, "success", versionLong,
       results.length, splitsInvalidated, totalFilesIndexed,
       totalBytesDownloaded, totalBytesUploaded, durationMs,
       s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
@@ -607,51 +722,53 @@ case class SyncToExternalCommand(
    * getChanges API) and is more robust against missed changes.
    */
   private def computeAntiJoinChanges(
-    deltaReader: DeltaLogReader,
+    currentSourceFiles: Seq[CompanionSourceFile],
     existingFiles: Seq[AddAction],
     isInitialSync: Boolean
-  ): (Seq[DeltaAddFile], Seq[AddAction]) = {
-    val currentDeltaFiles = deltaReader.getAllFiles()
-
+  ): (Seq[CompanionSourceFile], Seq[AddAction]) = {
     if (isInitialSync) {
-      logger.info(s"Initial sync: ${currentDeltaFiles.size} parquet files to index")
-      return (currentDeltaFiles, Seq.empty[AddAction])
+      logger.info(s"Initial sync: ${currentSourceFiles.size} parquet files to index")
+      return (currentSourceFiles, Seq.empty[AddAction])
     }
 
-    val currentDeltaPaths = currentDeltaFiles.map(f => normalizePath(f.path)).toSet
+    val currentSourcePaths = currentSourceFiles.map(f => normalizePath(f.path)).toSet
 
-    // Collect all parquet file paths tracked by existing companion splits
+    // Collect all parquet file paths tracked by existing companion splits.
+    // All source readers return relative paths (bucket-independent), and companion
+    // splits store the same relative paths. Direct comparison works across
+    // cross-region failover (different S3 buckets, same relative paths).
     val companionPaths = existingFiles
       .flatMap(_.companionSourceFiles.getOrElse(Seq.empty))
       .map(normalizePath).toSet
 
-    // Anti-join: files in Delta but not in any companion split → need indexing
-    val filesToIndex = currentDeltaFiles.filterNot(f =>
+    // Anti-join: files in source but not in any companion split → need indexing
+    val filesToIndex = currentSourceFiles.filterNot(f =>
       companionPaths.contains(normalizePath(f.path)))
 
-    // Files tracked by companion splits but no longer in Delta → gone from Delta
-    val pathsGoneFromDelta = companionPaths -- currentDeltaPaths
+    // Files tracked by companion splits but no longer in source → gone
+    val pathsGoneFromSource = companionPaths -- currentSourcePaths
 
-    // Find companion splits that reference files gone from Delta → need invalidation
-    val splitsToInvalidate = if (pathsGoneFromDelta.nonEmpty) {
+    // Find companion splits that reference files gone from source → need invalidation
+    val splitsToInvalidate = if (pathsGoneFromSource.nonEmpty) {
       existingFiles.filter { split =>
         split.companionSourceFiles.exists(_.exists(f =>
-          pathsGoneFromDelta.contains(normalizePath(f))))
+          pathsGoneFromSource.contains(normalizePath(f))))
       }
     } else {
       Seq.empty
     }
 
-    // Collect remaining valid files from invalidated splits that still exist in Delta,
+    // Collect remaining valid files from invalidated splits that still exist in source,
     // preserving partition values from the parent split for correct grouping.
-    // Look up accurate file sizes from the current Delta snapshot.
-    val deltaSizeByPath = currentDeltaFiles.map(f => normalizePath(f.path) -> f.size).toMap
+    // Look up accurate file sizes from the current source snapshot.
+    val sourceSizeByPath = currentSourceFiles.map(f => normalizePath(f.path) -> f.size).toMap
     val remainingFromInvalidated = splitsToInvalidate.flatMap { split =>
       split.companionSourceFiles.getOrElse(Seq.empty)
-        .filterNot(f => pathsGoneFromDelta.contains(normalizePath(f)))
+        .filterNot(f => pathsGoneFromSource.contains(normalizePath(f)))
         .map { relPath =>
-          val size = deltaSizeByPath.getOrElse(normalizePath(relPath), 0L)
-          DeltaAddFile(relPath, split.partitionValues, size)
+          val normalized = normalizePath(relPath)
+          val size = sourceSizeByPath.getOrElse(normalized, 0L)
+          CompanionSourceFile(normalized, split.partitionValues, size)
         }
     }.groupBy(f => normalizePath(f.path)).map(_._2.head).toSeq
 
@@ -662,9 +779,9 @@ case class SyncToExternalCommand(
       .map(_._2.maxBy(_.size))
       .toSeq
 
-    logger.info(s"Anti-join sync: ${currentDeltaFiles.size} in Delta, " +
+    logger.info(s"Anti-join sync: ${currentSourceFiles.size} in source, " +
       s"${companionPaths.size} in companion, ${filesToIndex.size} new, " +
-      s"${pathsGoneFromDelta.size} gone, ${splitsToInvalidate.size} splits to invalidate, " +
+      s"${pathsGoneFromSource.size} gone, ${splitsToInvalidate.size} splits to invalidate, " +
       s"${remainingFromInvalidated.size} files to re-index from invalidated splits")
 
     (allFilesToIndex, splitsToInvalidate)
@@ -675,7 +792,7 @@ case class SyncToExternalCommand(
    * and target input size.
    */
   private def planIndexingGroups(
-    files: Seq[DeltaAddFile],
+    files: Seq[CompanionSourceFile],
     maxGroupSize: Long
   ): Seq[SyncIndexingGroupPlan] = {
     // Group by partition values
@@ -691,7 +808,7 @@ case class SyncToExternalCommand(
       } else {
         // Distribute files evenly: target per group = totalBytes / numGroups
         val targetPerGroup = totalBytes.toDouble / numGroups
-        val groups = Array.fill(numGroups)(scala.collection.mutable.ArrayBuffer[DeltaAddFile]())
+        val groups = Array.fill(numGroups)(scala.collection.mutable.ArrayBuffer[CompanionSourceFile]())
         val groupSizes = Array.fill(numGroups)(0L)
 
         // Sort largest files first (First Fit Decreasing) for better bin-packing balance
@@ -742,11 +859,50 @@ case class SyncToExternalCommand(
   private def resolveAbsolutePath(path: String, tableRoot: String): String =
     if (path.startsWith("s3://") || path.startsWith("s3a://") ||
       path.startsWith("abfss://") || path.startsWith("wasbs://") ||
-      path.startsWith("abfs://") || path.startsWith("/")) {
+      path.startsWith("abfs://") || path.startsWith("file:") ||
+      path.startsWith("/")) {
       path
     } else {
       s"${tableRoot.stripSuffix("/")}/$path"
     }
+
+  /**
+   * Build Iceberg catalog configuration from merged Spark configs and source credentials.
+   * Maps spark.indextables.iceberg.* properties to IcebergTableReader config keys.
+   */
+  private def buildIcebergConfig(
+    mergedConfigs: Map[String, String],
+    sourceCredentials: Map[String, String]
+  ): java.util.Map[String, String] = {
+    val config = new java.util.HashMap[String, String]()
+
+    // Catalog config: SQL clause values take precedence over spark.indextables.iceberg.*
+    val effectiveCatalogType = catalogType
+      .orElse(mergedConfigs.get("spark.indextables.iceberg.catalogType"))
+    val effectiveWh = effectiveWarehouse
+      .orElse(mergedConfigs.get("spark.indextables.iceberg.warehouse"))
+
+    effectiveCatalogType.foreach(v => config.put("catalog_type", v))
+    mergedConfigs.get("spark.indextables.iceberg.uri").foreach(v => config.put("uri", v))
+    effectiveWh.foreach(v => config.put("warehouse", v))
+    mergedConfigs.get("spark.indextables.iceberg.token").foreach(v => config.put("token", v))
+    mergedConfigs.get("spark.indextables.iceberg.credential").foreach(v => config.put("credential", v))
+
+    // S3 storage config
+    sourceCredentials.get("spark.indextables.aws.accessKey").foreach(v => config.put("s3.access-key-id", v))
+    sourceCredentials.get("spark.indextables.aws.secretKey").foreach(v => config.put("s3.secret-access-key", v))
+    sourceCredentials.get("spark.indextables.aws.sessionToken").foreach(v => config.put("s3.session-token", v))
+    sourceCredentials.get("spark.indextables.aws.region").foreach(v => config.put("s3.region", v))
+    mergedConfigs.get("spark.indextables.iceberg.s3Endpoint").foreach(v => config.put("s3.endpoint", v))
+    mergedConfigs.get("spark.indextables.iceberg.s3PathStyleAccess")
+      .foreach(v => config.put("s3.path-style-access", v))
+
+    // Azure storage credentials
+    sourceCredentials.get("spark.indextables.azure.accountName").foreach(v => config.put("adls.account-name", v))
+    sourceCredentials.get("spark.indextables.azure.accountKey").foreach(v => config.put("adls.account-key", v))
+
+    config
+  }
 
   /**
    * Resolve credentials for a given storage path. Returns a flat map of
@@ -793,5 +949,5 @@ case class SyncToExternalCommand(
 
 /** Internal grouping plan for BUILD COMPANION operation (driver-side only, not serialized). */
 private[sql] case class SyncIndexingGroupPlan(
-  files: Seq[DeltaAddFile],
+  files: Seq[CompanionSourceFile],
   partitionValues: Map[String, String])

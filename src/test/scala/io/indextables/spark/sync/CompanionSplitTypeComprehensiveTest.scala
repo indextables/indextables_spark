@@ -105,7 +105,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
   /** Build companion index from a Delta table and return a DataFrame reading it. */
   private def buildAndReadCompanion(deltaPath: String, indexPath: String): DataFrame = {
     val syncResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
     syncResult.collect()(0).getString(2) shouldBe "success"
 
@@ -885,7 +885,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
 
       // Build companion with INDEXING MODES: message as TEXT
       val syncResult = spark.sql(
-        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
            |  INDEXING MODES ('message': 'text')
            |  AT LOCATION '$indexPath'""".stripMargin
       )
@@ -942,7 +942,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
 
       // Build companion with INDEXING MODES: ip as ipaddress
       val syncResult = spark.sql(
-        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
            |  INDEXING MODES ('ip': 'ipaddress')
            |  AT LOCATION '$indexPath'""".stripMargin
       )
@@ -999,7 +999,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
 
       // Build companion — Struct fields are auto-detected as JSON
       val syncResult = spark.sql(
-        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
            |  AT LOCATION '$indexPath'""".stripMargin
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
@@ -1051,7 +1051,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
 
       // Build companion with INDEXING MODES: payload as JSON
       val syncResult = spark.sql(
-        s"""BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath'
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
            |  INDEXING MODES ('payload': 'json')
            |  AT LOCATION '$indexPath'""".stripMargin
       )

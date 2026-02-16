@@ -49,7 +49,7 @@ import io.indextables.spark.expressions.{
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
-import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery}
+import io.indextables.tantivy4java.split.SplitMatchAllQuery
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -670,7 +670,6 @@ class IndexTables4SparkGroupByAggregateReader(
     try {
       // Create cache configuration from broadcast config
       val splitCacheConfig = createCacheConfig()
-      val cacheManager     = SplitCacheManager.getInstance(splitCacheConfig.toJavaCacheConfig())
 
       logger.debug(s"GROUP BY EXECUTION: Creating searcher for split: ${partition.split.path}")
 
@@ -707,8 +706,11 @@ class IndexTables4SparkGroupByAggregateReader(
 
       logger.debug(s"GROUP BY EXECUTION: SplitSearchEngine created successfully")
 
-      // Get the searcher from the engine
-      val searcher = cacheManager.createSplitSearcher(splitPath, splitMetadata)
+      // Get the searcher from the SplitSearchEngine (NOT from cacheManager directly).
+      // SplitSearchEngine handles companion mode by passing parquetTableRoot and
+      // parquetStorageConfig to the native layer, which is required for fast field
+      // access in companion (HYBRID/PARQUET_ONLY) mode.
+      val searcher = splitSearchEngine.getSplitSearcher()
 
       // Dispatch to bucket aggregation if bucketConfig is present
       partition.bucketConfig match {
@@ -1891,19 +1893,17 @@ class IndexTables4SparkGroupByAggregateReader(
     import java.time.LocalDate
 
     try {
-      // Use format detection to avoid expensive exception-based control flow
-      val localDate = if (dateStr.contains("T")) {
+      if (dateStr.contains("T")) {
         // ISO datetime format - extract date part
-        if (dateStr.endsWith("Z")) {
-          LocalDate.parse(dateStr.substring(0, 10))
-        } else {
-          LocalDate.parse(dateStr.substring(0, 10))
-        }
-      } else {
+        LocalDate.parse(dateStr.substring(0, 10)).toEpochDay.toInt
+      } else if (dateStr.contains("-")) {
         // Simple date format YYYY-MM-DD
-        LocalDate.parse(dateStr)
+        LocalDate.parse(dateStr).toEpochDay.toInt
+      } else {
+        // Numeric string: already days-since-epoch (from Tantivy fast field
+        // aggregation or Iceberg partition values)
+        dateStr.toInt
       }
-      localDate.toEpochDay.toInt
     } catch {
       case e: Exception =>
         throw new IllegalArgumentException(

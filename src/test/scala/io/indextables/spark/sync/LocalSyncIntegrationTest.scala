@@ -29,7 +29,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FROM DELTA.
+ * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FOR DELTA.
  *
  * Uses delta-spark to create Delta tables with known schemas, then exercises
  * the BUILD INDEXTABLES COMPANION command pipeline.
@@ -151,7 +151,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTable(deltaPath, numRows = 20)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -161,7 +161,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       row.getString(0) shouldBe indexPath // table_path
       row.getString(1) shouldBe deltaPath // source_path
       row.getString(2) shouldBe "success" // status
-      row.getAs[Long](3) shouldBe 0L // delta_version
+      row.getAs[Long](3) shouldBe 0L // source_version
       row.getInt(4) should be > 0 // splits_created
       row.getInt(6) should be > 0 // parquet_files_indexed
     }
@@ -175,7 +175,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTableWithFiles(deltaPath, numFiles = 3, rowsPerFile = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -193,7 +193,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
       )
 
       val rows = result.collect()
@@ -218,13 +218,13 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // First sync
       val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result1.collect()(0).getString(2) shouldBe "success"
 
       // Second sync (same delta version) - should be no_action
       val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result2.collect()(0).getString(2) shouldBe "no_action"
     }
@@ -238,7 +238,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -266,7 +266,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -294,7 +294,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTable(deltaPath, numRows = 10)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -322,7 +322,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTableWithFiles(deltaPath, numFiles = 2, rowsPerFile = 15)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result.collect()(0).getString(2) shouldBe "success"
 
@@ -357,7 +357,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       createLocalDeltaTable(deltaPath, numRows = 20)
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val row = result.collect()(0)
@@ -374,7 +374,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       val indexPath = new File(tempDir, "nonexistent_index").getAbsolutePath
 
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
 
       val rows = result.collect()
@@ -392,7 +392,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Build companion index
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result.collect()(0).getString(2) shouldBe "success"
 
@@ -435,7 +435,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Build companion index
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       result.collect()(0).getString(2) shouldBe "success"
 
@@ -469,7 +469,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Create companion index
       val syncResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
       )
       syncResult.collect()(0).getString(2) shouldBe "success"
 

@@ -1,0 +1,57 @@
+# Local Iceberg REST catalog + MinIO for integration testing.
+# Usage:
+#   cd docker/iceberg-local
+#   docker compose up -d
+#   ./seed-data.sh          # create test table with sample data
+#   # run tests...
+#   docker compose down -v  # cleanup
+
+services:
+  rest:
+    image: apache/iceberg-rest-fixture
+    ports:
+      - "8181:8181"
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    networks:
+      - iceberg-net
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    command: server /data --console-address ":9001"
+    networks:
+      iceberg-net:
+        aliases:
+          - warehouse.minio
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set minio http://minio:9000 admin password; do sleep 1; done;
+      mc mb minio/warehouse --ignore-existing;
+      mc anonymous set public minio/warehouse;
+      "
+    networks:
+      - iceberg-net
+
+networks:
+  iceberg-net:
+    driver: bridge

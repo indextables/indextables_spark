@@ -24,7 +24,7 @@ import org.apache.spark.sql.SparkSession
 import io.indextables.spark.RealAzureTestBase
 
 /**
- * Real Azure Blob Storage integration tests for BUILD INDEXTABLES COMPANION FROM DELTA.
+ * Real Azure Blob Storage integration tests for BUILD INDEXTABLES COMPANION FOR DELTA.
  *
  * These tests require:
  * 1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
@@ -111,9 +111,9 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
   // --- Parsing Tests (no credentials needed) ---
 
-  test("BUILD INDEXTABLES COMPANION FROM DELTA should parse with Azure paths") {
+  test("BUILD INDEXTABLES COMPANION FOR DELTA should parse with Azure paths") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA 'abfss://container@account.dfs.core.windows.net/delta' " +
+      s"BUILD INDEXTABLES COMPANION FOR DELTA 'abfss://container@account.dfs.core.windows.net/delta' " +
         s"AT LOCATION 'abfss://container@account.dfs.core.windows.net/index' DRY RUN"
     )
 
@@ -121,7 +121,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
     columns should contain("table_path")
     columns should contain("source_path")
     columns should contain("status")
-    columns should contain("delta_version")
+    columns should contain("source_version")
     columns should contain("splits_created")
     columns should contain("splits_invalidated")
     columns should contain("parquet_files_indexed")
@@ -133,7 +133,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
   test("SYNC command should return error for non-existent Azure Delta table") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '/tmp/nonexistent_delta_${testRunId}' AT LOCATION '/tmp/nonexistent_index_${testRunId}'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/nonexistent_delta_${testRunId}' AT LOCATION '/tmp/nonexistent_index_${testRunId}'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -167,7 +167,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
     // Step 2: Run SYNC to create companion index
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -200,7 +200,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
       .save(deltaPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath' DRY RUN"
     )
 
     val rows = result.collect()
@@ -232,7 +232,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
       .save(deltaPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()
@@ -261,13 +261,13 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
     // First sync
     val result1 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
     result1.collect()(0).getString(2) shouldBe "success"
 
     // Second sync (same delta version)
     val result2 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
     )
     result2.collect()(0).getString(2) shouldBe "no_action"
   }
@@ -291,7 +291,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
       .save(deltaPath)
 
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FROM DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
     )
 
     val rows = result.collect()

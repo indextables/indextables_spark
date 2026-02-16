@@ -102,16 +102,37 @@ class IndexTables4SparkScanBuilder(
         if (isCompanion) {
           metadata.configuration.get("indextables.companion.sourceTablePath") match {
             case Some(path) =>
-              logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
-              var enrichedConfig = config + ("spark.indextables.companion.parquetTableRoot" -> path)
-              // Resolve credentials for the parquet table root (Delta table) on the driver.
+              val sourceFormat = metadata.configuration.getOrElse(
+                "indextables.companion.sourceFormat", "delta")
+
+              // For Iceberg: use stored S3 root for parquetTableRoot (sourcePath is a
+              // table identifier like "prod.events", not an S3 path), and try table-based
+              // credential resolution at runtime.
+              val (effectivePath, baseConfig) = if (sourceFormat == "iceberg") {
+                val storageRoot = metadata.configuration.get("indextables.companion.parquetStorageRoot")
+                val root = storageRoot.getOrElse {
+                  logger.warn(s"Iceberg companion: no parquetStorageRoot in metadata, " +
+                    s"falling back to sourceTablePath=$path")
+                  path
+                }
+                logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
+                val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
+                (root, enriched)
+              } else {
+                logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
+                (path, config)
+              }
+
+              var enrichedConfig = baseConfig + ("spark.indextables.companion.parquetTableRoot" -> effectivePath)
+
+              // Resolve credentials for the parquet table root on the driver.
               // On Databricks/Unity Catalog, the companion index and Delta table may need
               // different credentials (different external locations or vended tokens).
               try {
                 io.indextables.spark.utils.CredentialProviderFactory
-                  .resolveAWSCredentialsFromConfig(config, path)
+                  .resolveAWSCredentialsFromConfig(enrichedConfig, effectivePath)
                   .foreach { creds =>
-                    logger.info(s"Companion mode: resolved parquet credentials for $path (accessKey=${creds.accessKey.take(4)}...)")
+                    logger.info(s"Companion mode: resolved parquet credentials for $effectivePath (accessKey=${creds.accessKey.take(4)}...)")
                     enrichedConfig = enrichedConfig +
                       ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
                       ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
@@ -121,14 +142,14 @@ class IndexTables4SparkScanBuilder(
                     }
                   }
                 // Propagate region and endpoint from main config
-                config.get("spark.indextables.aws.region")
-                  .orElse(config.get("spark.indextables.aws.region".toLowerCase))
+                enrichedConfig.get("spark.indextables.aws.region")
+                  .orElse(enrichedConfig.get("spark.indextables.aws.region".toLowerCase))
                   .foreach { region =>
                     enrichedConfig = enrichedConfig +
                       ("spark.indextables.companion.parquet.aws.region" -> region)
                   }
-                config.get("spark.indextables.s3.endpoint")
-                  .orElse(config.get("spark.indextables.s3.endpoint".toLowerCase))
+                enrichedConfig.get("spark.indextables.s3.endpoint")
+                  .orElse(enrichedConfig.get("spark.indextables.s3.endpoint".toLowerCase))
                   .foreach { endpoint =>
                     enrichedConfig = enrichedConfig +
                       ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
@@ -159,7 +180,11 @@ class IndexTables4SparkScanBuilder(
                 }
               }
 
-              enrichedConfig
+              // Strip tableId from the final config so that split credential resolution
+              // uses path-based credentials (for the indextables split storage), not
+              // table-based credentials (scoped to the Iceberg source table). Companion
+              // parquet credentials are already stored in separate companion.parquet.* keys.
+              enrichedConfig - "spark.indextables.iceberg.uc.tableId"
             case None =>
               logger.warn("Companion mode enabled but no sourceTablePath in metadata")
               config
@@ -173,6 +198,50 @@ class IndexTables4SparkScanBuilder(
           logger.warn(s"Could not read metadata for companion mode detection: ${e.getMessage}", e)
           config
       }
+    }
+  }
+
+  /**
+   * For Iceberg companions: try to resolve table credentials at read time by
+   * reconstructing the full table name from stored catalog coordinates and calling
+   * the TableCredentialProvider to get a fresh table ID. This enables the Priority 1.5
+   * path in CredentialProviderFactory (table-based credential vending).
+   *
+   * Falls back to the original config (path-based resolution) on any failure.
+   */
+  private def tryResolveIcebergTableCredentials(
+    companionConfig: Map[String, String],
+    baseConfig: Map[String, String]
+  ): Map[String, String] = {
+    val providerOpt = baseConfig.get("spark.indextables.aws.credentialsProviderClass")
+      .filter(_.nonEmpty)
+      .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
+
+    providerOpt match {
+      case Some(provider) =>
+        try {
+          val catalog = companionConfig.getOrElse("indextables.companion.icebergCatalog", "default")
+          val tablePath = companionConfig.getOrElse("indextables.companion.sourceTablePath", "")
+          val fullTableName = s"$catalog.$tablePath"
+
+          // Merge auto-derived catalog defaults (URI, token, etc.) from provider
+          val withDefaults = provider.icebergCatalogDefaults(baseConfig).foldLeft(baseConfig) {
+            case (acc, (key, value)) => if (acc.contains(key)) acc else acc + (key -> value)
+          }
+
+          val tableId = provider.resolveTableId(fullTableName, withDefaults)
+          logger.info(s"Resolved Iceberg table ID for '$fullTableName': $tableId")
+
+          // Inject tableId so Priority 1.5 in CredentialProviderFactory activates
+          withDefaults + ("spark.indextables.iceberg.uc.tableId" -> tableId)
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to resolve Iceberg table credentials at read time: ${e.getMessage}. " +
+              s"Falling back to path-based credential resolution.")
+            baseConfig
+        }
+      case None =>
+        baseConfig
     }
   }
 
@@ -1908,6 +1977,8 @@ class IndexTables4SparkScanBuilder(
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
       case f: org.apache.spark.sql.sources.Or =>
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
+      case f: org.apache.spark.sql.sources.Not =>
+        extractFieldNamesFromFilter(f.child)
       case other =>
         logger.debug(s"FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
         Set.empty[String]
