@@ -20,6 +20,7 @@ package io.indextables.spark.write
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -49,13 +50,15 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("fromOptions with all values specified") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_ENABLED -> "true",
-      OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "512M",
-      OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "1.5",
-      OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST -> "5000",
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "none"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_ENABLED           -> "true",
+        OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "512M",
+        OptimizedWriteConfig.KEY_SAMPLING_RATIO    -> "1.5",
+        OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST  -> "5000",
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "none"
+      )
+    )
     config.enabled shouldBe true
     config.targetSplitSizeBytes shouldBe (512L * 1024 * 1024)
     config.samplingRatio shouldBe 1.5
@@ -64,90 +67,116 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("fromOptions parses size strings correctly") {
-    val config1G = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "1G"
-    ))
+    val config1G = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "1G"
+      )
+    )
     config1G.targetSplitSizeBytes shouldBe (1L * 1024 * 1024 * 1024)
 
-    val config2G = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "2G"
-    ))
+    val config2G = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "2G"
+      )
+    )
     config2G.targetSplitSizeBytes shouldBe (2L * 1024 * 1024 * 1024)
 
-    val config256M = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "256M"
-    ))
+    val config256M = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "256M"
+      )
+    )
     config256M.targetSplitSizeBytes shouldBe (256L * 1024 * 1024)
   }
 
   test("fromOptions falls back to defaults for invalid boolean") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_ENABLED -> "notabool"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_ENABLED -> "notabool"
+      )
+    )
     config.enabled shouldBe false
   }
 
   test("fromOptions falls back to defaults for invalid sampling ratio") {
     // Zero ratio
-    val config1 = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "0"
-    ))
+    val config1 = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "0"
+      )
+    )
     config1.samplingRatio shouldBe 1.1
 
     // Negative ratio
-    val config2 = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "-1.0"
-    ))
+    val config2 = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "-1.0"
+      )
+    )
     config2.samplingRatio shouldBe 1.1
 
     // Non-numeric
-    val config3 = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "abc"
-    ))
+    val config3 = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "abc"
+      )
+    )
     config3.samplingRatio shouldBe 1.1
   }
 
   test("fromOptions falls back to defaults for invalid minRows") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST -> "-100"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST -> "-100"
+      )
+    )
     config.minRowsForEstimation shouldBe 10000L
   }
 
   test("fromOptions falls back to defaults for invalid distribution mode") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "invalid"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "invalid"
+      )
+    )
     config.distributionMode shouldBe "hash"
   }
 
   test("fromOptions distribution mode is case-insensitive") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "HASH"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "HASH"
+      )
+    )
     config.distributionMode shouldBe "hash"
 
-    val config2 = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "None"
-    ))
+    val config2 = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "None"
+      )
+    )
     config2.distributionMode shouldBe "none"
   }
 
   test("fromOptions falls back to defaults for invalid size string") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "notasize"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "notasize"
+      )
+    )
     config.targetSplitSizeBytes shouldBe (1L * 1024 * 1024 * 1024)
   }
 
   test("fromMap with valid values") {
-    val config = OptimizedWriteConfig.fromMap(Map(
-      OptimizedWriteConfig.KEY_ENABLED -> "true",
-      OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "2G",
-      OptimizedWriteConfig.KEY_SAMPLING_RATIO -> "1.3",
-      OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST -> "20000",
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "none"
-    ))
+    val config = OptimizedWriteConfig.fromMap(
+      Map(
+        OptimizedWriteConfig.KEY_ENABLED           -> "true",
+        OptimizedWriteConfig.KEY_TARGET_SPLIT_SIZE -> "2G",
+        OptimizedWriteConfig.KEY_SAMPLING_RATIO    -> "1.3",
+        OptimizedWriteConfig.KEY_MIN_ROWS_FOR_EST  -> "20000",
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "none"
+      )
+    )
     config.enabled shouldBe true
     config.targetSplitSizeBytes shouldBe (2L * 1024 * 1024 * 1024)
     config.samplingRatio shouldBe 1.3
@@ -156,9 +185,11 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("fromMap is case-insensitive on keys") {
-    val config = OptimizedWriteConfig.fromMap(Map(
-      "SPARK.INDEXTABLES.WRITE.OPTIMIZEWRITE.ENABLED" -> "true"
-    ))
+    val config = OptimizedWriteConfig.fromMap(
+      Map(
+        "SPARK.INDEXTABLES.WRITE.OPTIMIZEWRITE.ENABLED" -> "true"
+      )
+    )
     config.enabled shouldBe true
   }
 
@@ -194,43 +225,55 @@ class OptimizedWriteConfigTest extends AnyFunSuite with Matchers {
   // ===== Balanced mode tests =====
 
   test("fromOptions parses balanced distribution mode") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced"
+      )
+    )
     config.distributionMode shouldBe "balanced"
   }
 
   test("fromOptions balanced mode is case-insensitive") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "BALANCED"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "BALANCED"
+      )
+    )
     config.distributionMode shouldBe "balanced"
   }
 
   test("fromOptions parses maxSplitSize") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "2G"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "2G"
+      )
+    )
     config.maxSplitSizeBytes shouldBe (2L * 1024 * 1024 * 1024)
 
-    val config512M = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "512M"
-    ))
+    val config512M = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "512M"
+      )
+    )
     config512M.maxSplitSizeBytes shouldBe (512L * 1024 * 1024)
   }
 
   test("fromOptions falls back to default for invalid maxSplitSize") {
-    val config = OptimizedWriteConfig.fromOptions(makeOptions(
-      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "notasize"
-    ))
+    val config = OptimizedWriteConfig.fromOptions(
+      makeOptions(
+        OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "notasize"
+      )
+    )
     config.maxSplitSizeBytes shouldBe (4L * 1024 * 1024 * 1024)
   }
 
   test("fromMap parses balanced mode and maxSplitSize") {
-    val config = OptimizedWriteConfig.fromMap(Map(
-      OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced",
-      OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE -> "2G"
-    ))
+    val config = OptimizedWriteConfig.fromMap(
+      Map(
+        OptimizedWriteConfig.KEY_DISTRIBUTION_MODE -> "balanced",
+        OptimizedWriteConfig.KEY_MAX_SPLIT_SIZE    -> "2G"
+      )
+    )
     config.distributionMode shouldBe "balanced"
     config.maxSplitSizeBytes shouldBe (2L * 1024 * 1024 * 1024)
   }

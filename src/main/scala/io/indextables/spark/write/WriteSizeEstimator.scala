@@ -26,11 +26,11 @@ import org.slf4j.LoggerFactory
  *
  * Two estimation modes:
  *
- *   - '''Sampling mode''' (no qualifying history): Uses a configurable ratio to estimate the
- *     relationship between shuffle data and on-disk split size. Advisory = targetSplitSize / samplingRatio.
+ *   - '''Sampling mode''' (no qualifying history): Uses a configurable ratio to estimate the relationship between
+ *     shuffle data and on-disk split size. Advisory = targetSplitSize / samplingRatio.
  *
- *   - '''History mode''' (qualifying splits in transaction log): Uses real bytes-per-row from
- *     existing splits. Advisory = targetSplitSize (we know the actual compression ratio).
+ *   - '''History mode''' (qualifying splits in transaction log): Uses real bytes-per-row from existing splits. Advisory
+ *     \= targetSplitSize (we know the actual compression ratio).
  *
  * @param transactionLog
  *   Transaction log to read existing split metadata from
@@ -46,7 +46,8 @@ class WriteSizeEstimator(
   /**
    * Calculates bytes-per-row from qualifying splits in the transaction log.
    *
-   * @return Some(bytesPerRow) if qualifying splits exist, None otherwise
+   * @return
+   *   Some(bytesPerRow) if qualifying splits exist, None otherwise
    */
   def calculateBytesPerRow(): Option[Double] =
     try {
@@ -54,8 +55,8 @@ class WriteSizeEstimator(
       val qualifying = addActions.filter(_.numRecords.exists(_ >= config.minRowsForEstimation))
 
       if (qualifying.nonEmpty) {
-        val totalBytes = qualifying.map(_.size).sum
-        val totalRows = qualifying.flatMap(_.numRecords).sum
+        val totalBytes  = qualifying.map(_.size).sum
+        val totalRows   = qualifying.flatMap(_.numRecords).sum
         val bytesPerRow = totalBytes.toDouble / totalRows
         logger.info(
           s"History mode: ${qualifying.length} qualifying splits, " +
@@ -90,11 +91,11 @@ class WriteSizeEstimator(
   /**
    * Calculates the maximum number of rows per split for balanced mode rolling.
    *
-   * Uses bytes-per-row from transaction log history to estimate how many rows
-   * fit within maxSplitSizeBytes. Returns None if no history is available
-   * (first write), in which case no rolling occurs.
+   * Uses bytes-per-row from transaction log history to estimate how many rows fit within maxSplitSizeBytes. Returns
+   * None if no history is available (first write), in which case no rolling occurs.
    *
-   * @return Some(maxRows) if history exists, None otherwise
+   * @return
+   *   Some(maxRows) if history exists, None otherwise
    */
   def calculateMaxRowsPerSplit(): Option[Long] =
     calculateBytesPerRow().map { bpr =>

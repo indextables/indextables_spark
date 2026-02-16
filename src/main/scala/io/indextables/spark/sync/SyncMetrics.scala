@@ -22,8 +22,7 @@ import org.apache.spark.util.AccumulatorV2
 /**
  * Metrics collected during a BUILD INDEXTABLES COMPANION operation.
  *
- * Aggregated across all executor tasks via Spark accumulators, then reported
- * in the result rows and Spark UI.
+ * Aggregated across all executor tasks via Spark accumulators, then reported in the result rows and Spark UI.
  */
 case class SyncMetrics(
   parquetBytesDownloaded: Long = 0,
@@ -47,9 +46,8 @@ object SyncMetrics {
 /**
  * Spark accumulator for aggregating SyncMetrics across executor tasks.
  *
- * Register with SparkContext before dispatching sync tasks. Each executor
- * calls `accumulator.add(taskMetrics)`. Driver reads final metrics for
- * result rows and Spark UI.
+ * Register with SparkContext before dispatching sync tasks. Each executor calls `accumulator.add(taskMetrics)`. Driver
+ * reads final metrics for result rows and Spark UI.
  */
 class SyncMetricsAccumulator extends AccumulatorV2[SyncMetrics, SyncMetrics] {
   private var _metrics: SyncMetrics = SyncMetrics.zero

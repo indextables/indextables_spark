@@ -17,10 +17,12 @@
 
 package io.indextables.spark.write
 
-import io.indextables.spark.transaction._
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction._
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -46,29 +48,29 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
   private class StubTransactionLog(files: Seq[AddAction] = Seq.empty, throwOnList: Boolean = false)
       extends TransactionLogInterface {
 
-    override def getTablePath(): Path = new Path("file:///tmp/stub")
-    override def initialize(schema: StructType): Unit = ()
+    override def getTablePath(): Path                                                = new Path("file:///tmp/stub")
+    override def initialize(schema: StructType): Unit                                = ()
     override def initialize(schema: StructType, partitionColumns: Seq[String]): Unit = ()
-    override def addFiles(addActions: Seq[AddAction]): Long = 0L
-    override def overwriteFiles(addActions: Seq[AddAction]): Long = 0L
-    override def removeFile(path: String, deletionTimestamp: Long): Long = 0L
+    override def addFiles(addActions: Seq[AddAction]): Long                          = 0L
+    override def overwriteFiles(addActions: Seq[AddAction]): Long                    = 0L
+    override def removeFile(path: String, deletionTimestamp: Long): Long             = 0L
     override def listFiles(): Seq[AddAction] =
       if (throwOnList) throw new RuntimeException("Simulated failure") else files
-    override def getTotalRowCount(): Long = files.flatMap(_.numRecords).sum
-    override def getSchema(): Option[StructType] = None
+    override def getTotalRowCount(): Long           = files.flatMap(_.numRecords).sum
+    override def getSchema(): Option[StructType]    = None
     override def getPartitionColumns(): Seq[String] = Seq.empty
-    override def isPartitioned(): Boolean = false
+    override def isPartitioned(): Boolean           = false
     override def getMetadata(): MetadataAction =
       MetadataAction("stub", None, None, FileFormat("tantivy", Map.empty), "", Seq.empty, Map.empty, None)
-    override def getProtocol(): ProtocolAction = ProtocolAction(1, 1)
-    override def assertTableReadable(): Unit = ()
-    override def assertTableWritable(): Unit = ()
+    override def getProtocol(): ProtocolAction                                             = ProtocolAction(1, 1)
+    override def assertTableReadable(): Unit                                               = ()
+    override def assertTableWritable(): Unit                                               = ()
     override def upgradeProtocol(newMinReaderVersion: Int, newMinWriterVersion: Int): Unit = ()
-    override def close(): Unit = ()
+    override def close(): Unit                                                             = ()
   }
 
   test("sampling mode: empty transaction log") {
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, samplingRatio = 1.1)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB, samplingRatio = 1.1)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(), config)
 
     val advisory = estimator.calculateAdvisoryPartitionSize()
@@ -77,8 +79,8 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
 
   test("sampling mode: splits with too few rows") {
     val files = Seq(
-      makeAddAction(size = 100 * MB, numRecords = Some(500)),   // Below minRowsForEstimation
-      makeAddAction(size = 50 * MB, numRecords = Some(1000))    // Below minRowsForEstimation
+      makeAddAction(size = 100 * MB, numRecords = Some(500)), // Below minRowsForEstimation
+      makeAddAction(size = 50 * MB, numRecords = Some(1000))  // Below minRowsForEstimation
     )
     val config = OptimizedWriteConfig(
       targetSplitSizeBytes = GB,
@@ -96,7 +98,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
       makeAddAction(size = 500 * MB, numRecords = None),
       makeAddAction(size = 300 * MB, numRecords = None)
     )
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, samplingRatio = 1.1)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB, samplingRatio = 1.1)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
 
     val advisory = estimator.calculateAdvisoryPartitionSize()
@@ -122,9 +124,9 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
 
   test("history mode: mixed qualifying and non-qualifying splits") {
     val files = Seq(
-      makeAddAction(size = 500 * MB, numRecords = Some(50000)),   // Qualifying
-      makeAddAction(size = 10 * MB, numRecords = Some(500)),       // Too few rows
-      makeAddAction(size = 800 * MB, numRecords = Some(80000))    // Qualifying
+      makeAddAction(size = 500 * MB, numRecords = Some(50000)), // Qualifying
+      makeAddAction(size = 10 * MB, numRecords = Some(500)),    // Too few rows
+      makeAddAction(size = 800 * MB, numRecords = Some(80000))  // Qualifying
     )
     val config = OptimizedWriteConfig(
       targetSplitSizeBytes = 2 * GB,
@@ -150,7 +152,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
   }
 
   test("falls back to sampling on listFiles exception") {
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, samplingRatio = 1.1)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB, samplingRatio = 1.1)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(throwOnList = true), config)
 
     val advisory = estimator.calculateAdvisoryPartitionSize()
@@ -249,7 +251,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
   // ===== calculateBytesPerRow tests =====
 
   test("calculateBytesPerRow returns None for empty transaction log") {
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(), config)
 
     estimator.calculateBytesPerRow() shouldBe None
@@ -259,7 +261,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
     val files = Seq(
       makeAddAction(size = 100 * MB, numRecords = Some(500))
     )
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
 
     estimator.calculateBytesPerRow() shouldBe None
@@ -270,7 +272,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
       makeAddAction(size = 500 * MB, numRecords = Some(50000)),
       makeAddAction(size = 700 * MB, numRecords = Some(70000))
     )
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB, minRowsForEstimation = 10000)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(files), config)
 
     val result = estimator.calculateBytesPerRow()
@@ -281,7 +283,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
   }
 
   test("calculateBytesPerRow returns None on listFiles exception") {
-    val config = OptimizedWriteConfig(targetSplitSizeBytes = GB)
+    val config    = OptimizedWriteConfig(targetSplitSizeBytes = GB)
     val estimator = new WriteSizeEstimator(new StubTransactionLog(throwOnList = true), config)
 
     estimator.calculateBytesPerRow() shouldBe None
@@ -317,7 +319,7 @@ class WriteSizeEstimatorTest extends AnyFunSuite with Matchers {
     // bytesPerRow = 100MB / 10000 = 10485.76
     // maxRows = 4GB / 10485.76 = 409600
     val bytesPerRow = (100.0 * MB) / 10000
-    val expected = (4.0 * GB / bytesPerRow).toLong
+    val expected    = (4.0 * GB / bytesPerRow).toLong
     result.get shouldBe expected
   }
 

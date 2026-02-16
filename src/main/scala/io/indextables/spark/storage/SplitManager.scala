@@ -443,11 +443,11 @@ case class SplitCacheConfig(
   adaptiveTuningEnabled: Option[Boolean] = None,
   adaptiveTuningMinBatches: Option[Int] = None,
   // L2 Disk Cache configuration (persistent NVMe caching)
-  diskCacheEnabled: Option[Boolean] = None,         // Master switch (auto-enabled on /local_disk0)
-  diskCachePath: Option[String] = None,             // Cache directory path
-  diskCacheMaxSize: Option[Long] = None,            // Max size in bytes (0 = auto: 2/3 available disk)
-  diskCacheCompression: Option[String] = None,      // "lz4" (default), "zstd", "none"
-  diskCacheMinCompressSize: Option[Long] = None,    // Skip compression below threshold (default: 4096)
+  diskCacheEnabled: Option[Boolean] = None,          // Master switch (auto-enabled on /local_disk0)
+  diskCachePath: Option[String] = None,              // Cache directory path
+  diskCacheMaxSize: Option[Long] = None,             // Max size in bytes (0 = auto: 2/3 available disk)
+  diskCacheCompression: Option[String] = None,       // "lz4" (default), "zstd", "none"
+  diskCacheMinCompressSize: Option[Long] = None,     // Skip compression below threshold (default: 4096)
   diskCacheManifestSyncInterval: Option[Int] = None, // Seconds between manifest writes (default: 30)
   // Companion mode (parquet companion splits)
   companionSourceTableRoot: Option[String] = None, // Root path of parquet table for companion splits
@@ -456,8 +456,7 @@ case class SplitCacheConfig(
   parquetAwsSecretKey: Option[String] = None,
   parquetAwsSessionToken: Option[String] = None,
   parquetAwsRegion: Option[String] = None,
-  parquetAwsEndpoint: Option[String] = None
-) {
+  parquetAwsEndpoint: Option[String] = None) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
 

@@ -22,21 +22,19 @@ import java.net.{HttpURLConnection, URL}
 import java.nio.file.Files
 import java.util.UUID
 
-import org.apache.hadoop.fs.Path
-
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.transaction.TransactionLogFactory
+import org.apache.hadoop.fs.Path
 
-import org.scalatest.BeforeAndAfterAll
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Local integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
- * Requires Docker containers running locally:
- *   cd docker/iceberg-local && docker compose up -d && ./seed-data.sh
+ * Requires Docker containers running locally: cd docker/iceberg-local && docker compose up -d && ./seed-data.sh
  *
  * This starts:
  *   - REST catalog at http://localhost:8181
@@ -45,17 +43,16 @@ import org.scalatest.matchers.should.Matchers
  *
  * Tests are automatically skipped if the REST catalog is not reachable.
  */
-class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll
-  with IcebergTestSupport {
+class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with IcebergTestSupport {
 
-  private val REST_URI = "http://localhost:8181"
-  private val MINIO_ENDPOINT = "http://localhost:9000"
+  private val REST_URI         = "http://localhost:8181"
+  private val MINIO_ENDPOINT   = "http://localhost:9000"
   private val MINIO_ACCESS_KEY = "admin"
   private val MINIO_SECRET_KEY = "password"
   private val TABLE_IDENTIFIER = "default.test_events"
 
-  private var spark: SparkSession = _
-  private var tempDir: File = _
+  private var spark: SparkSession    = _
+  private var tempDir: File          = _
   private var restAvailable: Boolean = false
 
   override def beforeAll(): Unit = {
@@ -64,14 +61,17 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     // Check if the REST catalog is reachable
     restAvailable = isRestCatalogReachable()
     if (!restAvailable) {
-      println(s"Iceberg REST catalog not reachable at $REST_URI - " +
-        "start with: cd docker/iceberg-local && docker compose up -d && ./seed-data.sh")
+      println(
+        s"Iceberg REST catalog not reachable at $REST_URI - " +
+          "start with: cd docker/iceberg-local && docker compose up -d && ./seed-data.sh"
+      )
     }
 
     tempDir = Files.createTempDirectory("iceberg-sync-test-").toFile
     tempDir.deleteOnExit()
 
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .master("local[2]")
       .appName("LocalIcebergSyncIntegrationTest")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
@@ -102,7 +102,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     super.afterAll()
   }
 
-  private def isRestCatalogReachable(): Boolean = {
+  private def isRestCatalogReachable(): Boolean =
     try {
       val conn = new URL(s"$REST_URI/v1/config").openConnection().asInstanceOf[HttpURLConnection]
       conn.setConnectTimeout(2000)
@@ -114,7 +114,6 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     } catch {
       case _: Exception => false
     }
-  }
 
   private def newIndexPath(): String = {
     val path = new File(tempDir, UUID.randomUUID().toString.substring(0, 8))
@@ -185,19 +184,21 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     val indexPath = newIndexPath()
 
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
     try {
       val metadata = txLog.getMetadata()
       metadata.configuration("indextables.companion.sourceFormat") shouldBe "iceberg"
       metadata.configuration("indextables.companion.enabled") shouldBe "true"
-    } finally {
+    } finally
       txLog.close()
-    }
   }
 
   test("re-sync with same snapshot returns no_action") {
@@ -206,10 +207,13 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     val indexPath = newIndexPath()
 
     // First sync
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     // Re-sync should detect no new files
     val result = spark.sql(
@@ -224,10 +228,13 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     val indexPath = newIndexPath()
 
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     val companionDf = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -242,10 +249,13 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     val indexPath = newIndexPath()
 
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     val companionDf = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -264,16 +274,19 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     val indexPath = newIndexPath()
 
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     val companionDf = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(indexPath)
 
-    val filtered = companionDf.filter(companionDf("event_type") === "click")
+    val filtered   = companionDf.filter(companionDf("event_type") === "click")
     val clickCount = filtered.count()
     clickCount should be > 0L
     clickCount should be < 12L
@@ -316,7 +329,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       .load(indexPath)
 
     // GROUP BY partition column with COUNT(*)
-    val aggDf = companionDf.groupBy("region").count().orderBy("region")
+    val aggDf   = companionDf.groupBy("region").count().orderBy("region")
     val aggRows = aggDf.collect()
 
     // Seed data: eu-west=3, us-east=5, us-west=4 (sorted alphabetically)

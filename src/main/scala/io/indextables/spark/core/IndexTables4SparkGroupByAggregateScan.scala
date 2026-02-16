@@ -49,8 +49,8 @@ import io.indextables.spark.expressions.{
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
-import io.indextables.tantivy4java.split.SplitMatchAllQuery
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.SplitMatchAllQuery
 import org.slf4j.LoggerFactory
 
 /**
@@ -1892,7 +1892,7 @@ class IndexTables4SparkGroupByAggregateReader(
   private def convertDateStringToDays(dateStr: String): Int = {
     import java.time.LocalDate
 
-    try {
+    try
       if (dateStr.contains("T")) {
         // ISO datetime format - extract date part
         LocalDate.parse(dateStr.substring(0, 10)).toEpochDay.toInt
@@ -1904,7 +1904,7 @@ class IndexTables4SparkGroupByAggregateReader(
         // aggregation or Iceberg partition values)
         dateStr.toInt
       }
-    } catch {
+    catch {
       case e: Exception =>
         throw new IllegalArgumentException(
           s"Cannot convert date string '$dateStr' to days since epoch: ${e.getMessage}",

@@ -163,7 +163,7 @@ case class PrewarmCacheCommand(
     val sc = sparkSession.sparkContext
 
     // Resolve segment aliases to IndexComponent set, extracting parquet companion aliases separately
-    val segmentString = segments.mkString(",")
+    val segmentString                = segments.mkString(",")
     val parquetSegments: Set[String] = IndexComponentMapping.parseParquetSegments(segmentString)
     if (parquetSegments.nonEmpty) logger.info(s"Companion parquet preload segments: ${parquetSegments.mkString(", ")}")
     val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
@@ -416,7 +416,9 @@ case class PrewarmCacheCommand(
             val overallStatus = if (hasErrors) {
               // Surface the first error message so users can see what went wrong
               results.find(_.status.startsWith("error")).map(_.status).getOrElse("error")
-            } else if (hasFailed) "partial" else if (hasPartial) "partial" else "success"
+            } else if (hasFailed) "partial"
+            else if (hasPartial) "partial"
+            else "success"
             val segmentsStr = results.head.segments
             val fieldsStr   = results.head.fields
             val skippedStr  = if (allSkipped.isEmpty) null else allSkipped.mkString(",")
@@ -461,9 +463,10 @@ case class PrewarmCacheCommand(
     val sc = sparkSession.sparkContext
 
     // Resolve segment aliases to IndexComponent set, extracting parquet companion aliases separately
-    val asyncSegmentString = segments.mkString(",")
+    val asyncSegmentString                = segments.mkString(",")
     val asyncParquetSegments: Set[String] = IndexComponentMapping.parseParquetSegments(asyncSegmentString)
-    if (asyncParquetSegments.nonEmpty) logger.info(s"Companion parquet preload segments: ${asyncParquetSegments.mkString(", ")}")
+    if (asyncParquetSegments.nonEmpty)
+      logger.info(s"Companion parquet preload segments: ${asyncParquetSegments.mkString(", ")}")
     val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
       logger.info("Using default segments: TERM, POSTINGS")
       IndexComponentMapping.defaultComponents
@@ -797,7 +800,9 @@ case class PrewarmCacheCommand(
               val asyncAutoPreload = task.parquetSegments.isEmpty &&
                 task.segments.contains(IndexComponent.FASTFIELD) &&
                 (asyncCompanionMode == "PARQUET_ONLY" || asyncCompanionMode == "HYBRID") && {
-                  val tantivyFastFields = EnhancedTransactionLogCache.getDocMappingMetadata(addAction).fastFields
+                  val tantivyFastFields = EnhancedTransactionLogCache
+                    .getDocMappingMetadata(addAction)
+                    .fastFields
                     .map(_.toLowerCase)
                   task.fields match {
                     case Some(requestedFields) =>
@@ -809,12 +814,14 @@ case class PrewarmCacheCommand(
               val asyncShouldPreloadCols = task.parquetSegments.contains("PARQUET_COLUMNS")
 
               if (asyncShouldPreloadFast || asyncShouldPreloadCols) {
-                try {
+                try
                   if (splitSearcher.hasParquetCompanion()) {
                     val fieldArgs = task.fields.getOrElse(Seq.empty)
                     if (asyncShouldPreloadFast) {
-                      taskLogger.debug(s"Preloading parquet fast fields for ${addAction.path}" +
-                        (if (asyncAutoPreload) s" (auto-detected, companionMode=$asyncCompanionMode)" else ""))
+                      taskLogger.debug(
+                        s"Preloading parquet fast fields for ${addAction.path}" +
+                          (if (asyncAutoPreload) s" (auto-detected, companionMode=$asyncCompanionMode)" else "")
+                      )
                       splitSearcher.preloadParquetFastFields(fieldArgs: _*).join()
                     }
                     if (asyncShouldPreloadCols) {
@@ -822,7 +829,7 @@ case class PrewarmCacheCommand(
                       splitSearcher.preloadParquetColumns(fieldArgs: _*).join()
                     }
                   }
-                } catch {
+                catch {
                   case e: Exception =>
                     taskLogger.warn(s"Parquet preload failed for ${addAction.path}: ${e.getMessage}")
                 }
@@ -984,8 +991,8 @@ case class PrewarmCacheCommand(
             task.fields match {
               case Some(requestedFields) =>
                 // Filter out partition columns - they're not indexed in the split
-                val (partCols, indexedRequestedFields) = requestedFields.partition(f =>
-                  task.partitionColumns.contains(f.toLowerCase))
+                val (partCols, indexedRequestedFields) =
+                  requestedFields.partition(f => task.partitionColumns.contains(f.toLowerCase))
                 if (partCols.nonEmpty) {
                   taskLogger.debug(s"Filtering partition columns from prewarm: ${partCols.mkString(",")}")
                 }
@@ -1066,7 +1073,9 @@ case class PrewarmCacheCommand(
             task.segments.contains(IndexComponent.FASTFIELD) &&
             (companionMode == "PARQUET_ONLY" || companionMode == "HYBRID") && {
               // Check if any requested fields are missing from tantivy fast fields
-              val tantivyFastFields = EnhancedTransactionLogCache.getDocMappingMetadata(work.addAction).fastFields
+              val tantivyFastFields = EnhancedTransactionLogCache
+                .getDocMappingMetadata(work.addAction)
+                .fastFields
                 .map(_.toLowerCase)
               task.fields match {
                 case Some(requestedFields) =>
@@ -1081,12 +1090,14 @@ case class PrewarmCacheCommand(
           val shouldPreloadParquetCols = task.parquetSegments.contains("PARQUET_COLUMNS")
 
           if (shouldPreloadParquetFast || shouldPreloadParquetCols) {
-            try {
+            try
               if (work.splitSearcher.hasParquetCompanion()) {
                 val fieldArgs = task.fields.getOrElse(Seq.empty)
                 if (shouldPreloadParquetFast) {
-                  taskLogger.debug(s"Preloading parquet fast fields for ${work.addAction.path}" +
-                    (if (autoPreloadParquetFast) s" (auto-detected, companionMode=$companionMode)" else ""))
+                  taskLogger.debug(
+                    s"Preloading parquet fast fields for ${work.addAction.path}" +
+                      (if (autoPreloadParquetFast) s" (auto-detected, companionMode=$companionMode)" else "")
+                  )
                   work.splitSearcher.preloadParquetFastFields(fieldArgs: _*).join()
                 }
                 if (shouldPreloadParquetCols) {
@@ -1094,7 +1105,7 @@ case class PrewarmCacheCommand(
                   work.splitSearcher.preloadParquetColumns(fieldArgs: _*).join()
                 }
               }
-            } catch {
+            catch {
               case e: Exception =>
                 taskLogger.warn(s"Parquet preload failed for ${work.addAction.path}: ${e.getMessage}")
             }

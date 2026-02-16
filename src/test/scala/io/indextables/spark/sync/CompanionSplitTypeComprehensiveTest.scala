@@ -22,15 +22,15 @@ import java.nio.file.Files
 
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.functions._
-import org.scalatest.BeforeAndAfterAll
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Comprehensive type tests for companion splits.
  *
- * Tests every supported Spark type as BOTH partition and non-partition columns,
- * verifying:
+ * Tests every supported Spark type as BOTH partition and non-partition columns, verifying:
  *   - Unfiltered reads return correct data
  *   - Equality filters work on non-partition columns (pushed down to tantivy)
  *   - Range filters work on non-partition numeric columns
@@ -45,19 +45,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
     SparkSession.getActiveSession.foreach(_.stop())
     SparkSession.getDefaultSession.foreach(_.stop())
 
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("CompanionSplitTypeComprehensiveTest")
       .master("local[2]")
-      .config("spark.sql.warehouse.dir",
-        Files.createTempDirectory("spark-warehouse").toString)
+      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.sql.extensions",
+      .config(
+        "spark.sql.extensions",
         "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-          "io.delta.sql.DeltaSparkSessionExtension")
-      .config("spark.sql.catalog.spark_catalog",
-        "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+          "io.delta.sql.DeltaSparkSessionExtension"
+      )
+      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
       .config("spark.sql.adaptive.enabled", "false")
       .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
       .config("spark.indextables.aws.accessKey", "test-default-access-key")
@@ -127,7 +128,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq(("alice", 1), ("bob", 2), ("charlie", 3))
         .toDF("name", "id")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
       df.collect().length shouldBe 3
@@ -147,7 +150,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq(("a", 10), ("b", 20), ("c", 30))
         .toDF("name", "value")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -169,7 +174,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq((100L, "x"), (200L, "y"), (300L, "z"))
         .toDF("big_id", "label")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -189,7 +196,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq((1.5f, "a"), (2.5f, "b"), (3.5f, "c"))
         .toDF("score", "label")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
       df.collect().length shouldBe 3
@@ -207,7 +216,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq((10.5, "a"), (20.5, "b"), (30.5, "c"))
         .toDF("amount", "label")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -227,7 +238,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq((1, true), (2, false), (3, true), (4, false))
         .toDF("id", "active")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
       df.collect().length shouldBe 4
@@ -245,20 +258,18 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  event_date DATE
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  event_date DATE
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, DATE '2024-01-15'),
-           |  (2, DATE '2024-06-15'),
-           |  (3, DATE '2024-12-25')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, DATE '2024-01-15'),
+                   |  (2, DATE '2024-06-15'),
+                   |  (3, DATE '2024-12-25')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -274,20 +285,18 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  created_at TIMESTAMP
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  created_at TIMESTAMP
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, TIMESTAMP '2024-01-15 10:30:00'),
-           |  (2, TIMESTAMP '2024-06-15 14:00:00'),
-           |  (3, TIMESTAMP '2024-12-25 08:00:00')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, TIMESTAMP '2024-01-15 10:30:00'),
+                   |  (2, TIMESTAMP '2024-06-15 14:00:00'),
+                   |  (3, TIMESTAMP '2024-12-25 08:00:00')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -301,22 +310,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  tags ARRAY<STRING>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  tags ARRAY<STRING>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, array('a', 'b', 'c')
-           |UNION ALL
-           |SELECT 2, array('x', 'y')
-           |UNION ALL
-           |SELECT 3, array('single')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, array('a', 'b', 'c')
+                   |UNION ALL
+                   |SELECT 2, array('x', 'y')
+                   |UNION ALL
+                   |SELECT 3, array('single')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -334,20 +341,18 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  info STRUCT<first_name: STRING, age: INT>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  info STRUCT<first_name: STRING, age: INT>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, named_struct('first_name', 'Alice', 'age', 30)
-           |UNION ALL
-           |SELECT 2, named_struct('first_name', 'Bob', 'age', 25)
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, named_struct('first_name', 'Alice', 'age', 30)
+                   |UNION ALL
+                   |SELECT 2, named_struct('first_name', 'Bob', 'age', 25)
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 2
 
@@ -364,20 +369,18 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  attrs MAP<STRING, STRING>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  attrs MAP<STRING, STRING>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, map('color', 'red', 'size', 'large')
-           |UNION ALL
-           |SELECT 2, map('color', 'blue')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, map('color', 'red', 'size', 'large')
+                   |UNION ALL
+                   |SELECT 2, map('color', 'blue')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 2
 
@@ -401,9 +404,12 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq((1, "us-east"), (2, "us-west"), (3, "eu-west"))
         .toDF("id", "region")
-        .write.format("delta").partitionBy("region").save(deltaPath)
+        .write
+        .format("delta")
+        .partitionBy("region")
+        .save(deltaPath)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -420,9 +426,12 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq(("a", 2023), ("b", 2024), ("c", 2025))
         .toDF("name", "year")
-        .write.format("delta").partitionBy("year").save(deltaPath)
+        .write
+        .format("delta")
+        .partitionBy("year")
+        .save(deltaPath)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -436,21 +445,19 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  name STRING,
-           |  epoch LONG
-           |) USING DELTA
-           |PARTITIONED BY (epoch)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  name STRING,
+                   |  epoch LONG
+                   |) USING DELTA
+                   |PARTITIONED BY (epoch)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  ('a', 1000000000),
-           |  ('b', 2000000000),
-           |  ('c', 3000000000)
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  ('a', 1000000000),
+                   |  ('b', 2000000000),
+                   |  ('c', 3000000000)
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -467,9 +474,12 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq(("active-1", true), ("active-2", true), ("inactive-1", false))
         .toDF("name", "is_active")
-        .write.format("delta").partitionBy("is_active").save(deltaPath)
+        .write
+        .format("delta")
+        .partitionBy("is_active")
+        .save(deltaPath)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -483,22 +493,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  event_date DATE
-           |) USING DELTA
-           |PARTITIONED BY (event_date)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  event_date DATE
+                   |) USING DELTA
+                   |PARTITIONED BY (event_date)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'Alice', DATE '2024-01-15'),
-           |  (2, 'Bob', DATE '2024-06-15'),
-           |  (3, 'Charlie', DATE '2024-12-25')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice', DATE '2024-01-15'),
+                   |  (2, 'Bob', DATE '2024-06-15'),
+                   |  (3, 'Charlie', DATE '2024-12-25')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -513,22 +521,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  version DOUBLE
-           |) USING DELTA
-           |PARTITIONED BY (version)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  version DOUBLE
+                   |) USING DELTA
+                   |PARTITIONED BY (version)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'a', 1.0),
-           |  (2, 'b', 2.0),
-           |  (3, 'c', 3.0)
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'a', 1.0),
+                   |  (2, 'b', 2.0),
+                   |  (3, 'c', 3.0)
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -546,23 +552,21 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  score DOUBLE,
-           |  region STRING
-           |) USING DELTA
-           |PARTITIONED BY (region)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  score DOUBLE,
+                   |  region STRING
+                   |) USING DELTA
+                   |PARTITIONED BY (region)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'Alice', 85.0, 'us-east'),
-           |  (2, 'Bob', 92.0, 'us-east'),
-           |  (3, 'Charlie', 78.0, 'eu-west'),
-           |  (4, 'Dave', 95.0, 'eu-west'),
-           |  (5, 'Eve', 88.0, 'us-west')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice', 85.0, 'us-east'),
+                   |  (2, 'Bob', 92.0, 'us-east'),
+                   |  (3, 'Charlie', 78.0, 'eu-west'),
+                   |  (4, 'Dave', 95.0, 'eu-west'),
+                   |  (5, 'Eve', 88.0, 'us-west')
+                   |""".stripMargin)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -582,21 +586,19 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  category STRING
-           |) USING DELTA
-           |PARTITIONED BY (category)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  category STRING
+                   |) USING DELTA
+                   |PARTITIONED BY (category)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'Item1', 'electronics'),
-           |  (2, 'Item2', 'electronics'),
-           |  (3, 'Item3', 'clothing'),
-           |  (4, 'Item4', 'food')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Item1', 'electronics'),
+                   |  (2, 'Item2', 'electronics'),
+                   |  (3, 'Item3', 'clothing'),
+                   |  (4, 'Item4', 'food')
+                   |""".stripMargin)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -611,23 +613,21 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  score INT,
-           |  dept STRING
-           |) USING DELTA
-           |PARTITIONED BY (dept)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  score INT,
+                   |  dept STRING
+                   |) USING DELTA
+                   |PARTITIONED BY (dept)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'Alice', 85, 'engineering'),
-           |  (2, 'Bob', 92, 'engineering'),
-           |  (3, 'Charlie', 78, 'marketing'),
-           |  (4, 'Dave', 95, 'marketing'),
-           |  (5, 'Eve', 60, 'engineering')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice', 85, 'engineering'),
+                   |  (2, 'Bob', 92, 'engineering'),
+                   |  (3, 'Charlie', 78, 'marketing'),
+                   |  (4, 'Dave', 95, 'marketing'),
+                   |  (5, 'Eve', 60, 'engineering')
+                   |""".stripMargin)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -651,26 +651,24 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  str_col STRING,
-           |  int_col INT,
-           |  long_col LONG,
-           |  float_col FLOAT,
-           |  double_col DOUBLE,
-           |  bool_col BOOLEAN,
-           |  date_col DATE,
-           |  ts_col TIMESTAMP
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  str_col STRING,
+                   |  int_col INT,
+                   |  long_col LONG,
+                   |  float_col FLOAT,
+                   |  double_col DOUBLE,
+                   |  bool_col BOOLEAN,
+                   |  date_col DATE,
+                   |  ts_col TIMESTAMP
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  ('hello', 1, 100, 1.5, 10.5, true,  DATE '2024-01-01', TIMESTAMP '2024-01-01 12:00:00'),
-           |  ('world', 2, 200, 2.5, 20.5, false, DATE '2024-06-15', TIMESTAMP '2024-06-15 18:30:00'),
-           |  ('test',  3, 300, 3.5, 30.5, true,  DATE '2024-12-25', TIMESTAMP '2024-12-25 06:00:00')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  ('hello', 1, 100, 1.5, 10.5, true,  DATE '2024-01-01', TIMESTAMP '2024-01-01 12:00:00'),
+                   |  ('world', 2, 200, 2.5, 20.5, false, DATE '2024-06-15', TIMESTAMP '2024-06-15 18:30:00'),
+                   |  ('test',  3, 300, 3.5, 30.5, true,  DATE '2024-12-25', TIMESTAMP '2024-12-25 06:00:00')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -701,31 +699,29 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  tags ARRAY<STRING>,
-           |  info STRUCT<city: STRING, zip: INT>,
-           |  attrs MAP<STRING, STRING>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  tags ARRAY<STRING>,
+                   |  info STRUCT<city: STRING, zip: INT>,
+                   |  attrs MAP<STRING, STRING>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, 'Alice', array('dev', 'scala'),
-           |       named_struct('city', 'NYC', 'zip', 10001),
-           |       map('role', 'engineer')
-           |UNION ALL
-           |SELECT 2, 'Bob', array('qa'),
-           |       named_struct('city', 'LA', 'zip', 90001),
-           |       map('role', 'manager')
-           |UNION ALL
-           |SELECT 3, 'Charlie', array('dev', 'python', 'rust'),
-           |       named_struct('city', 'SF', 'zip', 94101),
-           |       map('role', 'engineer', 'level', 'senior')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, 'Alice', array('dev', 'scala'),
+                   |       named_struct('city', 'NYC', 'zip', 10001),
+                   |       map('role', 'engineer')
+                   |UNION ALL
+                   |SELECT 2, 'Bob', array('qa'),
+                   |       named_struct('city', 'LA', 'zip', 90001),
+                   |       map('role', 'manager')
+                   |UNION ALL
+                   |SELECT 3, 'Charlie', array('dev', 'python', 'rust'),
+                   |       named_struct('city', 'SF', 'zip', 94101),
+                   |       map('role', 'engineer', 'level', 'senior')
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -755,24 +751,22 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  region STRING,
-           |  year INT
-           |) USING DELTA
-           |PARTITIONED BY (region, year)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  region STRING,
+                   |  year INT
+                   |) USING DELTA
+                   |PARTITIONED BY (region, year)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'Alice', 'us', 2023),
-           |  (2, 'Bob', 'us', 2024),
-           |  (3, 'Charlie', 'eu', 2023),
-           |  (4, 'Dave', 'eu', 2024)
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice', 'us', 2023),
+                   |  (2, 'Bob', 'us', 2024),
+                   |  (3, 'Charlie', 'eu', 2023),
+                   |  (4, 'Dave', 'eu', 2024)
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 4
 
@@ -797,25 +791,23 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  tags ARRAY<STRING>,
-           |  event_date DATE
-           |) USING DELTA
-           |PARTITIONED BY (event_date)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  tags ARRAY<STRING>,
+                   |  event_date DATE
+                   |) USING DELTA
+                   |PARTITIONED BY (event_date)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, 'Alice', array('a', 'b'), DATE '2024-01-15'
-           |UNION ALL
-           |SELECT 2, 'Bob', array('c'), DATE '2024-06-15'
-           |UNION ALL
-           |SELECT 3, 'Charlie', array('d', 'e', 'f'), DATE '2024-12-25'
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, 'Alice', array('a', 'b'), DATE '2024-01-15'
+                   |UNION ALL
+                   |SELECT 2, 'Bob', array('c'), DATE '2024-06-15'
+                   |UNION ALL
+                   |SELECT 3, 'Charlie', array('d', 'e', 'f'), DATE '2024-12-25'
+                   |""".stripMargin)
 
-      val df = buildAndReadCompanion(deltaPath, indexPath)
+      val df      = buildAndReadCompanion(deltaPath, indexPath)
       val results = df.collect()
       results.length shouldBe 3
 
@@ -825,9 +817,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       dates.map(_.toString).toSet shouldBe Set("2024-01-15", "2024-06-15", "2024-12-25")
 
       // Verify array values deserialized
-      results.foreach { row =>
-        assert(row.getAs[Seq[String]]("tags") != null, "tags should not be null")
-      }
+      results.foreach(row => assert(row.getAs[Seq[String]]("tags") != null, "tags should not be null"))
 
       // Filter on name (non-partition) — tests Bug #3 fix with complex types present
       val nameResult = df.filter(col("name") === "Bob").collect()
@@ -844,7 +834,10 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val ss = spark; import ss.implicits._
       Seq((1, "a"), (2, "a"), (3, "b"))
         .toDF("id", "group")
-        .write.format("delta").partitionBy("group").save(deltaPath)
+        .write
+        .format("delta")
+        .partitionBy("group")
+        .save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
@@ -868,20 +861,18 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       // Create Delta table with a message column (STRING in Delta, but we want TEXT indexing)
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  status STRING,
-           |  message STRING
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  status STRING,
+                   |  message STRING
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'open', 'the quick brown fox jumps over the lazy dog'),
-           |  (2, 'closed', 'machine learning is transforming the world'),
-           |  (3, 'open', 'apache spark processes big data efficiently'),
-           |  (4, 'closed', 'the lazy cat sleeps all day long')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'open', 'the quick brown fox jumps over the lazy dog'),
+                   |  (2, 'closed', 'machine learning is transforming the world'),
+                   |  (3, 'open', 'apache spark processes big data efficiently'),
+                   |  (4, 'closed', 'the lazy cat sleeps all day long')
+                   |""".stripMargin)
 
       // Build companion with INDEXING MODES: message as TEXT
       val syncResult = spark.sql(
@@ -898,16 +889,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       df.createOrReplaceTempView("indexing_modes_test")
 
       // indexquery on TEXT field should find tokenized matches
-      val iqResults = spark.sql(
-        "SELECT id, message FROM indexing_modes_test WHERE message indexquery 'lazy'"
-      ).collect()
+      val iqResults = spark
+        .sql(
+          "SELECT id, message FROM indexing_modes_test WHERE message indexquery 'lazy'"
+        )
+        .collect()
       iqResults.length shouldBe 2
       iqResults.map(_.getInt(0)).toSet shouldBe Set(1, 4)
 
       // indexquery with multiple terms
-      val iqMulti = spark.sql(
-        "SELECT id FROM indexing_modes_test WHERE message indexquery 'machine learning'"
-      ).collect()
+      val iqMulti = spark
+        .sql(
+          "SELECT id FROM indexing_modes_test WHERE message indexquery 'machine learning'"
+        )
+        .collect()
       iqMulti.length shouldBe 1
       iqMulti.head.getInt(0) shouldBe 2
 
@@ -924,21 +919,19 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       // Create Delta table with a STRING column holding IP addresses
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  name STRING,
-           |  ip STRING
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  ip STRING
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'server1', '192.168.1.1'),
-           |  (2, 'server2', '192.168.1.2'),
-           |  (3, 'server3', '192.168.1.10'),
-           |  (4, 'server4', '10.0.0.1'),
-           |  (5, 'server5', '10.0.0.2')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'server1', '192.168.1.1'),
+                   |  (2, 'server2', '192.168.1.2'),
+                   |  (3, 'server3', '192.168.1.10'),
+                   |  (4, 'server4', '10.0.0.1'),
+                   |  (5, 'server5', '10.0.0.2')
+                   |""".stripMargin)
 
       // Build companion with INDEXING MODES: ip as ipaddress
       val syncResult = spark.sql(
@@ -955,16 +948,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       df.createOrReplaceTempView("ip_modes_test")
 
       // Exact IP match via indexquery
-      val exact = spark.sql(
-        "SELECT id FROM ip_modes_test WHERE ip indexquery '192.168.1.1'"
-      ).collect()
+      val exact = spark
+        .sql(
+          "SELECT id FROM ip_modes_test WHERE ip indexquery '192.168.1.1'"
+        )
+        .collect()
       exact.length shouldBe 1
       exact.head.getInt(0) shouldBe 1
 
       // IP range query via indexquery
-      val range = spark.sql(
-        "SELECT id FROM ip_modes_test WHERE ip indexquery '[192.168.1.0 TO 192.168.1.5]'"
-      ).collect()
+      val range = spark
+        .sql(
+          "SELECT id FROM ip_modes_test WHERE ip indexquery '[192.168.1.0 TO 192.168.1.5]'"
+        )
+        .collect()
       range.length shouldBe 2
       range.map(_.getInt(0)).toSet shouldBe Set(1, 2)
 
@@ -981,21 +978,19 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       // Create Delta table with a Struct column (auto-detected as JSON)
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  label STRING,
-           |  metadata STRUCT<color: STRING, size: INT>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  label STRING,
+                   |  metadata STRUCT<color: STRING, size: INT>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, 'item-a', named_struct('color', 'red', 'size', 10)
-           |UNION ALL
-           |SELECT 2, 'item-b', named_struct('color', 'blue', 'size', 20)
-           |UNION ALL
-           |SELECT 3, 'item-c', named_struct('color', 'red', 'size', 30)
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, 'item-a', named_struct('color', 'red', 'size', 10)
+                   |UNION ALL
+                   |SELECT 2, 'item-b', named_struct('color', 'blue', 'size', 20)
+                   |UNION ALL
+                   |SELECT 3, 'item-c', named_struct('color', 'red', 'size', 30)
+                   |""".stripMargin)
 
       // Build companion — Struct fields are auto-detected as JSON
       val syncResult = spark.sql(
@@ -1035,19 +1030,17 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       // Create Delta table with a plain STRING column containing raw JSON strings
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id INT,
-           |  label STRING,
-           |  payload STRING
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  label STRING,
+                   |  payload STRING
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'first',  '{"user":"alice","score":42}'),
-           |  (2, 'second', '{"user":"bob","score":99}'),
-           |  (3, 'third',  '{"user":"alice","score":7}')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'first',  '{"user":"alice","score":42}'),
+                   |  (2, 'second', '{"user":"bob","score":99}'),
+                   |  (3, 'third',  '{"user":"alice","score":7}')
+                   |""".stripMargin)
 
       // Build companion with INDEXING MODES: payload as JSON
       val syncResult = spark.sql(
@@ -1067,16 +1060,20 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       df.collect().length shouldBe 3
 
       // Nested field query via indexquery (tantivy JSON path syntax: field.key:value)
-      val aliceResults = spark.sql(
-        "SELECT id FROM json_string_test WHERE payload indexquery 'payload.user:alice'"
-      ).collect()
+      val aliceResults = spark
+        .sql(
+          "SELECT id FROM json_string_test WHERE payload indexquery 'payload.user:alice'"
+        )
+        .collect()
       aliceResults.length shouldBe 2
       aliceResults.map(_.getInt(0)).toSet shouldBe Set(1, 3)
 
       // Another nested field query
-      val bobResults = spark.sql(
-        "SELECT id FROM json_string_test WHERE payload indexquery 'payload.user:bob'"
-      ).collect()
+      val bobResults = spark
+        .sql(
+          "SELECT id FROM json_string_test WHERE payload indexquery 'payload.user:bob'"
+        )
+        .collect()
       bobResults.length shouldBe 1
       bobResults.head.getInt(0) shouldBe 2
 
@@ -1097,8 +1094,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
         (1, "alice", "Engineering"),
         (2, "bob", "Marketing"),
         (3, "charlie", "Engineering")
-      ).toDF("userId", "userName", "deptName")
-        .write.format("delta").save(deltaPath)
+      ).toDF("userId", "userName", "deptName").write.format("delta").save(deltaPath)
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
       df.createOrReplaceTempView("mixed_case_test")

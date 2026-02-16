@@ -30,33 +30,31 @@ import io.indextables.spark.RealS3TestBase
  * Real S3 integration tests for BUILD INDEXTABLES COMPANION FOR DELTA.
  *
  * These tests require:
- * 1. AWS credentials in ~/.aws/credentials
- * 2. An S3 bucket for test data (configured via S3_BUCKET constant)
- * 3. A Delta table on S3 (or tests that create one)
+ *   1. AWS credentials in ~/.aws/credentials 2. An S3 bucket for test data (configured via S3_BUCKET constant) 3. A
+ *      Delta table on S3 (or tests that create one)
  *
  * Tests are automatically skipped if credentials are not available.
  */
 class RealS3SyncToExternalTest extends RealS3TestBase {
 
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
+  private val S3_BUCKET    = "test-tantivy4sparkbucket"
+  private val S3_REGION    = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
   private val testBasePath = s"$S3_BASE_PATH/sync-test-$testRunId"
 
-  private lazy val hasDeltaSparkDataSource: Boolean = {
+  private lazy val hasDeltaSparkDataSource: Boolean =
     try {
       Class.forName("io.delta.sql.DeltaSparkSessionExtension")
       true
     } catch {
       case _: ClassNotFoundException => false
     }
-  }
 
   private var awsCredentials: Option[(String, String)] = None
 
   private def loadAwsCredentials(): Option[(String, String)] = {
-    val home = System.getProperty("user.home")
+    val home     = System.getProperty("user.home")
     val credFile = new File(s"$home/.aws/credentials")
 
     if (!credFile.exists()) {
@@ -90,19 +88,20 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     // Recreate SparkSession with Delta extensions if available
     if (hasDeltaSparkDataSource) {
       spark.stop()
-      spark = SparkSession.builder()
+      spark = SparkSession
+        .builder()
         .appName("RealS3SyncTest")
         .master("local[2]")
-        .config("spark.sql.warehouse.dir",
-          java.nio.file.Files.createTempDirectory("spark-warehouse").toString)
+        .config("spark.sql.warehouse.dir", java.nio.file.Files.createTempDirectory("spark-warehouse").toString)
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
         .config("spark.sql.adaptive.enabled", "false")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-        .config("spark.sql.extensions",
+        .config(
+          "spark.sql.extensions",
           "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-            "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog",
-          "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+            "io.delta.sql.DeltaSparkSessionExtension"
+        )
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
@@ -134,7 +133,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
   test("BUILD INDEXTABLES COMPANION FOR DELTA should parse with S3 paths") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '${testBasePath}/delta_source' AT LOCATION '${testBasePath}/index_dest' DRY RUN"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$testBasePath/delta_source' AT LOCATION '$testBasePath/index_dest' DRY RUN"
     )
 
     // DRY RUN should return a result even without a real Delta table
@@ -162,7 +161,7 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
 
   test("SYNC command should return error status for non-existent Delta table") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/nonexistent_delta_${testRunId}' AT LOCATION '/tmp/nonexistent_index_${testRunId}'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/nonexistent_delta_$testRunId' AT LOCATION '/tmp/nonexistent_index_$testRunId'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -172,8 +171,10 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
   // --- Real S3 Integration Tests ---
 
   test("SYNC should create companion index from S3 Delta table") {
-    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
-      "AWS credentials or Delta Spark DataSource not available - skipping test")
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
 
     val deltaPath = s"$testBasePath/delta_table"
     val indexPath = s"$testBasePath/companion_index"
@@ -206,13 +207,15 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     row.getString(0) shouldBe indexPath // table_path
     row.getString(1) shouldBe deltaPath // source_path
     row.getString(2) shouldBe "success" // status
-    row.getInt(4) should be > 0 // splits_created
-    row.getInt(6) should be > 0 // parquet_files_indexed
+    row.getInt(4) should be > 0         // splits_created
+    row.getInt(6) should be > 0         // parquet_files_indexed
   }
 
   test("SYNC should support DRY RUN mode on S3") {
-    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
-      "AWS credentials or Delta Spark DataSource not available - skipping test")
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
 
     val deltaPath = s"$testBasePath/delta_dryrun"
     val indexPath = s"$testBasePath/companion_dryrun"
@@ -240,8 +243,10 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
   }
 
   test("SYNC should handle partitioned Delta tables on S3") {
-    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
-      "AWS credentials or Delta Spark DataSource not available - skipping test")
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
 
     val deltaPath = s"$testBasePath/delta_partitioned"
     val indexPath = s"$testBasePath/companion_partitioned"
@@ -273,8 +278,10 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
   }
 
   test("incremental SYNC should detect no-op when already synced") {
-    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
-      "AWS credentials or Delta Spark DataSource not available - skipping test")
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
 
     val deltaPath = s"$testBasePath/delta_incremental"
     val indexPath = s"$testBasePath/companion_incremental"
@@ -305,8 +312,10 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
   }
 
   test("SYNC with multi-level partitioned Delta table should create readable companion splits") {
-    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
-      "AWS credentials or Delta Spark DataSource not available - skipping test")
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
 
     val deltaPath = s"$testBasePath/delta_multi_partition"
     val indexPath = s"$testBasePath/companion_multi_partition"
@@ -340,8 +349,8 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     rows.length shouldBe 1
     val row = rows(0)
     row.getString(2) shouldBe "success" // status
-    row.getInt(4) should be > 0 // splits_created
-    row.getInt(6) should be > 0 // parquet_files_indexed
+    row.getInt(4) should be > 0         // splits_created
+    row.getInt(6) should be > 0         // parquet_files_indexed
 
     // Step 3: Verify transaction log has correct partition structure
     import org.apache.hadoop.fs.Path
@@ -363,9 +372,8 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
       // Verify we have files for multiple partitions
       val uniquePartitions = files.map(_.partitionValues).toSet
       uniquePartitions.size should be >= 3 // at least 3 distinct (load_date, load_hour) combos
-    } finally {
+    } finally
       txLog.close()
-    }
 
     // Step 4: Read the companion index back and verify splits are physically accessible in S3
     val (accessKey, secretKey) = awsCredentials.get
@@ -395,8 +403,10 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
   }
 
   test("SYNC with FASTFIELDS MODE should be reflected in companion splits") {
-    assume(awsCredentials.isDefined && hasDeltaSparkDataSource,
-      "AWS credentials or Delta Spark DataSource not available - skipping test")
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
 
     val deltaPath = s"$testBasePath/delta_fastfield"
     val indexPath = s"$testBasePath/companion_fastfield"
@@ -427,11 +437,8 @@ class RealS3SyncToExternalTest extends RealS3TestBase {
     try {
       val files = txLog.listFiles()
       files should not be empty
-      files.foreach { file =>
-        file.companionFastFieldMode shouldBe Some("PARQUET_ONLY")
-      }
-    } finally {
+      files.foreach(file => file.companionFastFieldMode shouldBe Some("PARQUET_ONLY"))
+    } finally
       txLog.close()
-    }
   }
 }

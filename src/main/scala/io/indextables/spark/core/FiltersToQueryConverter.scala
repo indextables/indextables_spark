@@ -132,9 +132,9 @@ object FiltersToQueryConverter {
   }
 
   /**
-   * Remove IsNotNull filters that are redundant because a value-bearing sibling filter
-   * already references the same attribute. A document matching EqualTo(X, v) or
-   * GreaterThan(X, v) inherently has a non-null X, so the existence check is meaningless.
+   * Remove IsNotNull filters that are redundant because a value-bearing sibling filter already references the same
+   * attribute. A document matching EqualTo(X, v) or GreaterThan(X, v) inherently has a non-null X, so the existence
+   * check is meaningless.
    */
   private def removeRedundantIsNotNull(filters: Array[Filter]): Array[Filter] = {
     import org.apache.spark.sql.sources._
@@ -1597,9 +1597,9 @@ object FiltersToQueryConverter {
           queryLog(s"Creating IsNotNull SplitExistsQuery for TEXT/JSON field: $attribute IS NOT NULL")
           Some(new SplitExistsQuery(attribute))
         } else {
-          try {
+          try
             Some(splitSearchEngine.parseQuery(s"$attribute:*"))
-          } catch {
+          catch {
             case e: Exception =>
               queryLog(s"Failed to create IsNotNull wildcard query for '$attribute', falling back to SplitExistsQuery: ${e.getMessage}")
               Some(new SplitExistsQuery(attribute))

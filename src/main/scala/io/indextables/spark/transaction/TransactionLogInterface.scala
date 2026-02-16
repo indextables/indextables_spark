@@ -240,9 +240,8 @@ trait TransactionLogInterface extends AutoCloseable {
   /**
    * Commits a sync operation atomically, optionally including a metadata update.
    *
-   * This is used by BUILD INDEXTABLES COMPANION to commit companion split changes
-   * along with companion metadata (source path, synced version, etc.) in a single
-   * transaction.
+   * This is used by BUILD INDEXTABLES COMPANION to commit companion split changes along with companion metadata (source
+   * path, synced version, etc.) in a single transaction.
    *
    * @param removeActions
    *   Sequence of remove actions for invalidated splits

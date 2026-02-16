@@ -88,7 +88,13 @@ class IndexTables4SparkWriteBuilder(
 
       logger.info("Using IndexTables4SparkOptimizedWrite (shuffle optimization enabled)")
       val write = new IndexTables4SparkOptimizedWrite(
-        transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite, optimizedConfig
+        transactionLog,
+        tablePath,
+        info,
+        serializedOptions,
+        hadoopConf,
+        isOverwrite,
+        optimizedConfig
       )
       logger.info(s"Created write instance: ${write.getClass.getSimpleName}")
       write

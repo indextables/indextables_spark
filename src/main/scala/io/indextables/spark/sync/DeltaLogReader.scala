@@ -19,24 +19,23 @@ package io.indextables.spark.sync
 
 import scala.jdk.CollectionConverters._
 
-import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaTableReader}
-
 import org.apache.spark.sql.types._
 
+import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaTableReader}
 import org.slf4j.LoggerFactory
 
 /**
- * Wraps tantivy4java's DeltaTableReader (delta-kernel-rs) to provide a simple
- * interface for reading Delta transaction logs.
+ * Wraps tantivy4java's DeltaTableReader (delta-kernel-rs) to provide a simple interface for reading Delta transaction
+ * logs.
  *
- * Uses Rust-based delta-kernel-rs via JNI — no Hadoop dependency, no Java-side
- * credential chain issues. Native S3/Azure support with credentials passed directly.
+ * Uses Rust-based delta-kernel-rs via JNI — no Hadoop dependency, no Java-side credential chain issues. Native S3/Azure
+ * support with credentials passed directly.
  *
  * @param deltaTablePath
  *   Path to the Delta table root (containing `_delta_log/`)
  * @param sourceCredentials
- *   Credentials for accessing the Delta table's storage (spark.indextables.* keys).
- *   Translated to delta-kernel-rs credential keys (aws_access_key_id, etc.).
+ *   Credentials for accessing the Delta table's storage (spark.indextables.* keys). Translated to delta-kernel-rs
+ *   credential keys (aws_access_key_id, etc.).
  */
 class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, String]) {
   private val logger = LoggerFactory.getLogger(classOf[DeltaLogReader])
@@ -50,8 +49,10 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
 
   // Lazily list files once and cache (used by currentVersion, getAllFiles, partitionColumns)
   private lazy val fileEntries: java.util.List[DeltaFileEntry] = {
-    logger.info(s"Reading Delta table at $deltaTablePath via DeltaTableReader" +
-      (if (deltaKernelPath != deltaTablePath) s" (normalized to $deltaKernelPath)" else ""))
+    logger.info(
+      s"Reading Delta table at $deltaTablePath via DeltaTableReader" +
+        (if (deltaKernelPath != deltaTablePath) s" (normalized to $deltaKernelPath)" else "")
+    )
     DeltaTableReader.listFiles(deltaKernelPath, deltaConfig)
   }
 
@@ -86,20 +87,22 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
   /** Get the schema from Delta table metadata as a Spark StructType. */
   def schema(): StructType = {
     val deltaSchema = DeltaTableReader.readSchema(deltaKernelPath, deltaConfig)
-    logger.info(s"Delta schema at $deltaTablePath: ${deltaSchema.getFieldCount} fields, " +
-      s"version=${deltaSchema.getTableVersion}")
+    logger.info(
+      s"Delta schema at $deltaTablePath: ${deltaSchema.getFieldCount} fields, " +
+        s"version=${deltaSchema.getTableVersion}"
+    )
     DataType.fromJson(deltaSchema.getSchemaJson()).asInstanceOf[StructType]
   }
 
   /**
    * Normalize URL scheme for delta-kernel-rs compatibility.
    *
-   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's
-   * wasbs:// URL scheme. Convert wasbs:// to az:// which object_store recognizes as
-   * Azure Blob Storage (using the Blob endpoint, not the DFS endpoint).
+   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's wasbs:// URL scheme. Convert
+   * wasbs:// to az:// which object_store recognizes as Azure Blob Storage (using the Blob endpoint, not the DFS
+   * endpoint).
    *
-   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or
-   * SoftDelete enabled, which reject requests on the DFS endpoint.
+   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or SoftDelete enabled, which reject
+   * requests on the DFS endpoint.
    */
   private def normalizeForDeltaKernel(path: String): String = {
     val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
@@ -111,26 +114,32 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
   }
 
   /**
-   * Translate spark.indextables.* credential keys to the keys expected
-   * by tantivy4java's DeltaTableReader (delta-kernel-rs).
+   * Translate spark.indextables.* credential keys to the keys expected by tantivy4java's DeltaTableReader
+   * (delta-kernel-rs).
    */
   private def translateCredentials(
     creds: Map[String, String]
   ): java.util.Map[String, String] = {
     val config = new java.util.HashMap[String, String]()
     // AWS
-    creds.get("spark.indextables.aws.accessKey")
+    creds
+      .get("spark.indextables.aws.accessKey")
       .foreach(v => config.put("aws_access_key_id", v))
-    creds.get("spark.indextables.aws.secretKey")
+    creds
+      .get("spark.indextables.aws.secretKey")
       .foreach(v => config.put("aws_secret_access_key", v))
-    creds.get("spark.indextables.aws.sessionToken")
+    creds
+      .get("spark.indextables.aws.sessionToken")
       .foreach(v => config.put("aws_session_token", v))
-    creds.get("spark.indextables.aws.region")
+    creds
+      .get("spark.indextables.aws.region")
       .foreach(v => config.put("aws_region", v))
     // Azure
-    creds.get("spark.indextables.azure.accountName")
+    creds
+      .get("spark.indextables.azure.accountName")
       .foreach(v => config.put("azure_account_name", v))
-    creds.get("spark.indextables.azure.accountKey")
+    creds
+      .get("spark.indextables.azure.accountKey")
       .foreach(v => config.put("azure_access_key", v))
     config
   }

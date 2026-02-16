@@ -20,18 +20,17 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
 
-import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Reproduction tests for companion split bugs:
- *   1. Array[String] field returns null with "Cannot deserialize value of type LinkedHashMap" error
- *   2. Date field throws ClassCastException
- *   3. Any predicate returns zero rows
+ *   1. Array[String] field returns null with "Cannot deserialize value of type LinkedHashMap" error 2. Date field
+ *      throws ClassCastException 3. Any predicate returns zero rows
  */
 class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -41,19 +40,20 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
     SparkSession.getActiveSession.foreach(_.stop())
     SparkSession.getDefaultSession.foreach(_.stop())
 
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("CompanionSplitBugReproductionTest")
       .master("local[2]")
-      .config("spark.sql.warehouse.dir",
-        Files.createTempDirectory("spark-warehouse").toString)
+      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.sql.extensions",
+      .config(
+        "spark.sql.extensions",
         "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-          "io.delta.sql.DeltaSparkSessionExtension")
-      .config("spark.sql.catalog.spark_catalog",
-        "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+          "io.delta.sql.DeltaSparkSessionExtension"
+      )
+      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
       .config("spark.sql.adaptive.enabled", "false")
       .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
       .config("spark.indextables.aws.accessKey", "test-default-access-key")
@@ -108,21 +108,19 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       val indexPath = new File(tempDir, "companion_array_bug").getAbsolutePath
 
       // Create Delta table with Array[String] column
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id LONG,
-           |  name STRING,
-           |  tags ARRAY<STRING>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id LONG,
+                   |  name STRING,
+                   |  tags ARRAY<STRING>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, 'Alice', array('tag1', 'tag2', 'tag3')
-           |UNION ALL
-           |SELECT 2, 'Bob', array('alpha', 'beta')
-           |UNION ALL
-           |SELECT 3, 'Charlie', array('x', 'y', 'z')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, 'Alice', array('tag1', 'tag2', 'tag3')
+                   |UNION ALL
+                   |SELECT 2, 'Bob', array('alpha', 'beta')
+                   |UNION ALL
+                   |SELECT 3, 'Charlie', array('x', 'y', 'z')
+                   |""".stripMargin)
 
       // Build companion index
       val syncResult = spark.sql(
@@ -144,7 +142,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       // Verify array fields are not null
       results.foreach { row =>
         val tagsIdx = row.fieldIndex("tags")
-        val tags = row.get(tagsIdx)
+        val tags    = row.get(tagsIdx)
         withClue(s"tags field should not be null for row: $row") {
           assert(tags != null, "tags should not be null")
         }
@@ -166,21 +164,19 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       val ss = spark
       import ss.implicits._
 
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id LONG,
-           |  name STRING,
-           |  score DOUBLE,
-           |  event_date DATE
-           |) USING DELTA
-           |PARTITIONED BY (event_date)""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id LONG,
+                   |  name STRING,
+                   |  score DOUBLE,
+                   |  event_date DATE
+                   |) USING DELTA
+                   |PARTITIONED BY (event_date)""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath` VALUES
-           |  (1, 'Alice', 10.5, DATE '2024-01-15'),
-           |  (2, 'Bob', 20.5, DATE '2024-02-20'),
-           |  (3, 'Charlie', 30.5, DATE '2024-03-25')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice', 10.5, DATE '2024-01-15'),
+                   |  (2, 'Bob', 20.5, DATE '2024-02-20'),
+                   |  (3, 'Charlie', 30.5, DATE '2024-03-25')
+                   |""".stripMargin)
 
       // Build companion index
       val syncResult = spark.sql(
@@ -204,13 +200,11 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       // Verify date partition fields are not null and contain valid dates
       val dateValues = df.select("event_date").collect().map(_.getDate(0))
       dateValues.length shouldBe 3
-      dateValues.foreach { d =>
-        assert(d != null, s"Date partition value should not be null")
-      }
+      dateValues.foreach(d => assert(d != null, s"Date partition value should not be null"))
 
       // Verify specific date values
       val expectedDates = Set("2024-01-15", "2024-02-20", "2024-03-25")
-      val actualDates = dateValues.map(_.toString).toSet
+      val actualDates   = dateValues.map(_.toString).toSet
       actualDates shouldBe expectedDates
     }
   }
@@ -228,9 +222,12 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       import ss.implicits._
 
       // Create a simple Delta table with basic types only
-      (1 to 20).map(i => (i.toLong, s"name_$i", i * 10.0))
+      (1 to 20)
+        .map(i => (i.toLong, s"name_$i", i * 10.0))
         .toDF("id", "name", "score")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       // Build companion index
       val syncResult = spark.sql(
@@ -291,28 +288,26 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       val indexPath = new File(tempDir, "companion_pred_complex").getAbsolutePath
 
       // Create Delta table with all types
-      spark.sql(
-        s"""CREATE TABLE delta.`$deltaPath` (
-           |  id LONG,
-           |  name STRING,
-           |  score DOUBLE,
-           |  active BOOLEAN,
-           |  event_date DATE,
-           |  tags ARRAY<STRING>
-           |) USING DELTA""".stripMargin)
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id LONG,
+                   |  name STRING,
+                   |  score DOUBLE,
+                   |  active BOOLEAN,
+                   |  event_date DATE,
+                   |  tags ARRAY<STRING>
+                   |) USING DELTA""".stripMargin)
 
-      spark.sql(
-        s"""INSERT INTO delta.`$deltaPath`
-           |SELECT 1, 'Alice', 10.5, true, DATE '2024-01-15', array('tag1', 'tag2')
-           |UNION ALL
-           |SELECT 2, 'Bob', 20.5, false, DATE '2024-02-20', array('alpha', 'beta')
-           |UNION ALL
-           |SELECT 3, 'Charlie', 30.5, true, DATE '2024-03-25', array('x')
-           |UNION ALL
-           |SELECT 4, 'Dave', 40.5, false, DATE '2024-04-10', array('y', 'z')
-           |UNION ALL
-           |SELECT 5, 'Eve', 50.5, true, DATE '2024-05-05', array('tag1')
-           |""".stripMargin)
+      spark.sql(s"""INSERT INTO delta.`$deltaPath`
+                   |SELECT 1, 'Alice', 10.5, true, DATE '2024-01-15', array('tag1', 'tag2')
+                   |UNION ALL
+                   |SELECT 2, 'Bob', 20.5, false, DATE '2024-02-20', array('alpha', 'beta')
+                   |UNION ALL
+                   |SELECT 3, 'Charlie', 30.5, true, DATE '2024-03-25', array('x')
+                   |UNION ALL
+                   |SELECT 4, 'Dave', 40.5, false, DATE '2024-04-10', array('y', 'z')
+                   |UNION ALL
+                   |SELECT 5, 'Eve', 50.5, true, DATE '2024-05-05', array('tag1')
+                   |""".stripMargin)
 
       // Build companion index
       val syncResult = spark.sql(
@@ -331,7 +326,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Filter on name (string field)
       val dfNameFilter = dfNoFilter.filter(col("name") === "Alice")
-      val nameResults = dfNameFilter.collect()
+      val nameResults  = dfNameFilter.collect()
       withClue("Filter name='Alice' should return 1 row") {
         nameResults.length shouldBe 1
       }

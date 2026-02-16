@@ -26,13 +26,20 @@ import org.apache.spark.sql.SparkSession
 /**
  * Configuration for an Iceberg catalog test endpoint.
  *
- * @param catalogType Catalog type: "rest", "glue", or "hive"
- * @param uri         Catalog URI (REST endpoint or Hive Metastore thrift URI)
- * @param warehouse   Warehouse location (S3/Azure path)
- * @param token       Bearer token for REST catalog authentication
- * @param credential  OAuth credential for REST catalog
- * @param region      AWS region (for Glue catalog)
- * @param tableIdentifier Iceberg table identifier (e.g., "default.test_events")
+ * @param catalogType
+ *   Catalog type: "rest", "glue", or "hive"
+ * @param uri
+ *   Catalog URI (REST endpoint or Hive Metastore thrift URI)
+ * @param warehouse
+ *   Warehouse location (S3/Azure path)
+ * @param token
+ *   Bearer token for REST catalog authentication
+ * @param credential
+ *   OAuth credential for REST catalog
+ * @param region
+ *   AWS region (for Glue catalog)
+ * @param tableIdentifier
+ *   Iceberg table identifier (e.g., "default.test_events")
  */
 case class IcebergCatalogTestConfig(
   catalogType: String,
@@ -48,9 +55,8 @@ case class IcebergCatalogTestConfig(
 /**
  * Shared trait for Iceberg integration tests.
  *
- * Loads Iceberg catalog configuration from `~/.iceberg/credentials` (INI-style)
- * or environment variables. Provides helpers to configure and clear Spark session
- * properties for Iceberg catalog access.
+ * Loads Iceberg catalog configuration from `~/.iceberg/credentials` (INI-style) or environment variables. Provides
+ * helpers to configure and clear Spark session properties for Iceberg catalog access.
  *
  * INI file format (`~/.iceberg/credentials`):
  * {{{
@@ -71,19 +77,16 @@ case class IcebergCatalogTestConfig(
  * table = default.test_events
  * }}}
  *
- * Environment variable fallback (REST only):
- *   ICEBERG_REST_URI, ICEBERG_WAREHOUSE, ICEBERG_TEST_TABLE, ICEBERG_REST_TOKEN
+ * Environment variable fallback (REST only): ICEBERG_REST_URI, ICEBERG_WAREHOUSE, ICEBERG_TEST_TABLE,
+ * ICEBERG_REST_TOKEN
  */
 trait IcebergTestSupport {
 
   protected var restCatalogConfig: Option[IcebergCatalogTestConfig] = None
   protected var glueCatalogConfig: Option[IcebergCatalogTestConfig] = None
-  protected var hmsCatalogConfig: Option[IcebergCatalogTestConfig] = None
+  protected var hmsCatalogConfig: Option[IcebergCatalogTestConfig]  = None
 
-  /**
-   * Load Iceberg credentials from `~/.iceberg/credentials` and environment variables.
-   * Call this in `beforeAll()`.
-   */
+  /** Load Iceberg credentials from `~/.iceberg/credentials` and environment variables. Call this in `beforeAll()`. */
   protected def loadIcebergCredentials(): Unit = {
     loadFromFile()
     loadFromEnvironment()
@@ -97,7 +100,7 @@ trait IcebergTestSupport {
     }
 
     try {
-      val lines = Files.readAllLines(credPath).asScala
+      val lines                          = Files.readAllLines(credPath).asScala
       var currentSection: Option[String] = None
       val sections = scala.collection.mutable.Map[String, scala.collection.mutable.Map[String, String]]()
 
@@ -118,38 +121,44 @@ trait IcebergTestSupport {
 
       // Parse REST section
       sections.get("rest").foreach { props =>
-        restCatalogConfig = Some(IcebergCatalogTestConfig(
-          catalogType = "rest",
-          uri = props.get("uri"),
-          warehouse = props.get("warehouse"),
-          token = props.get("token"),
-          credential = props.get("credential"),
-          s3Endpoint = props.get("s3_endpoint"),
-          s3PathStyleAccess = props.get("s3_path_style_access"),
-          tableIdentifier = props.getOrElse("table", "default.test_events")
-        ))
+        restCatalogConfig = Some(
+          IcebergCatalogTestConfig(
+            catalogType = "rest",
+            uri = props.get("uri"),
+            warehouse = props.get("warehouse"),
+            token = props.get("token"),
+            credential = props.get("credential"),
+            s3Endpoint = props.get("s3_endpoint"),
+            s3PathStyleAccess = props.get("s3_path_style_access"),
+            tableIdentifier = props.getOrElse("table", "default.test_events")
+          )
+        )
         println("Loaded Iceberg REST catalog config from ~/.iceberg/credentials")
       }
 
       // Parse Glue section
       sections.get("glue").foreach { props =>
-        glueCatalogConfig = Some(IcebergCatalogTestConfig(
-          catalogType = "glue",
-          warehouse = props.get("warehouse"),
-          region = props.get("region"),
-          tableIdentifier = props.getOrElse("table", "default.test_events")
-        ))
+        glueCatalogConfig = Some(
+          IcebergCatalogTestConfig(
+            catalogType = "glue",
+            warehouse = props.get("warehouse"),
+            region = props.get("region"),
+            tableIdentifier = props.getOrElse("table", "default.test_events")
+          )
+        )
         println("Loaded Iceberg Glue catalog config from ~/.iceberg/credentials")
       }
 
       // Parse HMS section
       sections.get("hms").foreach { props =>
-        hmsCatalogConfig = Some(IcebergCatalogTestConfig(
-          catalogType = "hive",
-          uri = props.get("uri"),
-          warehouse = props.get("warehouse"),
-          tableIdentifier = props.getOrElse("table", "default.test_events")
-        ))
+        hmsCatalogConfig = Some(
+          IcebergCatalogTestConfig(
+            catalogType = "hive",
+            uri = props.get("uri"),
+            warehouse = props.get("warehouse"),
+            tableIdentifier = props.getOrElse("table", "default.test_events")
+          )
+        )
         println("Loaded Iceberg HMS catalog config from ~/.iceberg/credentials")
       }
     } catch {
@@ -158,34 +167,33 @@ trait IcebergTestSupport {
     }
   }
 
-  private def loadFromEnvironment(): Unit = {
+  private def loadFromEnvironment(): Unit =
     // Only populate REST config from env vars if not already loaded from file
     if (restCatalogConfig.isEmpty) {
-      val uri = Option(System.getenv("ICEBERG_REST_URI"))
-      val warehouse = Option(System.getenv("ICEBERG_WAREHOUSE"))
-      val table = Option(System.getenv("ICEBERG_TEST_TABLE")).getOrElse("default.test_events")
-      val token = Option(System.getenv("ICEBERG_REST_TOKEN"))
-      val s3Endpoint = Option(System.getenv("ICEBERG_S3_ENDPOINT"))
+      val uri         = Option(System.getenv("ICEBERG_REST_URI"))
+      val warehouse   = Option(System.getenv("ICEBERG_WAREHOUSE"))
+      val table       = Option(System.getenv("ICEBERG_TEST_TABLE")).getOrElse("default.test_events")
+      val token       = Option(System.getenv("ICEBERG_REST_TOKEN"))
+      val s3Endpoint  = Option(System.getenv("ICEBERG_S3_ENDPOINT"))
       val s3PathStyle = Option(System.getenv("ICEBERG_S3_PATH_STYLE_ACCESS"))
 
       if (uri.isDefined) {
-        restCatalogConfig = Some(IcebergCatalogTestConfig(
-          catalogType = "rest",
-          uri = uri,
-          warehouse = warehouse,
-          token = token,
-          s3Endpoint = s3Endpoint,
-          s3PathStyleAccess = s3PathStyle,
-          tableIdentifier = table
-        ))
+        restCatalogConfig = Some(
+          IcebergCatalogTestConfig(
+            catalogType = "rest",
+            uri = uri,
+            warehouse = warehouse,
+            token = token,
+            s3Endpoint = s3Endpoint,
+            s3PathStyleAccess = s3PathStyle,
+            tableIdentifier = table
+          )
+        )
         println("Loaded Iceberg REST catalog config from environment variables")
       }
     }
-  }
 
-  /**
-   * Configure Spark session with Iceberg catalog properties.
-   */
+  /** Configure Spark session with Iceberg catalog properties. */
   protected def configureSparkForCatalog(spark: SparkSession, config: IcebergCatalogTestConfig): Unit = {
     spark.conf.set("spark.indextables.iceberg.catalogType", config.catalogType)
     config.uri.foreach(v => spark.conf.set("spark.indextables.iceberg.uri", v))
@@ -197,9 +205,7 @@ trait IcebergTestSupport {
     config.s3PathStyleAccess.foreach(v => spark.conf.set("spark.indextables.iceberg.s3PathStyleAccess", v))
   }
 
-  /**
-   * Clear Iceberg-specific Spark configuration properties.
-   */
+  /** Clear Iceberg-specific Spark configuration properties. */
   protected def clearSparkIcebergConfig(spark: SparkSession): Unit = {
     val keys = Seq(
       "spark.indextables.iceberg.catalogType",
@@ -211,7 +217,7 @@ trait IcebergTestSupport {
       "spark.indextables.iceberg.s3PathStyleAccess"
     )
     keys.foreach { key =>
-      try { spark.conf.unset(key) }
+      try spark.conf.unset(key)
       catch { case _: Exception => }
     }
   }

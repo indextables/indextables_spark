@@ -508,8 +508,8 @@ class UnityCatalogAWSCredentialProviderTest
     val handler = new HttpHandler {
       override def handle(exchange: HttpExchange): Unit = {
         val method = exchange.getRequestMethod
-        val path = exchange.getRequestURI.getPath
-        val body = new String(exchange.getRequestBody.readAllBytes())
+        val path   = exchange.getRequestURI.getPath
+        val body   = new String(exchange.getRequestBody.readAllBytes())
         val headers = scala.jdk.CollectionConverters
           .mapAsScalaMapConverter(exchange.getRequestHeaders)
           .asScala
@@ -537,8 +537,7 @@ class UnityCatalogAWSCredentialProviderTest
         |}""".stripMargin
     setupTablesHandler(200, tableResponse)
 
-    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId(
-      "catalog.schema.my_table", configMap)
+    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId("catalog.schema.my_table", configMap)
 
     tableId shouldBe "abc-123-uuid"
     requestLog.last.method shouldBe "GET"
@@ -555,8 +554,7 @@ class UnityCatalogAWSCredentialProviderTest
         |}""".stripMargin
     setupTablesHandler(200, tableResponse)
 
-    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.events", configMap)
+    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.events", configMap)
 
     tableInfo.tableId shouldBe "def-456-uuid"
     tableInfo.storageLocation shouldBe "s3://my-bucket/warehouse/events"
@@ -570,8 +568,7 @@ class UnityCatalogAWSCredentialProviderTest
         |}""".stripMargin
     setupTablesHandler(200, tableResponse)
 
-    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.minimal_table", configMap)
+    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.minimal_table", configMap)
 
     tableInfo.tableId shouldBe "ghi-789-uuid"
     tableInfo.storageLocation shouldBe ""
@@ -587,13 +584,11 @@ class UnityCatalogAWSCredentialProviderTest
     setupTablesHandler(200, tableResponse)
 
     // First call - should hit the API
-    val info1 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.cached_table", configMap)
+    val info1 = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.cached_table", configMap)
     val requestsAfterFirst = requestLog.count(_.path.contains("tables"))
 
     // Second call - should use cache, not hit the API
-    val info2 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.cached_table", configMap)
+    val info2 = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.cached_table", configMap)
     val requestsAfterSecond = requestLog.count(_.path.contains("tables"))
 
     info1.tableId shouldBe "cache-test-uuid"
@@ -601,7 +596,7 @@ class UnityCatalogAWSCredentialProviderTest
     info1.storageLocation shouldBe "s3://bucket/cached_table"
     info2.storageLocation shouldBe "s3://bucket/cached_table"
     requestsAfterFirst shouldBe 1
-    requestsAfterSecond shouldBe 1  // No additional HTTP request
+    requestsAfterSecond shouldBe 1 // No additional HTTP request
   }
 
   test("resolveTableId also benefits from table info cache") {
@@ -614,19 +609,17 @@ class UnityCatalogAWSCredentialProviderTest
     setupTablesHandler(200, tableResponse)
 
     // Call resolveTableInfo first
-    val info = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.shared_table", configMap)
+    val info = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.shared_table", configMap)
     val requestsAfterFirst = requestLog.count(_.path.contains("tables"))
 
     // Call resolveTableId - should use same cache
-    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId(
-      "catalog.schema.shared_table", configMap)
+    val tableId             = UnityCatalogAWSCredentialProvider.resolveTableId("catalog.schema.shared_table", configMap)
     val requestsAfterSecond = requestLog.count(_.path.contains("tables"))
 
     info.tableId shouldBe "shared-cache-uuid"
     tableId shouldBe "shared-cache-uuid"
     requestsAfterFirst shouldBe 1
-    requestsAfterSecond shouldBe 1  // Shared cache, no additional request
+    requestsAfterSecond shouldBe 1 // Shared cache, no additional request
   }
 
   test("table info cache is keyed by table name - different tables make separate requests") {
@@ -651,8 +644,8 @@ class UnityCatalogAWSCredentialProviderTest
     val handler = new HttpHandler {
       override def handle(exchange: HttpExchange): Unit = {
         val method = exchange.getRequestMethod
-        val path = exchange.getRequestURI.getPath
-        val body = new String(exchange.getRequestBody.readAllBytes())
+        val path   = exchange.getRequestURI.getPath
+        val body   = new String(exchange.getRequestBody.readAllBytes())
         val headers = scala.jdk.CollectionConverters
           .mapAsScalaMapConverter(exchange.getRequestHeaders)
           .asScala
@@ -669,14 +662,12 @@ class UnityCatalogAWSCredentialProviderTest
     }
     mockServer.createContext("/api/2.1/unity-catalog/tables/", handler)
 
-    val info1 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.table1", configMap)
-    val info2 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "catalog.schema.table2", configMap)
+    val info1 = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.table1", configMap)
+    val info2 = UnityCatalogAWSCredentialProvider.resolveTableInfo("catalog.schema.table2", configMap)
 
     info1.tableId shouldBe "uuid-table-1"
     info2.tableId shouldBe "uuid-table-2"
-    requestLog.count(_.path.contains("tables")) shouldBe 2  // Two different tables = two requests
+    requestLog.count(_.path.contains("tables")) shouldBe 2 // Two different tables = two requests
   }
 
   test("resolveTableId is consistent with resolveTableInfo.tableId") {
@@ -688,10 +679,8 @@ class UnityCatalogAWSCredentialProviderTest
         |}""".stripMargin
     setupTablesHandler(200, tableResponse)
 
-    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId(
-      "cat.schema.table1", configMap)
-    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo(
-      "cat.schema.table1", configMap)
+    val tableId   = UnityCatalogAWSCredentialProvider.resolveTableId("cat.schema.table1", configMap)
+    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo("cat.schema.table1", configMap)
 
     tableId shouldBe tableInfo.tableId
   }

@@ -27,9 +27,8 @@ import io.indextables.spark.RealAzureTestBase
  * Real Azure Blob Storage integration tests for BUILD INDEXTABLES COMPANION FOR DELTA.
  *
  * These tests require:
- * 1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
- * 2. An Azure Blob Storage container for test data
- * 3. Delta Lake support configured for Azure (delta-standalone)
+ *   1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables) 2. An Azure Blob
+ *      Storage container for test data 3. Delta Lake support configured for Azure (delta-standalone)
  *
  * Tests are automatically skipped if credentials are not available.
  */
@@ -37,23 +36,21 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
 
-  private lazy val hasAzureWasbs: Boolean = {
+  private lazy val hasAzureWasbs: Boolean =
     try {
       Class.forName("org.apache.hadoop.fs.azure.NativeAzureFileSystem")
       true
     } catch {
       case _: ClassNotFoundException => false
     }
-  }
 
-  private lazy val hasDeltaSparkDataSource: Boolean = {
+  private lazy val hasDeltaSparkDataSource: Boolean =
     try {
       Class.forName("io.delta.sql.DeltaSparkSessionExtension")
       true
     } catch {
       case _: ClassNotFoundException => false
     }
-  }
 
   // Use wasbs:// (Blob endpoint) instead of abfss:// (DFS endpoint) because storage
   // accounts with BlobStorageEvents or SoftDelete enabled reject DFS requests with 409.
@@ -69,23 +66,24 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
     if (hasDeltaSparkDataSource) {
       // Capture credentials before stopping session
       val account = getStorageAccount
-      val key = getAccountKey
+      val key     = getAccountKey
       val connStr = getConnectionString
 
       spark.stop()
-      val builder = SparkSession.builder()
+      val builder = SparkSession
+        .builder()
         .appName("RealAzureSyncTest")
         .master("local[2]")
-        .config("spark.sql.warehouse.dir",
-          java.nio.file.Files.createTempDirectory("spark-warehouse").toString)
+        .config("spark.sql.warehouse.dir", java.nio.file.Files.createTempDirectory("spark-warehouse").toString)
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
         .config("spark.sql.adaptive.enabled", "false")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-        .config("spark.sql.extensions",
+        .config(
+          "spark.sql.extensions",
           "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-            "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog",
-          "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+            "io.delta.sql.DeltaSparkSessionExtension"
+        )
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
 
@@ -133,7 +131,7 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
 
   test("SYNC command should return error for non-existent Azure Delta table") {
     val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/nonexistent_delta_${testRunId}' AT LOCATION '/tmp/nonexistent_index_${testRunId}'"
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/nonexistent_delta_$testRunId' AT LOCATION '/tmp/nonexistent_index_$testRunId'"
     )
     val rows = result.collect()
     rows.length shouldBe 1
@@ -143,8 +141,10 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   // --- Real Azure Integration Tests ---
 
   test("SYNC should create companion index from Azure Delta table") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
-      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
 
     val deltaPath = s"$azureBasePath/delta_table"
     val indexPath = s"$azureBasePath/companion_index"
@@ -177,13 +177,15 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
     row.getString(0) shouldBe indexPath // table_path
     row.getString(1) shouldBe deltaPath // source_path
     row.getString(2) shouldBe "success" // status
-    row.getInt(4) should be > 0 // splits_created
-    row.getInt(6) should be > 0 // parquet_files_indexed
+    row.getInt(4) should be > 0         // splits_created
+    row.getInt(6) should be > 0         // parquet_files_indexed
   }
 
   test("SYNC should support DRY RUN mode on Azure") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
-      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
 
     val deltaPath = s"$azureBasePath/delta_dryrun"
     val indexPath = s"$azureBasePath/companion_dryrun"
@@ -209,8 +211,10 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("SYNC should handle partitioned Delta tables on Azure") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
-      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
 
     val deltaPath = s"$azureBasePath/delta_partitioned"
     val indexPath = s"$azureBasePath/companion_partitioned"
@@ -242,8 +246,10 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("incremental SYNC should detect no-op when already synced on Azure") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
-      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
 
     val deltaPath = s"$azureBasePath/delta_incremental"
     val indexPath = s"$azureBasePath/companion_incremental"
@@ -273,8 +279,10 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
   }
 
   test("SYNC with FASTFIELDS MODE on Azure should be reflected in companion splits") {
-    assume(hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
-      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
 
     val deltaPath = s"$azureBasePath/delta_fastfield"
     val indexPath = s"$azureBasePath/companion_fastfield"
@@ -305,11 +313,8 @@ class RealAzureSyncToExternalTest extends RealAzureTestBase {
     try {
       val files = txLog.listFiles()
       files should not be empty
-      files.foreach { file =>
-        file.companionFastFieldMode shouldBe Some("DISABLED")
-      }
-    } finally {
+      files.foreach(file => file.companionFastFieldMode shouldBe Some("DISABLED"))
+    } finally
       txLog.close()
-    }
   }
 }

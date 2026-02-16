@@ -483,11 +483,11 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   // ===== Table-based credential API (for Iceberg and Delta via Unity Catalog) =====
 
   /**
-   * Shared implementation: call GET /tables/{name} and return both table_id and storage_location.
-   * Used by both resolveTableId (returns ID only) and resolveTableInfo (returns both).
+   * Shared implementation: call GET /tables/{name} and return both table_id and storage_location. Used by both
+   * resolveTableId (returns ID only) and resolveTableInfo (returns both).
    *
-   * Results are cached in the process-global table info cache (1-hour TTL) to avoid
-   * redundant UC API calls, since table_id and storage_location rarely change.
+   * Results are cached in the process-global table info cache (1-hour TTL) to avoid redundant UC API calls, since
+   * table_id and storage_location rarely change.
    */
   private def fetchTableInfoInternal(
     fullTableName: String,
@@ -496,7 +496,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     retryAttempts: Int
   ): io.indextables.spark.utils.TableInfo = {
     val tokenHash = Integer.toHexString(token.hashCode)
-    val cacheKey = s"$tokenHash:tableinfo:$fullTableName"
+    val cacheKey  = s"$tokenHash:tableinfo:$fullTableName"
 
     // Check cache first
     if (globalTableInfoCache != null) {
@@ -507,10 +507,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       }
     }
 
-    val encodedName = java.net.URLEncoder.encode(fullTableName, "UTF-8")
+    val encodedName                      = java.net.URLEncoder.encode(fullTableName, "UTF-8")
     var lastException: Option[Exception] = None
 
-    for (attempt <- 1 to retryAttempts) {
+    for (attempt <- 1 to retryAttempts)
       Try {
         logger.info(s"Resolving table info for '$fullTableName' (attempt $attempt/$retryAttempts)")
 
@@ -531,7 +531,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           )
         }
 
-        val root = objectMapper.readTree(response.body())
+        val root        = objectMapper.readTree(response.body())
         val tableIdNode = root.get("table_id")
         if (tableIdNode == null || tableIdNode.isNull) {
           throw new RuntimeException(
@@ -563,7 +563,6 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           }
         case Failure(t) => throw t
       }
-    }
 
     throw new RuntimeException(
       s"Failed to resolve table info for '$fullTableName' after $retryAttempts attempts",
@@ -572,12 +571,14 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   }
 
   /**
-   * Resolve a Unity Catalog table name to its table_id UUID.
-   * Called once on the driver side.
+   * Resolve a Unity Catalog table name to its table_id UUID. Called once on the driver side.
    *
-   * @param fullTableName Three-part name: catalog.namespace.table
-   * @param config        Config map with workspace URL and API token
-   * @return The table_id UUID string
+   * @param fullTableName
+   *   Three-part name: catalog.namespace.table
+   * @param config
+   *   Config map with workspace URL and API token
+   * @return
+   *   The table_id UUID string
    */
   def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
     val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
@@ -586,13 +587,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   }
 
   /**
-   * Resolve a Unity Catalog table name to both its table_id UUID and storage_location.
-   * Called once on the driver side. Uses the same GET /tables/{name} API as resolveTableId
-   * but also extracts storage_location from the response.
+   * Resolve a Unity Catalog table name to both its table_id UUID and storage_location. Called once on the driver side.
+   * Uses the same GET /tables/{name} API as resolveTableId but also extracts storage_location from the response.
    *
-   * @param fullTableName Three-part name: catalog.namespace.table
-   * @param config        Config map with workspace URL and API token
-   * @return TableInfo containing table_id and storage_location
+   * @param fullTableName
+   *   Three-part name: catalog.namespace.table
+   * @param config
+   *   Config map with workspace URL and API token
+   * @return
+   *   TableInfo containing table_id and storage_location
    */
   override def resolveTableInfo(
     fullTableName: String,
@@ -604,12 +607,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   }
 
   /**
-   * Get AWS credentials for a Unity Catalog table using the table-based credential API.
-   * Used by executors when `spark.indextables.iceberg.uc.tableId` is present in config.
+   * Get AWS credentials for a Unity Catalog table using the table-based credential API. Used by executors when
+   * `spark.indextables.iceberg.uc.tableId` is present in config.
    *
-   * @param tableId The table UUID (resolved on the driver via resolveTableId)
-   * @param config  Config map with workspace URL and API token
-   * @return BasicAWSCredentials suitable for S3 access
+   * @param tableId
+   *   The table UUID (resolved on the driver via resolveTableId)
+   * @param config
+   *   Config map with workspace URL and API token
+   * @return
+   *   BasicAWSCredentials suitable for S3 access
    */
   def getTableCredentials(
     tableId: String,
@@ -620,13 +626,13 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     initializeGlobalCacheFromMap(config)
 
     val tokenHash = Integer.toHexString(token.hashCode)
-    val cacheKey = s"$tokenHash:table:$tableId"
+    val cacheKey  = s"$tokenHash:table:$tableId"
 
     // Check cache first
     val cached = globalCredentialsCache.getIfPresent(cacheKey)
     if (cached != null) {
       val refreshBufferMs = refreshBufferMinutes.toLong * 60 * 1000
-      val now = System.currentTimeMillis()
+      val now             = System.currentTimeMillis()
       if (now < cached.expirationTime - refreshBufferMs) {
         logger.debug(s"Using cached table credentials for tableId=$tableId")
         return toBasicCredentials(cached)
@@ -669,7 +675,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   ): CachedCredentials = {
     var lastException: Option[Exception] = None
 
-    for (attempt <- 1 to retryAttempts) {
+    for (attempt <- 1 to retryAttempts)
       Try {
         logger.debug(s"Fetching $operation table credentials for tableId=$tableId (attempt $attempt/$retryAttempts)")
 
@@ -704,7 +710,6 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           }
         case Failure(t) => throw t
       }
-    }
 
     throw new RuntimeException(
       s"Failed to fetch $operation table credentials after $retryAttempts attempts",
@@ -736,13 +741,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     val (workspaceUrl, token, _, _, _) = resolveConfigFromMap(config)
 
     val defaults = Map(
-      "spark.indextables.iceberg.uri" -> s"$workspaceUrl/api/2.1/unity-catalog/iceberg-rest",
-      "spark.indextables.iceberg.token" -> token,
+      "spark.indextables.iceberg.uri"         -> s"$workspaceUrl/api/2.1/unity-catalog/iceberg-rest",
+      "spark.indextables.iceberg.token"       -> token,
       "spark.indextables.iceberg.catalogType" -> "rest"
     )
 
-    logger.info(s"Auto-derived Iceberg catalog defaults from Unity Catalog: " +
-      s"uri=${defaults("spark.indextables.iceberg.uri")}, catalogType=rest")
+    logger.info(
+      s"Auto-derived Iceberg catalog defaults from Unity Catalog: " +
+        s"uri=${defaults("spark.indextables.iceberg.uri")}, catalogType=rest"
+    )
 
     defaults
   }

@@ -28,23 +28,22 @@ import io.indextables.spark.RealS3TestBase
  * Real S3 integration tests for BUILD INDEXTABLES COMPANION FOR PARQUET.
  *
  * These tests require:
- * 1. AWS credentials in ~/.aws/credentials
- * 2. An S3 bucket for test data
+ *   1. AWS credentials in ~/.aws/credentials 2. An S3 bucket for test data
  *
  * Tests are automatically skipped if credentials are not available.
  */
 class RealS3ParquetSyncTest extends RealS3TestBase {
 
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
+  private val S3_BUCKET    = "test-tantivy4sparkbucket"
+  private val S3_REGION    = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
   private val testBasePath = s"$S3_BASE_PATH/parquet-sync-test-$testRunId"
 
   private var awsCredentials: Option[(String, String)] = None
 
   private def loadAwsCredentials(): Option[(String, String)] = {
-    val home = System.getProperty("user.home")
+    val home     = System.getProperty("user.home")
     val credFile = new File(s"$home/.aws/credentials")
 
     if (!credFile.exists()) {
@@ -107,11 +106,10 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
   // --- Real S3 Integration Tests ---
 
   test("create companion from S3 parquet directory") {
-    assume(awsCredentials.isDefined,
-      "AWS credentials not available - skipping test")
+    assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
 
     val parquetPath = s"$testBasePath/parquet_data"
-    val indexPath = s"$testBasePath/companion_index"
+    val indexPath   = s"$testBasePath/companion_index"
 
     val _spark = spark
     import _spark.implicits._
@@ -135,17 +133,16 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
     row.getString(0) shouldBe indexPath   // table_path
     row.getString(1) shouldBe parquetPath // source_path
     row.getString(2) shouldBe "success"   // status
-    row.isNullAt(3) shouldBe true          // source_version (null for parquet)
+    row.isNullAt(3) shouldBe true         // source_version (null for parquet)
     row.getInt(4) should be > 0           // splits_created
     row.getInt(6) should be > 0           // parquet_files_indexed
   }
 
   test("partitioned parquet on S3 should detect partitions") {
-    assume(awsCredentials.isDefined,
-      "AWS credentials not available - skipping test")
+    assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
 
     val parquetPath = s"$testBasePath/parquet_partitioned"
-    val indexPath = s"$testBasePath/companion_partitioned"
+    val indexPath   = s"$testBasePath/companion_partitioned"
 
     val _spark = spark
     import _spark.implicits._
@@ -170,11 +167,10 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
   }
 
   test("DRY RUN on S3 parquet") {
-    assume(awsCredentials.isDefined,
-      "AWS credentials not available - skipping test")
+    assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
 
     val parquetPath = s"$testBasePath/parquet_dryrun"
-    val indexPath = s"$testBasePath/companion_dryrun"
+    val indexPath   = s"$testBasePath/companion_dryrun"
 
     val _spark = spark
     import _spark.implicits._
@@ -187,11 +183,10 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
   }
 
   test("read-back from S3 parquet companion returns correct data") {
-    assume(awsCredentials.isDefined,
-      "AWS credentials not available - skipping test")
+    assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
 
     val parquetPath = s"$testBasePath/parquet_readback"
-    val indexPath = s"$testBasePath/companion_readback"
+    val indexPath   = s"$testBasePath/companion_readback"
 
     val _spark = spark
     import _spark.implicits._
@@ -203,9 +198,12 @@ class RealS3ParquetSyncTest extends RealS3TestBase {
 
     df.write.parquet(parquetPath)
 
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     val (accessKey, secretKey) = awsCredentials.get
     val companionDf = spark.read

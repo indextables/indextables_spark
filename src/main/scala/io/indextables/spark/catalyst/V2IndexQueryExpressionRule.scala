@@ -64,7 +64,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     if (IndexTables4SparkScanBuilder.wereIndexQueriesConsumed()) {
       relationInPlan.orElse(IndexTables4SparkScanBuilder.getCurrentRelation()).foreach { relation =>
         IndexTables4SparkScanBuilder.clearIndexQueries(relation)
-        logger.debug(s"V2IndexQueryExpressionRule: Cleared stale IndexQueries for relation ${System.identityHashCode(relation)}")
+        logger.debug(
+          s"V2IndexQueryExpressionRule: Cleared stale IndexQueries for relation ${System.identityHashCode(relation)}"
+        )
       }
       IndexTables4SparkScanBuilder.resetIndexQueriesConsumed()
     }

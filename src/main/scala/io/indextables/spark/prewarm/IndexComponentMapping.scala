@@ -66,11 +66,11 @@ object IndexComponentMapping {
   )
 
   /**
-   * Companion mode parquet preload aliases. These are NOT IndexComponent values —
-   * they trigger separate parquet-specific preloading via SplitSearcher.
+   * Companion mode parquet preload aliases. These are NOT IndexComponent values — they trigger separate
+   * parquet-specific preloading via SplitSearcher.
    *
-   * PARQUET_FAST / PARQUET_FAST_FIELDS → preloadParquetFastFields()
-   * PARQUET_COLS / PARQUET_COLUMNS     → preloadParquetColumns()
+   * PARQUET_FAST / PARQUET_FAST_FIELDS → preloadParquetFastFields() PARQUET_COLS / PARQUET_COLUMNS →
+   * preloadParquetColumns()
    */
   val parquetAliases: Map[String, String] = Map(
     "PARQUET_FAST"        -> "PARQUET_FAST_FIELDS",
@@ -126,7 +126,8 @@ object IndexComponentMapping {
           aliasToComponent.getOrElse(
             alias,
             throw new IllegalArgumentException(
-              s"Unknown segment type: $alias. Valid types: ${(aliasToComponent.keys ++ parquetAliases.keys).toSeq.sorted.mkString(", ")}"
+              s"Unknown segment type: $alias. Valid types: ${(aliasToComponent.keys ++ parquetAliases.keys).toSeq.sorted
+                  .mkString(", ")}"
             )
           )
         }
@@ -135,8 +136,8 @@ object IndexComponentMapping {
   }
 
   /**
-   * Extract parquet companion preload types from a segment string.
-   * Returns the set of parquet alias types found (e.g., "PARQUET_FAST_FIELDS", "PARQUET_COLUMNS").
+   * Extract parquet companion preload types from a segment string. Returns the set of parquet alias types found (e.g.,
+   * "PARQUET_FAST_FIELDS", "PARQUET_COLUMNS").
    */
   def parseParquetSegments(segmentString: String): Set[String] = {
     val trimmed = segmentString.trim

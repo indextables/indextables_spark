@@ -78,8 +78,10 @@ class PrewarmCacheTest extends TestBase {
         txLog.getCacheStats() match {
           case Some(stats) =>
             println(s"Cache stats: hits=${stats.hits}, misses=${stats.misses}, hitRate=${stats.hitRate}")
-            assert(stats.hits + stats.misses > 0L,
-              s"Expected cache activity (hits + misses > 0), got hits=${stats.hits}, misses=${stats.misses}")
+            assert(
+              stats.hits + stats.misses > 0L,
+              s"Expected cache activity (hits + misses > 0), got hits=${stats.hits}, misses=${stats.misses}"
+            )
           case None =>
             println("No cache stats available (using standard TransactionLog)")
         }

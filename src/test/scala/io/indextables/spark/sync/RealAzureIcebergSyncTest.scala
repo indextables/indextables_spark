@@ -25,9 +25,8 @@ import io.indextables.spark.RealAzureTestBase
  * Real Azure + Iceberg catalog integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
  * These tests require:
- * 1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
- * 2. Iceberg catalog config in ~/.iceberg/credentials
- * 3. A pre-existing Iceberg table accessible via the catalog with Azure storage
+ *   1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables) 2. Iceberg catalog
+ *      config in ~/.iceberg/credentials 3. A pre-existing Iceberg table accessible via the catalog with Azure storage
  *
  * Tests are automatically skipped if credentials are not available.
  */
@@ -35,14 +34,13 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
 
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
 
-  private lazy val hasAzureWasbs: Boolean = {
+  private lazy val hasAzureWasbs: Boolean =
     try {
       Class.forName("org.apache.hadoop.fs.azure.NativeAzureFileSystem")
       true
     } catch {
       case _: ClassNotFoundException => false
     }
-  }
 
   private def azureBasePath: String = {
     val account = getStorageAccount.getOrElse("devstoreaccount1")
@@ -76,8 +74,10 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
   // --- Real Azure + Iceberg Integration Tests ---
 
   test("create companion from Iceberg table with Azure storage backend") {
-    assume(hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
-      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
+      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test"
+    )
 
     val config = icebergConfig
     configureSparkForCatalog(spark, config)
@@ -97,8 +97,10 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
   }
 
   test("DRY RUN on Azure with Iceberg source") {
-    assume(hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
-      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
+      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test"
+    )
 
     val config = icebergConfig
     configureSparkForCatalog(spark, config)
@@ -113,8 +115,10 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
   }
 
   test("FROM SNAPSHOT on Azure with Iceberg source") {
-    assume(hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
-      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
+      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test"
+    )
 
     val config = icebergConfig
     configureSparkForCatalog(spark, config)
@@ -143,18 +147,23 @@ class RealAzureIcebergSyncTest extends RealAzureTestBase with IcebergTestSupport
   }
 
   test("read-back from Azure Iceberg companion") {
-    assume(hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
-      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test")
+    assume(
+      hasAzureCredentials() && hasAzureWasbs && hasIcebergConfig,
+      "Azure credentials, WASBS driver, or Iceberg catalog config not available - skipping test"
+    )
 
     val config = icebergConfig
     configureSparkForCatalog(spark, config)
 
     val indexPath = s"$azureBasePath/iceberg_readback"
 
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     val companionDf = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")

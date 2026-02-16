@@ -372,8 +372,10 @@ object CredentialProviderFactory {
               return Some(creds)
             } catch {
               case ex: Exception =>
-                logger.warn(s"Table credential lookup failed for tableId=$tableId via $className, " +
-                  s"falling through to path-based flow: ${ex.getMessage}")
+                logger.warn(
+                  s"Table credential lookup failed for tableId=$tableId via $className, " +
+                    s"falling through to path-based flow: ${ex.getMessage}"
+                )
             }
           }
         }
@@ -418,9 +420,9 @@ object CredentialProviderFactory {
    * Resolve AWS credentials for companion parquet storage.
    *
    * Priority order:
-   *   1. Explicit companion credentials: `spark.indextables.companion.aws.accessKey/secretKey`
-   *   2. Credential provider called with the parquet table path
-   *   3. Fall back to standard split credentials via `resolveAWSCredentialsFromConfig`
+   *   1. Explicit companion credentials: `spark.indextables.companion.aws.accessKey/secretKey` 2. Credential provider
+   *      called with the parquet table path 3. Fall back to standard split credentials via
+   *      `resolveAWSCredentialsFromConfig`
    */
   def resolveCompanionAWSCredentials(
     configs: Map[String, String],
@@ -436,8 +438,9 @@ object CredentialProviderFactory {
     ) match {
       case (Some(key), Some(secret)) =>
         logger.debug(s"Using explicit companion credentials: accessKey=${key.take(4)}...")
-        return Some(BasicAWSCredentials(key, secret,
-          getConfig("spark.indextables.companion.aws.sessionToken").filter(_.nonEmpty)))
+        return Some(
+          BasicAWSCredentials(key, secret, getConfig("spark.indextables.companion.aws.sessionToken").filter(_.nonEmpty))
+        )
       case _ => // continue
     }
 
@@ -446,7 +449,7 @@ object CredentialProviderFactory {
       case Some(className) =>
         try {
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(parquetTablePath)
-          val uri = new URI(normalizedPath)
+          val uri            = new URI(normalizedPath)
           val provider = if (className.contains("UnityCatalogAWSCredentialProvider")) {
             io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider.fromConfig(uri, configs)
           } else {
@@ -454,7 +457,9 @@ object CredentialProviderFactory {
             createCredentialProvider(className, uri, hadoopConf)
           }
           val creds = extractCredentialsViaReflection(provider)
-          logger.debug(s"Resolved companion credentials from provider $className: accessKey=${creds.accessKey.take(4)}...")
+          logger.debug(
+            s"Resolved companion credentials from provider $className: accessKey=${creds.accessKey.take(4)}..."
+          )
           return Some(creds)
         } catch {
           case ex: Exception =>
@@ -468,19 +473,18 @@ object CredentialProviderFactory {
   }
 
   /**
-   * Resolve a TableCredentialProvider from the provider class name, if its companion object
-   * implements the TableCredentialProvider trait.
+   * Resolve a TableCredentialProvider from the provider class name, if its companion object implements the
+   * TableCredentialProvider trait.
    *
-   * This uses reflection to load the companion object (className + "$") and check if it
-   * implements the trait, making table credential support fully extensible without hardcoding
-   * specific provider class names.
+   * This uses reflection to load the companion object (className + "$") and check if it implements the trait, making
+   * table credential support fully extensible without hardcoding specific provider class names.
    */
   def resolveTableCredentialProvider(className: String): Option[TableCredentialProvider] =
     Try {
       // Scala companion objects are compiled to className$ with a MODULE$ static field
       val companionClass = Class.forName(className + "$")
-      val moduleField = companionClass.getField("MODULE$")
-      val companionObj = moduleField.get(null)
+      val moduleField    = companionClass.getField("MODULE$")
+      val companionObj   = moduleField.get(null)
       companionObj match {
         case tcp: TableCredentialProvider =>
           logger.debug(s"Provider $className supports table credentials via TableCredentialProvider trait")

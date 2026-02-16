@@ -90,10 +90,12 @@ object ConfigUtils {
 
     // Companion mode: parquet table root (normalized for native layer)
     val rawCompanionTableRoot = getConfigOption("spark.indextables.companion.parquetTableRoot")
-    val companionTableRoot = rawCompanionTableRoot.map(normalizeStorageUrl)
-    logger.info(s"createSplitCacheConfig: companion.parquetTableRoot raw=${rawCompanionTableRoot.getOrElse("NONE")}, " +
-      s"normalized=${companionTableRoot.getOrElse("NONE")}, " +
-      s"parquetCredentials=${getConfigOption("spark.indextables.companion.parquet.aws.accessKey").map(_.take(4) + "...").getOrElse("NONE")}")
+    val companionTableRoot    = rawCompanionTableRoot.map(normalizeStorageUrl)
+    logger.info(
+      s"createSplitCacheConfig: companion.parquetTableRoot raw=${rawCompanionTableRoot.getOrElse("NONE")}, " +
+        s"normalized=${companionTableRoot.getOrElse("NONE")}, " +
+        s"parquetCredentials=${getConfigOption("spark.indextables.companion.parquet.aws.accessKey").map(_.take(4) + "...").getOrElse("NONE")}"
+    )
 
     SplitCacheConfig(
       cacheName = {
@@ -394,9 +396,8 @@ object ConfigUtils {
   /**
    * Normalize Hadoop filesystem URLs to native storage URLs.
    *
-   * Hadoop uses protocol schemes (s3a://, s3n://) that the native Rust layer
-   * (Quickwit URI parser) doesn't understand. This converts them to the
-   * standard protocols that the native layer expects.
+   * Hadoop uses protocol schemes (s3a://, s3n://) that the native Rust layer (Quickwit URI parser) doesn't understand.
+   * This converts them to the standard protocols that the native layer expects.
    */
   private def normalizeStorageUrl(url: String): String =
     if (url.startsWith("s3a://")) url.replaceFirst("s3a://", "s3://")

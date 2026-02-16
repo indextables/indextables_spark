@@ -20,13 +20,13 @@ package io.indextables.spark.sync
 import org.apache.spark.sql.types.StructType
 
 /**
- * CompanionSourceReader adapter for Delta Lake tables.
- * Wraps the existing DeltaLogReader (tantivy4java delta-kernel-rs).
+ * CompanionSourceReader adapter for Delta Lake tables. Wraps the existing DeltaLogReader (tantivy4java
+ * delta-kernel-rs).
  */
 class DeltaSourceReader(
-    deltaTablePath: String,
-    sourceCredentials: Map[String, String]
-) extends CompanionSourceReader {
+  deltaTablePath: String,
+  sourceCredentials: Map[String, String])
+    extends CompanionSourceReader {
 
   private val delegate = new DeltaLogReader(deltaTablePath, sourceCredentials)
 
