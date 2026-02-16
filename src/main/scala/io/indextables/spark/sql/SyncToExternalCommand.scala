@@ -518,6 +518,14 @@ case class SyncToExternalCommand(
               interruptOnCancel = true
             )
 
+            // Set scheduler pool so FAIR scheduler runs batches concurrently.
+            // Without this, Spark's default FIFO scheduler serializes all runJob calls
+            // even though they're submitted from different threads.
+            val schedulerPool = sparkSession.conf
+              .getOption("spark.indextables.companion.schedulerPool")
+              .getOrElse("indextables-companion")
+            sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", schedulerPool)
+
             try {
               val batchRDD = sparkSession.sparkContext
                 .parallelize(batch, batch.size)
@@ -572,6 +580,7 @@ case class SyncToExternalCommand(
               }
             } finally {
               sparkSession.sparkContext.clearJobGroup()
+              sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
             }
           }
         })

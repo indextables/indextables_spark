@@ -54,6 +54,21 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     // Clear ThreadLocal only if we're starting a new query (different relation ID)
     IndexTables4SparkScanBuilder.clearCurrentRelationIfDifferent(relationInPlan)
 
+    // CRITICAL: Detect and clear stale IndexQueries from a previous failed query.
+    // V2IndexQueryExpressionRule is a resolution rule (runs during analysis), not an optimization
+    // rule. It runs once per query during analysis, then the optimizer runs (calling build()).
+    // If build() throws (e.g., non-existent field), its cleanup (lines 460-464) is skipped,
+    // leaving stale IndexQueries in the WeakHashMap. When the next query's analysis starts,
+    // this rule runs again. If the "consumed" flag is true (build() read the IndexQueries),
+    // they are stale and should be cleared before processing the new query.
+    if (IndexTables4SparkScanBuilder.wereIndexQueriesConsumed()) {
+      relationInPlan.orElse(IndexTables4SparkScanBuilder.getCurrentRelation()).foreach { relation =>
+        IndexTables4SparkScanBuilder.clearIndexQueries(relation)
+        logger.debug(s"V2IndexQueryExpressionRule: Cleared stale IndexQueries for relation ${System.identityHashCode(relation)}")
+      }
+      IndexTables4SparkScanBuilder.resetIndexQueriesConsumed()
+    }
+
     val result = plan.transformUp {
       case filter @ Filter(condition, child: DataSourceV2Relation) =>
         logger.debug(

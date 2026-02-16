@@ -39,6 +39,7 @@ case class TableInfo(tableId: String, storageLocation: String)
  *   2. Implement `resolveTableId` and `getTableCredentials`
  *   3. The credential factory will automatically detect and route to the trait methods
  *      when `spark.indextables.iceberg.uc.tableId` is present in the config
+ *      (key name is historical; used for both Iceberg and Delta UC tables)
  *
  * Example:
  * {{{

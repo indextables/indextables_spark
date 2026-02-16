@@ -345,11 +345,16 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
 
   // Process-global credentials cache
   @volatile private var globalCredentialsCache: Cache[String, CachedCredentials] = _
-  private val initLock                                                           = new Object
 
-  /** Initialize the process-global credentials cache from Map config. */
+  // Process-global table info cache (table name → TableInfo with table_id + storage_location)
+  // Table info rarely changes, so we use a 1-hour TTL to avoid unnecessary UC API calls.
+  @volatile private var globalTableInfoCache: Cache[String, io.indextables.spark.utils.TableInfo] = _
+
+  private val initLock = new Object
+
+  /** Initialize the process-global credentials and table info caches from Map config. */
   private def initializeGlobalCacheFromMap(config: Map[String, String]): Unit =
-    if (globalCredentialsCache == null) {
+    if (globalCredentialsCache == null || globalTableInfoCache == null) {
       initLock.synchronized {
         if (globalCredentialsCache == null) {
           val sources = Seq(MapConfigSource(config, "spark.indextables.databricks"), MapConfigSource(config))
@@ -361,6 +366,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
             .maximumSize(maxSize)
             .recordStats()
             .build[String, CachedCredentials]()
+        }
+        if (globalTableInfoCache == null) {
+          logger.info("Initializing process-global table info cache: maxSize=100, TTL=1h")
+          globalTableInfoCache = CacheBuilder
+            .newBuilder()
+            .maximumSize(100)
+            .expireAfterWrite(java.time.Duration.ofHours(1))
+            .recordStats()
+            .build[String, io.indextables.spark.utils.TableInfo]()
         }
       }
     }
@@ -388,12 +402,17 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       }
     }
 
-  /** Clear all cached credentials. This is a process-global operation. */
-  def clearCache(): Unit =
+  /** Clear all cached credentials and table info. This is a process-global operation. */
+  def clearCache(): Unit = {
     if (globalCredentialsCache != null) {
       logger.info("Clearing process-global credentials cache")
       globalCredentialsCache.invalidateAll()
     }
+    if (globalTableInfoCache != null) {
+      logger.info("Clearing process-global table info cache")
+      globalTableInfoCache.invalidateAll()
+    }
+  }
 
   /** Get current cache statistics. Useful for monitoring and debugging. */
   def getCacheStatistics(): Option[CacheStats] =
@@ -407,6 +426,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       if (globalCredentialsCache != null) {
         globalCredentialsCache.invalidateAll()
         globalCredentialsCache = null
+      }
+      if (globalTableInfoCache != null) {
+        globalTableInfoCache.invalidateAll()
+        globalTableInfoCache = null
       }
     }
 
@@ -462,6 +485,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   /**
    * Shared implementation: call GET /tables/{name} and return both table_id and storage_location.
    * Used by both resolveTableId (returns ID only) and resolveTableInfo (returns both).
+   *
+   * Results are cached in the process-global table info cache (1-hour TTL) to avoid
+   * redundant UC API calls, since table_id and storage_location rarely change.
    */
   private def fetchTableInfoInternal(
     fullTableName: String,
@@ -469,6 +495,18 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     token: String,
     retryAttempts: Int
   ): io.indextables.spark.utils.TableInfo = {
+    val tokenHash = Integer.toHexString(token.hashCode)
+    val cacheKey = s"$tokenHash:tableinfo:$fullTableName"
+
+    // Check cache first
+    if (globalTableInfoCache != null) {
+      val cached = globalTableInfoCache.getIfPresent(cacheKey)
+      if (cached != null) {
+        logger.debug(s"Using cached table info for '$fullTableName' -> table_id=${cached.tableId}")
+        return cached
+      }
+    }
+
     val encodedName = java.net.URLEncoder.encode(fullTableName, "UTF-8")
     var lastException: Option[Exception] = None
 
@@ -510,7 +548,12 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
         logger.info(s"Resolved table '$fullTableName' -> table_id=$tableId, storage_location=$storageLocation")
         io.indextables.spark.utils.TableInfo(tableId, storageLocation)
       } match {
-        case Success(info) => return info
+        case Success(info) =>
+          // Cache the result
+          if (globalTableInfoCache != null) {
+            globalTableInfoCache.put(cacheKey, info)
+          }
+          return info
         case Failure(e: Exception) =>
           lastException = Some(e)
           if (attempt < retryAttempts) {
