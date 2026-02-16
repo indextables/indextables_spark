@@ -428,8 +428,8 @@ case class SyncToExternalCommand(
   /**
    * Batched concurrent dispatch: indexing tasks are grouped into batches of
    * batchSize, with up to maxConcurrentBatches Spark jobs running at once.
-   * Uses a fixed ThreadPoolExecutor to maintain exactly N concurrent threads
-   * regardless of I/O blocking (runJob blocks waiting for Spark execution).
+   * Uses Scala parallel collections with ForkJoinTaskSupport to run up to
+   * maxConcurrentBatches Spark jobs concurrently (same pattern as MergeSplitsCommand).
    * Sets spark.scheduler.pool per thread so the FAIR scheduler on Databricks
    * actually runs batches concurrently.
    */
@@ -447,7 +447,9 @@ case class SyncToExternalCommand(
     externalStorageRoot: Option[String],
     startTime: Long
   ): Seq[Row] = {
-    import java.util.concurrent.{Executors, Callable, ExecutionException}
+    import scala.collection.parallel.ForkJoinTaskSupport
+    import java.util.concurrent.ForkJoinPool
+    import scala.util.{Try, Success, Failure}
 
     val totalTasks = groups.size
 
@@ -492,111 +494,102 @@ case class SyncToExternalCommand(
     val removesCommitted = new java.util.concurrent.atomic.AtomicBoolean(false)
     val completedBatches = new java.util.concurrent.atomic.AtomicInteger(0)
 
-    // Fixed thread pool maintains exactly N threads regardless of blocking behavior.
-    // Unlike ForkJoinPool, ThreadPoolExecutor does not degrade when threads block on
-    // I/O (runJob) — each thread runs one batch: runJob → commitLock → next batch.
-    val executor = Executors.newFixedThreadPool(maxConcurrentBatches)
-
     // Define task function OUTSIDE parallel block to avoid closure capture issues
     val taskFunc = (_: org.apache.spark.TaskContext, iter: Iterator[SyncIndexingGroup]) => {
       val group = iter.next()
       SyncTaskExecutor.execute(group, broadcastConfig.value)
     }
 
-    try {
-      val futures = batches.zipWithIndex.map { case (batch, batchIdx) =>
-        executor.submit(new Callable[Unit] {
-          def call(): Unit = {
-            val batchNum = batchIdx + 1
-            val (batchFiles, batchBytes) = batchInputSizes(batchIdx)
-            val batchSizeGB = batchBytes / 1024.0 / 1024.0 / 1024.0
+    // Process batches with controlled concurrency using Scala parallel collections
+    // (same pattern as MergeSplitsCommand)
+    val parBatches = batches.zipWithIndex.par
+    val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
+    parBatches.tasksupport = customTaskSupport
 
-            // Set job group for Spark UI visibility (thread-local, safe for concurrent use)
-            sparkSession.sparkContext.setJobGroup(
-              s"tantivy4spark-build-companion-batch-$batchNum",
-              f"BUILD COMPANION Batch $batchNum/$totalBatches: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)",
-              interruptOnCancel = true
+    try {
+      parBatches.foreach { case (batch, batchIdx) =>
+        Try {
+          val batchNum = batchIdx + 1
+          val (batchFiles, batchBytes) = batchInputSizes(batchIdx)
+          val batchSizeGB = batchBytes / 1024.0 / 1024.0 / 1024.0
+
+          // Set job group for Spark UI visibility (thread-local, safe for concurrent use)
+          sparkSession.sparkContext.setJobGroup(
+            s"tantivy4spark-build-companion-batch-$batchNum",
+            f"BUILD COMPANION Batch $batchNum/$totalBatches: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)",
+            interruptOnCancel = true
+          )
+
+          // Set scheduler pool so FAIR scheduler runs batches concurrently.
+          // Without this, Spark's default FIFO scheduler serializes all runJob calls.
+          val schedulerPool = sparkSession.conf
+            .getOption("spark.indextables.companion.schedulerPool")
+            .getOrElse("indextables-companion")
+          sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", schedulerPool)
+
+          try {
+            val batchRDD = sparkSession.sparkContext
+              .parallelize(batch, batch.size)
+              .setName(f"Building batch $batchNum of $totalBatches: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)")
+
+            // Run Spark job for this batch
+            val batchResults = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
+
+            sparkSession.sparkContext.runJob(
+              batchRDD,
+              taskFunc,
+              0 until batch.size,
+              (_: Int, result: io.indextables.spark.sync.SyncTaskResult) => {
+                batchResults.add(result)
+                allResults.add(result)
+              }
             )
 
-            // Set scheduler pool so FAIR scheduler runs batches concurrently.
-            // Without this, Spark's default FIFO scheduler serializes all runJob calls
-            // even though they're submitted from different threads.
-            val schedulerPool = sparkSession.conf
-              .getOption("spark.indextables.companion.schedulerPool")
-              .getOrElse("indextables-companion")
-            sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", schedulerPool)
+            // Commit this batch's results (synchronized for thread safety).
+            // The entire commit sequence (build actions, read metadata, write)
+            // must be inside the lock because concurrent threads invalidate the
+            // transaction log cache after each commit.
+            val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
+              companionDeltaVersion = Some(sourceVersion)
+            ))
 
-            try {
-              val batchRDD = sparkSession.sparkContext
-                .parallelize(batch, batch.size)
-                .setName(f"Building batch $batchNum of $totalBatches: ${batch.size} tasks, $batchFiles files ($batchSizeGB%.2f GB)")
-
-              // Run Spark job for this batch
-              val batchResults = new java.util.ArrayList[io.indextables.spark.sync.SyncTaskResult]()
-
-              sparkSession.sparkContext.runJob(
-                batchRDD,
-                taskFunc,
-                0 until batch.size,
-                (_: Int, result: io.indextables.spark.sync.SyncTaskResult) => {
-                  batchResults.add(result)
-                  allResults.add(result)
-                }
-              )
-
-              // Commit this batch's results (synchronized for thread safety).
-              // The entire commit sequence (build actions, read metadata, write)
-              // must be inside the lock because concurrent threads invalidate the
-              // transaction log cache after each commit.
-              val addActions = batchResults.asScala.toSeq.map(_.addAction.copy(
-                companionDeltaVersion = Some(sourceVersion)
-              ))
-
-              commitLock.synchronized {
-                // First batch to commit also includes RemoveActions for invalidated splits
-                val removeActions = if (removesCommitted.compareAndSet(false, true)) {
-                  buildRemoveActions(splitsToInvalidate)
-                } else {
-                  Seq.empty
-                }
-
-                // Write companion metadata on every batch so that any Avro state
-                // written mid-sync contains the full companion config. Without this,
-                // a reader in a different process would fail with "parquet_table_root
-                // was not set" because intermediate states had no MetadataAction.
-                val completed = completedBatches.incrementAndGet()
-                val metadataUpdate = Some(buildCompanionMetadata(
-                  transactionLog, effectiveIndexingModes, effectiveWherePredicates,
-                  sourceVersion, externalStorageRoot))
-
-                if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
-                  val version = transactionLog.commitSyncActions(
-                    removeActions, addActions, metadataUpdate)
-                  transactionLog.invalidateCache()
-                  logger.info(s"Batch $batchNum/$totalBatches committed: " +
-                    s"${addActions.size} adds at version $version " +
-                    s"($completed/$totalBatches batches complete)")
-                }
+            commitLock.synchronized {
+              // First batch to commit also includes RemoveActions for invalidated splits
+              val removeActions = if (removesCommitted.compareAndSet(false, true)) {
+                buildRemoveActions(splitsToInvalidate)
+              } else {
+                Seq.empty
               }
-            } finally {
-              sparkSession.sparkContext.clearJobGroup()
-              sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
-            }
-          }
-        })
-      }
 
-      // Wait for all futures, propagating the first failure
-      var firstError: Option[Throwable] = None
-      futures.foreach { future =>
-        try { future.get() }
-        catch { case e: ExecutionException =>
-          if (firstError.isEmpty) firstError = Some(e.getCause)
+              // Write companion metadata on every batch so that any Avro state
+              // written mid-sync contains the full companion config. Without this,
+              // a reader in a different process would fail with "parquet_table_root
+              // was not set" because intermediate states had no MetadataAction.
+              val completed = completedBatches.incrementAndGet()
+              val metadataUpdate = Some(buildCompanionMetadata(
+                transactionLog, effectiveIndexingModes, effectiveWherePredicates,
+                sourceVersion, externalStorageRoot))
+
+              if (addActions.nonEmpty || removeActions.nonEmpty || metadataUpdate.isDefined) {
+                val version = transactionLog.commitSyncActions(
+                  removeActions, addActions, metadataUpdate)
+                transactionLog.invalidateCache()
+                logger.info(s"Batch $batchNum/$totalBatches committed: " +
+                  s"${addActions.size} adds at version $version " +
+                  s"($completed/$totalBatches batches complete)")
+              }
+            }
+          } finally {
+            sparkSession.sparkContext.clearJobGroup()
+            sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
+          }
+        } match {
+          case Failure(e) => throw e
+          case Success(_) => // batch succeeded
         }
       }
-      firstError.foreach(throw _)
     } finally {
-      executor.shutdown()
+      customTaskSupport.forkJoinPool.shutdown()
       broadcastConfig.destroy()
     }
 
