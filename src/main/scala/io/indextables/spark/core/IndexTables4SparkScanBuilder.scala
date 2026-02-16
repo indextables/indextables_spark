@@ -2238,6 +2238,20 @@ object IndexTables4SparkScanBuilder {
     currentRelationId.remove()
   }
 
+  // Tracks whether stored IndexQueries have been "consumed" (read by build()/pushAggregation()).
+  // Used by V2IndexQueryExpressionRule to detect stale IndexQueries from a previous failed query.
+  //
+  // Lifecycle:
+  //   1. storeIndexQueries() sets consumed = false (fresh IndexQueries from current query's analysis)
+  //   2. getIndexQueries() sets consumed = true when returning non-empty results (build() read them)
+  //   3. V2IndexQueryExpressionRule.apply() checks: if consumed = true, stale IndexQueries from
+  //      a previous query are present → clear them before processing the new query
+  //
+  // This prevents stale IndexQueries from persisting across queries when build() throws
+  // (e.g., non-existent field validation), because the cleanup at build() lines 460-464
+  // is only reached on success.
+  private val indexQueriesConsumed: ThreadLocal[Boolean] = ThreadLocal.withInitial(() => false)
+
   /**
    * Store IndexQuery expressions for a specific relation object. IMPORTANT: This appends to existing entries to support
    * multiple IndexQueries on the same relation (e.g., IndexQuery in both inner CTE definition and outer query
@@ -2247,12 +2261,15 @@ object IndexTables4SparkScanBuilder {
     relationIndexQueries.synchronized {
       val existing = Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
       relationIndexQueries.put(relation, existing ++ indexQueries)
+      indexQueriesConsumed.set(false) // Fresh IndexQueries - not yet consumed
     }
 
   /** Retrieve IndexQuery expressions for a specific relation object. */
   def getIndexQueries(relation: AnyRef): Seq[Any] =
     relationIndexQueries.synchronized {
-      Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
+      val result = Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
+      if (result.nonEmpty) indexQueriesConsumed.set(true) // Mark as consumed by build()/pushAggregation()
+      result
     }
 
   /** Clear IndexQuery expressions for a specific relation object. */
@@ -2260,6 +2277,20 @@ object IndexTables4SparkScanBuilder {
     relationIndexQueries.synchronized {
       relationIndexQueries.remove(relation)
     }
+
+  /**
+   * Check if stored IndexQueries have been consumed (read by build()) and are potentially stale.
+   * Called by V2IndexQueryExpressionRule at the start of each new query's analysis phase.
+   *
+   * When this returns true, the caller should clear stored IndexQueries for the current relation
+   * because they are leftover from a previous query that either:
+   *   - Failed (build() threw before cleanup) - the stale state bug
+   *   - Succeeded but cleanup already ran (IndexQueries already empty, so clearing is a no-op)
+   */
+  def wereIndexQueriesConsumed(): Boolean = indexQueriesConsumed.get()
+
+  /** Reset the consumed flag after clearing stale IndexQueries. */
+  def resetIndexQueriesConsumed(): Unit = indexQueriesConsumed.set(false)
 
   /** Get cache statistics for monitoring. */
   def getCacheStats(): String = {

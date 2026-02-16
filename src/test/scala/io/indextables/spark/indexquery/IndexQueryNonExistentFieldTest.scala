@@ -547,6 +547,53 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     assert(results(0).getDouble(2) == 100.0, s"Expected min 100.0, got ${results(0).getDouble(2)}")
   }
 
+  test("REGRESSION: stale IndexQuery error should NOT persist to subsequent queries") {
+    val spark = this.spark
+    import spark.implicits._
+
+    val testPath = s"$tempDir/indexquery_stale_threadlocal_test"
+
+    // Create test data with known fields
+    val testData = Seq(
+      (1, "machine learning algorithms", "tech"),
+      (2, "data engineering pipeline", "tech"),
+      (3, "web development frameworks", "tech")
+    ).toDF("id", "title", "category")
+
+    testData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .option("spark.indextables.indexing.typemap.category", "string")
+      .mode("overwrite")
+      .save(testPath)
+
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+
+    df.createOrReplaceTempView("stale_error_test")
+
+    // Step 1: Query with non-existent field - should fail
+    val exception = intercept[IllegalArgumentException] {
+      spark
+        .sql("SELECT * FROM stale_error_test WHERE missing_field indexquery 'value'")
+        .collect()
+    }
+    assert(exception.getMessage.contains("missing_field"), "First query should fail with missing_field error")
+
+    // Step 2: Simple SELECT * without any IndexQuery - should succeed
+    // BUG: This currently fails with the stale "non-existent field 'missing_field'" error
+    // because the ThreadLocal/WeakHashMap state is not cleaned up when build() throws
+    val results = spark.sql("SELECT * FROM stale_error_test").collect()
+    assert(results.length == 3, s"Expected 3 rows from simple SELECT *, got ${results.length}")
+
+    // Step 3: Query with a valid IndexQuery - should also work
+    val validResults = spark
+      .sql("SELECT * FROM stale_error_test WHERE title indexquery 'machine'")
+      .collect()
+    assert(validResults.length == 1, s"Expected 1 result for valid IndexQuery, got ${validResults.length}")
+  }
+
   private def getFullErrorMessage(e: Throwable): String = {
     val messages           = scala.collection.mutable.ArrayBuffer[String]()
     var current: Throwable = e

@@ -577,6 +577,108 @@ class UnityCatalogAWSCredentialProviderTest
     tableInfo.storageLocation shouldBe ""
   }
 
+  test("resolveTableInfo caches results - second call should not make HTTP request") {
+    val tableResponse =
+      """{
+        |  "table_id": "cache-test-uuid",
+        |  "name": "cached_table",
+        |  "storage_location": "s3://bucket/cached_table"
+        |}""".stripMargin
+    setupTablesHandler(200, tableResponse)
+
+    // First call - should hit the API
+    val info1 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.cached_table", configMap)
+    val requestsAfterFirst = requestLog.count(_.path.contains("tables"))
+
+    // Second call - should use cache, not hit the API
+    val info2 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.cached_table", configMap)
+    val requestsAfterSecond = requestLog.count(_.path.contains("tables"))
+
+    info1.tableId shouldBe "cache-test-uuid"
+    info2.tableId shouldBe "cache-test-uuid"
+    info1.storageLocation shouldBe "s3://bucket/cached_table"
+    info2.storageLocation shouldBe "s3://bucket/cached_table"
+    requestsAfterFirst shouldBe 1
+    requestsAfterSecond shouldBe 1  // No additional HTTP request
+  }
+
+  test("resolveTableId also benefits from table info cache") {
+    val tableResponse =
+      """{
+        |  "table_id": "shared-cache-uuid",
+        |  "name": "shared_table",
+        |  "storage_location": "s3://bucket/shared_table"
+        |}""".stripMargin
+    setupTablesHandler(200, tableResponse)
+
+    // Call resolveTableInfo first
+    val info = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.shared_table", configMap)
+    val requestsAfterFirst = requestLog.count(_.path.contains("tables"))
+
+    // Call resolveTableId - should use same cache
+    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId(
+      "catalog.schema.shared_table", configMap)
+    val requestsAfterSecond = requestLog.count(_.path.contains("tables"))
+
+    info.tableId shouldBe "shared-cache-uuid"
+    tableId shouldBe "shared-cache-uuid"
+    requestsAfterFirst shouldBe 1
+    requestsAfterSecond shouldBe 1  // Shared cache, no additional request
+  }
+
+  test("table info cache is keyed by table name - different tables make separate requests") {
+    val tableResponse1 =
+      """{
+        |  "table_id": "uuid-table-1",
+        |  "name": "table1",
+        |  "storage_location": "s3://bucket/table1"
+        |}""".stripMargin
+    val tableResponse2 =
+      """{
+        |  "table_id": "uuid-table-2",
+        |  "name": "table2",
+        |  "storage_location": "s3://bucket/table2"
+        |}""".stripMargin
+
+    // Setup handler that returns different responses based on request path
+    try mockServer.removeContext("/api/2.1/unity-catalog/tables/")
+    catch { case _: IllegalArgumentException => }
+
+    val callCount = new AtomicInteger(0)
+    val handler = new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        val method = exchange.getRequestMethod
+        val path = exchange.getRequestURI.getPath
+        val body = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters
+          .mapAsScalaMapConverter(exchange.getRequestHeaders)
+          .asScala
+          .map { case (k, v) => k -> v.get(0) }
+          .toMap
+        requestLog += MockRequest(method, path, body, headers)
+
+        val responseBody = if (callCount.getAndIncrement() == 0) tableResponse1 else tableResponse2
+        exchange.sendResponseHeaders(200, responseBody.length)
+        val os = exchange.getResponseBody
+        os.write(responseBody.getBytes)
+        os.close()
+      }
+    }
+    mockServer.createContext("/api/2.1/unity-catalog/tables/", handler)
+
+    val info1 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.table1", configMap)
+    val info2 = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.table2", configMap)
+
+    info1.tableId shouldBe "uuid-table-1"
+    info2.tableId shouldBe "uuid-table-2"
+    requestLog.count(_.path.contains("tables")) shouldBe 2  // Two different tables = two requests
+  }
+
   test("resolveTableId is consistent with resolveTableInfo.tableId") {
     val tableResponse =
       """{
