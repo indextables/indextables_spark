@@ -595,12 +595,14 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.catalogType shouldBe None
   }
 
-  test("DELTA should not accept CATALOG TYPE") {
-    an[Exception] should be thrownBy {
-      parseSync(
-        "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/data' CATALOG 'cat' TYPE 'rest' AT LOCATION '/tmp/index'"
-      )
-    }
+  test("parse DELTA with CATALOG TYPE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA 'schema.table' CATALOG 'unity' TYPE 'rest' AT LOCATION '/tmp/index'"
+    )
+    cmd.sourceFormat shouldBe "delta"
+    cmd.sourcePath shouldBe "schema.table"
+    cmd.catalogName shouldBe Some("unity")
+    cmd.catalogType shouldBe Some("rest")
   }
 
   test("DELTA should not accept WAREHOUSE") {
@@ -648,5 +650,58 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.catalogName shouldBe Some("uc")
     cmd.catalogType shouldBe Some("rest")
     cmd.warehouse shouldBe Some("my_wh")
+  }
+
+  // ==========================================================================
+  // Delta UC table name resolution tests
+  // ==========================================================================
+
+  test("parse DELTA with CATALOG for UC table name resolution") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA 'schema.my_table' CATALOG 'unity_catalog' AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "delta"
+    cmd.sourcePath shouldBe "schema.my_table"
+    cmd.destPath shouldBe "s3://bucket/index"
+    cmd.catalogName shouldBe Some("unity_catalog")
+    cmd.catalogType shouldBe None
+    cmd.warehouse shouldBe None
+  }
+
+  test("parse DELTA with CATALOG and all options") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 'my_schema.events'
+        |  CATALOG 'unity' TYPE 'rest'
+        |  INDEXING MODES ('content':'text', 'title':'string')
+        |  FASTFIELDS MODE HYBRID
+        |  TARGET INPUT SIZE 2G
+        |  FROM VERSION 42
+        |  WHERE date = '2024-01-01'
+        |  AT LOCATION 's3://bucket/companion'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "delta"
+    cmd.sourcePath shouldBe "my_schema.events"
+    cmd.catalogName shouldBe Some("unity")
+    cmd.catalogType shouldBe Some("rest")
+    cmd.fromVersion shouldBe Some(42L)
+    cmd.dryRun shouldBe true
+    cmd.indexingModes shouldBe Map("content" -> "text", "title" -> "string")
+  }
+
+  test("DELTA with CATALOG should not accept WAREHOUSE") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR DELTA 'schema.table' CATALOG 'uc' WAREHOUSE 'wh' AT LOCATION '/tmp/index'"
+      )
+    }
+  }
+
+  test("PARQUET should not accept CATALOG TYPE") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '/tmp/data' CATALOG 'cat' TYPE 'rest' AT LOCATION '/tmp/index'"
+      )
+    }
   }
 }

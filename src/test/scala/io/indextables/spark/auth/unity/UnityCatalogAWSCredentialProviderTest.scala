@@ -498,4 +498,99 @@ class UnityCatalogAWSCredentialProviderTest
     provider.refresh()
     assert(requestLog.size == 2, "refresh() should force a new API call")
   }
+
+  // ==================== Table Resolution Tests ====================
+
+  private def setupTablesHandler(responseCode: Int, responseBody: String): Unit = {
+    try mockServer.removeContext("/api/2.1/unity-catalog/tables/")
+    catch { case _: IllegalArgumentException => }
+
+    val handler = new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        val method = exchange.getRequestMethod
+        val path = exchange.getRequestURI.getPath
+        val body = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters
+          .mapAsScalaMapConverter(exchange.getRequestHeaders)
+          .asScala
+          .map { case (k, v) => k -> v.get(0) }
+          .toMap
+        requestLog += MockRequest(method, path, body, headers)
+
+        exchange.sendResponseHeaders(responseCode, responseBody.length)
+        val os = exchange.getResponseBody
+        os.write(responseBody.getBytes)
+        os.close()
+      }
+    }
+    // Use a root context that matches all /api/2.1/unity-catalog/tables/* paths
+    mockServer.createContext("/api/2.1/unity-catalog/tables/", handler)
+  }
+
+  test("resolveTableId returns table_id from mock UC API") {
+    val tableResponse =
+      """{
+        |  "table_id": "abc-123-uuid",
+        |  "name": "my_table",
+        |  "storage_location": "s3://bucket/delta_table",
+        |  "table_type": "MANAGED"
+        |}""".stripMargin
+    setupTablesHandler(200, tableResponse)
+
+    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId(
+      "catalog.schema.my_table", configMap)
+
+    tableId shouldBe "abc-123-uuid"
+    requestLog.last.method shouldBe "GET"
+    requestLog.last.path should include("tables")
+  }
+
+  test("resolveTableInfo returns both table_id and storage_location") {
+    val tableResponse =
+      """{
+        |  "table_id": "def-456-uuid",
+        |  "name": "events",
+        |  "storage_location": "s3://my-bucket/warehouse/events",
+        |  "table_type": "EXTERNAL"
+        |}""".stripMargin
+    setupTablesHandler(200, tableResponse)
+
+    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.events", configMap)
+
+    tableInfo.tableId shouldBe "def-456-uuid"
+    tableInfo.storageLocation shouldBe "s3://my-bucket/warehouse/events"
+  }
+
+  test("resolveTableInfo returns empty storageLocation when not in response") {
+    val tableResponse =
+      """{
+        |  "table_id": "ghi-789-uuid",
+        |  "name": "minimal_table"
+        |}""".stripMargin
+    setupTablesHandler(200, tableResponse)
+
+    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "catalog.schema.minimal_table", configMap)
+
+    tableInfo.tableId shouldBe "ghi-789-uuid"
+    tableInfo.storageLocation shouldBe ""
+  }
+
+  test("resolveTableId is consistent with resolveTableInfo.tableId") {
+    val tableResponse =
+      """{
+        |  "table_id": "same-uuid-123",
+        |  "name": "table1",
+        |  "storage_location": "s3://bucket/table1"
+        |}""".stripMargin
+    setupTablesHandler(200, tableResponse)
+
+    val tableId = UnityCatalogAWSCredentialProvider.resolveTableId(
+      "cat.schema.table1", configMap)
+    val tableInfo = UnityCatalogAWSCredentialProvider.resolveTableInfo(
+      "cat.schema.table1", configMap)
+
+    tableId shouldBe tableInfo.tableId
+  }
 }

@@ -738,11 +738,11 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         None
       }
 
-      // CATALOG (Iceberg only)
+      // CATALOG (Iceberg and Delta only - used for UC table name resolution)
       val catalogName: Option[String] = if (ctx.catalogName != null) {
         val name = ParserUtils.string(ctx.catalogName)
-        if (sourceFormat != "iceberg") {
-          throw new IllegalArgumentException("CATALOG is only valid with FOR ICEBERG")
+        if (sourceFormat == "parquet") {
+          throw new IllegalArgumentException("CATALOG is only valid with FOR DELTA or FOR ICEBERG")
         }
         logger.debug(s"Catalog name: $name")
         Some(name)
@@ -750,11 +750,11 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         None
       }
 
-      // CATALOG TYPE (Iceberg only, sub-clause of CATALOG)
+      // CATALOG TYPE (Iceberg and Delta only, sub-clause of CATALOG)
       val catalogType: Option[String] = if (ctx.catalogType != null) {
         val ct = ParserUtils.string(ctx.catalogType)
-        if (sourceFormat != "iceberg") {
-          throw new IllegalArgumentException("CATALOG TYPE is only valid with FOR ICEBERG")
+        if (sourceFormat == "parquet") {
+          throw new IllegalArgumentException("CATALOG TYPE is only valid with FOR DELTA or FOR ICEBERG")
         }
         logger.debug(s"Catalog type: $ct")
         Some(ct)

@@ -118,6 +118,15 @@ class IndexTables4SparkScanBuilder(
                 logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
                 val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
                 (root, enriched)
+              } else if (sourceFormat == "delta" &&
+                         metadata.configuration.contains("indextables.companion.deltaTableName")) {
+                // Delta + UC table name: resolve credentials via table-based API
+                val storedPath = metadata.configuration.get("indextables.companion.parquetStorageRoot")
+                  .getOrElse(path)
+                logger.info(s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
+                  s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})")
+                val enriched = tryResolveDeltaTableCredentials(metadata.configuration, config)
+                (storedPath, enriched)
               } else {
                 logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
                 (path, config)
@@ -237,6 +246,45 @@ class IndexTables4SparkScanBuilder(
         } catch {
           case e: Exception =>
             logger.warn(s"Failed to resolve Iceberg table credentials at read time: ${e.getMessage}. " +
+              s"Falling back to path-based credential resolution.")
+            baseConfig
+        }
+      case None =>
+        baseConfig
+    }
+  }
+
+  /**
+   * For Delta UC companions: try to resolve table credentials at read time by
+   * reconstructing the full table name from stored catalog coordinates and calling
+   * the TableCredentialProvider to get a fresh table ID. This enables the Priority 1.5
+   * path in CredentialProviderFactory (table-based credential vending).
+   *
+   * Falls back to the original config (path-based resolution) on any failure.
+   */
+  private def tryResolveDeltaTableCredentials(
+    companionConfig: Map[String, String],
+    baseConfig: Map[String, String]
+  ): Map[String, String] = {
+    val providerOpt = baseConfig.get("spark.indextables.aws.credentialsProviderClass")
+      .filter(_.nonEmpty)
+      .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
+
+    providerOpt match {
+      case Some(provider) =>
+        try {
+          val catalog = companionConfig.getOrElse("indextables.companion.deltaCatalog", "")
+          val tableName = companionConfig.getOrElse("indextables.companion.deltaTableName", "")
+          val fullTableName = if (catalog.nonEmpty) s"$catalog.$tableName" else tableName
+
+          val tableInfo = provider.resolveTableInfo(fullTableName, baseConfig)
+          logger.info(s"Resolved Delta table ID for '$fullTableName': ${tableInfo.tableId}")
+
+          // Inject tableId so Priority 1.5 in CredentialProviderFactory activates
+          baseConfig + ("spark.indextables.iceberg.uc.tableId" -> tableInfo.tableId)
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to resolve Delta table credentials at read time: ${e.getMessage}. " +
               s"Falling back to path-based credential resolution.")
             baseConfig
         }
