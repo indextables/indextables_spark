@@ -25,8 +25,8 @@ import io.indextables.spark.RealAzureTestBase
  * Real Azure Blob Storage integration tests for BUILD INDEXTABLES COMPANION FOR PARQUET.
  *
  * These tests require:
- * 1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
- * 2. An Azure Blob Storage container for test data
+ *   1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables) 2. An Azure Blob
+ *      Storage container for test data
  *
  * Tests are automatically skipped if credentials are not available.
  */
@@ -34,14 +34,13 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
 
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
 
-  private lazy val hasAzureWasbs: Boolean = {
+  private lazy val hasAzureWasbs: Boolean =
     try {
       Class.forName("org.apache.hadoop.fs.azure.NativeAzureFileSystem")
       true
     } catch {
       case _: ClassNotFoundException => false
     }
-  }
 
   private def azureBasePath: String = {
     val account = getStorageAccount.getOrElse("devstoreaccount1")
@@ -78,11 +77,10 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
   // --- Real Azure Integration Tests ---
 
   test("create companion from Azure parquet directory") {
-    assume(hasAzureCredentials() && hasAzureWasbs,
-      "Azure credentials or WASBS driver not available - skipping test")
+    assume(hasAzureCredentials() && hasAzureWasbs, "Azure credentials or WASBS driver not available - skipping test")
 
     val parquetPath = s"$azureBasePath/parquet_data"
-    val indexPath = s"$azureBasePath/companion_index"
+    val indexPath   = s"$azureBasePath/companion_index"
 
     val _spark = spark
     import _spark.implicits._
@@ -107,11 +105,10 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
   }
 
   test("partitioned parquet on Azure") {
-    assume(hasAzureCredentials() && hasAzureWasbs,
-      "Azure credentials or WASBS driver not available - skipping test")
+    assume(hasAzureCredentials() && hasAzureWasbs, "Azure credentials or WASBS driver not available - skipping test")
 
     val parquetPath = s"$azureBasePath/parquet_partitioned"
-    val indexPath = s"$azureBasePath/companion_partitioned"
+    val indexPath   = s"$azureBasePath/companion_partitioned"
 
     val _spark = spark
     import _spark.implicits._
@@ -120,7 +117,8 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
       (2, "data-b", "east"),
       (3, "data-c", "west")
     ).toDF("id", "content", "region")
-      .write.partitionBy("region")
+      .write
+      .partitionBy("region")
       .parquet(parquetPath)
 
     val result = spark.sql(
@@ -130,11 +128,10 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
   }
 
   test("DRY RUN on Azure parquet") {
-    assume(hasAzureCredentials() && hasAzureWasbs,
-      "Azure credentials or WASBS driver not available - skipping test")
+    assume(hasAzureCredentials() && hasAzureWasbs, "Azure credentials or WASBS driver not available - skipping test")
 
     val parquetPath = s"$azureBasePath/parquet_dryrun"
-    val indexPath = s"$azureBasePath/companion_dryrun"
+    val indexPath   = s"$azureBasePath/companion_dryrun"
 
     val _spark = spark
     import _spark.implicits._
@@ -147,11 +144,10 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
   }
 
   test("FASTFIELDS MODE on Azure parquet") {
-    assume(hasAzureCredentials() && hasAzureWasbs,
-      "Azure credentials or WASBS driver not available - skipping test")
+    assume(hasAzureCredentials() && hasAzureWasbs, "Azure credentials or WASBS driver not available - skipping test")
 
     val parquetPath = s"$azureBasePath/parquet_ff"
-    val indexPath = s"$azureBasePath/companion_ff"
+    val indexPath   = s"$azureBasePath/companion_ff"
 
     val _spark = spark
     import _spark.implicits._
@@ -172,11 +168,8 @@ class RealAzureParquetSyncTest extends RealAzureTestBase {
     try {
       val files = txLog.listFiles()
       files should not be empty
-      files.foreach { file =>
-        file.companionFastFieldMode shouldBe Some("DISABLED")
-      }
-    } finally {
+      files.foreach(file => file.companionFastFieldMode shouldBe Some("DISABLED"))
+    } finally
       txLog.close()
-    }
   }
 }

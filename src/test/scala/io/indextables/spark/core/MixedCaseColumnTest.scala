@@ -23,8 +23,8 @@ import io.indextables.spark.TestBase
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
- * Test that mixed-case column names work correctly in SQL query predicates.
- * Reproduces issue where field names get lowercased and tantivy can't find them.
+ * Test that mixed-case column names work correctly in SQL query predicates. Reproduces issue where field names get
+ * lowercased and tantivy can't find them.
  */
 class MixedCaseColumnTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -46,7 +46,8 @@ class MixedCaseColumnTest extends TestBase with BeforeAndAfterAll with BeforeAnd
         .save(path)
 
       // Read and register as temp view
-      val df = spark.read.format(provider)
+      val df = spark.read
+        .format(provider)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(path)
       df.createOrReplaceTempView("mixed_case_regular")
@@ -85,7 +86,8 @@ class MixedCaseColumnTest extends TestBase with BeforeAndAfterAll with BeforeAnd
         .save(path)
 
       // Read with same typemap config
-      val df = spark.read.format(provider)
+      val df = spark.read
+        .format(provider)
         .option("spark.indextables.read.defaultLimit", "1000")
         .option("spark.indextables.indexing.typemap.contentBody", "text")
         .load(path)
@@ -95,9 +97,11 @@ class MixedCaseColumnTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       df.schema.fieldNames should contain("contentBody")
 
       // SQL indexquery on mixed-case text field
-      val iqResult = spark.sql(
-        "SELECT * FROM mixed_case_text WHERE contentBody indexquery 'quick fox'"
-      ).collect()
+      val iqResult = spark
+        .sql(
+          "SELECT * FROM mixed_case_text WHERE contentBody indexquery 'quick fox'"
+        )
+        .collect()
       iqResult.length should be >= 1
 
       // Filter on non-text mixed-case column

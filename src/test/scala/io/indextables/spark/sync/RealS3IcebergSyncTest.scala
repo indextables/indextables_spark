@@ -28,24 +28,23 @@ import io.indextables.spark.RealS3TestBase
  * Real S3 + Iceberg REST catalog integration tests for BUILD INDEXTABLES COMPANION FOR ICEBERG.
  *
  * These tests require:
- * 1. AWS credentials in ~/.aws/credentials
- * 2. Iceberg REST catalog config in ~/.iceberg/credentials (or environment variables)
- * 3. A pre-existing Iceberg table accessible via the REST catalog
+ *   1. AWS credentials in ~/.aws/credentials 2. Iceberg REST catalog config in ~/.iceberg/credentials (or environment
+ *      variables) 3. A pre-existing Iceberg table accessible via the REST catalog
  *
  * Tests are automatically skipped if credentials are not available.
  */
 class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
 
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
+  private val S3_BUCKET    = "test-tantivy4sparkbucket"
+  private val S3_REGION    = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
   private val testBasePath = s"$S3_BASE_PATH/iceberg-sync-test-$testRunId"
 
   private var awsCredentials: Option[(String, String)] = None
 
   private def loadAwsCredentials(): Option[(String, String)] = {
-    val home = System.getProperty("user.home")
+    val home     = System.getProperty("user.home")
     val credFile = new File(s"$home/.aws/credentials")
 
     if (!credFile.exists()) return None
@@ -106,8 +105,10 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
   // --- Real S3 + Iceberg Integration Tests ---
 
   test("create companion from REST catalog table") {
-    assume(awsCredentials.isDefined && restCatalogConfig.isDefined,
-      "AWS credentials or Iceberg REST catalog config not available - skipping test")
+    assume(
+      awsCredentials.isDefined && restCatalogConfig.isDefined,
+      "AWS credentials or Iceberg REST catalog config not available - skipping test"
+    )
 
     val config = restCatalogConfig.get
     configureSparkForCatalog(spark, config)
@@ -124,8 +125,8 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
     val row = rows(0)
     row.getString(2) shouldBe "success"
     row.isNullAt(3) shouldBe false // source_version (Iceberg snapshot ID)
-    row.getInt(4) should be > 0   // splits_created
-    row.getInt(6) should be > 0   // parquet_files_indexed
+    row.getInt(4) should be > 0    // splits_created
+    row.getInt(6) should be > 0    // parquet_files_indexed
 
     // Verify metadata records sourceFormat=iceberg
     import org.apache.hadoop.fs.Path
@@ -135,14 +136,15 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
       val metadata = txLog.getMetadata()
       metadata.configuration("indextables.companion.sourceFormat") shouldBe "iceberg"
       metadata.configuration("indextables.companion.enabled") shouldBe "true"
-    } finally {
+    } finally
       txLog.close()
-    }
   }
 
   test("DRY RUN on Iceberg table") {
-    assume(awsCredentials.isDefined && restCatalogConfig.isDefined,
-      "AWS credentials or Iceberg REST catalog config not available - skipping test")
+    assume(
+      awsCredentials.isDefined && restCatalogConfig.isDefined,
+      "AWS credentials or Iceberg REST catalog config not available - skipping test"
+    )
 
     val config = restCatalogConfig.get
     configureSparkForCatalog(spark, config)
@@ -157,8 +159,10 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
   }
 
   test("FROM SNAPSHOT time travel on Iceberg table") {
-    assume(awsCredentials.isDefined && restCatalogConfig.isDefined,
-      "AWS credentials or Iceberg REST catalog config not available - skipping test")
+    assume(
+      awsCredentials.isDefined && restCatalogConfig.isDefined,
+      "AWS credentials or Iceberg REST catalog config not available - skipping test"
+    )
 
     val config = restCatalogConfig.get
     configureSparkForCatalog(spark, config)
@@ -187,8 +191,10 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
   }
 
   test("read-back from Iceberg companion returns correct data") {
-    assume(awsCredentials.isDefined && restCatalogConfig.isDefined,
-      "AWS credentials or Iceberg REST catalog config not available - skipping test")
+    assume(
+      awsCredentials.isDefined && restCatalogConfig.isDefined,
+      "AWS credentials or Iceberg REST catalog config not available - skipping test"
+    )
 
     val config = restCatalogConfig.get
     configureSparkForCatalog(spark, config)
@@ -214,8 +220,10 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
   }
 
   test("re-sync with same snapshot is no_action") {
-    assume(awsCredentials.isDefined && restCatalogConfig.isDefined,
-      "AWS credentials or Iceberg REST catalog config not available - skipping test")
+    assume(
+      awsCredentials.isDefined && restCatalogConfig.isDefined,
+      "AWS credentials or Iceberg REST catalog config not available - skipping test"
+    )
 
     val config = restCatalogConfig.get
     configureSparkForCatalog(spark, config)
@@ -223,10 +231,13 @@ class RealS3IcebergSyncTest extends RealS3TestBase with IcebergTestSupport {
     val indexPath = s"$testBasePath/iceberg_resync"
 
     // First sync
-    spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
-        s"AT LOCATION '$indexPath'"
-    ).collect()(0).getString(2) shouldBe "success"
+    spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG '${config.tableIdentifier}' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      .collect()(0)
+      .getString(2) shouldBe "success"
 
     // Re-sync with same snapshot should be no_action
     val result = spark.sql(

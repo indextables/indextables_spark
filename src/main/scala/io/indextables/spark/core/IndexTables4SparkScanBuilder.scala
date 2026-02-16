@@ -97,13 +97,12 @@ class IndexTables4SparkScanBuilder(
       config
     } else {
       try {
-        val metadata = transactionLog.getMetadata()
+        val metadata    = transactionLog.getMetadata()
         val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
         if (isCompanion) {
           metadata.configuration.get("indextables.companion.sourceTablePath") match {
             case Some(path) =>
-              val sourceFormat = metadata.configuration.getOrElse(
-                "indextables.companion.sourceFormat", "delta")
+              val sourceFormat = metadata.configuration.getOrElse("indextables.companion.sourceFormat", "delta")
 
               // For Iceberg: use stored S3 root for parquetTableRoot (sourcePath is a
               // table identifier like "prod.events", not an S3 path), and try table-based
@@ -111,20 +110,27 @@ class IndexTables4SparkScanBuilder(
               val (effectivePath, baseConfig) = if (sourceFormat == "iceberg") {
                 val storageRoot = metadata.configuration.get("indextables.companion.parquetStorageRoot")
                 val root = storageRoot.getOrElse {
-                  logger.warn(s"Iceberg companion: no parquetStorageRoot in metadata, " +
-                    s"falling back to sourceTablePath=$path")
+                  logger.warn(
+                    s"Iceberg companion: no parquetStorageRoot in metadata, " +
+                      s"falling back to sourceTablePath=$path"
+                  )
                   path
                 }
                 logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
                 val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
                 (root, enriched)
-              } else if (sourceFormat == "delta" &&
-                         metadata.configuration.contains("indextables.companion.deltaTableName")) {
+              } else if (
+                sourceFormat == "delta" &&
+                metadata.configuration.contains("indextables.companion.deltaTableName")
+              ) {
                 // Delta + UC table name: resolve credentials via table-based API
-                val storedPath = metadata.configuration.get("indextables.companion.parquetStorageRoot")
+                val storedPath = metadata.configuration
+                  .get("indextables.companion.parquetStorageRoot")
                   .getOrElse(path)
-                logger.info(s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
-                  s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})")
+                logger.info(
+                  s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
+                    s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})"
+                )
                 val enriched = tryResolveDeltaTableCredentials(metadata.configuration, config)
                 (storedPath, enriched)
               } else {
@@ -151,13 +157,15 @@ class IndexTables4SparkScanBuilder(
                     }
                   }
                 // Propagate region and endpoint from main config
-                enrichedConfig.get("spark.indextables.aws.region")
+                enrichedConfig
+                  .get("spark.indextables.aws.region")
                   .orElse(enrichedConfig.get("spark.indextables.aws.region".toLowerCase))
                   .foreach { region =>
                     enrichedConfig = enrichedConfig +
                       ("spark.indextables.companion.parquet.aws.region" -> region)
                   }
-                enrichedConfig.get("spark.indextables.s3.endpoint")
+                enrichedConfig
+                  .get("spark.indextables.s3.endpoint")
                   .orElse(enrichedConfig.get("spark.indextables.s3.endpoint".toLowerCase))
                   .foreach { endpoint =>
                     enrichedConfig = enrichedConfig +
@@ -174,14 +182,15 @@ class IndexTables4SparkScanBuilder(
                 try {
                   val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
                   import scala.jdk.CollectionConverters._
-                  val modes: java.util.Map[String, String] = mapper.readValue(
-                    json, classOf[java.util.HashMap[String, String]])
-                  modes.asScala.foreach { case (field, mode) =>
-                    val key = s"spark.indextables.indexing.typemap.$field"
-                    if (!enrichedConfig.contains(key)) {
-                      logger.info(s"Companion mode: propagating indexingMode $field -> $mode as typemap entry")
-                      enrichedConfig = enrichedConfig + (key -> mode)
-                    }
+                  val modes: java.util.Map[String, String] =
+                    mapper.readValue(json, classOf[java.util.HashMap[String, String]])
+                  modes.asScala.foreach {
+                    case (field, mode) =>
+                      val key = s"spark.indextables.indexing.typemap.$field"
+                      if (!enrichedConfig.contains(key)) {
+                        logger.info(s"Companion mode: propagating indexingMode $field -> $mode as typemap entry")
+                        enrichedConfig = enrichedConfig + (key -> mode)
+                      }
                   }
                 } catch {
                   case e: Exception =>
@@ -199,7 +208,9 @@ class IndexTables4SparkScanBuilder(
               config
           }
         } else {
-          logger.info(s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})")
+          logger.info(
+            s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})"
+          )
           config
         }
       } catch {
@@ -211,10 +222,9 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * For Iceberg companions: try to resolve table credentials at read time by
-   * reconstructing the full table name from stored catalog coordinates and calling
-   * the TableCredentialProvider to get a fresh table ID. This enables the Priority 1.5
-   * path in CredentialProviderFactory (table-based credential vending).
+   * For Iceberg companions: try to resolve table credentials at read time by reconstructing the full table name from
+   * stored catalog coordinates and calling the TableCredentialProvider to get a fresh table ID. This enables the
+   * Priority 1.5 path in CredentialProviderFactory (table-based credential vending).
    *
    * Falls back to the original config (path-based resolution) on any failure.
    */
@@ -222,15 +232,16 @@ class IndexTables4SparkScanBuilder(
     companionConfig: Map[String, String],
     baseConfig: Map[String, String]
   ): Map[String, String] = {
-    val providerOpt = baseConfig.get("spark.indextables.aws.credentialsProviderClass")
+    val providerOpt = baseConfig
+      .get("spark.indextables.aws.credentialsProviderClass")
       .filter(_.nonEmpty)
       .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
 
     providerOpt match {
       case Some(provider) =>
         try {
-          val catalog = companionConfig.getOrElse("indextables.companion.icebergCatalog", "default")
-          val tablePath = companionConfig.getOrElse("indextables.companion.sourceTablePath", "")
+          val catalog       = companionConfig.getOrElse("indextables.companion.icebergCatalog", "default")
+          val tablePath     = companionConfig.getOrElse("indextables.companion.sourceTablePath", "")
           val fullTableName = s"$catalog.$tablePath"
 
           // Merge auto-derived catalog defaults (URI, token, etc.) from provider
@@ -245,8 +256,10 @@ class IndexTables4SparkScanBuilder(
           withDefaults + ("spark.indextables.iceberg.uc.tableId" -> tableId)
         } catch {
           case e: Exception =>
-            logger.warn(s"Failed to resolve Iceberg table credentials at read time: ${e.getMessage}. " +
-              s"Falling back to path-based credential resolution.")
+            logger.warn(
+              s"Failed to resolve Iceberg table credentials at read time: ${e.getMessage}. " +
+                s"Falling back to path-based credential resolution."
+            )
             baseConfig
         }
       case None =>
@@ -255,10 +268,9 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * For Delta UC companions: try to resolve table credentials at read time by
-   * reconstructing the full table name from stored catalog coordinates and calling
-   * the TableCredentialProvider to get a fresh table ID. This enables the Priority 1.5
-   * path in CredentialProviderFactory (table-based credential vending).
+   * For Delta UC companions: try to resolve table credentials at read time by reconstructing the full table name from
+   * stored catalog coordinates and calling the TableCredentialProvider to get a fresh table ID. This enables the
+   * Priority 1.5 path in CredentialProviderFactory (table-based credential vending).
    *
    * Falls back to the original config (path-based resolution) on any failure.
    */
@@ -266,15 +278,16 @@ class IndexTables4SparkScanBuilder(
     companionConfig: Map[String, String],
     baseConfig: Map[String, String]
   ): Map[String, String] = {
-    val providerOpt = baseConfig.get("spark.indextables.aws.credentialsProviderClass")
+    val providerOpt = baseConfig
+      .get("spark.indextables.aws.credentialsProviderClass")
       .filter(_.nonEmpty)
       .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
 
     providerOpt match {
       case Some(provider) =>
         try {
-          val catalog = companionConfig.getOrElse("indextables.companion.deltaCatalog", "")
-          val tableName = companionConfig.getOrElse("indextables.companion.deltaTableName", "")
+          val catalog       = companionConfig.getOrElse("indextables.companion.deltaCatalog", "")
+          val tableName     = companionConfig.getOrElse("indextables.companion.deltaTableName", "")
           val fullTableName = if (catalog.nonEmpty) s"$catalog.$tableName" else tableName
 
           val tableInfo = provider.resolveTableInfo(fullTableName, baseConfig)
@@ -284,8 +297,10 @@ class IndexTables4SparkScanBuilder(
           baseConfig + ("spark.indextables.iceberg.uc.tableId" -> tableInfo.tableId)
         } catch {
           case e: Exception =>
-            logger.warn(s"Failed to resolve Delta table credentials at read time: ${e.getMessage}. " +
-              s"Falling back to path-based credential resolution.")
+            logger.warn(
+              s"Failed to resolve Delta table credentials at read time: ${e.getMessage}. " +
+                s"Falling back to path-based credential resolution."
+            )
             baseConfig
         }
       case None =>
@@ -2071,7 +2086,7 @@ class IndexTables4SparkScanBuilder(
 
     // Partition columns are resolved from split metadata at execution time,
     // not from tantivy fast fields - skip them in validation
-    val partitionColumns = getPartitionColumns()
+    val partitionColumns   = getPartitionColumns()
     val dataGroupByColumns = groupByColumns.filterNot(partitionColumns.contains)
 
     dataGroupByColumns.foreach { columnName =>
@@ -2279,11 +2294,11 @@ object IndexTables4SparkScanBuilder {
     }
 
   /**
-   * Check if stored IndexQueries have been consumed (read by build()) and are potentially stale.
-   * Called by V2IndexQueryExpressionRule at the start of each new query's analysis phase.
+   * Check if stored IndexQueries have been consumed (read by build()) and are potentially stale. Called by
+   * V2IndexQueryExpressionRule at the start of each new query's analysis phase.
    *
-   * When this returns true, the caller should clear stored IndexQueries for the current relation
-   * because they are leftover from a previous query that either:
+   * When this returns true, the caller should clear stored IndexQueries for the current relation because they are
+   * leftover from a previous query that either:
    *   - Failed (build() threw before cleanup) - the stale state bug
    *   - Succeeded but cleanup already ran (IndexQueries already empty, so clearing is a no-op)
    */

@@ -22,15 +22,18 @@ import io.indextables.spark.TestBase
 /**
  * Tests for BUILD INDEXTABLES COMPANION FOR (DELTA|PARQUET|ICEBERG) SQL parsing.
  *
- * Validates that the ANTLR grammar correctly parses all BUILD COMPANION command variants
- * and produces the correct SyncToExternalCommand parameters.
+ * Validates that the ANTLR grammar correctly parses all BUILD COMPANION command variants and produces the correct
+ * SyncToExternalCommand parameters.
  */
 class SyncToExternalParsingTest extends TestBase {
 
   private def parseSync(sql: String): SyncToExternalCommand = {
     val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
-    val plan = sqlParser.parsePlan(sql)
-    assert(plan.isInstanceOf[SyncToExternalCommand], s"Expected SyncToExternalCommand, got ${plan.getClass.getSimpleName}")
+    val plan      = sqlParser.parsePlan(sql)
+    assert(
+      plan.isInstanceOf[SyncToExternalCommand],
+      s"Expected SyncToExternalCommand, got ${plan.getClass.getSimpleName}"
+    )
     plan.asInstanceOf[SyncToExternalCommand]
   }
 

@@ -260,11 +260,13 @@ class IndexTables4SparkPartitionReader(
   private def createCacheConfig(): SplitCacheConfig = {
     // Diagnostic: log companion config state on executor
     val hasCompanionKey = config.contains("spark.indextables.companion.parquetTableRoot")
-    val companionRoot = config.get("spark.indextables.companion.parquetTableRoot")
-    logger.info(s"[EXECUTOR] createCacheConfig for ${addAction.path}: " +
-      s"companionMode=$hasCompanionKey, " +
-      s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
-      s"totalConfigKeys=${config.size}")
+    val companionRoot   = config.get("spark.indextables.companion.parquetTableRoot")
+    logger.info(
+      s"[EXECUTOR] createCacheConfig for ${addAction.path}: " +
+        s"companionMode=$hasCompanionKey, " +
+        s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
+        s"totalConfigKeys=${config.size}"
+    )
     io.indextables.spark.util.ConfigUtils.createSplitCacheConfig(
       config,
       Some(tablePath.toString)
@@ -295,10 +297,12 @@ class IndexTables4SparkPartitionReader(
 
         // Defensive check: detect companion splits that are missing companion config
         if (addAction.companionDeltaVersion.isDefined && cacheConfig.companionSourceTableRoot.isEmpty) {
-          logger.error(s"COMPANION CONFIG MISSING: Split ${addAction.path} has companionDeltaVersion=" +
-            s"${addAction.companionDeltaVersion.get} but companionSourceTableRoot is None. " +
-            s"Config keys: ${config.keys.filter(_.contains("companion")).mkString(", ")}. " +
-            s"This will cause 'parquet_table_root was not set' error during document retrieval.")
+          logger.error(
+            s"COMPANION CONFIG MISSING: Split ${addAction.path} has companionDeltaVersion=" +
+              s"${addAction.companionDeltaVersion.get} but companionSourceTableRoot is None. " +
+              s"Config keys: ${config.keys.filter(_.contains("companion")).mkString(", ")}. " +
+              s"This will cause 'parquet_table_root was not set' error during document retrieval."
+          )
         }
 
         // Create split search engine using footer offset optimization when available
@@ -464,8 +468,9 @@ class IndexTables4SparkPartitionReader(
             logger.info(s"Companion split: injecting ${partitionIndices.length} partition column value(s)")
             searchResults.iterator.map { row =>
               val values = row.toSeq(readSchema).toArray
-              partitionIndices.foreach { case (idx, dataType, strVal) =>
-                values(idx) = convertPartitionValue(strVal, dataType)
+              partitionIndices.foreach {
+                case (idx, dataType, strVal) =>
+                  values(idx) = convertPartitionValue(strVal, dataType)
               }
               InternalRow.fromSeq(values)
             }
@@ -756,15 +761,15 @@ class IndexTables4SparkPartitionReader(
     import org.apache.spark.unsafe.types.UTF8String
     if (value == null) return null
     dataType match {
-      case StringType    => UTF8String.fromString(value)
-      case IntegerType   => value.toInt
-      case LongType      => value.toLong
-      case DoubleType    => value.toDouble
-      case FloatType     => value.toFloat
-      case BooleanType   => value.toBoolean
-      case ShortType     => value.toShort
-      case ByteType      => value.toByte
-      case DateType      =>
+      case StringType  => UTF8String.fromString(value)
+      case IntegerType => value.toInt
+      case LongType    => value.toLong
+      case DoubleType  => value.toDouble
+      case FloatType   => value.toFloat
+      case BooleanType => value.toBoolean
+      case ShortType   => value.toShort
+      case ByteType    => value.toByte
+      case DateType    =>
         // Spark stores DateType as Int (days since epoch 1970-01-01)
         java.time.LocalDate.parse(value).toEpochDay.toInt
       case TimestampType =>
@@ -775,7 +780,7 @@ class IndexTables4SparkPartitionReader(
           java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
         }
         instant.getEpochSecond * 1000000L + instant.getNano / 1000L
-      case _             => UTF8String.fromString(value) // fallback: treat as string
+      case _ => UTF8String.fromString(value) // fallback: treat as string
     }
   }
 }
@@ -1070,9 +1075,10 @@ class IndexTables4SparkDataWriter(
   // finalize and upload the current split when the row count reaches the limit,
   // then continue writing to a fresh split.
   private val maxRowsPerSplit: Option[Long] = Option(serializedOptions.getOrElse("__maxRowsPerSplit", null))
-    .filter(_.nonEmpty).map(_.toLong)
-  private val rolledActions = scala.collection.mutable.ArrayBuffer[AddAction]()
-  private var cumulativeBytes: Long = 0L
+    .filter(_.nonEmpty)
+    .map(_.toLong)
+  private val rolledActions           = scala.collection.mutable.ArrayBuffer[AddAction]()
+  private var cumulativeBytes: Long   = 0L
   private var cumulativeRecords: Long = 0L
 
   // Debug: log partition columns being used
@@ -1082,9 +1088,9 @@ class IndexTables4SparkDataWriter(
   )
 
   /**
-   * Check if the current writer should be rolled (finalized and replaced with a fresh one).
-   * Called after each row is written. If the row count reaches maxRowsPerSplit, the current
-   * split is committed (uploaded + cleaned up), and a fresh writer is returned.
+   * Check if the current writer should be rolled (finalized and replaced with a fresh one). Called after each row is
+   * written. If the row count reaches maxRowsPerSplit, the current split is committed (uploaded + cleaned up), and a
+   * fresh writer is returned.
    */
   private def maybeRollSplit(
     engine: TantivySearchEngine,
@@ -1104,8 +1110,10 @@ class IndexTables4SparkDataWriter(
         cumulativeRecords += addAction.numRecords.getOrElse(0L)
         org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(cumulativeBytes, cumulativeRecords)
 
-        logger.info(s"Rolled split after $count rows (cumulative: $cumulativeRecords records, " +
-          s"${rolledActions.size} splits, partition=$partitionKey)")
+        logger.info(
+          s"Rolled split after $count rows (cumulative: $cumulativeRecords records, " +
+            s"${rolledActions.size} splits, partition=$partitionKey)"
+        )
 
         // Create fresh writer
         (

@@ -127,7 +127,7 @@ class IndexTables4SparkBatchWrite(
       }
     } catch {
       case e: UnsupportedOperationException => throw e
-      case _: Exception => // Table may not exist yet, which is fine
+      case _: Exception                     => // Table may not exist yet, which is fine
     }
 
     // Initialize transaction log with schema and partition columns

@@ -17,21 +17,23 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.transaction.TransactionLog
-import io.indextables.spark.write.{OptimizedWriteConfig, WriteSizeEstimator}
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.connector.distributions.{Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.{Expression, Expressions, SortOrder}
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, RequiresDistributionAndOrdering}
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.write.{OptimizedWriteConfig, WriteSizeEstimator}
 import org.slf4j.LoggerFactory
 
 /**
- * Optimized write implementation that mixes in RequiresDistributionAndOrdering to request
- * a shuffle before writing. This produces well-sized splits by clustering data by partition
- * columns and using an advisory partition size based on transaction log history or a sampling ratio.
+ * Optimized write implementation that mixes in RequiresDistributionAndOrdering to request a shuffle before writing.
+ * This produces well-sized splits by clustering data by partition columns and using an advisory partition size based on
+ * transaction log history or a sampling ratio.
  *
- * All commit, writer factory, data writer, merge-on-write, and purge-on-write logic is
- * inherited unchanged from IndexTables4SparkStandardWrite.
+ * All commit, writer factory, data writer, merge-on-write, and purge-on-write logic is inherited unchanged from
+ * IndexTables4SparkStandardWrite.
  */
 class IndexTables4SparkOptimizedWrite(
   @transient transactionLog: TransactionLog,
@@ -40,9 +42,14 @@ class IndexTables4SparkOptimizedWrite(
   serializedOptions: Map[String, String],
   @transient hadoopConf: org.apache.hadoop.conf.Configuration,
   isOverwrite: Boolean,
-  config: OptimizedWriteConfig
-) extends IndexTables4SparkStandardWrite(
-      transactionLog, tablePath, writeInfo, serializedOptions, hadoopConf, isOverwrite
+  config: OptimizedWriteConfig)
+    extends IndexTables4SparkStandardWrite(
+      transactionLog,
+      tablePath,
+      writeInfo,
+      serializedOptions,
+      hadoopConf,
+      isOverwrite
     )
     with RequiresDistributionAndOrdering {
 

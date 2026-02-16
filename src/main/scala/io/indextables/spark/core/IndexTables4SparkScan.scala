@@ -388,12 +388,14 @@ class IndexTables4SparkScan(
 
     // Diagnostic: log companion config state on driver before serialization to executors
     val hasCompanionKey = resolvedConfig.contains("spark.indextables.companion.parquetTableRoot")
-    val companionRoot = resolvedConfig.get("spark.indextables.companion.parquetTableRoot")
+    val companionRoot   = resolvedConfig.get("spark.indextables.companion.parquetTableRoot")
     val hasParquetCreds = resolvedConfig.contains("spark.indextables.companion.parquet.aws.accessKey")
-    logger.info(s"[DRIVER] createReaderFactory: companionMode=$hasCompanionKey, " +
-      s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
-      s"parquetCredentials=$hasParquetCreds, " +
-      s"totalConfigKeys=${resolvedConfig.size}")
+    logger.info(
+      s"[DRIVER] createReaderFactory: companionMode=$hasCompanionKey, " +
+        s"parquetTableRoot=${companionRoot.getOrElse("NONE")}, " +
+        s"parquetCredentials=$hasParquetCreds, " +
+        s"totalConfigKeys=${resolvedConfig.size}"
+    )
 
     new IndexTables4SparkReaderFactory(readSchema, limit, resolvedConfig, tablePath, metricsAccumulator)
   }

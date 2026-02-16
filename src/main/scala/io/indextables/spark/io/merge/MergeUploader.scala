@@ -91,7 +91,7 @@ object MergeUploader {
     }
 
     // S3 upload - Use the SAME credential resolution as S3AsyncDownloader
-    val s3Client = createS3Client(configs, tablePath)
+    val s3Client           = createS3Client(configs, tablePath)
     val multipartThreshold = 100L * 1024 * 1024 // 100MB
 
     try {
@@ -181,8 +181,8 @@ object MergeUploader {
   }
 
   /**
-   * Multipart upload for files exceeding the single-PUT 5GB S3 limit.
-   * Uses 128MB parts with sequential upload via the sync S3 client.
+   * Multipart upload for files exceeding the single-PUT 5GB S3 limit. Uses 128MB parts with sequential upload via the
+   * sync S3 client.
    */
   private def uploadMultipart(
     s3Client: S3Client,
@@ -196,26 +196,28 @@ object MergeUploader {
     val partSize = 128L * 1024 * 1024 // 128MB parts
     val fileSize = localFile.length()
 
-    val createRequest = CreateMultipartUploadRequest.builder()
+    val createRequest = CreateMultipartUploadRequest
+      .builder()
       .bucket(bucket)
       .key(key)
       .build()
     val createResponse = s3Client.createMultipartUpload(createRequest)
-    val uploadId = createResponse.uploadId()
+    val uploadId       = createResponse.uploadId()
 
     try {
       val completedParts = new java.util.ArrayList[CompletedPart]()
-      val raf = new RandomAccessFile(localFile, "r")
+      val raf            = new RandomAccessFile(localFile, "r")
       try {
-        var offset = 0L
+        var offset     = 0L
         var partNumber = 1
         while (offset < fileSize) {
           val currentPartSize = math.min(partSize, fileSize - offset).toInt
-          val buffer = new Array[Byte](currentPartSize)
+          val buffer          = new Array[Byte](currentPartSize)
           raf.seek(offset)
           raf.readFully(buffer)
 
-          val uploadRequest = UploadPartRequest.builder()
+          val uploadRequest = UploadPartRequest
+            .builder()
             .bucket(bucket)
             .key(key)
             .uploadId(uploadId)
@@ -226,46 +228,53 @@ object MergeUploader {
           val response = s3Client.uploadPart(uploadRequest, RequestBody.fromBytes(buffer))
 
           completedParts.add(
-            CompletedPart.builder()
+            CompletedPart
+              .builder()
               .partNumber(partNumber)
               .eTag(response.eTag())
               .build()
           )
 
-          logger.debug(s"Uploaded part $partNumber (${currentPartSize / 1024 / 1024}MB) " +
-            s"for s3://$bucket/$key")
+          logger.debug(
+            s"Uploaded part $partNumber (${currentPartSize / 1024 / 1024}MB) " +
+              s"for s3://$bucket/$key"
+          )
           offset += currentPartSize
           partNumber += 1
         }
-      } finally {
+      } finally
         raf.close()
-      }
 
-      val completeRequest = CompleteMultipartUploadRequest.builder()
+      val completeRequest = CompleteMultipartUploadRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .uploadId(uploadId)
         .multipartUpload(
-          CompletedMultipartUpload.builder()
+          CompletedMultipartUpload
+            .builder()
             .parts(completedParts)
             .build()
         )
         .build()
       s3Client.completeMultipartUpload(completeRequest)
-      logger.info(s"Multipart upload completed: s3://$bucket/$key " +
-        s"(${completedParts.size()} parts, $fileSize bytes)")
+      logger.info(
+        s"Multipart upload completed: s3://$bucket/$key " +
+          s"(${completedParts.size()} parts, $fileSize bytes)"
+      )
     } catch {
       case e: Exception =>
         // Abort the multipart upload on failure to clean up partial parts
-        try {
+        try
           s3Client.abortMultipartUpload(
-            AbortMultipartUploadRequest.builder()
+            AbortMultipartUploadRequest
+              .builder()
               .bucket(bucket)
               .key(key)
               .uploadId(uploadId)
               .build()
           )
-        } catch {
+        catch {
           case abortEx: Exception =>
             logger.warn(s"Failed to abort multipart upload: ${abortEx.getMessage}")
         }
@@ -392,7 +401,7 @@ object MergeUploader {
       .replaceFirst("^wasbs?://", "azure://")
       .replaceFirst("^abfss?://", "azure://")
 
-    val uri = new URI(normalizedPath)
+    val uri      = new URI(normalizedPath)
     val pathPart = uri.getPath.stripPrefix("/")
 
     // Hadoop-style URLs use container@account.host format:

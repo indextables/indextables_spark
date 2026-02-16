@@ -122,12 +122,16 @@ class SplitSearchEngine private (
       cacheConfig.companionSourceTableRoot match {
         case Some(tableRoot) =>
           val pqStorageConfig = buildParquetStorageConfig()
-          logger.info(s"Companion mode: per-split parquetTableRoot=$tableRoot, " +
-            s"parquetStorageConfig=${if (pqStorageConfig != null) "present" else "null"} for $splitPath")
+          logger.info(
+            s"Companion mode: per-split parquetTableRoot=$tableRoot, " +
+              s"parquetStorageConfig=${if (pqStorageConfig != null) "present" else "null"} for $splitPath"
+          )
           cacheManager.createSplitSearcher(splitPath, metadata, tableRoot, pqStorageConfig)
         case None =>
-          logger.info(s"Non-companion mode: companionSourceTableRoot=None for $splitPath " +
-            s"(parquetAwsAccessKey=${cacheConfig.parquetAwsAccessKey.map(_.take(4) + "...").getOrElse("None")})")
+          logger.info(
+            s"Non-companion mode: companionSourceTableRoot=None for $splitPath " +
+              s"(parquetAwsAccessKey=${cacheConfig.parquetAwsAccessKey.map(_.take(4) + "...").getOrElse("None")})"
+          )
           cacheManager.createSplitSearcher(splitPath, metadata)
       }
     } catch {
@@ -369,11 +373,10 @@ class SplitSearchEngine private (
   }
 
   /**
-   * Build a per-split ParquetStorageConfig from cacheConfig's parquet credential fields.
-   * Returns null if no separate parquet credentials are configured (native layer falls back
-   * to the split's own credentials).
+   * Build a per-split ParquetStorageConfig from cacheConfig's parquet credential fields. Returns null if no separate
+   * parquet credentials are configured (native layer falls back to the split's own credentials).
    */
-  private def buildParquetStorageConfig(): io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig = {
+  private def buildParquetStorageConfig(): io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig =
     (cacheConfig.parquetAwsAccessKey, cacheConfig.parquetAwsSecretKey) match {
       case (Some(key), Some(secret)) =>
         val pqStorage = new io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig()
@@ -387,7 +390,6 @@ class SplitSearchEngine private (
       case _ =>
         null // No separate parquet credentials — native layer will fall back to split credentials
     }
-  }
 
   /**
    * Get the underlying SplitSearcher for direct operations like warmup. This provides access to advanced features like

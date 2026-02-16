@@ -20,19 +20,20 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
-import io.indextables.spark.transaction.TransactionLogFactory
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 
-import org.scalatest.BeforeAndAfterAll
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Local filesystem integration tests for BUILD INDEXTABLES COMPANION FOR DELTA.
  *
- * Uses delta-spark to create Delta tables with known schemas, then exercises
- * the BUILD INDEXTABLES COMPANION command pipeline.
+ * Uses delta-spark to create Delta tables with known schemas, then exercises the BUILD INDEXTABLES COMPANION command
+ * pipeline.
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
@@ -44,19 +45,20 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     SparkSession.getActiveSession.foreach(_.stop())
     SparkSession.getDefaultSession.foreach(_.stop())
 
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("LocalSyncIntegrationTest")
       .master("local[2]")
-      .config("spark.sql.warehouse.dir",
-        Files.createTempDirectory("spark-warehouse").toString)
+      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.sql.extensions",
+      .config(
+        "spark.sql.extensions",
         "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-          "io.delta.sql.DeltaSparkSessionExtension")
-      .config("spark.sql.catalog.spark_catalog",
-        "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+          "io.delta.sql.DeltaSparkSessionExtension"
+      )
+      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
       .config("spark.sql.adaptive.enabled", "false")
       .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
       .config("spark.indextables.aws.accessKey", "test-default-access-key")
@@ -102,8 +104,8 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
   }
 
   /**
-   * Create a Delta table using delta-spark's DataFrame write API.
-   * Schema: id(Long), name(String), score(Double), active(Boolean)
+   * Create a Delta table using delta-spark's DataFrame write API. Schema: id(Long), name(String), score(Double),
+   * active(Boolean)
    */
   private def createLocalDeltaTable(
     deltaPath: String,
@@ -112,17 +114,16 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val ss = spark
     import ss.implicits._
 
-    val data = (0 until numRows).map { i =>
-      (i.toLong, s"name_$i", i * 1.5, i % 2 == 0)
-    }
-    data.toDF("id", "name", "score", "active")
+    val data = (0 until numRows).map(i => (i.toLong, s"name_$i", i * 1.5, i % 2 == 0))
+    data
+      .toDF("id", "name", "score", "active")
       .repartition(1)
-      .write.format("delta").save(deltaPath)
+      .write
+      .format("delta")
+      .save(deltaPath)
   }
 
-  /**
-   * Create a Delta table with a specific number of parquet files.
-   */
+  /** Create a Delta table with a specific number of parquet files. */
   private def createLocalDeltaTableWithFiles(
     deltaPath: String,
     numFiles: Int,
@@ -131,12 +132,13 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val ss = spark
     import ss.implicits._
 
-    val data = (0 until numFiles * rowsPerFile).map { i =>
-      (i.toLong, s"name_$i", i * 1.5, i % 2 == 0)
-    }
-    data.toDF("id", "name", "score", "active")
+    val data = (0 until numFiles * rowsPerFile).map(i => (i.toLong, s"name_$i", i * 1.5, i % 2 == 0))
+    data
+      .toDF("id", "name", "score", "active")
       .repartition(numFiles)
-      .write.format("delta").save(deltaPath)
+      .write
+      .format("delta")
+      .save(deltaPath)
   }
 
   // ═══════════════════════════════════════════
@@ -161,9 +163,9 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       row.getString(0) shouldBe indexPath // table_path
       row.getString(1) shouldBe deltaPath // source_path
       row.getString(2) shouldBe "success" // status
-      row.getAs[Long](3) shouldBe 0L // source_version
-      row.getInt(4) should be > 0 // splits_created
-      row.getInt(6) should be > 0 // parquet_files_indexed
+      row.getAs[Long](3) shouldBe 0L      // source_version
+      row.getInt(4) should be > 0         // splits_created
+      row.getInt(6) should be > 0         // parquet_files_indexed
     }
   }
 
@@ -249,12 +251,9 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       try {
         val files = txLog.listFiles()
         files should not be empty
-        files.foreach { file =>
-          file.companionFastFieldMode shouldBe Some("DISABLED")
-        }
-      } finally {
+        files.foreach(file => file.companionFastFieldMode shouldBe Some("DISABLED"))
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -277,12 +276,9 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       try {
         val files = txLog.listFiles()
         files should not be empty
-        files.foreach { file =>
-          file.companionFastFieldMode shouldBe Some("HYBRID")
-        }
-      } finally {
+        files.foreach(file => file.companionFastFieldMode shouldBe Some("HYBRID"))
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -305,12 +301,9 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       try {
         val files = txLog.listFiles()
         files should not be empty
-        files.foreach { file =>
-          file.companionFastFieldMode shouldBe Some("PARQUET_ONLY")
-        }
-      } finally {
+        files.foreach(file => file.companionFastFieldMode shouldBe Some("PARQUET_ONLY"))
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -343,9 +336,8 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
           file.companionSourceFiles shouldBe defined
           file.companionSourceFiles.get should not be empty
         }
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -427,7 +419,8 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
         (5L, "noon analysis", 7.5, true, "2025-01-02", "12"),
         (6L, "evening wrap", 9.0, false, "2025-01-02", "18")
       )
-      data.toDF("id", "name", "score", "active", "load_date", "load_hour")
+      data
+        .toDF("id", "name", "score", "active", "load_date", "load_hour")
         .write
         .format("delta")
         .partitionBy("load_date", "load_hour")
@@ -448,14 +441,14 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       allRecords.length shouldBe 6
 
       // Verify data is not null
-      allRecords.foreach { row =>
-        row.get(0) should not be (null: Any)
-      }
+      allRecords.foreach(row => row.get(0) should not be (null: Any))
 
       // Verify partition filtering works
-      val jan01Records = companionDf.filter(
-        org.apache.spark.sql.functions.col("load_date") === "2025-01-01"
-      ).collect()
+      val jan01Records = companionDf
+        .filter(
+          org.apache.spark.sql.functions.col("load_date") === "2025-01-01"
+        )
+        .collect()
       jan01Records.length shouldBe 3
     }
   }

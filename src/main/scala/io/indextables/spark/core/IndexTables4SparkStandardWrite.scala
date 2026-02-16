@@ -156,7 +156,7 @@ class IndexTables4SparkStandardWrite(
       }
     } catch {
       case e: UnsupportedOperationException => throw e
-      case _: Exception => // Table may not exist yet, which is fine
+      case _: Exception                     => // Table may not exist yet, which is fine
     }
 
     // Validate indexing configuration for append operations

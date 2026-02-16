@@ -17,16 +17,17 @@
 
 package io.indextables.spark.write
 
-import io.indextables.spark.util.SizeParser
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.util.SizeParser
 import org.slf4j.LoggerFactory
 
 /**
  * Configuration for optimized writes using Spark's RequiresDistributionAndOrdering interface.
  *
- * When enabled, this feature requests a shuffle before writing to produce well-sized splits
- * (~1GB by default). For partitioned tables, data is clustered by partition columns so each
- * writer task handles a single partition, producing fewer, larger splits.
+ * When enabled, this feature requests a shuffle before writing to produce well-sized splits (~1GB by default). For
+ * partitioned tables, data is clustered by partition columns so each writer task handles a single partition, producing
+ * fewer, larger splits.
  *
  * @param enabled
  *   Whether optimized write is enabled (default: false)
@@ -37,8 +38,8 @@ import org.slf4j.LoggerFactory
  * @param minRowsForEstimation
  *   Minimum rows per split to qualify for history-based size estimation (default: 10000)
  * @param distributionMode
- *   Distribution mode: "hash" clusters by partition columns, "balanced" uses fixed partition count
- *   for 100% executor utilization with split rolling, "none" uses unspecified (default: "hash")
+ *   Distribution mode: "hash" clusters by partition columns, "balanced" uses fixed partition count for 100% executor
+ *   utilization with split rolling, "none" uses unspecified (default: "hash")
  * @param maxSplitSizeBytes
  *   Maximum on-disk split size before rolling a new split in balanced mode (default: 4GB)
  */
@@ -83,20 +84,20 @@ object OptimizedWriteConfig {
   private val logger = LoggerFactory.getLogger(getClass)
 
   // Configuration key constants
-  val KEY_ENABLED              = "spark.indextables.write.optimizeWrite.enabled"
-  val KEY_TARGET_SPLIT_SIZE    = "spark.indextables.write.optimizeWrite.targetSplitSize"
-  val KEY_SAMPLING_RATIO       = "spark.indextables.write.optimizeWrite.samplingRatio"
-  val KEY_MIN_ROWS_FOR_EST     = "spark.indextables.write.optimizeWrite.minRowsForEstimation"
-  val KEY_DISTRIBUTION_MODE    = "spark.indextables.write.optimizeWrite.distributionMode"
-  val KEY_MAX_SPLIT_SIZE       = "spark.indextables.write.optimizeWrite.maxSplitSize"
+  val KEY_ENABLED           = "spark.indextables.write.optimizeWrite.enabled"
+  val KEY_TARGET_SPLIT_SIZE = "spark.indextables.write.optimizeWrite.targetSplitSize"
+  val KEY_SAMPLING_RATIO    = "spark.indextables.write.optimizeWrite.samplingRatio"
+  val KEY_MIN_ROWS_FOR_EST  = "spark.indextables.write.optimizeWrite.minRowsForEstimation"
+  val KEY_DISTRIBUTION_MODE = "spark.indextables.write.optimizeWrite.distributionMode"
+  val KEY_MAX_SPLIT_SIZE    = "spark.indextables.write.optimizeWrite.maxSplitSize"
 
   // Default values
-  val DEFAULT_ENABLED: Boolean                = false
-  val DEFAULT_TARGET_SPLIT_SIZE_BYTES: Long   = 1L * 1024 * 1024 * 1024 // 1GB
-  val DEFAULT_SAMPLING_RATIO: Double          = 1.1
-  val DEFAULT_MIN_ROWS_FOR_ESTIMATION: Long   = 10000L
-  val DEFAULT_DISTRIBUTION_MODE: String       = "hash"
-  val DEFAULT_MAX_SPLIT_SIZE_BYTES: Long      = 4L * 1024 * 1024 * 1024 // 4GB
+  val DEFAULT_ENABLED: Boolean              = false
+  val DEFAULT_TARGET_SPLIT_SIZE_BYTES: Long = 1L * 1024 * 1024 * 1024 // 1GB
+  val DEFAULT_SAMPLING_RATIO: Double        = 1.1
+  val DEFAULT_MIN_ROWS_FOR_ESTIMATION: Long = 10000L
+  val DEFAULT_DISTRIBUTION_MODE: String     = "hash"
+  val DEFAULT_MAX_SPLIT_SIZE_BYTES: Long    = 4L * 1024 * 1024 * 1024 // 4GB
 
   val VALID_DISTRIBUTION_MODES: Set[String] = Set("hash", "balanced", "none")
 
@@ -105,19 +106,32 @@ object OptimizedWriteConfig {
   def fromOptions(options: CaseInsensitiveStringMap): OptimizedWriteConfig = {
     val enabled = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
     val targetSplitSizeBytes = parseSizeOption(
-      options, KEY_TARGET_SPLIT_SIZE, DEFAULT_TARGET_SPLIT_SIZE_BYTES
+      options,
+      KEY_TARGET_SPLIT_SIZE,
+      DEFAULT_TARGET_SPLIT_SIZE_BYTES
     )
     val samplingRatio = getDoubleOption(
-      options, KEY_SAMPLING_RATIO, DEFAULT_SAMPLING_RATIO, minExclusive = Some(0.0)
+      options,
+      KEY_SAMPLING_RATIO,
+      DEFAULT_SAMPLING_RATIO,
+      minExclusive = Some(0.0)
     )
     val minRowsForEstimation = getLongOption(
-      options, KEY_MIN_ROWS_FOR_EST, DEFAULT_MIN_ROWS_FOR_ESTIMATION, mustBePositive = true
+      options,
+      KEY_MIN_ROWS_FOR_EST,
+      DEFAULT_MIN_ROWS_FOR_ESTIMATION,
+      mustBePositive = true
     )
     val distributionMode = getStringOption(
-      options, KEY_DISTRIBUTION_MODE, DEFAULT_DISTRIBUTION_MODE, VALID_DISTRIBUTION_MODES
+      options,
+      KEY_DISTRIBUTION_MODE,
+      DEFAULT_DISTRIBUTION_MODE,
+      VALID_DISTRIBUTION_MODES
     )
     val maxSplitSizeBytes = parseSizeOption(
-      options, KEY_MAX_SPLIT_SIZE, DEFAULT_MAX_SPLIT_SIZE_BYTES
+      options,
+      KEY_MAX_SPLIT_SIZE,
+      DEFAULT_MAX_SPLIT_SIZE_BYTES
     )
 
     val config = OptimizedWriteConfig(
@@ -145,12 +159,14 @@ object OptimizedWriteConfig {
     OptimizedWriteConfig(
       enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED),
       targetSplitSizeBytes = get(KEY_TARGET_SPLIT_SIZE)
-        .map(SizeParser.parseSize).getOrElse(DEFAULT_TARGET_SPLIT_SIZE_BYTES),
+        .map(SizeParser.parseSize)
+        .getOrElse(DEFAULT_TARGET_SPLIT_SIZE_BYTES),
       samplingRatio = get(KEY_SAMPLING_RATIO).map(_.toDouble).getOrElse(DEFAULT_SAMPLING_RATIO),
       minRowsForEstimation = get(KEY_MIN_ROWS_FOR_EST).map(_.toLong).getOrElse(DEFAULT_MIN_ROWS_FOR_ESTIMATION),
       distributionMode = get(KEY_DISTRIBUTION_MODE).getOrElse(DEFAULT_DISTRIBUTION_MODE),
       maxSplitSizeBytes = get(KEY_MAX_SPLIT_SIZE)
-        .map(SizeParser.parseSize).getOrElse(DEFAULT_MAX_SPLIT_SIZE_BYTES)
+        .map(SizeParser.parseSize)
+        .getOrElse(DEFAULT_MAX_SPLIT_SIZE_BYTES)
     ).validate()
   }
 

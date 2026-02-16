@@ -19,9 +19,7 @@ package io.indextables.spark.sync
 
 import org.apache.spark.sql.types.StructType
 
-/**
- * A source file from a companion source (Delta, Parquet directory, Iceberg).
- */
+/** A source file from a companion source (Delta, Parquet directory, Iceberg). */
 case class CompanionSourceFile(
   path: String,
   partitionValues: Map[String, String],
@@ -29,8 +27,8 @@ case class CompanionSourceFile(
     extends Serializable
 
 /**
- * Abstraction for reading source table metadata in BUILD COMPANION operations.
- * Implementations exist for Delta, bare Parquet directories, and Iceberg tables.
+ * Abstraction for reading source table metadata in BUILD COMPANION operations. Implementations exist for Delta, bare
+ * Parquet directories, and Iceberg tables.
  */
 trait CompanionSourceReader {
 
@@ -47,15 +45,15 @@ trait CompanionSourceReader {
   def schema(): StructType
 
   /**
-   * Path to a single parquet file suitable for schema extraction by tantivy4java.
-   * Used when creating ParquetCompanionConfig on executors.
-   * Returns None if the source provides schema via other means (e.g., Iceberg catalog).
+   * Path to a single parquet file suitable for schema extraction by tantivy4java. Used when creating
+   * ParquetCompanionConfig on executors. Returns None if the source provides schema via other means (e.g., Iceberg
+   * catalog).
    */
   def schemaSourceParquetFile(): Option[String]
 
   /**
-   * Physical-to-logical column name mapping for sources where parquet files use
-   * physical column names that differ from logical schema names.
+   * Physical-to-logical column name mapping for sources where parquet files use physical column names that differ from
+   * logical schema names.
    *
    * Examples:
    *   - Iceberg via Databricks: col_1 -> id, col_2 -> name
@@ -66,13 +64,12 @@ trait CompanionSourceReader {
   def columnNameMapping(): Map[String, String] = Map.empty
 
   /**
-   * The root storage path for resolving relative file paths returned by getAllFiles().
-   * For Iceberg, this is the actual S3/Azure base path (e.g., "s3://bucket/warehouse/db/table/data").
-   * For Delta/Parquet, file paths are relative to sourcePath so this returns None.
+   * The root storage path for resolving relative file paths returned by getAllFiles(). For Iceberg, this is the actual
+   * S3/Azure base path (e.g., "s3://bucket/warehouse/db/table/data"). For Delta/Parquet, file paths are relative to
+   * sourcePath so this returns None.
    *
-   * When present, relative paths from getAllFiles() are resolved against this root
-   * for downloads, while the anti-join uses the relative paths directly for
-   * bucket-independent comparison (supports cross-region failover).
+   * When present, relative paths from getAllFiles() are resolved against this root for downloads, while the anti-join
+   * uses the relative paths directly for bucket-independent comparison (supports cross-region failover).
    */
   def storageRoot(): Option[String] = None
 

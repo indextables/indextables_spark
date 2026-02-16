@@ -23,17 +23,14 @@ import java.util.UUID
 
 import scala.jdk.CollectionConverters._
 
-import io.indextables.spark.transaction.AddAction
-import io.indextables.tantivy4java.split.ParquetCompanionConfig
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-
 import org.apache.spark.sql.indextables.OutputMetricsUpdater
 
+import io.indextables.spark.transaction.AddAction
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.ParquetCompanionConfig
 import org.slf4j.LoggerFactory
 
-/**
- * Serializable configuration for a sync task, passed from driver to executor.
- */
+/** Serializable configuration for a sync task, passed from driver to executor. */
 case class SyncConfig(
   indexingModes: Map[String, String],
   fastFieldMode: String,
@@ -47,8 +44,8 @@ case class SyncConfig(
     extends Serializable
 
 /**
- * Represents a group of parquet files to be indexed into a single companion split.
- * Sent from driver to executor as part of a Spark task.
+ * Represents a group of parquet files to be indexed into a single companion split. Sent from driver to executor as part
+ * of a Spark task.
  */
 case class SyncIndexingGroup(
   parquetFiles: Seq[String],
@@ -57,10 +54,7 @@ case class SyncIndexingGroup(
   groupIndex: Int)
     extends Serializable
 
-/**
- * Result of indexing a single group of parquet files into a companion split.
- * Returned from executor to driver.
- */
+/** Result of indexing a single group of parquet files into a companion split. Returned from executor to driver. */
 case class SyncTaskResult(
   addAction: AddAction,
   bytesDownloaded: Long,
@@ -69,8 +63,8 @@ case class SyncTaskResult(
     extends Serializable
 
 /**
- * Executor-side companion split creation. Handles one indexing group:
- * downloads parquet files, calls QuickwitSplit.createFromParquet(), uploads the result.
+ * Executor-side companion split creation. Handles one indexing group: downloads parquet files, calls
+ * QuickwitSplit.createFromParquet(), uploads the result.
  */
 object SyncTaskExecutor {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -87,22 +81,22 @@ object SyncTaskExecutor {
    */
   def execute(group: SyncIndexingGroup, config: SyncConfig): SyncTaskResult = {
     val startTime = System.currentTimeMillis()
-    val tempDir = createTempDir()
+    val tempDir   = createTempDir()
     logger.info(
       s"Sync task ${group.groupIndex}: indexing ${group.parquetFiles.size} parquet files into companion split"
     )
 
     try {
       // 1. Download parquet files to local temp in parallel, preserving relative paths
-      val downloadParallelism = math.min(8, math.max(1, group.parquetFiles.size))
-      val downloadPool = java.util.concurrent.Executors.newFixedThreadPool(downloadParallelism)
+      val downloadParallelism  = math.min(8, math.max(1, group.parquetFiles.size))
+      val downloadPool         = java.util.concurrent.Executors.newFixedThreadPool(downloadParallelism)
       val totalBytesDownloaded = new java.util.concurrent.atomic.AtomicLong(0L)
 
       val downloadFutures = group.parquetFiles.map { parquetPath =>
         downloadPool.submit(new java.util.concurrent.Callable[String] {
           override def call(): String = {
             val relativePath = extractRelativePath(parquetPath, group.parquetTableRoot)
-            val localFile = new File(tempDir, relativePath)
+            val localFile    = new File(tempDir, relativePath)
             localFile.getParentFile.mkdirs()
 
             val bytesDownloaded = downloadFile(parquetPath, localFile, config.storageConfig, group.parquetTableRoot)
@@ -112,17 +106,17 @@ object SyncTaskExecutor {
         })
       }
 
-      val localFiles = try {
-        downloadFutures.map { f =>
-          try {
-            f.get()
-          } catch {
-            case e: java.util.concurrent.ExecutionException => throw e.getCause
+      val localFiles =
+        try
+          downloadFutures.map { f =>
+            try
+              f.get()
+            catch {
+              case e: java.util.concurrent.ExecutionException => throw e.getCause
+            }
           }
-        }
-      } finally {
-        downloadPool.shutdownNow()
-      }
+        finally
+          downloadPool.shutdownNow()
 
       OutputMetricsUpdater.updateInputMetrics(totalBytesDownloaded.get(), group.parquetFiles.size)
 
@@ -164,7 +158,9 @@ object SyncTaskExecutor {
 
       // Apply column name mapping (physical → logical) for Iceberg/Delta with column mapping
       if (config.columnNameMapping.nonEmpty) {
-        logger.info(s"Sync task ${group.groupIndex}: applying column name mapping (${config.columnNameMapping.size} columns)")
+        logger.info(
+          s"Sync task ${group.groupIndex}: applying column name mapping (${config.columnNameMapping.size} columns)"
+        )
         companionConfig.withFieldIdMapping(config.columnNameMapping.asJava)
       }
       if (config.autoDetectNameMapping) {
@@ -172,8 +168,8 @@ object SyncTaskExecutor {
       }
 
       // 3. Call QuickwitSplit.createFromParquet()
-      val splitId = UUID.randomUUID().toString
-      val splitFileName = s"companion-${group.groupIndex}-$splitId.split"
+      val splitId        = UUID.randomUUID().toString
+      val splitFileName  = s"companion-${group.groupIndex}-$splitId.split"
       val localSplitPath = new File(tempDir, splitFileName).getAbsolutePath
 
       val metadata = QuickwitSplit.createFromParquet(
@@ -191,14 +187,12 @@ object SyncTaskExecutor {
         ""
       }
       val destSplitPath = s"${config.splitTablePath.stripSuffix("/")}/$partitionPrefix$splitFileName"
-      val splitSize = uploadSplit(localSplitPath, destSplitPath, config.storageConfig, config.splitTablePath)
+      val splitSize     = uploadSplit(localSplitPath, destSplitPath, config.storageConfig, config.splitTablePath)
 
       OutputMetricsUpdater.updateOutputMetrics(splitSize, 1)
 
       // 5. Compute relative parquet file paths for manifest
-      val relativeParquetPaths = group.parquetFiles.map { path =>
-        extractRelativePath(path, group.parquetTableRoot)
-      }
+      val relativeParquetPaths = group.parquetFiles.map(path => extractRelativePath(path, group.parquetTableRoot))
 
       // 6. Build AddAction
       val addAction = AddAction(
@@ -231,9 +225,8 @@ object SyncTaskExecutor {
         bytesUploaded = splitSize,
         parquetFilesIndexed = group.parquetFiles.size
       )
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   private def createTempDir(): File = {
@@ -336,7 +329,8 @@ object SyncTaskExecutor {
       clientBuilder.endpointOverride(java.net.URI.create(endpoint))
     }
 
-    val pathStyle = storageConfig.get("spark.indextables.s3.pathStyleAccess")
+    val pathStyle = storageConfig
+      .get("spark.indextables.s3.pathStyleAccess")
       .orElse(storageConfig.get("spark.indextables.aws.pathStyleAccess"))
       .exists(_.equalsIgnoreCase("true"))
     if (pathStyle) {
@@ -345,16 +339,16 @@ object SyncTaskExecutor {
 
     val client = clientBuilder.build()
     try {
-      val request = software.amazon.awssdk.services.s3.model.GetObjectRequest.builder()
+      val request = software.amazon.awssdk.services.s3.model.GetObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
 
       val response = client.getObject(request, destFile.toPath)
       destFile.length()
-    } finally {
+    } finally
       client.close()
-    }
   }
 
   private def downloadFromAzure(
@@ -365,15 +359,14 @@ object SyncTaskExecutor {
     // For Azure, use Hadoop FileSystem API since azure-storage-blob has different URL formats
     val hadoopConf = new org.apache.hadoop.conf.Configuration()
     storageConfig.foreach { case (k, v) => hadoopConf.set(k, v) }
-    val fs = org.apache.hadoop.fs.FileSystem.get(new java.net.URI(azurePath), hadoopConf)
-    val path = new org.apache.hadoop.fs.Path(azurePath)
+    val fs          = org.apache.hadoop.fs.FileSystem.get(new java.net.URI(azurePath), hadoopConf)
+    val path        = new org.apache.hadoop.fs.Path(azurePath)
     val inputStream = fs.open(path)
     try {
       Files.copy(inputStream, destFile.toPath, StandardCopyOption.REPLACE_EXISTING)
       destFile.length()
-    } finally {
+    } finally
       inputStream.close()
-    }
   }
 
   private def uploadSplit(
@@ -386,12 +379,11 @@ object SyncTaskExecutor {
     // DESTINATION path, not the source Iceberg table. The table ID is only valid
     // for the source table's storage location.
     val uploadConfig = storageConfig - "spark.indextables.iceberg.uc.tableId"
-    io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
-      localPath, destPath, uploadConfig, tablePath)
+    io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(localPath, destPath, uploadConfig, tablePath)
   }
 
   private def parseS3Path(s3Path: String): (String, String) = {
-    val path = s3Path.replaceFirst("^s3a?://", "")
+    val path       = s3Path.replaceFirst("^s3a?://", "")
     val slashIndex = path.indexOf('/')
     if (slashIndex < 0) {
       (path, "")
@@ -401,16 +393,15 @@ object SyncTaskExecutor {
   }
 
   /**
-   * Extract the table base path from a full file path by stripping the filename and
-   * any trailing Hive-style partition segments (key=value/).
+   * Extract the table base path from a full file path by stripping the filename and any trailing Hive-style partition
+   * segments (key=value/).
    *
-   * Example: s3://bucket/warehouse/db/table/data/region=us-east/file.parquet
-   *       -> s3://bucket/warehouse/db/table/data
+   * Example: s3://bucket/warehouse/db/table/data/region=us-east/file.parquet -> s3://bucket/warehouse/db/table/data
    */
   def extractTableBasePath(filePath: String): String = {
     // Strip scheme prefix, remember it for reconstruction
-    val schemePattern = "^(s3a?://|abfss?://|wasbs?://)".r
-    val scheme = schemePattern.findFirstIn(filePath).getOrElse("")
+    val schemePattern     = "^(s3a?://|abfss?://|wasbs?://)".r
+    val scheme            = schemePattern.findFirstIn(filePath).getOrElse("")
     val pathWithoutScheme = filePath.substring(scheme.length)
 
     // Split into segments, drop the filename (last segment)

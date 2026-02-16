@@ -800,11 +800,16 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
 
       // Indexing modes
       val indexingModes: Map[String, String] = if (ctx.indexingModeList() != null) {
-        ctx.indexingModeList().indexingModeEntry().asScala.map { entry =>
-          val fieldName = ParserUtils.string(entry.fieldName)
-          val fieldMode = ParserUtils.string(entry.fieldMode).toLowerCase
-          fieldName -> fieldMode
-        }.toMap
+        ctx
+          .indexingModeList()
+          .indexingModeEntry()
+          .asScala
+          .map { entry =>
+            val fieldName = ParserUtils.string(entry.fieldName)
+            val fieldMode = ParserUtils.string(entry.fieldMode).toLowerCase
+            fieldName -> fieldMode
+          }
+          .toMap
       } else {
         Map.empty
       }

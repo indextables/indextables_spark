@@ -20,26 +20,27 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLogFactory}
-import io.indextables.spark.transaction.avro.{AvroManifestReader, AvroManifestWriter, FileEntry}
-import io.indextables.spark.io.CloudStorageProviderFactory
+import scala.jdk.CollectionConverters._
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import scala.jdk.CollectionConverters._
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLogFactory}
+import io.indextables.spark.transaction.avro.{AvroManifestReader, AvroManifestWriter, FileEntry}
+import io.indextables.spark.TestBase
 
 /**
  * Tests for Parquet Companion Mode functionality.
  *
  * Validates:
- * - AddAction companion fields (companionSourceFiles, companionDeltaVersion, companionFastFieldMode)
- * - FileEntry <-> AddAction round-trip with companion fields
- * - Avro manifest serialization/deserialization of companion fields
- * - Transaction log storage and retrieval of companion fields
- * - Write guard: rejection of normal writes to companion-mode tables
- * - SyncConfig and SyncIndexingGroup serialization
+ *   - AddAction companion fields (companionSourceFiles, companionDeltaVersion, companionFastFieldMode)
+ *   - FileEntry <-> AddAction round-trip with companion fields
+ *   - Avro manifest serialization/deserialization of companion fields
+ *   - Transaction log storage and retrieval of companion fields
+ *   - Write guard: rejection of normal writes to companion-mode tables
+ *   - SyncConfig and SyncIndexingGroup serialization
  */
 class CompanionModeTest extends TestBase {
 
@@ -148,7 +149,7 @@ class CompanionModeTest extends TestBase {
       companionFastFieldMode = Some("DISABLED")
     )
 
-    val entry = FileEntry.fromAddAction(original, version = 10L, timestamp = 1700000000000L)
+    val entry    = FileEntry.fromAddAction(original, version = 10L, timestamp = 1700000000000L)
     val restored = FileEntry.toAddAction(entry)
 
     restored.companionSourceFiles shouldBe original.companionSourceFiles
@@ -170,7 +171,7 @@ class CompanionModeTest extends TestBase {
       numRecords = Some(100L)
     )
 
-    val entry = FileEntry.fromAddAction(original, version = 1L, timestamp = 1700000000000L)
+    val entry    = FileEntry.fromAddAction(original, version = 1L, timestamp = 1700000000000L)
     val restored = FileEntry.toAddAction(entry)
 
     restored.companionSourceFiles shouldBe None
@@ -200,7 +201,8 @@ class CompanionModeTest extends TestBase {
             numRecords = Some(1000L),
             addedAtVersion = 1L,
             addedAtTimestamp = 1700000000000L,
-            companionSourceFiles = Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")),
+            companionSourceFiles =
+              Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")),
             companionDeltaVersion = Some(42L),
             companionFastFieldMode = Some("HYBRID")
           ),
@@ -241,7 +243,9 @@ class CompanionModeTest extends TestBase {
 
         // Verify companion entry 1
         val entry1 = result.find(_.path == "companion-1.split").get
-        entry1.companionSourceFiles shouldBe Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet"))
+        entry1.companionSourceFiles shouldBe Some(
+          Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")
+        )
         entry1.companionDeltaVersion shouldBe Some(42L)
         entry1.companionFastFieldMode shouldBe Some("HYBRID")
 
@@ -256,9 +260,8 @@ class CompanionModeTest extends TestBase {
         entry3.companionSourceFiles shouldBe None
         entry3.companionDeltaVersion shouldBe None
         entry3.companionFastFieldMode shouldBe None
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -296,7 +299,7 @@ class CompanionModeTest extends TestBase {
 
   test("transaction log should store and retrieve AddActions with companion fields") {
     withTempPath { tempPath =>
-      val tablePath = new Path(tempPath)
+      val tablePath      = new Path(tempPath)
       val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
@@ -326,15 +329,14 @@ class CompanionModeTest extends TestBase {
         retrieved.companionSourceFiles shouldBe Some(Seq("part-00001.parquet", "part-00002.parquet"))
         retrieved.companionDeltaVersion shouldBe Some(5L)
         retrieved.companionFastFieldMode shouldBe Some("HYBRID")
-      } finally {
+      } finally
         transactionLog.close()
-      }
     }
   }
 
   test("transaction log should handle mixed companion and regular AddActions") {
     withTempPath { tempPath =>
-      val tablePath = new Path(tempPath)
+      val tablePath      = new Path(tempPath)
       val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
@@ -375,15 +377,14 @@ class CompanionModeTest extends TestBase {
         val regular = files.find(_.path == "regular.split").get
         regular.companionSourceFiles shouldBe None
         regular.companionDeltaVersion shouldBe None
-      } finally {
+      } finally
         transactionLog.close()
-      }
     }
   }
 
   test("commitMergeSplits should preserve companion fields in new AddActions") {
     withTempPath { tempPath =>
-      val tablePath = new Path(tempPath)
+      val tablePath      = new Path(tempPath)
       val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
@@ -410,7 +411,8 @@ class CompanionModeTest extends TestBase {
             modificationTime = System.currentTimeMillis(),
             dataChange = true,
             numRecords = Some(250L),
-            companionSourceFiles = Some(Seq("date=2024-01-02/part-00002.parquet", "date=2024-01-02/part-00003.parquet")),
+            companionSourceFiles =
+              Some(Seq("date=2024-01-02/part-00002.parquet", "date=2024-01-02/part-00003.parquet")),
             companionDeltaVersion = Some(3L),
             companionFastFieldMode = Some("HYBRID")
           )
@@ -426,11 +428,12 @@ class CompanionModeTest extends TestBase {
         group0.companionDeltaVersion shouldBe Some(3L)
 
         val group1 = files.find(_.path == "companion-group-1.split").get
-        group1.companionSourceFiles shouldBe Some(Seq("date=2024-01-02/part-00002.parquet", "date=2024-01-02/part-00003.parquet"))
+        group1.companionSourceFiles shouldBe Some(
+          Seq("date=2024-01-02/part-00002.parquet", "date=2024-01-02/part-00003.parquet")
+        )
         group1.companionDeltaVersion shouldBe Some(3L)
-      } finally {
+      } finally
         transactionLog.close()
-      }
     }
   }
 
@@ -438,7 +441,7 @@ class CompanionModeTest extends TestBase {
 
   test("write guard should reject normal writes to companion-mode table") {
     withTempPath { tempPath =>
-      val tablePath = new Path(tempPath)
+      val tablePath      = new Path(tempPath)
       val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
@@ -457,9 +460,8 @@ class CompanionModeTest extends TestBase {
           companionFastFieldMode = Some("HYBRID")
         )
         transactionLog.addFile(companionAction)
-      } finally {
+      } finally
         transactionLog.close()
-      }
 
       // Now try to write normally - should be rejected
       val df = createTestDataFrame()
@@ -487,12 +489,12 @@ class CompanionModeTest extends TestBase {
 
     // Verify basic serialization by writing/reading through Java serialization
     val baos = new java.io.ByteArrayOutputStream()
-    val oos = new java.io.ObjectOutputStream(baos)
+    val oos  = new java.io.ObjectOutputStream(baos)
     oos.writeObject(config)
     oos.close()
 
-    val bais = new java.io.ByteArrayInputStream(baos.toByteArray)
-    val ois = new java.io.ObjectInputStream(bais)
+    val bais         = new java.io.ByteArrayInputStream(baos.toByteArray)
+    val ois          = new java.io.ObjectInputStream(bais)
     val deserialized = ois.readObject().asInstanceOf[SyncConfig]
 
     deserialized.indexingModes shouldBe config.indexingModes
@@ -522,12 +524,12 @@ class CompanionModeTest extends TestBase {
     )
 
     val baos = new java.io.ByteArrayOutputStream()
-    val oos = new java.io.ObjectOutputStream(baos)
+    val oos  = new java.io.ObjectOutputStream(baos)
     oos.writeObject(group)
     oos.close()
 
-    val bais = new java.io.ByteArrayInputStream(baos.toByteArray)
-    val ois = new java.io.ObjectInputStream(bais)
+    val bais         = new java.io.ByteArrayInputStream(baos.toByteArray)
+    val ois          = new java.io.ObjectInputStream(bais)
     val deserialized = ois.readObject().asInstanceOf[SyncIndexingGroup]
 
     deserialized.parquetFiles shouldBe group.parquetFiles
@@ -555,12 +557,12 @@ class CompanionModeTest extends TestBase {
     )
 
     val baos = new java.io.ByteArrayOutputStream()
-    val oos = new java.io.ObjectOutputStream(baos)
+    val oos  = new java.io.ObjectOutputStream(baos)
     oos.writeObject(result)
     oos.close()
 
-    val bais = new java.io.ByteArrayInputStream(baos.toByteArray)
-    val ois = new java.io.ObjectInputStream(bais)
+    val bais         = new java.io.ByteArrayInputStream(baos.toByteArray)
+    val ois          = new java.io.ObjectInputStream(bais)
     val deserialized = ois.readObject().asInstanceOf[SyncTaskResult]
 
     deserialized.bytesDownloaded shouldBe 100000L
@@ -573,7 +575,7 @@ class CompanionModeTest extends TestBase {
 
   test("companion splits should track max delta version for incremental sync") {
     withTempPath { tempPath =>
-      val tablePath = new Path(tempPath)
+      val tablePath      = new Path(tempPath)
       val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
@@ -633,9 +635,8 @@ class CompanionModeTest extends TestBase {
         val versions = files.flatMap(_.companionDeltaVersion)
         versions should have length 3
         versions.max shouldBe 8L
-      } finally {
+      } finally
         transactionLog.close()
-      }
     }
   }
 
