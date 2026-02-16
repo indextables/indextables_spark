@@ -372,7 +372,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           globalTableInfoCache = CacheBuilder
             .newBuilder()
             .maximumSize(100)
-            .expireAfterWrite(java.time.Duration.ofHours(1))
+            .expireAfterWrite(1, java.util.concurrent.TimeUnit.HOURS)
             .recordStats()
             .build[String, io.indextables.spark.utils.TableInfo]()
         }
