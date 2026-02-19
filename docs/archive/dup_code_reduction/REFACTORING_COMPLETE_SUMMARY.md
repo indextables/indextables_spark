@@ -168,7 +168,7 @@ We're trading scattered duplicate code for:
 - ✅ Same resolution priority maintained
 - ✅ Same configuration keys supported
 - ✅ Clean compilation with zero errors
-- ✅ All 228+ tests passing (validated with run_tests_individually.sh)
+- ✅ All 228+ tests passing (validated with scripts/run-tests.sh)
 
 ---
 

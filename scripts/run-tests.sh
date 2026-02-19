@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-# run_tests_individually.sh - Run Scala test classes individually to avoid OOM
+# run-tests.sh - Run Scala test classes individually to avoid OOM
 #
 # Usage:
-#   ./run_tests_individually.sh              # Run all tests with 4 parallel jobs
-#   ./run_tests_individually.sh -j 8         # Run with 8 parallel jobs
-#   ./run_tests_individually.sh -j 1         # Run sequentially
-#   ./run_tests_individually.sh --dry-run    # Show test classes without running
-#   ./run_tests_individually.sh -j 2 --dry-run
+#   ./scripts/run-tests.sh              # Run all tests with 4 parallel jobs
+#   ./scripts/run-tests.sh -j 8         # Run with 8 parallel jobs
+#   ./scripts/run-tests.sh -j 1         # Run sequentially
+#   ./scripts/run-tests.sh --dry-run    # Show test classes without running
+#   ./scripts/run-tests.sh -j 2 --dry-run
 
 set -euo pipefail
 
