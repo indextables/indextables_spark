@@ -142,6 +142,13 @@ All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/
 - PURGE INDEXTABLE: 40/40, Purge-on-write: 8/8, DESCRIBE ENVIRONMENT: 10/10
 - Merge I/O: 34/34, Optimized Writes: 44/44
 
+## Development Principles
+
+- **Design First**: All major features should have design documents before implementation
+- **Test Coverage**: Maintain 100% test pass rate with comprehensive integration tests
+- **Performance**: Benchmark all major features against baseline
+- **Documentation**: Keep CLAUDE.md and reference docs updated with implementation details
+
 ## Reference Documentation
 
 - `docs/reference/configuration.md` - All configuration settings (writer, state, merge, cache, read optimization, etc.)
