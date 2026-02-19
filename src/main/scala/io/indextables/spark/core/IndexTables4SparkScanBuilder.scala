@@ -90,13 +90,6 @@ class IndexTables4SparkScanBuilder(
   // Bucket aggregation state (DateHistogram, Histogram, Range)
   private var _bucketConfig: Option[BucketAggregationConfig] = None
 
-  // Detect companion mode from transaction log metadata (lazy, computed once).
-  private lazy val isCompanionTable: Boolean =
-    try {
-      val metadata = transactionLog.getMetadata()
-      metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
-    } catch { case _: Exception => false }
-
   // Inject companion mode config from transaction log metadata (lazy, computed once).
   // Resolves credentials for parquet file access on the driver so executors can use them.
   private lazy val effectiveConfig: Map[String, String] = {
@@ -412,61 +405,63 @@ class IndexTables4SparkScanBuilder(
           )
         )
 
-        val hasAggregateInPlan = detectAggregateInQueryPlan()
-        logger.debug(s"BUILD: hasAggregateInPlan=$hasAggregateInPlan")
-
-        if (blockingUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
-          val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
-          // Build specific guidance for string pattern filters
-          val hasStringStartsWith    = blockingUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
-          val hasStringEndsWith      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
-          val hasStringContains      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringContains])
-          val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
-
-          val stringPatternHint = if (hasStringPatternFilter) {
-            val patternTypes = Seq(
-              if (hasStringStartsWith) "stringStartsWith" else "",
-              if (hasStringEndsWith) "stringEndsWith" else "",
-              if (hasStringContains) "stringContains" else ""
-            ).filter(_.nonEmpty)
-
-            s" To enable string pattern pushdown, set " +
-              s"spark.indextables.filter.stringPattern.pushdown=true (enables all patterns) " +
-              s"or individually: ${patternTypes.map(t => s"spark.indextables.filter.$t.pushdown=true").mkString(", ")}."
-          } else ""
-
-          throw new IllegalStateException(
-            s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
-              s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
-              s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
-              s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not. " +
-              s"Note: IsNull/IsNotNull on non-FAST fields are handled by Spark post-filtering and don't block aggregates." +
-              stringPatternHint
-          )
-        }
-
-        // COMPANION AGGREGATE GUARD: companion-mode tables MUST use aggregate pushdown
-        // for correct COUNT/SUM/AVG/MIN/MAX results because the regular scan path applies
-        // a default row limit that would silently truncate results.
-        // Use _aggregationWasRequested as a reliable signal: if Spark called pushAggregation()
-        // but we rejected it (returned false), we know an aggregate is in the plan even if
-        // schema heuristics in detectAggregateInQueryPlan() don't detect it.
-        // Check both instance-level and relation-based storage (build() may be on different instance).
+        // Reliable aggregate detection: only use signals from Spark actually calling pushAggregation().
+        // Do NOT use schema/plan heuristics — they produce false positives on non-aggregate queries
+        // (e.g., SELECT single_col, or tables with columns named "count").
         val relationAggRequested = relationForIndexQuery
           .exists(IndexTables4SparkScanBuilder.wasAggregationRequested)
-        val aggregateDetected = hasAggregateInPlan || _aggregationWasRequested || relationAggRequested
-        if (isCompanionTable && aggregateDetected && isCompanionAggregatePushdownRequired) {
-          val filterDesc = if (effectiveUnsupportedFilters.nonEmpty) {
-            s" Unsupported filter(s) blocking pushdown: [${effectiveUnsupportedFilters.map(_.toString).mkString(", ")}]."
-          } else ""
-          throw new IllegalStateException(
-            s"Aggregate query on companion-mode table cannot proceed without aggregate pushdown." +
-              s" Companion splits require aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results" +
-              s" because the regular scan path applies a default row limit that would truncate results." +
-              filterDesc +
-              s" To disable this safety check (results may be incorrect), set" +
-              s" spark.indextables.read.companion.requireAggregatePushdown=false."
-          )
+        val aggregateWasRequested = _aggregationWasRequested || relationAggRequested
+        logger.debug(s"BUILD: aggregateWasRequested=$aggregateWasRequested")
+
+        // AGGREGATE PUSHDOWN GUARD: when Spark requested aggregate pushdown but it could not
+        // proceed (unsupported filters or companion table without pushdown), fail fast rather
+        // than returning silently incorrect results (e.g., truncated by default row limit).
+        // All guards are disableable via spark.indextables.read.requireAggregatePushdown=false.
+        if (aggregateWasRequested && isAggregatePushdownRequired) {
+          if (blockingUnsupportedFilters.nonEmpty) {
+            val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
+            // Build specific guidance for string pattern filters
+            val hasStringStartsWith    = blockingUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
+            val hasStringEndsWith      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
+            val hasStringContains      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringContains])
+            val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
+
+            val stringPatternHint = if (hasStringPatternFilter) {
+              val patternTypes = Seq(
+                if (hasStringStartsWith) "stringStartsWith" else "",
+                if (hasStringEndsWith) "stringEndsWith" else "",
+                if (hasStringContains) "stringContains" else ""
+              ).filter(_.nonEmpty)
+
+              s" To enable string pattern pushdown, set " +
+                s"spark.indextables.filter.stringPattern.pushdown=true (enables all patterns) " +
+                s"or individually: ${patternTypes.map(t => s"spark.indextables.filter.$t.pushdown=true").mkString(", ")}."
+            } else ""
+
+            throw new IllegalStateException(
+              s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
+                s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
+                s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
+                s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not. " +
+                s"Note: IsNull/IsNotNull on non-FAST fields are handled by Spark post-filtering and don't block aggregates." +
+                stringPatternHint +
+                s" To disable this safety check (results may be incorrect), set" +
+                s" spark.indextables.read.requireAggregatePushdown=false."
+            )
+          }
+
+          if (_pushedAggregation.isEmpty) {
+            val filterDesc = if (effectiveUnsupportedFilters.nonEmpty) {
+              s" Unsupported filter(s) blocking pushdown: [${effectiveUnsupportedFilters.map(_.toString).mkString(", ")}]."
+            } else ""
+            throw new IllegalStateException(
+              s"Aggregate query cannot proceed without aggregate pushdown." +
+                s" IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results." +
+                filterDesc +
+                s" To disable this safety check (results may be incorrect), set" +
+                s" spark.indextables.read.requireAggregatePushdown=false."
+            )
+          }
         }
 
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
@@ -950,7 +945,7 @@ class IndexTables4SparkScanBuilder(
     logger.debug(s"AGGREGATE PUSHDOWN: About to check isAggregationSupported")
     if (!isAggregationSupported(aggregation)) {
       logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
-      rejectAggregateOnCompanionTable("aggregation type not supported for pushdown")
+      rejectAggregatePushdownFailure("aggregation type not supported for pushdown")
       return false
     }
     logger.debug(s"AGGREGATE PUSHDOWN: isAggregationSupported passed")
@@ -960,7 +955,7 @@ class IndexTables4SparkScanBuilder(
     try {
       if (!areFiltersCompatibleWithAggregation()) {
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
-        rejectAggregateOnCompanionTable("filters not compatible with aggregation")
+        rejectAggregatePushdownFailure("filters not compatible with aggregation")
         return false
       }
       logger.debug(s"AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
@@ -987,7 +982,7 @@ class IndexTables4SparkScanBuilder(
         throw e
       case e: IllegalArgumentException =>
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
-        rejectAggregateOnCompanionTable(e.getMessage)
+        rejectAggregatePushdownFailure(e.getMessage)
         return false
     }
 
@@ -1033,19 +1028,18 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * On companion-mode tables, rejecting aggregate pushdown means the regular scan path will be
-   * used, which applies a default row limit that silently truncates results. Throw an error
-   * instead of allowing incorrect results, unless the safety check is explicitly disabled.
+   * When aggregate pushdown fails, the regular scan path will be used, which produces incorrect
+   * aggregate results. Throw an error instead of allowing silently wrong results, unless the
+   * safety check is explicitly disabled.
    */
-  private def rejectAggregateOnCompanionTable(reason: String): Unit =
-    if (isCompanionTable && isCompanionAggregatePushdownRequired) {
+  private def rejectAggregatePushdownFailure(reason: String): Unit =
+    if (isAggregatePushdownRequired) {
       throw new IllegalStateException(
-        s"Aggregate query on companion-mode table cannot proceed without aggregate pushdown." +
-          s" Companion splits require aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results" +
-          s" because the regular scan path applies a default row limit that would truncate results." +
+        s"Aggregate query cannot proceed without aggregate pushdown." +
+          s" IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results." +
           s" Reason pushdown was rejected: $reason." +
           s" To disable this safety check (results may be incorrect), set" +
-          s" spark.indextables.read.companion.requireAggregatePushdown=false."
+          s" spark.indextables.read.requireAggregatePushdown=false."
       )
     }
 
@@ -1055,9 +1049,11 @@ class IndexTables4SparkScanBuilder(
     // First check reader options, then session config
     Option(options.get(key)).orElse(config.get(key))
 
-  // Whether companion-mode tables require aggregate pushdown (default: true)
-  private def isCompanionAggregatePushdownRequired: Boolean =
-    getConfigValue("spark.indextables.read.companion.requireAggregatePushdown")
+  // Whether aggregate pushdown is required for correct results (default: true).
+  // Checks both the general key and the legacy companion-specific key for backwards compatibility.
+  private def isAggregatePushdownRequired: Boolean =
+    getConfigValue("spark.indextables.read.requireAggregatePushdown")
+      .orElse(getConfigValue("spark.indextables.read.companion.requireAggregatePushdown"))
       .map(_.toLowerCase != "false")
       .getOrElse(true)
 
@@ -1178,58 +1174,6 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
-  /**
-   * Detect if the current query plan contains an Aggregate operator. This is used to fail fast when aggregate pushdown
-   * is blocked by unsupported filters.
-   *
-   * We inspect the query execution context to find Aggregate nodes in the logical plan.
-   */
-  private def detectAggregateInQueryPlan(): Boolean = {
-    // Detect aggregation by examining the required schema
-    // When an aggregate like COUNT(*) is used, the schema will have aggregate-like column names
-    // or the schema will be radically different from the original table schema
-
-    val aggregatePatterns = Seq("count(", "sum(", "avg(", "min(", "max(", "count_")
-
-    // Check if required schema column names look like aggregate results
-    val schemaLooksLikeAggregate = requiredSchema.fieldNames.exists { name =>
-      val lowerName = name.toLowerCase
-      aggregatePatterns.exists(lowerName.contains)
-    }
-
-    if (schemaLooksLikeAggregate) {
-      logger.debug(
-        s"Detected aggregate in query plan via schema inspection: ${requiredSchema.fieldNames.mkString(", ")}"
-      )
-      return true
-    }
-
-    // Fallback: check if the required schema is empty (COUNT(*) case)
-    // or has significantly fewer columns than the original schema
-    if (requiredSchema.isEmpty || (schema.length > 2 && requiredSchema.length == 1)) {
-      // Could be an aggregate query - be conservative and assume yes
-      logger.debug(s"Schema suggests possible aggregate query: original=${schema.length} cols, required=${requiredSchema.length} cols")
-      return true
-    }
-
-    // Try string matching on relation as last resort
-    try
-      IndexTables4SparkScanBuilder.getCurrentRelation() match {
-        case Some(relation) =>
-          val planStr = relation.toString.toLowerCase
-          val hasAgg = planStr.contains("aggregate") ||
-            aggregatePatterns.exists(planStr.contains)
-          if (hasAgg) {
-            logger.debug("Detected aggregate via string matching on relation")
-          }
-          hasAgg
-        case None =>
-          false
-      }
-    catch {
-      case _: Exception => false
-    }
-  }
 
   /**
    * Extract IndexQuery expressions directly using the companion object storage. This eliminates the need for global

@@ -13,8 +13,8 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import scala.jdk.CollectionConverters._
 
 /**
- * Tests for the companion aggregate guard that prevents silently incorrect aggregate
- * results on companion-mode tables when aggregate pushdown fails.
+ * Tests for the aggregate guard that prevents silently incorrect aggregate
+ * results when aggregate pushdown fails.
  */
 class CompanionAggregateGuardTest extends TestBase {
 
@@ -77,13 +77,50 @@ class CompanionAggregateGuardTest extends TestBase {
       val message = Option(ex.getMessage).getOrElse("") +
         Option(ex.getCause).map(c => " " + c.getMessage).getOrElse("")
       assert(
-        message.contains("companion-mode table"),
-        s"Expected companion aggregate guard error, got: ${ex.getMessage}"
+        message.contains("Aggregate query cannot proceed without aggregate pushdown"),
+        s"Expected aggregate guard error, got: ${ex.getMessage}"
       )
     }
   }
 
-  test("companion aggregate guard can be disabled via config") {
+  test("non-companion table should also fail on aggregate without pushdown") {
+    withTempPath { testPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create test data with 'content' as a TEXT field (not fast by default).
+      // MIN/MAX on non-fast fields are rejected by pushAggregation().
+      // This is a regular (non-companion) table.
+      val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(testPath)
+
+      // Do NOT mark as companion - this is a regular table
+
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+
+      // MIN on a non-fast TEXT field causes pushAggregation() to reject.
+      // The guard should fire for ALL tables, not just companion tables.
+      val ex = intercept[Exception] {
+        readDf.agg(min($"content")).collect()
+      }
+
+      val message = Option(ex.getMessage).getOrElse("") +
+        Option(ex.getCause).map(c => " " + c.getMessage).getOrElse("")
+      assert(
+        message.contains("Aggregate query cannot proceed without aggregate pushdown"),
+        s"Expected aggregate guard error, got: ${ex.getMessage}"
+      )
+    }
+  }
+
+  test("aggregate guard can be disabled via config") {
     withTempPath { testPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
