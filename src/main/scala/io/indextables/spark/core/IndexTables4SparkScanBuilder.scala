@@ -423,19 +423,19 @@ class IndexTables4SparkScanBuilder(
           )
         )
 
-        // Reliable aggregate detection: only use signals from Spark actually calling pushAggregation().
-        // Do NOT use schema/plan heuristics — they produce false positives on non-aggregate queries
-        // (e.g., SELECT single_col, or tables with columns named "count").
-        val relationAggRequested = relationForIndexQuery
-          .exists(IndexTables4SparkScanBuilder.wasAggregationRequested)
-        val aggregateWasRequested = _aggregationWasRequested || relationAggRequested
-        logger.debug(s"BUILD: aggregateWasRequested=$aggregateWasRequested")
+        // Reliable aggregate detection: only use the LOCAL flag from pushAggregation() being
+        // called on THIS instance. Do NOT use relation-level storage here because Spark may
+        // create multiple ScanBuilder instances for the same relation (e.g., partitioned tables),
+        // and only the instance where pushAggregation() was actually called should enforce the guard.
+        // Using relation-level signals causes false positives when build() runs on a fresh instance
+        // where pushAggregation was never called (so _pushedAggregation is correctly empty).
+        logger.debug(s"BUILD: _aggregationWasRequested=${_aggregationWasRequested}")
 
         // AGGREGATE PUSHDOWN GUARD: when Spark requested aggregate pushdown but it could not
         // proceed (unsupported filters or companion table without pushdown), fail fast rather
         // than returning silently incorrect results (e.g., truncated by default row limit).
         // All guards are disableable via spark.indextables.read.requireAggregatePushdown=false.
-        if (aggregateWasRequested && isAggregatePushdownRequired) {
+        if (_aggregationWasRequested && isAggregatePushdownRequired) {
           if (blockingUnsupportedFilters.nonEmpty) {
             val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
             // Build specific guidance for string pattern filters
@@ -468,18 +468,12 @@ class IndexTables4SparkScanBuilder(
             )
           }
 
-          if (_pushedAggregation.isEmpty) {
-            val filterDesc = if (effectiveUnsupportedFilters.nonEmpty) {
-              s" Unsupported filter(s) blocking pushdown: [${effectiveUnsupportedFilters.map(_.toString).mkString(", ")}]."
-            } else ""
-            throw new IllegalStateException(
-              s"Aggregate query cannot proceed without aggregate pushdown." +
-                s" IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results." +
-                filterDesc +
-                s" To disable this safety check (results may be incorrect), set" +
-                s" spark.indextables.read.requireAggregatePushdown=false."
-            )
-          }
+          // Note: _pushedAggregation.isEmpty is NOT checked here because all rejection
+          // paths in pushAggregation() already throw via rejectAggregatePushdownFailure()
+          // when isAggregatePushdownRequired is true. If we reach build() with
+          // _pushedAggregation empty, it means pushAggregation was never called on this
+          // instance (e.g., Spark created a fresh ScanBuilder for a partitioned table scan),
+          // which is not an error condition.
         }
 
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
