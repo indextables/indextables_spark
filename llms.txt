@@ -1,0 +1,32 @@
+# IndexTables4Spark
+
+> High-performance Spark DataSource implementing fast full-text search using Tantivy via tantivy4java. Runs embedded in Spark executors with no server-side components. Supports S3 and Azure Blob Storage.
+
+## Primary (load first)
+- .claude/CLAUDE.md: Project overview, build commands, core features, common usage patterns, architecture notes, test status
+- README.md: Public-facing project overview, quick start guide, installation
+- .claude/BACKLOG.md: Development backlog with prioritized work items and known issues
+
+## Reference Documentation (load on-demand by topic)
+- docs/reference/protocol.md: IndexTables4Spark protocol specification (transaction log format, file structure, protocol versions V1-V4)
+- docs/reference/table-protocol.md: Table protocol specification (ACID guarantees, schema evolution, time travel, concurrent writes)
+- docs/reference/configuration.md: All configuration settings by subsystem (index writer, split conversion, transaction log, Avro state, statistics truncation, data skipping, optimized writes, merge-on-write, merge I/O, purge-on-write, batch retrieval, L2 disk cache, read limits, partition pruning, working directories)
+- docs/reference/sql-commands.md: SQL command syntax with examples and output schemas (MERGE SPLITS, PURGE INDEXTABLE, DROP PARTITIONS, CHECKPOINT/COMPACT, TRUNCATE TIME TRAVEL, PREWARM CACHE, DESCRIBE STATE/DISK CACHE/STORAGE STATS/ENVIRONMENT/MERGE JOBS, FLUSH DISK CACHE)
+- docs/reference/features.md: Detailed feature documentation with code examples (batch retrieval optimization, JSON fields, bucket aggregations, purge-on-write, optimized writes)
+- docs/reference/cloud-configuration.md: Cloud provider authentication and setup (S3, Azure account key and OAuth, Unity Catalog/Databricks)
+- docs/reference/field-indexing.md: Field type configuration (string/text/JSON types, list-based typemap syntax, index record options, tokenizers, token length limits, fast fields)
+
+## Design Documents (load when modifying specific subsystems)
+- docs/design/architecture.md: System architecture overview with component breakdown and data flow
+- docs/design/component-interactions.md: Component interaction diagrams and data flow patterns
+- docs/design/uml-diagrams.md: UML class, sequence, and component diagrams
+- docs/design/antlr-sql-parsing-guide.md: Guide for implementing new SQL commands using ANTLR
+- docs/design/avro-state-file.md: Avro state format design for Protocol V4 (manifest structure, incremental writes, compaction)
+- docs/design/json-field-integration.md: JSON field integration design (predicate pushdown, full vs minimal mode, type conversion)
+- docs/design/protocol-versioning.md: Protocol version management (minReader/minWriter, backward compatibility, upgrade paths)
+- docs/design/log-compaction.md: Transaction log compaction design (Parquet-based checkpoints, may be partially superseded by Avro state)
+- docs/design/replace-where.md: ReplaceWhere feature design (selective partition replacement, predicate parsing)
+- docs/design/repair-transaction-log.md: Transaction log repair command design (SQL syntax, validation flow)
+
+## Archived
+Historical design documents, completed feature summaries, and refactoring records are in docs/archive/. Retained for reference but not needed for current development.
