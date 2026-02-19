@@ -132,4 +132,121 @@ class AggregateExceptionTest extends TestBase {
       assert(count == 10L, s"Expected 10 null rows but got $count")
     }
   }
+
+  test("COUNT with filter on partition column should work (IsNotNull is tautology)") {
+    withTempPath { testPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create partitioned test data
+      val df = (0 until 100).map(i => (i.toLong, s"region_${i % 3}", s"item_$i")).toDF("id", "region", "name")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("region")
+        .mode("overwrite")
+        .save(testPath)
+
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+
+      // Spark adds implicit IsNotNull(region) for comparison predicates.
+      // This should NOT block aggregate pushdown since partition columns are never null.
+      val count = readDf.filter($"region" === "region_0").count()
+      // i % 3 == 0 => i = 0,3,6,...,99 => 34 values
+      assert(count == 34L, s"Expected 34 rows for region_0 but got $count")
+    }
+  }
+
+  test("COUNT with filters on multi-partition table should work") {
+    withTempPath { testPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create multi-partition test data
+      val df = (0 until 120).map(i => (i.toLong, s"region_${i % 3}", s"type_${i % 2}", s"item_$i"))
+        .toDF("id", "region", "type", "name")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("region", "type")
+        .mode("overwrite")
+        .save(testPath)
+
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+
+      // Compound filter on both partition columns - Spark adds IsNotNull for both
+      val count = readDf.filter($"region" === "region_0" && $"type" === "type_0").count()
+      // i % 3 == 0 AND i % 2 == 0 => i % 6 == 0 => i = 0,6,12,...,114 => 20 values
+      assert(count == 20L, s"Expected 20 rows but got $count")
+    }
+  }
+
+  test("GROUP BY partition column with COUNT should work (reproduction case)") {
+    withTempPath { testPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Reproduce the exact scenario: partitioned dataset, indexed, then GROUP BY partition key.
+      // Spark adds implicit IsNotNull(partition_key) for GROUP BY, which must be supported
+      // to allow aggregate pushdown.
+      val df = (0 until 300).map(i => (i.toLong, s"region_${i % 3}", s"item_$i"))
+        .toDF("id", "region", "name")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("region")
+        .mode("overwrite")
+        .save(testPath)
+
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+
+      // GROUP BY partition column - this is the exact reproduction case.
+      // Before the fix, IsNotNull("region") was unsupported which blocked aggregate pushdown.
+      val result = readDf.groupBy("region").count().collect()
+      assert(result.length == 3, s"Expected 3 groups but got ${result.length}")
+
+      val countMap = result.map(r => r.getString(0) -> r.getLong(1)).toMap
+      assert(countMap("region_0") == 100L, s"Expected 100 for region_0 but got ${countMap("region_0")}")
+      assert(countMap("region_1") == 100L, s"Expected 100 for region_1 but got ${countMap("region_1")}")
+      assert(countMap("region_2") == 100L, s"Expected 100 for region_2 but got ${countMap("region_2")}")
+    }
+  }
+
+  test("GROUP BY partition column with filter and aggregate should work") {
+    withTempPath { testPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      val df = (0 until 300).map(i => (i.toLong, s"region_${i % 3}", i * 10.0))
+        .toDF("id", "region", "value")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "id,value")
+        .partitionBy("region")
+        .mode("overwrite")
+        .save(testPath)
+
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+
+      // Filter on partition column + GROUP BY partition column + COUNT
+      // Spark adds IsNotNull("region") for both the filter and GROUP BY.
+      val result = readDf
+        .filter($"region" === "region_0")
+        .groupBy("region")
+        .count()
+        .collect()
+
+      assert(result.length == 1, s"Expected 1 group but got ${result.length}")
+      assert(result(0).getLong(1) == 100L, s"Expected 100 for region_0 but got ${result(0).getLong(1)}")
+    }
+  }
 }
