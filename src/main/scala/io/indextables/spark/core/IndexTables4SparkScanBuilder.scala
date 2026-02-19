@@ -108,6 +108,10 @@ class IndexTables4SparkScanBuilder(
               // For Iceberg: use stored S3 root for parquetTableRoot (sourcePath is a
               // table identifier like "prod.events", not an S3 path), and try table-based
               // credential resolution at runtime.
+              val preferPathCreds = config
+                .getOrElse("spark.indextables.companion.credential.preferPathCredentials", "false")
+                .toLowerCase == "true"
+
               val (effectivePath, baseConfig) = if (sourceFormat == "iceberg") {
                 val storageRoot = metadata.configuration.get("indextables.companion.parquetStorageRoot")
                 val root = storageRoot.getOrElse {
@@ -117,9 +121,16 @@ class IndexTables4SparkScanBuilder(
                   )
                   path
                 }
-                logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
-                val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
-                (root, enriched)
+                if (preferPathCreds) {
+                  logger.info(
+                    s"Iceberg companion: preferPathCredentials=true, using path-based credentials for $root"
+                  )
+                  (root, config)
+                } else {
+                  logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
+                  val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
+                  (root, enriched)
+                }
               } else if (
                 sourceFormat == "delta" &&
                 metadata.configuration.contains("indextables.companion.deltaTableName")
@@ -128,12 +139,19 @@ class IndexTables4SparkScanBuilder(
                 val storedPath = metadata.configuration
                   .get("indextables.companion.parquetStorageRoot")
                   .getOrElse(path)
-                logger.info(
-                  s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
-                    s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})"
-                )
-                val enriched = tryResolveDeltaTableCredentials(metadata.configuration, config)
-                (storedPath, enriched)
+                if (preferPathCreds) {
+                  logger.info(
+                    s"Delta UC companion: preferPathCredentials=true, using path-based credentials for $storedPath"
+                  )
+                  (storedPath, config)
+                } else {
+                  logger.info(
+                    s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
+                      s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})"
+                  )
+                  val enriched = tryResolveDeltaTableCredentials(metadata.configuration, config)
+                  (storedPath, enriched)
+                }
               } else {
                 logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
                 (path, config)
