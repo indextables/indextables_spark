@@ -152,6 +152,7 @@ All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/
 
 ## Development Principles
 
+- **Branch Workflow**: All work must be done on a feature branch and submitted as a pull request. Never commit directly to `main`.
 - **Design First**: All major features should have design documents before implementation
 - **Test Coverage**: Maintain 100% test pass rate with comprehensive integration tests
 - **Performance**: Benchmark all major features against baseline
