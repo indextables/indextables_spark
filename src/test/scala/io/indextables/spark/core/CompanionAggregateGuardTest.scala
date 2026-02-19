@@ -5,9 +5,9 @@
 package io.indextables.spark.core
 
 import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{FileFormat, MetadataAction, TransactionLog}
+import io.indextables.spark.transaction.{MetadataAction, TransactionLog}
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.functions.min
+import org.apache.spark.sql.functions.{count, min, sum}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import scala.jdk.CollectionConverters._
@@ -18,7 +18,7 @@ import scala.jdk.CollectionConverters._
  */
 class CompanionAggregateGuardTest extends TestBase {
 
-  private def markAsCompanionTable(testPath: String): Unit = {
+  private def markAsCompanionTable(testPath: String, includeSourcePath: Boolean = false): Unit = {
     val txLog = new TransactionLog(
       new Path(testPath),
       spark,
@@ -28,6 +28,10 @@ class CompanionAggregateGuardTest extends TestBase {
     )
     try {
       val currentMetadata = txLog.getMetadata()
+      var companionConfig = currentMetadata.configuration + ("indextables.companion.enabled" -> "true")
+      if (includeSourcePath) {
+        companionConfig = companionConfig + ("indextables.companion.sourceTablePath" -> testPath)
+      }
       val updatedMetadata = MetadataAction(
         id = java.util.UUID.randomUUID().toString,
         name = currentMetadata.name,
@@ -35,7 +39,7 @@ class CompanionAggregateGuardTest extends TestBase {
         format = currentMetadata.format,
         schemaString = currentMetadata.schemaString,
         partitionColumns = currentMetadata.partitionColumns,
-        configuration = currentMetadata.configuration + ("indextables.companion.enabled" -> "true"),
+        configuration = companionConfig,
         createdTime = Some(System.currentTimeMillis())
       )
       txLog.commitSyncActions(Seq.empty, Seq.empty, Some(updatedMetadata))
@@ -145,6 +149,44 @@ class CompanionAggregateGuardTest extends TestBase {
       // With the guard disabled, the query should proceed (even if results may be incorrect)
       val result = readDf.agg(min($"content")).collect()
       assert(result.length == 1, s"Expected 1 result row, got ${result.length}")
+    }
+  }
+
+  test("companion table COUNT(*) should prefer numeric fast field") {
+    withTempPath { testPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create test data with a numeric fast field — COUNT(*) should prefer it
+      // over string fields for performance (compact, fast for counting)
+      val df = (0 until 100).map(i => (i.toLong, s"item$i", i * 10)).toDF("id", "name", "score")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "score")
+        .mode("overwrite")
+        .save(testPath)
+
+      markAsCompanionTable(testPath, includeSourcePath = true)
+
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+
+      // Unfiltered COUNT(*) uses TransactionLogCountScan
+      val result = readDf.agg(count("*")).collect()
+      assert(result.length == 1)
+      assert(result(0).getLong(0) == 100L, s"Expected COUNT(*)=100, got ${result(0).getLong(0)}")
+
+      // Filtered COUNT(*) goes through SimpleAggregateScan and picks numeric fast field
+      val filteredCount = readDf.filter($"score" >= 500).agg(count("*")).collect()
+      assert(filteredCount.length == 1)
+      assert(filteredCount(0).getLong(0) == 50L, s"Expected COUNT(*)=50, got ${filteredCount(0).getLong(0)}")
+
+      // COUNT(*) + SUM in one query
+      val combined = readDf.filter($"score" >= 500).agg(count("*"), sum("score")).collect()
+      assert(combined.length == 1)
+      assert(combined(0).getLong(0) == 50L, s"Expected COUNT(*)=50, got ${combined(0).getLong(0)}")
     }
   }
 }
