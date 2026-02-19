@@ -21,14 +21,17 @@ import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{
+  BooleanType,
   DataType,
+  DateType,
   DoubleType,
   FloatType,
   IntegerType,
   LongType,
   StringType,
   StructField,
-  StructType
+  StructType,
+  TimestampType
 }
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
@@ -649,11 +652,13 @@ class IndexTables4SparkSimpleAggregateReader(
               aggNames += aggName
 
             case _: CountStar =>
-              // For COUNT(*), we need a fast field since CountAggregation requires fast fields
-              // Strategy: 1) fields from other aggregations, 2) fast fields from docMapping, 3) auto-fast-field
+              // For COUNT(*), we need a fast field since CountAggregation requires fast fields.
+              // Prefer numeric fast fields (compact, fast) over string fast fields (heavy).
+              // Strategy: 1) numeric field from other aggregations, 2) numeric fast field from
+              //           docMapping, 3) string fast field, 4) auto-fast-field from schema
               logger.debug(s"COUNT(*) FIELD SELECTION: Looking for fast field for COUNT(*) aggregation")
 
-              // Try to find a field from other aggregations first (guaranteed to be fast)
+              // Try to find a numeric field from other aggregations first (guaranteed to be fast)
               val fieldFromAgg = partition.aggregation.aggregateExpressions.collectFirst {
                 case sum: Sum     => Some(getFieldName(sum.column))
                 case min: Min     => Some(getFieldName(min.column))
@@ -661,22 +666,28 @@ class IndexTables4SparkSimpleAggregateReader(
                 case count: Count => Some(getFieldName(count.column))
               }.flatten
 
-              // If no field from aggregations, read fast fields from docMapping metadata
+              // Prefer numeric fast fields over string fast fields for counting performance
+              val numericTypes: Set[DataType] = Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
+
               val selectedField = fieldFromAgg.getOrElse {
                 val fastFieldsFromDocMapping = getFastFieldsFromDocMapping()
 
                 if (fastFieldsFromDocMapping.nonEmpty) {
-                  val field = fastFieldsFromDocMapping.head
-                  logger.debug(s"COUNT(*) FIELD SELECTION: Using fast field from docMapping: '$field'")
+                  val numericFastField = fastFieldsFromDocMapping.find { fieldName =>
+                    partition.schema.fields.find(_.name == fieldName).exists(f => numericTypes.contains(f.dataType))
+                  }
+                  val field = numericFastField.getOrElse(fastFieldsFromDocMapping.head)
+                  logger.debug(s"COUNT(*) FIELD SELECTION: Using fast field from docMapping: '$field' (numeric preferred: ${numericFastField.isDefined})")
                   field
                 } else {
-                  // No docMapping fast fields - fall back to auto-fast-field (first string or numeric field)
-                  val autoFastField = partition.schema.fields
-                    .find { f =>
-                      f.dataType == StringType || f.dataType == IntegerType || f.dataType == LongType ||
-                      f.dataType == FloatType || f.dataType == DoubleType
-                    }
+                  // No docMapping fast fields - fall back to auto-fast-field, numeric first
+                  val numericField = partition.schema.fields
+                    .find(f => numericTypes.contains(f.dataType))
                     .map(_.name)
+
+                  val autoFastField = numericField.orElse {
+                    partition.schema.fields.find(_.dataType == StringType).map(_.name)
+                  }
 
                   autoFastField.getOrElse {
                     throw new IllegalArgumentException(
