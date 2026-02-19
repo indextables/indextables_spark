@@ -368,6 +368,22 @@ class IndexTables4SparkScanBuilder(
     logger.debug(s"BUILD: Effective filters count: ${effectiveFilters.length}")
     effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Effective filter: $filter"))
 
+    // Set spark.sql.limit.initialNumPartitions to defaultParallelism if not already configured.
+    // By default Spark uses only 1 partition for LIMIT queries, which serializes reads.
+    // Setting this to defaultParallelism ensures LIMIT queries use all available partitions.
+    try {
+      val limitPartitionsKey = "spark.sql.limit.initialNumPartitions"
+      val currentValue = sparkSession.conf.getOption(limitPartitionsKey)
+      if (currentValue.isEmpty) {
+        val parallelism = sparkSession.sparkContext.defaultParallelism
+        sparkSession.conf.set(limitPartitionsKey, parallelism)
+        logger.info(s"Set $limitPartitionsKey=$parallelism (defaultParallelism)")
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug(s"Could not set spark.sql.limit.initialNumPartitions: ${e.getMessage}")
+    }
+
     // Create the scan
     val scan = aggregation match {
       case Some(agg) =>

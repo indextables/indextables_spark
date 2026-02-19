@@ -313,7 +313,7 @@ class SimpleAggregatePushdownTest extends TestBase {
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
-        .option("spark.indextables.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.fastfields", "score,rating,category")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -322,6 +322,7 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Filter for category in ('category_a', 'category_b') AND score >= 20
       // Should include docs: doc2 (score=20), doc3 (score=30), doc4 (score=40)
+      // Note: category must be a fast field for filtered aggregate pushdown
       val result = df
         .filter(col("category").isin("category_a", "category_b") && col("score") >= 20)
         .agg(

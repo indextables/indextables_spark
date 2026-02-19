@@ -27,7 +27,7 @@ import io.indextables.spark.TestBase
  * Tests verify that:
  *   - StringStartsWith, StringEndsWith, StringContains filters work correctly
  *   - Pushdown can be enabled via configuration
- *   - Aggregate pushdown is blocked when pattern filters are not enabled
+ *   - COUNT works via Spark post-filtering when pattern pushdown is disabled
  *   - Aggregate pushdown works when pattern filters are enabled
  */
 class StringPatternPushdownTest extends TestBase {
@@ -94,7 +94,7 @@ class StringPatternPushdownTest extends TestBase {
     }
   }
 
-  test("COUNT with StringStartsWith fails when pushdown disabled") {
+  test("COUNT with StringStartsWith works without pushdown via Spark post-filtering") {
     withTempPath { path =>
       createPatternTestData().write
         .format(format)
@@ -103,20 +103,14 @@ class StringPatternPushdownTest extends TestBase {
         .mode("overwrite")
         .save(path)
 
-      // Without pushdown enabled, aggregate should fail
-      val df = spark.read
+      // Without pushdown enabled, Spark handles filtering post-retrieval
+      val count = spark.read
         .format(format)
         .load(path)
         .filter(col("filename").startsWith("log_"))
+        .count()
 
-      val exception = intercept[IllegalStateException] {
-        df.count()
-      }
-      exception.getMessage should include("Aggregate pushdown blocked")
-      exception.getMessage should include("StringStartsWith")
-      // Verify helpful hint is included
-      exception.getMessage should include("spark.indextables.filter.stringPattern.pushdown=true")
-      exception.getMessage should include("spark.indextables.filter.stringStartsWith.pushdown=true")
+      count shouldBe 3
     }
   }
 
@@ -226,7 +220,7 @@ class StringPatternPushdownTest extends TestBase {
     }
   }
 
-  test("COUNT with StringEndsWith fails when pushdown disabled") {
+  test("COUNT with StringEndsWith works without pushdown via Spark post-filtering") {
     withTempPath { path =>
       createPatternTestData().write
         .format(format)
@@ -235,19 +229,14 @@ class StringPatternPushdownTest extends TestBase {
         .mode("overwrite")
         .save(path)
 
-      val df = spark.read
+      // Without pushdown enabled, Spark handles filtering post-retrieval
+      val count = spark.read
         .format(format)
         .load(path)
         .filter(col("filename").endsWith(".json"))
+        .count()
 
-      val exception = intercept[IllegalStateException] {
-        df.count()
-      }
-      exception.getMessage should include("Aggregate pushdown blocked")
-      exception.getMessage should include("StringEndsWith")
-      // Verify helpful hint is included
-      exception.getMessage should include("spark.indextables.filter.stringPattern.pushdown=true")
-      exception.getMessage should include("spark.indextables.filter.stringEndsWith.pushdown=true")
+      count shouldBe 3
     }
   }
 
@@ -355,7 +344,7 @@ class StringPatternPushdownTest extends TestBase {
     }
   }
 
-  test("COUNT with StringContains fails when pushdown disabled") {
+  test("COUNT with StringContains works without pushdown via Spark post-filtering") {
     withTempPath { path =>
       createPatternTestData().write
         .format(format)
@@ -364,19 +353,14 @@ class StringPatternPushdownTest extends TestBase {
         .mode("overwrite")
         .save(path)
 
-      val df = spark.read
+      // Without pushdown enabled, Spark handles filtering post-retrieval
+      val count = spark.read
         .format(format)
         .load(path)
         .filter(col("filename").contains("2024"))
+        .count()
 
-      val exception = intercept[IllegalStateException] {
-        df.count()
-      }
-      exception.getMessage should include("Aggregate pushdown blocked")
-      exception.getMessage should include("StringContains")
-      // Verify helpful hint is included
-      exception.getMessage should include("spark.indextables.filter.stringPattern.pushdown=true")
-      exception.getMessage should include("spark.indextables.filter.stringContains.pushdown=true")
+      count shouldBe 5
     }
   }
 
