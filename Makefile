@@ -15,11 +15,14 @@ MVN            := mvn
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: help compile build test-compile test test-dry-run test-single clean package verify
+.PHONY: help setup compile build test-compile test test-dry-run test-single clean package verify
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+
+setup: ## Install/verify development dependencies (Java 11, Maven)
+	./scripts/setup.sh
 
 compile: ## Compile sources (mvn clean compile)
 	$(MVN) clean compile
