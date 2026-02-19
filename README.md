@@ -79,6 +79,8 @@ spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'error'").show()
 | [SQL Commands](https://www.indextables.io/docs/sql-commands/merge-splits) | MERGE SPLITS, PURGE, PREWARM CACHE, and more |
 | [Cloud Deployment](https://www.indextables.io/docs/cloud-deployment/databricks) | Databricks, AWS EMR deployment guides |
 | [Configuration Reference](https://www.indextables.io/docs/reference/configuration-reference) | Complete configuration options |
+| [Protocol Specification](docs/reference/protocol.md) | Transaction log format, file structure, protocol versions |
+| [Table Protocol](docs/reference/table-protocol.md) | ACID guarantees, schema evolution, time travel |
 
 ## Development
 
