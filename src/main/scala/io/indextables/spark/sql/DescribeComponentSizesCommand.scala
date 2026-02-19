@@ -131,7 +131,9 @@ case class DescribeComponentSizesCommand(
       val baseConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
       // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
-      val mergedConfig = resolveCredentialsOnDriver(baseConfig, resolvedPath.toString)
+      // Describe is read-only, request PATH_READ credentials
+      val readConfig = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+      val mergedConfig = resolveCredentialsOnDriver(readConfig, resolvedPath.toString)
 
       // Create transaction log
       val transactionLog = TransactionLogFactory.create(

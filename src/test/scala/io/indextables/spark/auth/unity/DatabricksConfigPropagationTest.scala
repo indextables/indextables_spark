@@ -173,7 +173,7 @@ class DatabricksConfigPropagationTest extends TestBase {
       "spark.indextables.databricks.apiToken",
       "spark.indextables.databricks.credential.refreshBuffer.minutes",
       "spark.indextables.databricks.cache.maxSize",
-      "spark.indextables.databricks.fallback.enabled",
+      "spark.indextables.databricks.credential.operation",
       "spark.indextables.databricks.retry.attempts"
     )
 

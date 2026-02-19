@@ -73,9 +73,14 @@ class TokenizationTest extends TestBase with Matchers {
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      // Pass typemap at read time so ScanBuilder knows content is a text field
+      // and defers EqualTo filtering to Spark (text fields require IndexQuery for pushdown)
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .load(tablePath)
 
-      // Text fields with === should still do exact matching
+      // Text fields with === work via Spark post-filtering when typemap is provided at read time
       val exactMatch = df.filter(df("content") === "machine learning algorithms").collect()
       exactMatch should have length 1
       exactMatch(0).getString(0) should be("doc1")
@@ -104,14 +109,19 @@ class TokenizationTest extends TestBase with Matchers {
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      // Pass typemap at read time so ScanBuilder knows field types
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.title", "string")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .load(tablePath)
 
       // String field should match exactly
       val exactTitleMatch = df.filter(df("title") === "exact_title").collect()
       exactTitleMatch should have length 1
       exactTitleMatch(0).getString(0) should be("doc1")
 
-      // Text field with === should still do exact matching
+      // Text field with === works via Spark post-filtering when typemap is provided at read time
       val exactContentMatch = df.filter(df("content") === "machine learning algorithms").collect()
       exactContentMatch should have length 1
       exactContentMatch(0).getString(0) should be("doc1")

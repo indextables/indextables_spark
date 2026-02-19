@@ -91,7 +91,9 @@ class IndexTables4SparkGroupByAggregateScan(
   // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
   private lazy val resolvedConfig: Map[String, String] = {
     val tablePath = transactionLog.getTablePath()
-    resolveCredentialsOnDriver(config, tablePath)
+    // Read path only needs PATH_READ credentials
+    val readConfig = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    resolveCredentialsOnDriver(readConfig, tablePath)
   }
 
   override def readSchema(): StructType = {

@@ -35,7 +35,10 @@ import org.slf4j.LoggerFactory
  * AWS Credential Provider that integrates with Databricks Unity Catalog via HTTP API.
  *
  * This provider fetches temporary AWS credentials from Unity Catalog's temporary path credentials API. It implements
- * intelligent caching with expiration tracking and automatic fallback from READ_WRITE to READ permissions.
+ * intelligent caching with expiration tracking and automatic fallback from PATH_READ_WRITE to PATH_READ.
+ *
+ * By default, credentials are requested as PATH_READ_WRITE with fallback to PATH_READ on 403.
+ * Read paths can set credential.operation=PATH_READ to skip the fallback and request read credentials directly.
  *
  * IMPORTANT: This provider MUST be created using the fromConfig() factory method or by passing a Map[String, String]
  * config. The Hadoop Configuration constructor has been removed to enforce the fast path that avoids expensive Hadoop
@@ -46,7 +49,7 @@ import org.slf4j.LoggerFactory
  *   - spark.indextables.databricks.apiToken: Databricks API token (required)
  *   - spark.indextables.databricks.credential.refreshBuffer.minutes: Minutes before expiration to refresh (default: 40)
  *   - spark.indextables.databricks.cache.maxSize: Maximum cached entries (default: 100)
- *   - spark.indextables.databricks.fallback.enabled: Enable READ fallback (default: true)
+ *   - spark.indextables.databricks.credential.operation: PATH_READ or PATH_READ_WRITE (default: PATH_READ_WRITE)
  *   - spark.indextables.databricks.retry.attempts: Retry attempts on failure (default: 3)
  *
  * Usage:
@@ -63,8 +66,10 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   import UnityCatalogAWSCredentialProvider._
 
   // Resolve all configuration from the Map
-  private val (_workspaceUrl, _token, _refreshBufferMinutes, _fallbackEnabled, _retryAttempts) =
+  private val (_workspaceUrl, _token, _refreshBufferMinutes, _retryAttempts) =
     resolveConfigFromMap(config)
+
+  private val credentialOperation = resolveCredentialOperation(config)
 
   // Initialize the global cache
   initializeGlobalCacheFromMap(config)
@@ -73,13 +78,13 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   logger.info(s"Initializing UnityCatalogAWSCredentialProvider for URI: $uri")
   logger.info(s"  Workspace URL: ${_workspaceUrl}")
   logger.info(s"  Refresh buffer: ${_refreshBufferMinutes} minutes before expiration")
+  logger.info(s"  Credential operation: $credentialOperation")
   logger.info("UnityCatalogAWSCredentialProvider initialized successfully")
 
   // Accessors for resolved config (for cleaner code below)
   private def workspaceUrl: String      = _workspaceUrl
   private def token: String             = _token
   private def refreshBufferMinutes: Int = _refreshBufferMinutes
-  private def fallbackEnabled: Boolean  = _fallbackEnabled
   private def retryAttempts: Int        = _retryAttempts
 
   /**
@@ -87,7 +92,8 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
    *
    * This method:
    *   1. Checks the cache for valid credentials (not near expiration) 2. If cached and valid, returns them 3.
-   *      Otherwise, fetches fresh credentials with READ_WRITE/READ fallback 4. Caches the new credentials
+   *      Otherwise, fetches fresh credentials. If credential.operation is PATH_READ, fetches directly; otherwise uses
+   *      PATH_READ_WRITE with automatic fallback to PATH_READ on 403. 4. Caches the new credentials
    */
   override def getCredentials(): AWSCredentials = {
     val path     = extractPath(uri)
@@ -105,9 +111,13 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
       return cached.toAWSCredentials
     }
 
-    // Fetch fresh credentials
+    // Fetch fresh credentials:
+    // - If explicitly PATH_READ, fetch directly (no fallback needed)
+    // - Otherwise, try PATH_READ_WRITE with automatic fallback to PATH_READ
     try {
-      val freshCredentials = fetchCredentialsWithFallback(path)
+      val freshCredentials =
+        if (credentialOperation == "PATH_READ") fetchCredentials(path, "PATH_READ")
+        else fetchCredentialsWithFallback(path)
       globalCredentialsCache.put(cacheKey, freshCredentials)
       logCacheStats()
       freshCredentials.toAWSCredentials
@@ -130,7 +140,9 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
 
     // Fetch new credentials and update cache
     Try {
-      val freshCredentials = fetchCredentialsWithFallback(path)
+      val freshCredentials =
+        if (credentialOperation == "PATH_READ") fetchCredentials(path, "PATH_READ")
+        else fetchCredentialsWithFallback(path)
       globalCredentialsCache.put(cacheKey, freshCredentials)
       logger.info(s"Successfully refreshed and cached credentials for path: $path")
     } match {
@@ -156,9 +168,8 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
     }
   }
 
-  /** Fetch credentials with automatic fallback from READ_WRITE to READ. */
+  /** Fetch credentials with automatic fallback from PATH_READ_WRITE to PATH_READ. */
   private def fetchCredentialsWithFallback(path: String): CachedCredentials =
-    // Try READ_WRITE first
     Try {
       logger.debug(s"Attempting to fetch PATH_READ_WRITE credentials for path: $path")
       val creds = fetchCredentials(path, "PATH_READ_WRITE")
@@ -167,14 +178,9 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
     } match {
       case Success(creds) => creds
       case Failure(e) =>
-        if (!fallbackEnabled) {
-          throw e
-        }
-
         logger.info(s"PATH_READ_WRITE credentials unavailable for path: $path, falling back to PATH_READ")
         logger.debug(s"PATH_READ_WRITE failure reason: ${e.getMessage}")
 
-        // Fallback to READ
         Try {
           val creds = fetchCredentials(path, "PATH_READ")
           logger.info(s"Successfully obtained PATH_READ credentials for path: $path")
@@ -263,15 +269,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   private val TokenKey        = "apiToken"
 
   // Configuration keys - Databricks behavior
-  private val RefreshBufferKey   = "spark.indextables.databricks.credential.refreshBuffer.minutes"
-  private val CacheMaxSizeKey    = "spark.indextables.databricks.cache.maxSize"
-  private val FallbackEnabledKey = "spark.indextables.databricks.fallback.enabled"
-  private val RetryAttemptsKey   = "spark.indextables.databricks.retry.attempts"
+  private val RefreshBufferKey        = "spark.indextables.databricks.credential.refreshBuffer.minutes"
+  private val CacheMaxSizeKey         = "spark.indextables.databricks.cache.maxSize"
+  private val CredentialOperationKey  = "spark.indextables.databricks.credential.operation"
+  private val RetryAttemptsKey        = "spark.indextables.databricks.retry.attempts"
 
   // Default values
   private val DefaultRefreshBufferMinutes = 40
   private val DefaultCacheMaxSize         = 100
-  private val DefaultFallbackEnabled      = true
+  private val DefaultCredentialOperation  = "PATH_READ_WRITE"
   private val DefaultRetryAttempts        = 3
 
   /**
@@ -299,7 +305,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * Resolve Databricks configuration from a Map[String, String]. This is the fast path that avoids Hadoop Configuration
    * creation.
    */
-  private def resolveConfigFromMap(config: Map[String, String]): (String, String, Int, Boolean, Int) = {
+  private def resolveConfigFromMap(config: Map[String, String]): (String, String, Int, Int) = {
     val sources: Seq[ConfigSource] = Seq(
       MapConfigSource(config, "spark.indextables.databricks"),
       MapConfigSource(config)
@@ -325,14 +331,18 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     val refreshBuffer = ConfigurationResolver
       .resolveInt(RefreshBufferKey, sources, DefaultRefreshBufferMinutes)
 
-    val fallbackEnabled = ConfigurationResolver
-      .resolveBoolean(FallbackEnabledKey, sources, DefaultFallbackEnabled)
-
     val retryAttempts = ConfigurationResolver
       .resolveInt(RetryAttemptsKey, sources, DefaultRetryAttempts)
 
-    (workspaceUrl, token, refreshBuffer, fallbackEnabled, retryAttempts)
+    (workspaceUrl, token, refreshBuffer, retryAttempts)
   }
+
+  /**
+   * Resolve the path credential operation from config.
+   * Read paths set "PATH_READ"; write paths default to "PATH_READ_WRITE".
+   */
+  private def resolveCredentialOperation(config: Map[String, String]): String =
+    config.getOrElse(CredentialOperationKey, DefaultCredentialOperation)
 
   // Process-global HTTP client (thread-safe, reusable)
   private val httpClient: HttpClient = HttpClient
@@ -581,7 +591,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    *   The table_id UUID string
    */
   def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
-    val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
+    val (workspaceUrl, token, _, retryAttempts) = resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
     fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts).tableId
   }
@@ -601,7 +611,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     fullTableName: String,
     config: Map[String, String]
   ): io.indextables.spark.utils.TableInfo = {
-    val (workspaceUrl, token, _, _, retryAttempts) = resolveConfigFromMap(config)
+    val (workspaceUrl, token, _, retryAttempts) = resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
     fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts)
   }
@@ -621,7 +631,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     tableId: String,
     config: Map[String, String]
   ): io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials = {
-    val (workspaceUrl, token, refreshBufferMinutes, fallbackEnabled, retryAttempts) =
+    val (workspaceUrl, token, refreshBufferMinutes, retryAttempts) =
       resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
 
@@ -639,27 +649,8 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       }
     }
 
-    // Fetch with READ_WRITE -> READ fallback
-    val creds = Try {
-      logger.debug(s"Fetching READ_WRITE table credentials for tableId=$tableId")
-      fetchTableCredentials(tableId, "READ_WRITE", workspaceUrl, token, retryAttempts)
-    } match {
-      case Success(c) => c
-      case Failure(e) =>
-        if (!fallbackEnabled) throw e
-        logger.info(s"READ_WRITE table credentials failed for tableId=$tableId, falling back to READ")
-        Try {
-          fetchTableCredentials(tableId, "READ", workspaceUrl, token, retryAttempts)
-        } match {
-          case Success(c) => c
-          case Failure(readEx) =>
-            throw new RuntimeException(
-              s"Failed to obtain table credentials for tableId=$tableId. " +
-                s"READ_WRITE: ${e.getMessage}, READ: ${readEx.getMessage}",
-              readEx
-            )
-        }
-    }
+    // Fetch READ credentials directly (we never write via table credentials)
+    val creds = fetchTableCredentials(tableId, "READ", workspaceUrl, token, retryAttempts)
 
     globalCredentialsCache.put(cacheKey, creds)
     toBasicCredentials(creds)
@@ -738,7 +729,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * These are returned as defaults — user-explicit values always take precedence.
    */
   override def icebergCatalogDefaults(config: Map[String, String]): Map[String, String] = {
-    val (workspaceUrl, token, _, _, _) = resolveConfigFromMap(config)
+    val (workspaceUrl, token, _, _) = resolveConfigFromMap(config)
 
     val defaults = Map(
       "spark.indextables.iceberg.uri"         -> s"$workspaceUrl/api/2.1/unity-catalog/iceberg-rest",

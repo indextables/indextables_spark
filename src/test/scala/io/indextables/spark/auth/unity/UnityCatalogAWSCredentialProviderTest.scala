@@ -182,7 +182,7 @@ class UnityCatalogAWSCredentialProviderTest
     assert(requestLog.size == 1)
     assert(requestLog.head.method == "POST")
     assert(requestLog.head.headers.get("Authorization").contains("Bearer test-token-12345"))
-    assert(requestLog.head.body.contains("PATH_READ_WRITE"))
+    assert(requestLog.head.body.contains("PATH_READ_WRITE")) // Default operation
     assert(requestLog.head.body.contains("s3://test-bucket/path"))
   }
 
@@ -312,9 +312,9 @@ class UnityCatalogAWSCredentialProviderTest
     assert(requestLog.size == 2, "Should have refreshed due to near-expiration")
   }
 
-  // ==================== Fallback Tests ====================
+  // ==================== Credential Operation & Fallback Tests ====================
 
-  test("falls back to READ when READ_WRITE fails with 403") {
+  test("default operation is PATH_READ_WRITE with fallback to PATH_READ on 403") {
     // Disable retries for this test to focus on fallback behavior
     val testConfig = configMap + ("spark.indextables.databricks.retry.attempts" -> "1")
 
@@ -336,12 +336,44 @@ class UnityCatalogAWSCredentialProviderTest
     val credentials = provider.getCredentials()
 
     assert(credentials.getAWSAccessKeyId == "READ_ONLY_KEY")
-    assert(requestLog.size == 2) // First READ_WRITE, then READ
+    assert(requestLog.size == 2) // First PATH_READ_WRITE (403), then PATH_READ (200)
     assert(requestLog(0).body.contains("PATH_READ_WRITE"))
     assert(requestLog(1).body.contains("PATH_READ"))
   }
 
-  test("throws exception when both READ_WRITE and READ fail") {
+  test("default operation succeeds with PATH_READ_WRITE when write access is available") {
+    setupMockHandler(200, successResponse())
+
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
+      new URI("s3://test-bucket/path"),
+      configMap
+    )
+
+    provider.getCredentials()
+
+    assert(requestLog.size == 1)
+    assert(requestLog.head.body.contains("PATH_READ_WRITE"))
+  }
+
+  test("read path uses PATH_READ directly when configured (no fallback)") {
+    setupMockHandler(200, successResponse(accessKeyId = "READ_ONLY_KEY"))
+
+    val readConfig = configMap + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(
+      new URI("s3://test-bucket/path"),
+      readConfig
+    )
+
+    val credentials = provider.getCredentials()
+
+    assert(credentials.getAWSAccessKeyId == "READ_ONLY_KEY")
+    assert(requestLog.size == 1) // Single request, no fallback
+    assert(requestLog.head.body.contains("PATH_READ"))
+    assert(!requestLog.head.body.contains("PATH_READ_WRITE"))
+  }
+
+  test("throws exception when both PATH_READ_WRITE and PATH_READ fail") {
     setupMockHandler(403, """{"error": "Permission denied"}""")
 
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(
@@ -354,19 +386,21 @@ class UnityCatalogAWSCredentialProviderTest
     }
 
     assert(exception.getMessage.contains("Failed to obtain Unity Catalog credentials"))
-    // Should have tried both READ_WRITE and READ
-    assert(requestLog.count(_.body.contains("PATH_READ_WRITE")) >= 1)
-    assert(requestLog.count(_.body.contains("PATH_READ")) >= 1)
+    // Should have tried both PATH_READ_WRITE and PATH_READ
+    assert(requestLog.exists(_.body.contains("PATH_READ_WRITE")))
+    assert(requestLog.exists(r => r.body.contains("PATH_READ") && !r.body.contains("PATH_READ_WRITE")))
   }
 
-  test("fallback disabled throws on first failure") {
-    val testConfig = configMap + ("spark.indextables.databricks.fallback.enabled" -> "false")
+  test("explicit PATH_READ throws on failure without fallback") {
+    val readConfig = configMap +
+      ("spark.indextables.databricks.credential.operation" -> "PATH_READ") +
+      ("spark.indextables.databricks.retry.attempts"       -> "1")
 
-    setupMockHandler(403, """{"error": "Permission denied for READ_WRITE"}""")
+    setupMockHandler(403, """{"error": "Permission denied"}""")
 
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
-      testConfig
+      readConfig
     )
 
     val exception = intercept[RuntimeException] {
@@ -374,8 +408,9 @@ class UnityCatalogAWSCredentialProviderTest
     }
 
     assert(exception.getMessage.contains("Failed to obtain Unity Catalog credentials"))
-    // Should only have tried READ_WRITE (no fallback)
-    assert(requestLog.forall(_.body.contains("PATH_READ_WRITE")))
+    // Should only have tried PATH_READ (no fallback to or from PATH_READ_WRITE)
+    assert(requestLog.forall(_.body.contains("PATH_READ")))
+    assert(requestLog.forall(!_.body.contains("PATH_READ_WRITE")))
   }
 
   // ==================== Retry Tests ====================

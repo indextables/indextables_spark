@@ -65,18 +65,20 @@ class IndexingConfigurationTest extends TestBase with Matchers {
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      // Pass typemap at read time so ScanBuilder knows content is a text field
+      // and defers EqualTo filtering to Spark (text fields require IndexQuery for pushdown)
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .load(tablePath)
 
-      // Text fields with === should still use exact matching (not tokenized)
-      // For exact phrase search, the full phrase must match exactly
+      // Text fields with === work via Spark post-filtering when typemap is provided at read time
       val exactResults = df.filter(df("content") === "machine learning algorithms").collect()
       exactResults should have length 1
       exactResults(0).getString(0) should be("doc1")
 
-      // Partial phrase search with === should return no results (exact matching)
+      // Partial phrase search with === should return no results (exact matching via Spark)
       val partialResults = df.filter(df("content") === "machine learning").collect()
-      println(s"🔍 DEBUG: Partial results for 'machine learning': ${partialResults.length}")
-      partialResults.foreach(row => println(s"  - Found: ${row.getString(0)} -> '${row.getString(1)}'"))
       partialResults should have length 0
     }
   }
@@ -289,13 +291,18 @@ class IndexingConfigurationTest extends TestBase with Matchers {
         .option("spark.indextables.indexing.fastfields", "numField")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      // Pass typemap at read time so ScanBuilder knows field types
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.exactField", "string")
+        .option("spark.indextables.indexing.typemap.textField", "text")
+        .load(tablePath)
 
       // String field should match exactly
       val exactResults = df.filter(df("exactField") === "exact match").collect()
       exactResults should have length 1
 
-      // Text field with === should also use exact matching (not tokenized)
+      // Text field with === works via Spark post-filtering when typemap is provided at read time
       val textResults = df.filter(df("textField") === "tokenized content here").collect()
       textResults should have length 1
 
