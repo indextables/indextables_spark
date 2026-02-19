@@ -85,9 +85,17 @@ class IndexTables4SparkScanBuilder(
   // Aggregate pushdown state
   private var _pushedAggregation: Option[Aggregation] = None
   private var _pushedGroupBy: Option[Array[String]]   = None
+  private var _aggregationWasRequested: Boolean        = false // true if pushAggregation() was ever called
 
   // Bucket aggregation state (DateHistogram, Histogram, Range)
   private var _bucketConfig: Option[BucketAggregationConfig] = None
+
+  // Detect companion mode from transaction log metadata (lazy, computed once).
+  private lazy val isCompanionTable: Boolean =
+    try {
+      val metadata = transactionLog.getMetadata()
+      metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
+    } catch { case _: Exception => false }
 
   // Inject companion mode config from transaction log metadata (lazy, computed once).
   // Resolves credentials for parquet file access on the driver so executors can use them.
@@ -434,6 +442,30 @@ class IndexTables4SparkScanBuilder(
               s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not. " +
               s"Note: IsNull/IsNotNull on non-FAST fields are handled by Spark post-filtering and don't block aggregates." +
               stringPatternHint
+          )
+        }
+
+        // COMPANION AGGREGATE GUARD: companion-mode tables MUST use aggregate pushdown
+        // for correct COUNT/SUM/AVG/MIN/MAX results because the regular scan path applies
+        // a default row limit that would silently truncate results.
+        // Use _aggregationWasRequested as a reliable signal: if Spark called pushAggregation()
+        // but we rejected it (returned false), we know an aggregate is in the plan even if
+        // schema heuristics in detectAggregateInQueryPlan() don't detect it.
+        // Check both instance-level and relation-based storage (build() may be on different instance).
+        val relationAggRequested = relationForIndexQuery
+          .exists(IndexTables4SparkScanBuilder.wasAggregationRequested)
+        val aggregateDetected = hasAggregateInPlan || _aggregationWasRequested || relationAggRequested
+        if (isCompanionTable && aggregateDetected && isCompanionAggregatePushdownRequired) {
+          val filterDesc = if (effectiveUnsupportedFilters.nonEmpty) {
+            s" Unsupported filter(s) blocking pushdown: [${effectiveUnsupportedFilters.map(_.toString).mkString(", ")}]."
+          } else ""
+          throw new IllegalStateException(
+            s"Aggregate query on companion-mode table cannot proceed without aggregate pushdown." +
+              s" Companion splits require aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results" +
+              s" because the regular scan path applies a default row limit that would truncate results." +
+              filterDesc +
+              s" To disable this safety check (results may be incorrect), set" +
+              s" spark.indextables.read.companion.requireAggregatePushdown=false."
           )
         }
 
@@ -857,6 +889,9 @@ class IndexTables4SparkScanBuilder(
   }
 
   override def pushAggregation(aggregation: Aggregation): Boolean = {
+    _aggregationWasRequested = true
+    // Store in relation-based storage for cross-instance access (build() may be on a different instance)
+    IndexTables4SparkScanBuilder.getCurrentRelation().foreach(IndexTables4SparkScanBuilder.storeAggregationRequested)
     logger.debug(s"AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
     logger.debug(s"AGGREGATE PUSHDOWN: Number of pushed filters: ${_pushedFilters.length}")
     _pushedFilters.foreach(f => logger.debug(s"AGGREGATE PUSHDOWN: Pushed filter: $f"))
@@ -915,6 +950,7 @@ class IndexTables4SparkScanBuilder(
     logger.debug(s"AGGREGATE PUSHDOWN: About to check isAggregationSupported")
     if (!isAggregationSupported(aggregation)) {
       logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
+      rejectAggregateOnCompanionTable("aggregation type not supported for pushdown")
       return false
     }
     logger.debug(s"AGGREGATE PUSHDOWN: isAggregationSupported passed")
@@ -924,6 +960,7 @@ class IndexTables4SparkScanBuilder(
     try {
       if (!areFiltersCompatibleWithAggregation()) {
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
+        rejectAggregateOnCompanionTable("filters not compatible with aggregation")
         return false
       }
       logger.debug(s"AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
@@ -950,6 +987,7 @@ class IndexTables4SparkScanBuilder(
         throw e
       case e: IllegalArgumentException =>
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
+        rejectAggregateOnCompanionTable(e.getMessage)
         return false
     }
 
@@ -994,11 +1032,34 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
+  /**
+   * On companion-mode tables, rejecting aggregate pushdown means the regular scan path will be
+   * used, which applies a default row limit that silently truncates results. Throw an error
+   * instead of allowing incorrect results, unless the safety check is explicitly disabled.
+   */
+  private def rejectAggregateOnCompanionTable(reason: String): Unit =
+    if (isCompanionTable && isCompanionAggregatePushdownRequired) {
+      throw new IllegalStateException(
+        s"Aggregate query on companion-mode table cannot proceed without aggregate pushdown." +
+          s" Companion splits require aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results" +
+          s" because the regular scan path applies a default row limit that would truncate results." +
+          s" Reason pushdown was rejected: $reason." +
+          s" To disable this safety check (results may be incorrect), set" +
+          s" spark.indextables.read.companion.requireAggregatePushdown=false."
+      )
+    }
+
   // Configuration helpers for string pattern filter pushdown
   // Helper to get config value from both options (reader options) and config (session config)
   private def getConfigValue(key: String): Option[String] =
     // First check reader options, then session config
     Option(options.get(key)).orElse(config.get(key))
+
+  // Whether companion-mode tables require aggregate pushdown (default: true)
+  private def isCompanionAggregatePushdownRequired: Boolean =
+    getConfigValue("spark.indextables.read.companion.requireAggregatePushdown")
+      .map(_.toLowerCase != "false")
+      .getOrElse(true)
 
   // Master switch to enable all string pattern pushdowns at once
   private def isAllStringPatternPushdownEnabled: Boolean =
@@ -1039,6 +1100,12 @@ class IndexTables4SparkScanBuilder(
       }
     }
 
+    // Check if a field is a partition column. Partition columns are directory-based
+    // and can never be null, so IsNotNull on them is always a tautology. Accepting
+    // these as "supported" prevents them from blocking aggregate pushdown.
+    def isPartitionColumn(fieldName: String): Boolean =
+      getPartitionColumns().contains(fieldName)
+
     filter match {
       case EqualTo(attribute, _)            => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _)      => isFieldSuitableForExactMatching(attribute)
@@ -1047,10 +1114,12 @@ class IndexTables4SparkScanBuilder(
       case LessThan(attribute, _)           => true // Support range on all fields (both regular and JSON)
       case LessThanOrEqual(attribute, _)    => true // Support range on all fields (both regular and JSON)
       case _: In                            => true
-      // IsNull/IsNotNull only supported when field is fast (ExistsQuery requires FAST field)
-      // If field is not fast, filter will be handled by Spark instead (not pushed down)
-      case IsNull(attribute)    => isFieldFast(attribute)
-      case IsNotNull(attribute) => isFieldFast(attribute)
+      // IsNull/IsNotNull supported when field is fast (ExistsQuery requires FAST field)
+      // or when field is a partition column (partition values are never null, so
+      // IsNotNull is a tautology and IsNull always returns empty - both are safe).
+      // If neither, filter will be handled by Spark instead (not pushed down).
+      case IsNull(attribute)    => isFieldFast(attribute) || isPartitionColumn(attribute)
+      case IsNotNull(attribute) => isFieldFast(attribute) || isPartitionColumn(attribute)
       case And(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
       case Or(left, right)      => isSupportedFilter(left) && isSupportedFilter(right)
       case Not(child)           => isSupportedFilter(child) // NOT is supported only if child is supported
@@ -2206,6 +2275,11 @@ object IndexTables4SparkScanBuilder {
   // Store unsupported filters by relation object for aggregate exception detection
   private val relationUnsupportedFilters: WeakHashMap[AnyRef, Array[Filter]] = new WeakHashMap[AnyRef, Array[Filter]]()
 
+  // Track whether pushAggregation() was called (and rejected) for cross-instance detection.
+  // When build() runs on a different ScanBuilder instance, this flag lets us know that
+  // an aggregate was requested but pushdown failed.
+  private val relationAggregationRequested: WeakHashMap[AnyRef, java.lang.Boolean] = new WeakHashMap[AnyRef, java.lang.Boolean]()
+
   // ThreadLocal to pass the actual relation object from V2 rule to ScanBuilder
   // This works even with AQE because the same relation object is used throughout planning
   // Lifecycle: V2 rule checks relation identity → clears if different → sets new relation → ScanBuilder gets it
@@ -2341,6 +2415,18 @@ object IndexTables4SparkScanBuilder {
   def getUnsupportedFilters(relation: AnyRef): Array[Filter] =
     relationUnsupportedFilters.synchronized {
       Option(relationUnsupportedFilters.get(relation)).getOrElse(Array.empty)
+    }
+
+  /** Store that pushAggregation() was called for a specific relation object. */
+  def storeAggregationRequested(relation: AnyRef): Unit =
+    relationAggregationRequested.synchronized {
+      relationAggregationRequested.put(relation, java.lang.Boolean.TRUE)
+    }
+
+  /** Check if pushAggregation() was called for a specific relation object. */
+  def wasAggregationRequested(relation: AnyRef): Boolean =
+    relationAggregationRequested.synchronized {
+      Option(relationAggregationRequested.get(relation)).exists(_.booleanValue())
     }
 
 }

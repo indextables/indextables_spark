@@ -1483,7 +1483,7 @@ object FiltersToQueryConverter {
         // For text fields, use phrase query syntax with quotes to ensure exact phrase matching
         // For date fields, use range queries for proper date matching
         // For other fields, use term queries
-        if (fieldType == FieldType.TEXT) {
+        if (shouldUseTokenizedQuery(attribute, options)) {
           // Use parseQuery with quoted syntax for exact phrase matching on tokenized text fields
           val quotedValue = "\"" + convertedValue.toString.replace("\"", "\\\"") + "\""
           val queryString = s"$attribute:$quotedValue"
