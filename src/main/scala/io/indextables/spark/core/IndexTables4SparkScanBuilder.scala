@@ -157,7 +157,10 @@ class IndexTables4SparkScanBuilder(
                 (path, config)
               }
 
-              var enrichedConfig = baseConfig + ("spark.indextables.companion.parquetTableRoot" -> effectivePath)
+              var enrichedConfig = baseConfig +
+                ("spark.indextables.companion.parquetTableRoot" -> effectivePath) +
+                // ScanBuilder is read-only, request PATH_READ credentials
+                ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
 
               // Resolve credentials for the parquet table root on the driver.
               // On Databricks/Unity Catalog, the companion index and Delta table may need
