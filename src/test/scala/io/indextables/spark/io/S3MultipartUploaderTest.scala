@@ -26,7 +26,7 @@ import org.scalatest.funsuite.AnyFunSuite
 /**
  * S3MultipartUploader tests using real AWS S3.
  *
- * IMPORTANT: The comprehensive multipart upload tests have been moved to RealS3MultipartUploaderTest which tests
+ * IMPORTANT: The comprehensive multipart upload tests have been moved to CloudS3MultipartUploaderTest which tests
  * against actual AWS S3 infrastructure for realistic behavior verification.
  *
  * This class maintains configuration and utility tests that don't require actual S3 connectivity.

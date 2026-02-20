@@ -8,14 +8,20 @@
 # ---------------------------------------------------------------------------
 export JAVA_HOME ?= /opt/homebrew/opt/openjdk@11
 
-JOBS           ?= 4
 SUITE          ?=
 MVN            := mvn
+
+# If JOBS is overridden, pass it through; otherwise let the script auto-detect
+ifdef JOBS
+  JOBS_FLAG = -j $(JOBS)
+else
+  JOBS_FLAG =
+endif
 
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: help setup compile build test-compile test test-dry-run test-single clean package verify
+.PHONY: help setup compile build test-compile test test-cloud test-all test-dry-run test-single clean package verify
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -32,8 +38,14 @@ build: compile ## Alias for compile
 test-compile: ## Compile sources and tests (mvn test-compile)
 	$(MVN) test-compile
 
-test: ## Run all tests via scripts/run-tests.sh (JOBS=N to set parallelism)
-	./scripts/run-tests.sh -j $(JOBS)
+test: ## Run local tests (excludes cloud tests requiring S3/Azure credentials)
+	./scripts/run-tests.sh $(JOBS_FLAG) --exclude 'Cloud*'
+
+test-cloud: ## Run cloud tests only (requires S3/Azure credentials)
+	./scripts/run-tests.sh $(JOBS_FLAG) --only 'Cloud*'
+
+test-all: ## Run all tests including cloud
+	./scripts/run-tests.sh $(JOBS_FLAG)
 
 test-dry-run: ## List test classes without running them
 	./scripts/run-tests.sh --dry-run

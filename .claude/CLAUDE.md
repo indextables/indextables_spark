@@ -14,17 +14,21 @@
 export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # Set Java 11
 mvn clean compile                              # Build
 
-# Run all tests (parallel, avoids OOM from `mvn test`):
-./scripts/run-tests.sh          # Default: 4 parallel jobs
-./scripts/run-tests.sh -j 8     # 8 parallel jobs
-./scripts/run-tests.sh -j 1     # Sequential
-./scripts/run-tests.sh --dry-run # List test classes without running
+# Run local tests (excludes cloud tests, uses all CPU cores):
+make test                  # Default: all CPU cores
+make test JOBS=4           # Override parallelism
+
+# Run cloud tests only (requires S3/Azure credentials):
+make test-cloud
+
+# Run all tests:
+make test-all
 
 # Run single test:
 mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.DateStringFilterValidationTest'
 ```
 
-> **Note:** `mvn test` may OOM on laptops due to 360+ test classes. Use `./scripts/run-tests.sh` which compiles once and runs each test class in a separate JVM. Per-test logs are saved to a temp directory; failed test log paths are printed in the summary.
+> **Note:** `mvn test` may OOM on laptops due to 360+ test classes. Use `make test` which compiles once and runs each test class in a separate JVM with auto-detected parallelism. Cloud tests (42 classes prefixed with `Cloud*`) are separated into `make test-cloud` and require live S3/Azure credentials. Per-test logs are saved to a temp directory; failed test log paths are printed in the summary.
 
 ## Core Features
 
@@ -149,7 +153,8 @@ All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/
 
 ## Test Status
 
-- 350+ tests passing across all major features
+- 362 test classes total: 320 local + 42 cloud (all `Cloud*`-prefixed tests require S3/Azure credentials)
+- Cloud tests use `Cloud*` naming convention and are excluded from `make test`
 - Merge-on-write tests need updating for new post-commit design
 - JSON fields: 114/114 tests, Bucket aggregations: 4/4, Partitioned datasets: 7/7
 - PURGE INDEXTABLE: 40/40, Purge-on-write: 8/8, DESCRIBE ENVIRONMENT: 10/10

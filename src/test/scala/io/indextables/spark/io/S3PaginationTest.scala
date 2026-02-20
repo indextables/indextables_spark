@@ -38,7 +38,7 @@ import org.scalatest.funsuite.AnyFunSuite
  *   1. Local filesystem listing works with >1000 files (flow test) 2. CloudStorageProvider interface handles large file
  *      counts correctly
  *
- * For real S3 testing, see RealS3PaginationTest (requires AWS credentials).
+ * For real S3 testing, see CloudS3PaginationTest (requires AWS credentials).
  */
 class S3PaginationTest extends AnyFunSuite with TestBase {
 
@@ -174,7 +174,7 @@ class S3PaginationTest extends AnyFunSuite with TestBase {
    *
    * To test with real S3:
    *   1. Set AWS credentials in environment or spark config 2. Create a test bucket with >1000 files 3. Run
-   *      RealS3PaginationTest
+   *      CloudS3PaginationTest
    */
   test("S3 pagination fix documentation") {
     // This test just documents the fix - see method scaladoc above

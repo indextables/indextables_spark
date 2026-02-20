@@ -15,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * EXACT REPRODUCTION of failing test 647 from RealS3IntegrationTest. This isolates the MERGE SPLITS test to debug the
+ * EXACT REPRODUCTION of failing test 647 from CloudS3IntegrationTest. This isolates the MERGE SPLITS test to debug the
  * fast field bug. Includes both local file and real S3 tests.
  */
 class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Matchers {
