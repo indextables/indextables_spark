@@ -165,7 +165,8 @@ class AggregateExceptionTest extends TestBase {
       import sparkImplicits._
 
       // Create multi-partition test data
-      val df = (0 until 120).map(i => (i.toLong, s"region_${i % 3}", s"type_${i % 2}", s"item_$i"))
+      val df = (0 until 120)
+        .map(i => (i.toLong, s"region_${i % 3}", s"type_${i % 2}", s"item_$i"))
         .toDF("id", "region", "type", "name")
 
       df.write
@@ -193,7 +194,8 @@ class AggregateExceptionTest extends TestBase {
       // Reproduce the exact scenario: partitioned dataset, indexed, then GROUP BY partition key.
       // Spark adds implicit IsNotNull(partition_key) for GROUP BY, which must be supported
       // to allow aggregate pushdown.
-      val df = (0 until 300).map(i => (i.toLong, s"region_${i % 3}", s"item_$i"))
+      val df = (0 until 300)
+        .map(i => (i.toLong, s"region_${i % 3}", s"item_$i"))
         .toDF("id", "region", "name")
 
       df.write
@@ -223,7 +225,8 @@ class AggregateExceptionTest extends TestBase {
       val sparkImplicits = spark.implicits
       import sparkImplicits._
 
-      val df = (0 until 300).map(i => (i.toLong, s"region_${i % 3}", i * 10.0))
+      val df = (0 until 300)
+        .map(i => (i.toLong, s"region_${i % 3}", i * 10.0))
         .toDF("id", "region", "value")
 
       df.write
