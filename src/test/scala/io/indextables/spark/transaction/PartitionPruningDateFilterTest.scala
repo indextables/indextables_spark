@@ -721,11 +721,10 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers with Befo
       )
     )
     val complexResult = PartitionPruning.prunePartitions(addActions, partitionColumns, complexMixedFilter)
-    // Should extract and apply: (date >= 2023-02-01 AND region = us)
-    // This matches only: 2023-03-10/us
-    complexResult should have length 1
-    complexResult.head.partitionValues("date") shouldBe "2023-03-10"
-    complexResult.head.partitionValues("region") shouldBe "us"
+    // When an OR has one branch with all non-partition columns, the entire OR cannot be
+    // safely used for partition pruning (the non-partition branch might match any partition).
+    // All partitions should be returned and the full filter applied post-read.
+    complexResult should have length 3
   }
 
   test("Multiple partition columns should work with date filtering") {

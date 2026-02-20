@@ -17,12 +17,22 @@
 
 package io.indextables.spark.transaction
 
-import java.util.concurrent.{ConcurrentHashMap, Executors, TimeUnit}
+import java.util.concurrent.{ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.jdk.CollectionConverters._
 
 import org.slf4j.LoggerFactory
+
+/** Companion object holding the shared cleanup executor to avoid per-instance thread leak. */
+object TransactionLogCache {
+  private[transaction] val sharedCleanupExecutor: ScheduledExecutorService =
+    Executors.newSingleThreadScheduledExecutor { r =>
+      val thread = new Thread(r, "TransactionLogCache-Cleanup")
+      thread.setDaemon(true)
+      thread
+    }
+}
 
 /**
  * Time-based cache for transaction log data with configurable expiration. Designed to reduce repeated
@@ -37,31 +47,26 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
   // Cache entries with expiration timestamps
   private val versionCache                            = new ConcurrentHashMap[Long, CacheEntry[Seq[Action]]]()
   private val versionsListCache                       = new AtomicLong(0L) // timestamp when versions list was cached
-  private var cachedVersionsList: Option[Seq[Long]]   = None
-  private val filesCache                              = new AtomicLong(0L) // timestamp when files list was cached
-  private var cachedFilesList: Option[Seq[AddAction]] = None
-  private val metadataCache                           = new AtomicLong(0L) // timestamp when metadata was cached
-  private var cachedMetadata: Option[MetadataAction]  = None
-  private val protocolCache                           = new AtomicLong(0L) // timestamp when protocol was cached
-  private var cachedProtocol: Option[ProtocolAction]  = None
+  @volatile private var cachedVersionsList: Option[Seq[Long]]   = None
+  private val filesCache                                        = new AtomicLong(0L) // timestamp when files list was cached
+  @volatile private var cachedFilesList: Option[Seq[AddAction]] = None
+  private val metadataCache                                     = new AtomicLong(0L) // timestamp when metadata was cached
+  @volatile private var cachedMetadata: Option[MetadataAction]  = None
+  private val protocolCache                                     = new AtomicLong(0L) // timestamp when protocol was cached
+  @volatile private var cachedProtocol: Option[ProtocolAction]  = None
 
   // Partition index cache for optimized partition pruning
   private val partitionIndexCache = new AtomicLong(0L) // timestamp when partition index was cached
-  private var cachedPartitionIndex: Option[PartitionIndex] = None
+  @volatile private var cachedPartitionIndex: Option[PartitionIndex] = None
 
   // Statistics
   private val hitCount  = new AtomicLong(0)
   private val missCount = new AtomicLong(0)
 
-  // Background cleanup task
-  private val cleanupExecutor = Executors.newSingleThreadScheduledExecutor { r =>
-    val thread = new Thread(r, "TransactionLogCache-Cleanup")
-    thread.setDaemon(true)
-    thread
-  }
-
-  // Schedule cleanup every minute
-  cleanupExecutor.scheduleAtFixedRate(() => cleanup(), 1, 1, TimeUnit.MINUTES)
+  // Background cleanup task - use shared static executor to avoid per-instance thread leak
+  private val cleanupFuture = TransactionLogCache.sharedCleanupExecutor.scheduleAtFixedRate(
+    () => cleanup(), 1, 1, TimeUnit.MINUTES
+  )
 
   /** Cache entry with expiration timestamp */
   private case class CacheEntry[T](value: T, timestamp: Long) {
@@ -298,17 +303,7 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
 
   /** Shutdown the cache and cleanup resources */
   def shutdown(): Unit = {
-    try {
-      cleanupExecutor.shutdown()
-      if (!cleanupExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-        cleanupExecutor.shutdownNow()
-      }
-    } catch {
-      case _: InterruptedException =>
-        cleanupExecutor.shutdownNow()
-        Thread.currentThread().interrupt()
-    }
-
+    cleanupFuture.cancel(false)
     versionCache.clear()
     invalidateAll()
     logger.debug("Transaction log cache shut down")

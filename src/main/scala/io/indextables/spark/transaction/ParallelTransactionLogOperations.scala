@@ -333,7 +333,12 @@ class ParallelTransactionLogOperations(
       // Use full streaming: cloud storage -> decompression -> line parsing
       // This avoids OOM for large version files (>1GB)
       parseActionsFromStream(versionFilePath)
-    }.getOrElse(Seq.empty)
+    } match {
+      case scala.util.Success(actions) => actions
+      case scala.util.Failure(e) =>
+        logger.warn(s"Failed to parse version file $versionFilePath: ${e.getMessage}", e)
+        Seq.empty
+    }
   }
 
   /**
@@ -359,7 +364,9 @@ class ParallelTransactionLogOperations(
             val jsonNode = JsonUtil.mapper.readTree(line)
 
             // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
-            if (jsonNode.has("metaData")) {
+            if (jsonNode.has("protocol")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction]))
+            } else if (jsonNode.has("metaData")) {
               Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
             } else if (jsonNode.has("add")) {
               Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
@@ -389,7 +396,9 @@ class ParallelTransactionLogOperations(
           EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
 
-          if (jsonNode.has("metaData")) {
+          if (jsonNode.has("protocol")) {
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction]))
+          } else if (jsonNode.has("metaData")) {
             Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
           } else if (jsonNode.has("add")) {
             Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))

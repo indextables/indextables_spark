@@ -150,16 +150,18 @@ class StreamingStateReader(cloudProvider: CloudStorageProvider, transactionLogPa
     val manifestPaths = relevantManifestInfos.map(m => manifestIO.resolveManifestPath(m, transactionLogPath, stateDir))
     val allEntries    = manifestReader.readManifestsParallel(manifestPaths)
 
-    // Filter by version range
+    // Filter by version range - use Set for O(1) tombstone lookups instead of O(n*m)
+    val tombstoneSet = manifest.tombstones.toSet
     val addedFiles = allEntries
       .filter(e => e.addedAtVersion > fromVersion && e.addedAtVersion <= toVersion)
-      .filterNot(e => manifest.tombstones.contains(e.path))
+      .filterNot(e => tombstoneSet.contains(e.path))
 
     // For removed files, we look at tombstones
     // Note: Tombstones don't have version info, so we can't filter by version
     // In a full implementation, we'd need to track when files were removed
+    val allEntryPaths = allEntries.map(_.path).toSet
     val removedFiles = manifest.tombstones
-      .filter(path => allEntries.exists(_.path == path))
+      .filter(path => allEntryPaths.contains(path))
 
     log.info(s"Found ${addedFiles.size} added files between versions $fromVersion and $toVersion")
 

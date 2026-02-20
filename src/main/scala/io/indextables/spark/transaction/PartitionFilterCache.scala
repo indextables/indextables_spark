@@ -40,15 +40,18 @@ object PartitionFilterCache {
 
   private val logger = LoggerFactory.getLogger(PartitionFilterCache.getClass)
 
+  /** Typed cache key to avoid hash collisions from Long packing. */
+  private case class FilterCacheKey(filterStrings: Seq[String], partitionValues: Map[String, String])
+
   // Maximum cache size to prevent unbounded memory growth
   private val MAX_CACHE_SIZE = 100000L
 
   // Guava cache with LRU eviction
-  private val cache: Cache[java.lang.Long, java.lang.Boolean] = CacheBuilder
+  private val cache: Cache[FilterCacheKey, java.lang.Boolean] = CacheBuilder
     .newBuilder()
     .maximumSize(MAX_CACHE_SIZE)
     .recordStats()
-    .build[java.lang.Long, java.lang.Boolean]()
+    .build[FilterCacheKey, java.lang.Boolean]()
 
   // Statistics (supplementary to Guava stats)
   private val hitCount  = new AtomicLong(0)
@@ -71,7 +74,7 @@ object PartitionFilterCache {
     partitionValues: Map[String, String],
     compute: => Boolean
   ): Boolean = {
-    val cacheKey: java.lang.Long = computeCacheKey(filters, partitionValues)
+    val cacheKey = FilterCacheKey(filters.map(_.toString).sorted.toSeq, partitionValues)
 
     val cached = cache.getIfPresent(cacheKey)
     if (cached != null) {
@@ -83,25 +86,6 @@ object PartitionFilterCache {
       cache.put(cacheKey, java.lang.Boolean.valueOf(result))
       result
     }
-  }
-
-  /**
-   * Compute a cache key from filters and partition values. Uses a combined hash of both to create a unique Long key.
-   *
-   * Note: We use toString instead of hashCode for filters because Spark's Filter classes (And, Or, etc.) may have hash
-   * collisions when they contain the same children but different operators. toString includes the class name and full
-   * structure, ensuring And(a, b) and Or(a, b) produce different hashes.
-   */
-  private def computeCacheKey(filters: Array[Filter], partitionValues: Map[String, String]): Long = {
-    // Compute hash of filters using toString to capture full structure including filter type
-    // This ensures And(a, b) and Or(a, b) produce different hashes
-    val filterHash = filters.map(_.toString).sorted.mkString(",").hashCode
-
-    // Compute hash of partition values (order-independent)
-    val partitionHash = partitionValues.toSeq.sortBy(_._1).hashCode()
-
-    // Combine into a Long key to minimize collisions
-    (filterHash.toLong << 32) | (partitionHash.toLong & 0xffffffffL)
   }
 
   /** Invalidate all cached results. Should be called when the file list changes. */

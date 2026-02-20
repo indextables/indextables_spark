@@ -392,7 +392,8 @@ class StateWriter(
     val totalEntriesInManifests = newManifests.map(_.numEntries).sum
     val numLiveFiles            = totalEntriesInManifests - newTombstoneSet.size
 
-    // Calculate total bytes (estimate)
+    // Calculate total bytes (estimate - removed file sizes are not precisely tracked,
+    // but compaction self-corrects by recalculating from live files)
     val totalBytes = baseManifest.totalBytes + newFiles.map(_.size).sum
 
     // Merge schema registries
@@ -964,27 +965,28 @@ class StateWriter(
     written
   }
 
-  /** Find the next available state version by scanning existing state directories. */
-  private def findNextAvailableVersion(afterVersion: Long): Long =
-    Try {
-      val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
-      val manifestFiles = files
-        .filter(f => f.path.endsWith("/_manifest.avro"))
-        .filter(f => f.path.contains("/state-v"))
-
-      if (manifestFiles.isEmpty) {
-        afterVersion + 1
-      } else {
-        val versions = manifestFiles.flatMap { f =>
-          manifestIO.parseStateDirVersion(f.path.stripSuffix("/_manifest.avro"))
+  /** Find the next available state version by probing sequentially from afterVersion. */
+  private def findNextAvailableVersion(afterVersion: Long): Long = {
+    var candidate = afterVersion + 1
+    try {
+      // Probe sequentially until we find a version that doesn't exist
+      val maxProbes = 100 // Safety limit to avoid infinite loop
+      var probes    = 0
+      while (probes < maxProbes) {
+        val stateDir     = s"$transactionLogPath/${manifestIO.formatStateDir(candidate)}"
+        val manifestPath = s"$stateDir/_manifest.avro"
+        if (cloudProvider.exists(manifestPath)) {
+          candidate += 1
+          probes += 1
+        } else {
+          return candidate
         }
-        val maxVersion = if (versions.isEmpty) afterVersion else versions.max
-        math.max(afterVersion, maxVersion) + 1
       }
-    } match {
-      case Success(v) => v
-      case Failure(_) => afterVersion + 1
+      candidate
+    } catch {
+      case _: Exception => candidate
     }
+  }
 
   /** Calculate exponential backoff delay with jitter for retry attempts. */
   private def calculateRetryDelay(attempt: Int): Long = {

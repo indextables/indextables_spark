@@ -280,9 +280,8 @@ object TransactionLogMetrics {
     logger.info("=====================================")
   }
 
-  /** Reset all metrics */
+  /** Reset all metrics (resets counters without removing registered metrics) */
   def reset(): Unit = {
-    metricRegistry.removeMatching(MetricFilter.ALL)
     sequentialReadTimes.set(0)
     parallelReadTimes.set(0)
     sequentialReadCount.set(0)

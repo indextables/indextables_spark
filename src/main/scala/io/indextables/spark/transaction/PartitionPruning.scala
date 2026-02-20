@@ -116,7 +116,7 @@ object PartitionPruning {
       return addActions
     }
 
-    logger.info(s"Applying partition pruning with ${partitionFilters.length} filters on columns: ${partitionColumns.mkString(", ")}")
+    logger.debug(s"Applying partition pruning with ${partitionFilters.length} filters on columns: ${partitionColumns.mkString(", ")}")
 
     // Order filters by selectivity (most selective first)
     val orderedFilters = if (selectivityOrdering) {
@@ -367,9 +367,7 @@ object PartitionPruning {
         val rightPartition = extractPartitionFilter(right, partitionColumns)
         (leftPartition, rightPartition) match {
           case (Some(l), Some(r)) => Some(Or(l, r))
-          case (Some(l), None)    => Some(l) // Conservative: if either side can't be evaluated, we can't prune
-          case (None, Some(r))    => Some(r) // Conservative: if either side can't be evaluated, we can't prune
-          case (None, None)       => None
+          case _                  => None // If either side can't be evaluated, no pruning is safe
         }
 
       case Not(child) =>
@@ -377,27 +375,6 @@ object PartitionPruning {
 
       // Non-partition column references
       case _ => None
-    }
-
-  /** Extract column names referenced by a filter. */
-  private def getReferencedColumns(filter: Filter): Set[String] =
-    filter match {
-      case EqualTo(attribute, _)            => Set(attribute)
-      case EqualNullSafe(attribute, _)      => Set(attribute)
-      case GreaterThan(attribute, _)        => Set(attribute)
-      case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _)           => Set(attribute)
-      case LessThanOrEqual(attribute, _)    => Set(attribute)
-      case In(attribute, _)                 => Set(attribute)
-      case IsNull(attribute)                => Set(attribute)
-      case IsNotNull(attribute)             => Set(attribute)
-      case StringStartsWith(attribute, _)   => Set(attribute)
-      case StringEndsWith(attribute, _)     => Set(attribute)
-      case StringContains(attribute, _)     => Set(attribute)
-      case And(left, right)                 => getReferencedColumns(left) ++ getReferencedColumns(right)
-      case Or(left, right)                  => getReferencedColumns(left) ++ getReferencedColumns(right)
-      case Not(child)                       => getReferencedColumns(child)
-      case _                                => Set.empty
     }
 
   /** Evaluate whether partition values satisfy the given filters. Uses lazy AND evaluation. */
@@ -452,6 +429,48 @@ object PartitionPruning {
           case None                 => values.contains(null)
         }
 
+      case EqualNullSafe(attribute, value) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) =>
+            if (value == null) partitionValue == null
+            else if (partitionValue == null) false
+            else compareValues(partitionValue, value) == 0
+          case None => value == null
+        }
+
+      case IsNull(attribute) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => partitionValue == null
+          case None                 => true // Conservative: unknown column could be null
+        }
+
+      case IsNotNull(attribute) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => partitionValue != null
+          case None                 => true // Conservative: unknown column could be non-null
+        }
+
+      case Not(child) =>
+        !evaluateFilter(partitionValues, child)
+
+      case StringStartsWith(attribute, prefix) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => partitionValue != null && partitionValue.startsWith(prefix)
+          case None                 => true // Conservative
+        }
+
+      case StringEndsWith(attribute, suffix) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => partitionValue != null && partitionValue.endsWith(suffix)
+          case None                 => true // Conservative
+        }
+
+      case StringContains(attribute, substr) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => partitionValue != null && partitionValue.contains(substr)
+          case None                 => true // Conservative
+        }
+
       case And(left, right) =>
         // Lazy AND evaluation
         evaluateFilter(partitionValues, left) && evaluateFilter(partitionValues, right)
@@ -486,17 +505,25 @@ object PartitionPruning {
 
         // Timestamp type support - convert both to comparable format
         case timestamp: java.sql.Timestamp =>
-          // For timestamp partitions, partitionValue might be stored as ISO string or epoch millis
+          // For timestamp partitions, partitionValue might be stored as ISO-8601 string, JDBC format, or epoch millis
           try {
-            // Try parsing as ISO timestamp first
-            val partitionTimestamp = java.sql.Timestamp.valueOf(partitionValue)
+            // Try ISO-8601 format first (matches storage format)
+            val instant           = java.time.Instant.parse(partitionValue)
+            val partitionTimestamp = java.sql.Timestamp.from(instant)
             partitionTimestamp.compareTo(timestamp)
           } catch {
             case _: Exception =>
-              // Fallback to epoch millis comparison if stored as long
-              val partitionMillis = partitionValue.toLong
-              val filterMillis    = timestamp.getTime
-              partitionMillis.compareTo(filterMillis)
+              try {
+                // Fallback to JDBC timestamp format (yyyy-MM-dd HH:mm:ss)
+                val partitionTimestamp = java.sql.Timestamp.valueOf(partitionValue)
+                partitionTimestamp.compareTo(timestamp)
+              } catch {
+                case _: Exception =>
+                  // Fallback to epoch millis comparison if stored as long
+                  val partitionMillis = partitionValue.toLong
+                  val filterMillis    = timestamp.getTime
+                  partitionMillis.compareTo(filterMillis)
+              }
           }
 
         // BigDecimal type support - for precise numeric comparisons
@@ -555,6 +582,8 @@ object PartitionPruning {
   }
 
   /** Invalidate all optimization caches. Should be called when the file list changes. */
-  def invalidateCaches(): Unit =
+  def invalidateCaches(): Unit = {
     PartitionFilterCache.invalidate()
+    PartitionIndex.invalidateCache()
+  }
 }

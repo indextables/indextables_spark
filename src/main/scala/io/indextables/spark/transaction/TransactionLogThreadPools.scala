@@ -46,23 +46,35 @@ object TransactionLogThreadPools {
   private val PARALLEL_READ_POOL_SIZE = 8
 
   // Thread pools for different operations
-  lazy val checkpointThreadPool: DeltaThreadPool =
+  lazy val checkpointThreadPool: DeltaThreadPool = {
+    checkpointPoolInitialized = true
     new DeltaThreadPool(createThreadPool("checkpoint", CHECKPOINT_POOL_SIZE))
+  }
 
-  lazy val commitThreadPool: DeltaThreadPool =
+  lazy val commitThreadPool: DeltaThreadPool = {
+    commitPoolInitialized = true
     new DeltaThreadPool(createThreadPool("commit", COMMIT_POOL_SIZE))
+  }
 
-  lazy val asyncUpdateThreadPool: DeltaThreadPool =
+  lazy val asyncUpdateThreadPool: DeltaThreadPool = {
+    asyncUpdatePoolInitialized = true
     new DeltaThreadPool(createThreadPool("async-update", ASYNC_UPDATE_POOL_SIZE))
+  }
 
-  lazy val statsThreadPool: DeltaThreadPool =
+  lazy val statsThreadPool: DeltaThreadPool = {
+    statsPoolInitialized = true
     new DeltaThreadPool(createThreadPool("stats", STATS_POOL_SIZE))
+  }
 
-  lazy val fileListingThreadPool: DeltaThreadPool =
+  lazy val fileListingThreadPool: DeltaThreadPool = {
+    fileListingPoolInitialized = true
     new DeltaThreadPool(createThreadPool("file-listing", FILE_LISTING_POOL_SIZE))
+  }
 
-  lazy val parallelReadThreadPool: DeltaThreadPool =
+  lazy val parallelReadThreadPool: DeltaThreadPool = {
+    parallelReadPoolInitialized = true
     new DeltaThreadPool(createThreadPool("parallel-read", PARALLEL_READ_POOL_SIZE))
+  }
 
   /** Create a thread pool with custom thread factory */
   private def createThreadPool(name: String, size: Int): ThreadPoolExecutor =
@@ -82,18 +94,26 @@ object TransactionLogThreadPools {
       new ThreadPoolExecutor.CallerRunsPolicy() // Fallback to caller thread when pool is full
     )
 
-  /** Shutdown all thread pools gracefully */
+  // Track which pools have been initialized
+  @volatile private var checkpointPoolInitialized    = false
+  @volatile private var commitPoolInitialized        = false
+  @volatile private var asyncUpdatePoolInitialized   = false
+  @volatile private var statsPoolInitialized         = false
+  @volatile private var fileListingPoolInitialized   = false
+  @volatile private var parallelReadPoolInitialized  = false
+
+  /** Shutdown all thread pools gracefully (only those that have been initialized) */
   def shutdown(): Unit = {
     logger.info("Shutting down transaction log thread pools")
 
     val pools = Seq(
-      checkpointThreadPool,
-      commitThreadPool,
-      asyncUpdateThreadPool,
-      statsThreadPool,
-      fileListingThreadPool,
-      parallelReadThreadPool
-    )
+      (checkpointPoolInitialized, () => checkpointThreadPool),
+      (commitPoolInitialized, () => commitThreadPool),
+      (asyncUpdatePoolInitialized, () => asyncUpdateThreadPool),
+      (statsPoolInitialized, () => statsThreadPool),
+      (fileListingPoolInitialized, () => fileListingThreadPool),
+      (parallelReadPoolInitialized, () => parallelReadThreadPool)
+    ).collect { case (true, pool) => pool() }
 
     pools.foreach(_.shutdown())
 
@@ -218,10 +238,15 @@ class NonFateSharingFuture[T](
 
       case Failure(_: TimeoutException) =>
         logger.warn(s"Async operation timed out after $timeout, falling back to synchronous execution")
-        Try {
-          SparkSession.setActiveSession(spark)
-          body
-        }.toOption
+        // Check if the async future completed while we were handling the timeout
+        if (future.isCompleted) {
+          future.value.flatMap(_.toOption)
+        } else {
+          Try {
+            SparkSession.setActiveSession(spark)
+            body
+          }.toOption
+        }
 
       case Failure(e) =>
         logger.warn(s"Async operation failed, falling back to synchronous execution", e)

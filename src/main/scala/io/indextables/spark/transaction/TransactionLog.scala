@@ -106,6 +106,13 @@ object TransactionLog {
 
   def getWriteOptions(): Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] =
     Option(writeOptions.get()).flatten
+
+  /** Execute a block with write options set, ensuring cleanup via try/finally. */
+  def withWriteOptions[T](options: org.apache.spark.sql.util.CaseInsensitiveStringMap)(body: => T): T = {
+    setWriteOptions(options)
+    try body
+    finally clearWriteOptions()
+  }
 }
 
 class TransactionLog(
@@ -390,17 +397,20 @@ class TransactionLog(
         cachedFiles
       case None =>
         // Use optimized checkpoint + parallel retrieval approach
-        val files = ListBuffer[AddAction]()
+        // Use HashMap for O(1) add/remove instead of ListBuffer's O(n) filtering
+        val files = scala.collection.mutable.HashMap[String, AddAction]()
+
+        def applyAction(action: Action): Unit = action match {
+          case add: AddAction       => files(add.path) = add
+          case remove: RemoveAction => files.remove(remove.path)
+          case _                    => // Ignore other actions for file listing
+        }
 
         // Try to get base state from checkpoint first
         checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
           case Some(checkpointActions) =>
             // Apply checkpoint actions first
-            checkpointActions.foreach {
-              case add: AddAction       => files += add
-              case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-              case _                    => // Ignore other actions for file listing
-            }
+            checkpointActions.foreach(applyAction)
 
             // Then apply incremental changes since checkpoint
             val checkpointVersion       = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
@@ -415,13 +425,7 @@ class TransactionLog(
 
               // Apply changes in version order
               for (version <- versionsAfterCheckpoint.sorted)
-                parallelResults.get(version).foreach { actions =>
-                  actions.foreach {
-                    case add: AddAction       => files += add
-                    case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-                    case _                    => // Ignore other actions for file listing
-                  }
-                }
+                parallelResults.get(version).foreach(_.foreach(applyAction))
             }
           case None =>
             // No checkpoint available - use parallel retrieval for all versions
@@ -434,28 +438,16 @@ class TransactionLog(
                   val parallelResults = cp.readVersionsInParallel(versions)
                   // Apply changes in version order
                   for (version <- versions.sorted)
-                    parallelResults.get(version).foreach { actions =>
-                      actions.foreach {
-                        case add: AddAction       => files += add
-                        case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-                        case _                    => // Ignore other actions for file listing
-                      }
-                    }
+                    parallelResults.get(version).foreach(_.foreach(applyAction))
                 case None =>
                   // Fallback to sequential reading (original behavior)
-                  for (version <- versions) {
-                    val actions = readVersion(version)
-                    actions.foreach {
-                      case add: AddAction       => files += add
-                      case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-                      case _                    => // Ignore other actions for file listing
-                    }
-                  }
+                  for (version <- versions)
+                    readVersion(version).foreach(applyAction)
               }
             }
         }
 
-        val result = files.toSeq
+        val result = files.values.toSeq
         // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
         val restoredResult = restoreSchemasInAddActions(result)
         // Cache the result
@@ -1190,10 +1182,10 @@ class TransactionLog(
             logger.debug("No checkpoint available for metadata lookup")
         }
 
-        // Fallback: scan versions in reverse chronological order
+        // Fallback: scan in reverse chronological order to find latest metadata
+        // (metadata may be updated in later versions, e.g. with schema registry)
         val latestVersion = getLatestVersion()
 
-        // Look for metadata in reverse chronological order
         for (version <- latestVersion to 0L by -1) {
           val actions = readVersion(version)
           actions.collectFirst { case metadata: MetadataAction => metadata } match {
@@ -1467,8 +1459,8 @@ class TransactionLog(
    * write to a legacy table.
    */
   private def initializeProtocolIfNeeded(): Unit = {
-    val actions     = getVersions().flatMap(readVersion)
-    val hasProtocol = actions.exists(_.isInstanceOf[ProtocolAction])
+    val protocol = Try(getProtocol())
+    val hasProtocol = protocol.isSuccess && protocol.get != ProtocolVersion.legacyProtocol()
 
     if (!hasProtocol) {
       logger.info(s"Initializing protocol for legacy table at $tablePath")

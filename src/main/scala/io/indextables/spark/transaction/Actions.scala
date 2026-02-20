@@ -47,6 +47,7 @@ case class DocMappingMetadata(
 
 object DocMappingMetadata {
   private val mapper = new ObjectMapper()
+  private val logger = org.slf4j.LoggerFactory.getLogger(DocMappingMetadata.getClass)
 
   /** Empty metadata for when no docMappingJson is available */
   val empty: DocMappingMetadata = DocMappingMetadata(Set.empty, Set.empty, Map.empty, Set.empty, Set.empty)
@@ -105,7 +106,9 @@ object DocMappingMetadata {
 
       DocMappingMetadata(fieldNames.toSet, fastFields.toSet, fieldTypes.toMap, indexedFields.toSet, storedFields.toSet)
     } catch {
-      case _: Exception => empty
+      case e: Exception =>
+        logger.warn(s"Failed to parse docMappingJson, returning empty metadata: ${e.getMessage}")
+        empty
     }
   }
 }
