@@ -16,11 +16,39 @@ set -euo pipefail
 REQUIRED_JAVA_MAJOR=11
 
 # tantivy4java build-from-source configuration
-TANTIVY4JAVA_VERSION="0.29.7"
-TANTIVY4JAVA_TAG="v${TANTIVY4JAVA_VERSION}"
 TANTIVY4JAVA_REPO="https://github.com/indextables/tantivy4java.git"
 QUICKWIT_REPO="https://github.com/indextables/quickwit.git"
-QUICKWIT_REF="d9eeb73f1f329dafa40fbbd4d0c266f54e228b89"  # HEAD at tantivy4java v0.29.7 release (2026-02-08)
+TANTIVY_REPO="https://github.com/indextables/tantivy.git"
+
+# ---------------------------------------------------------------------------
+# Extract tantivy4java version from pom.xml (single source of truth)
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+POM_FILE="$PROJECT_ROOT/pom.xml"
+
+if [[ ! -f "$POM_FILE" ]]; then
+    echo "[ERROR] pom.xml not found at $POM_FILE" >&2
+    echo "[ERROR] Run this script from the project root or its scripts/ directory." >&2
+    exit 1
+fi
+
+# Extract the version from the tantivy4java dependency block in pom.xml.
+# Looks for: <artifactId>tantivy4java</artifactId> followed by <version>X.Y.Z</version>
+TANTIVY4JAVA_VERSION=$(
+    grep -A2 '<artifactId>tantivy4java</artifactId>' "$POM_FILE" \
+    | grep '<version>' \
+    | sed 's/.*<version>\(.*\)<\/version>.*/\1/' \
+    | tr -d '[:space:]'
+)
+
+if [[ -z "$TANTIVY4JAVA_VERSION" ]]; then
+    echo "[ERROR] Could not extract tantivy4java version from $POM_FILE" >&2
+    echo "[ERROR] Expected a <dependency> block with <artifactId>tantivy4java</artifactId> and a <version> element." >&2
+    exit 1
+fi
+
+TANTIVY4JAVA_TAG="v${TANTIVY4JAVA_VERSION}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -401,10 +429,48 @@ install_tantivy4java() {
     info "Cloning tantivy4java (tag: ${TANTIVY4JAVA_TAG})..."
     git clone --depth 1 --branch "$TANTIVY4JAVA_TAG" "$TANTIVY4JAVA_REPO" "$build_dir/tantivy4java"
 
-    # Clone quickwit at the pinned ref (required as a sibling for Cargo path dependencies)
-    info "Cloning quickwit (ref: ${QUICKWIT_REF})..."
-    git clone "$QUICKWIT_REPO" "$build_dir/quickwit"
-    git -C "$build_dir/quickwit" checkout "$QUICKWIT_REF"
+    # Clone sibling repos required by Cargo path dependencies in tantivy4java.
+    # The tantivy4java native/Cargo.toml uses path deps like ../../quickwit/...
+    # and may also use ../../tantivy/... depending on the version.
+    local cargo_toml="$build_dir/tantivy4java/native/Cargo.toml"
+
+    # --- quickwit (always required) ---
+    info "Cloning quickwit (HEAD)..."
+    git clone --depth 1 "$QUICKWIT_REPO" "$build_dir/quickwit"
+
+    # --- tantivy (required if Cargo.toml has ../../tantivy path dependencies) ---
+    # The [patch] section in Cargo.toml redirects the git dependency to the local
+    # path (../../tantivy), so cargo uses whatever is on disk — not the rev in the
+    # git dependency. We extract the pinned rev from Cargo.toml and advance one
+    # commit to pick up any immediate fixes (e.g., pub mod visibility) without
+    # pulling in breaking changes from HEAD.
+    if grep -q 'path = "../../tantivy' "$cargo_toml" 2>/dev/null; then
+        local tantivy_rev
+        tantivy_rev=$(
+            grep 'github.com/indextables/tantivy' "$cargo_toml" \
+            | grep -o 'rev = "[^"]*"' \
+            | head -1 \
+            | sed 's/rev = "\(.*\)"/\1/'
+        )
+        if [[ -n "$tantivy_rev" ]]; then
+            info "Cloning tantivy (pinned rev: ${tantivy_rev})..."
+            git clone "$TANTIVY_REPO" "$build_dir/tantivy"
+            # Advance one commit past the pinned rev if available (picks up
+            # immediate fixes like pub module visibility without pulling in
+            # breaking API changes from HEAD)
+            local next_commit
+            next_commit=$(git -C "$build_dir/tantivy" log --oneline --ancestry-path "${tantivy_rev}..origin/main" 2>/dev/null | tail -1 | awk '{print $1}')
+            if [[ -n "$next_commit" ]]; then
+                info "Checking out pinned rev + 1 (${next_commit})..."
+                git -C "$build_dir/tantivy" checkout "$next_commit" --quiet
+            else
+                git -C "$build_dir/tantivy" checkout "$tantivy_rev" --quiet
+            fi
+        else
+            info "Cloning tantivy (HEAD)..."
+            git clone --depth 1 "$TANTIVY_REPO" "$build_dir/tantivy"
+        fi
+    fi
 
     # Set JAVA_HOME for the Maven build
     local build_java_home="${JAVA_HOME:-}"
