@@ -4,18 +4,17 @@
  */
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{MetadataAction, TransactionLog}
-import org.apache.hadoop.fs.Path
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.functions.{count, min, sum}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import scala.jdk.CollectionConverters._
+import org.apache.hadoop.fs.Path
 
-/**
- * Tests for the aggregate guard that prevents silently incorrect aggregate
- * results when aggregate pushdown fails.
- */
+import io.indextables.spark.transaction.{MetadataAction, TransactionLog}
+import io.indextables.spark.TestBase
+
+/** Tests for the aggregate guard that prevents silently incorrect aggregate results when aggregate pushdown fails. */
 class CompanionAggregateGuardTest extends TestBase {
 
   private def markAsCompanionTable(testPath: String, includeSourcePath: Boolean = false): Unit = {
@@ -43,9 +42,8 @@ class CompanionAggregateGuardTest extends TestBase {
         createdTime = Some(System.currentTimeMillis())
       )
       txLog.commitSyncActions(Seq.empty, Seq.empty, Some(updatedMetadata))
-    } finally {
+    } finally
       txLog.close()
-    }
   }
 
   test("companion table should fail on aggregate without pushdown") {

@@ -28,13 +28,13 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * Reproduction test for tantivy4java bug: Schema.getFieldInfo() returns FieldType.TEXT
- * for all Str fields regardless of tokenizer. Fields with the "raw" tokenizer (string fields)
- * should return FieldType.STRING (value 11), but they incorrectly return FieldType.TEXT (1).
+ * Reproduction test for tantivy4java bug: Schema.getFieldInfo() returns FieldType.TEXT for all Str fields regardless of
+ * tokenizer. Fields with the "raw" tokenizer (string fields) should return FieldType.STRING (value 11), but they
+ * incorrectly return FieldType.TEXT (1).
  *
- * This causes FiltersToQueryConverter to generate phrase queries (full_text with phrase mode)
- * instead of term queries for string fields, which produces incorrect results for values
- * containing special characters (backslashes, colons, parentheses, etc.).
+ * This causes FiltersToQueryConverter to generate phrase queries (full_text with phrase mode) instead of term queries
+ * for string fields, which produces incorrect results for values containing special characters (backslashes, colons,
+ * parentheses, etc.).
  *
  * See TANTIVY4JAVA_STRING_FIELD_TYPE_BUG.md for root cause details.
  */

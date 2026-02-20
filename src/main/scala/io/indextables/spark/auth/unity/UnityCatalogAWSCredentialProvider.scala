@@ -37,8 +37,8 @@ import org.slf4j.LoggerFactory
  * This provider fetches temporary AWS credentials from Unity Catalog's temporary path credentials API. It implements
  * intelligent caching with expiration tracking and automatic fallback from PATH_READ_WRITE to PATH_READ.
  *
- * By default, credentials are requested as PATH_READ_WRITE with fallback to PATH_READ on 403.
- * Read paths can set credential.operation=PATH_READ to skip the fallback and request read credentials directly.
+ * By default, credentials are requested as PATH_READ_WRITE with fallback to PATH_READ on 403. Read paths can set
+ * credential.operation=PATH_READ to skip the fallback and request read credentials directly.
  *
  * IMPORTANT: This provider MUST be created using the fromConfig() factory method or by passing a Map[String, String]
  * config. The Hadoop Configuration constructor has been removed to enforce the fast path that avoids expensive Hadoop
@@ -269,10 +269,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   private val TokenKey        = "apiToken"
 
   // Configuration keys - Databricks behavior
-  private val RefreshBufferKey        = "spark.indextables.databricks.credential.refreshBuffer.minutes"
-  private val CacheMaxSizeKey         = "spark.indextables.databricks.cache.maxSize"
-  private val CredentialOperationKey  = "spark.indextables.databricks.credential.operation"
-  private val RetryAttemptsKey        = "spark.indextables.databricks.retry.attempts"
+  private val RefreshBufferKey       = "spark.indextables.databricks.credential.refreshBuffer.minutes"
+  private val CacheMaxSizeKey        = "spark.indextables.databricks.cache.maxSize"
+  private val CredentialOperationKey = "spark.indextables.databricks.credential.operation"
+  private val RetryAttemptsKey       = "spark.indextables.databricks.retry.attempts"
 
   // Default values
   private val DefaultRefreshBufferMinutes = 40
@@ -338,8 +338,8 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   }
 
   /**
-   * Resolve the path credential operation from config.
-   * Read paths set "PATH_READ"; write paths default to "PATH_READ_WRITE".
+   * Resolve the path credential operation from config. Read paths set "PATH_READ"; write paths default to
+   * "PATH_READ_WRITE".
    */
   private def resolveCredentialOperation(config: Map[String, String]): String =
     config.getOrElse(CredentialOperationKey, DefaultCredentialOperation)
