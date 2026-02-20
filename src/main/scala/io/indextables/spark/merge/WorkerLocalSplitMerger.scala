@@ -22,7 +22,6 @@ import java.util.concurrent.Semaphore
 import java.util.UUID
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.apache.spark.TaskContext
 
 /** Metadata extracted from a merged split file */
 case class MergedSplitMetadata(
@@ -149,23 +148,6 @@ class WorkerLocalSplitMerger(
       tempDir = new File(outputDir, s"merge-${UUID.randomUUID()}")
       tempDir.mkdirs()
 
-      // Gap #6: Start heartbeat thread to prevent task timeout
-      @volatile var mergeComplete = false
-      val heartbeatThread = new Thread(() =>
-        while (!mergeComplete)
-          try {
-            // Send Spark heartbeat if task context available
-            Option(TaskContext.get()).foreach(ctx => logger.debug(s"Merge in progress, sending heartbeat..."))
-            Thread.sleep(30000) // Heartbeat every 30 seconds
-          } catch {
-            case _: InterruptedException => // Normal shutdown
-            case e: Exception            => logger.warn("Heartbeat thread error", e)
-          }
-      )
-      heartbeatThread.setDaemon(true)
-      heartbeatThread.setName("merge-heartbeat")
-      heartbeatThread.start()
-
       try {
         val mergeStartTime = System.currentTimeMillis()
 
@@ -206,10 +188,7 @@ class WorkerLocalSplitMerger(
 
         (outputPath, metadata)
 
-      } finally {
-        mergeComplete = true
-        heartbeatThread.interrupt()
-      }
+      } finally {}
 
     } catch {
       case e: Exception =>
@@ -267,6 +246,16 @@ class WorkerLocalSplitMerger(
     )
   }
 
+  /**
+   * Ordering for statistics values that tries numeric comparison before falling back to lexicographic. This prevents
+   * incorrect results like min("9", "10") = "9" (lexicographic) instead of "10" (numeric).
+   */
+  private val statsValueOrdering: Ordering[String] = (a: String, b: String) =>
+    (scala.util.Try(BigDecimal(a)), scala.util.Try(BigDecimal(b))) match {
+      case (scala.util.Success(na), scala.util.Success(nb)) => na.compare(nb)
+      case _                                                 => a.compare(b)
+    }
+
   /** Compute union of min values across multiple splits (min of mins) */
   private def computeUnionMinValues(inputMinValues: Seq[Map[String, String]]): Map[String, String] = {
     if (inputMinValues.isEmpty) return Map.empty
@@ -277,8 +266,7 @@ class WorkerLocalSplitMerger(
     allFields.flatMap { field =>
       val fieldValues = inputMinValues.flatMap(_.get(field))
       if (fieldValues.nonEmpty) {
-        // Take minimum value (lexicographically for strings, numerically for numbers)
-        Some(field -> fieldValues.min)
+        Some(field -> fieldValues.min(statsValueOrdering))
       } else {
         None
       }
@@ -295,8 +283,7 @@ class WorkerLocalSplitMerger(
     allFields.flatMap { field =>
       val fieldValues = inputMaxValues.flatMap(_.get(field))
       if (fieldValues.nonEmpty) {
-        // Take maximum value (lexicographically for strings, numerically for numbers)
-        Some(field -> fieldValues.max)
+        Some(field -> fieldValues.max(statsValueOrdering))
       } else {
         None
       }

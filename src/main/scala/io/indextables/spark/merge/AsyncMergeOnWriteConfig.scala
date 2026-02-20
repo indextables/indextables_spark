@@ -341,7 +341,7 @@ object AsyncMergeOnWriteConfig {
     }
   }
 
-  /** Parse a byte size string (e.g., "2G", "512M", "1024K") into bytes. */
+  /** Parse a byte size string (e.g., "2G", "512M", "1.5G", "1024K") into bytes. */
   def parseBytes(size: String): Long = {
     val trimmed = size.trim.toUpperCase
     val multiplier = trimmed.last match {
@@ -358,7 +358,7 @@ object AsyncMergeOnWriteConfig {
       trimmed
     }
 
-    numericPart.toLong * multiplier
+    (BigDecimal(numericPart) * multiplier).toLong
   }
 
   /** Format bytes as a human-readable string. */

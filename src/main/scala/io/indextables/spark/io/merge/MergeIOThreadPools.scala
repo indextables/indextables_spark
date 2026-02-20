@@ -38,37 +38,79 @@ object MergeIOThreadPools {
   private val UPLOAD_POOL_SIZE                = 8  // Handles upload operations
   private val SCHEDULER_POOL_SIZE             = 2  // Handles retry delays and timeouts
 
+  // Mutable pool references with double-checked locking for recoverability after shutdown
+  @volatile private var _downloadPool: ThreadPoolExecutor            = _
+  @volatile private var _uploadPool: ThreadPoolExecutor              = _
+  @volatile private var _scheduledPool: ScheduledThreadPoolExecutor  = _
+  @volatile private var _downloadExecCtx: scala.concurrent.ExecutionContext = _
+  private val poolLock = new Object
+
   /**
    * Thread pool for coordinating async download operations. This pool handles CompletableFuture callbacks and
    * coordination, not the actual I/O which is handled by the async S3/Azure clients.
+   *
+   * Lazily initialized and automatically recreated after shutdown.
    */
-  lazy val downloadCoordinationPool: ThreadPoolExecutor =
-    createThreadPool("merge-download", DOWNLOAD_COORDINATION_POOL_SIZE)
-
-  /** Thread pool for upload operations. */
-  lazy val uploadPool: ThreadPoolExecutor =
-    createThreadPool("merge-upload", UPLOAD_POOL_SIZE)
-
-  /** Scheduled thread pool for retry delays and timeouts. Uses ScheduledThreadPoolExecutor for precise timing. */
-  lazy val scheduledPool: ScheduledThreadPoolExecutor = {
-    val pool = new ScheduledThreadPoolExecutor(
-      SCHEDULER_POOL_SIZE,
-      new ThreadFactory {
-        override def newThread(r: Runnable): Thread = {
-          val t = new Thread(r, s"tantivy4spark-merge-scheduler-${threadCounter.incrementAndGet()}")
-          t.setDaemon(true)
-          t
+  def downloadCoordinationPool: ThreadPoolExecutor = {
+    if (_downloadPool == null || _downloadPool.isShutdown) {
+      poolLock.synchronized {
+        if (_downloadPool == null || _downloadPool.isShutdown) {
+          _downloadPool = createThreadPool("merge-download", DOWNLOAD_COORDINATION_POOL_SIZE)
+          _downloadExecCtx = scala.concurrent.ExecutionContext.fromExecutor(_downloadPool)
         }
       }
-    )
-    // Remove cancelled tasks from the queue immediately
-    pool.setRemoveOnCancelPolicy(true)
-    pool
+    }
+    _downloadPool
   }
 
-  /** ExecutionContext backed by the download coordination pool. Useful for Scala Future operations. */
-  lazy val downloadExecutionContext: scala.concurrent.ExecutionContext =
-    scala.concurrent.ExecutionContext.fromExecutor(downloadCoordinationPool)
+  /** Thread pool for upload operations. Lazily initialized and automatically recreated after shutdown. */
+  def uploadPool: ThreadPoolExecutor = {
+    if (_uploadPool == null || _uploadPool.isShutdown) {
+      poolLock.synchronized {
+        if (_uploadPool == null || _uploadPool.isShutdown) {
+          _uploadPool = createThreadPool("merge-upload", UPLOAD_POOL_SIZE)
+        }
+      }
+    }
+    _uploadPool
+  }
+
+  /** Scheduled thread pool for retry delays and timeouts. Uses ScheduledThreadPoolExecutor for precise timing. */
+  def scheduledPool: ScheduledThreadPoolExecutor = {
+    if (_scheduledPool == null || _scheduledPool.isShutdown) {
+      poolLock.synchronized {
+        if (_scheduledPool == null || _scheduledPool.isShutdown) {
+          val pool = new ScheduledThreadPoolExecutor(
+            SCHEDULER_POOL_SIZE,
+            new ThreadFactory {
+              override def newThread(r: Runnable): Thread = {
+                val t = new Thread(r, s"tantivy4spark-merge-scheduler-${threadCounter.incrementAndGet()}")
+                t.setDaemon(true)
+                t
+              }
+            }
+          )
+          // Remove cancelled tasks from the queue immediately
+          pool.setRemoveOnCancelPolicy(true)
+          _scheduledPool = pool
+        }
+      }
+    }
+    _scheduledPool
+  }
+
+  /**
+   * ExecutionContext backed by the download coordination pool. Reads the context under the same lock used to create it,
+   * so the returned context is always paired with the current live pool.
+   */
+  def downloadExecutionContext: scala.concurrent.ExecutionContext =
+    poolLock.synchronized {
+      if (_downloadPool == null || _downloadPool.isShutdown) {
+        _downloadPool = createThreadPool("merge-download", DOWNLOAD_COORDINATION_POOL_SIZE)
+        _downloadExecCtx = scala.concurrent.ExecutionContext.fromExecutor(_downloadPool)
+      }
+      _downloadExecCtx
+    }
 
   /** Create a thread pool with daemon threads and CallerRunsPolicy for backpressure. */
   private def createThreadPool(name: String, size: Int): ThreadPoolExecutor =
@@ -77,7 +119,7 @@ object MergeIOThreadPools {
       size, // maximum pool size
       60L,
       TimeUnit.SECONDS, // keep-alive time for idle threads
-      new LinkedBlockingQueue[Runnable](),
+      new LinkedBlockingQueue[Runnable](1000), // bounded to prevent unbounded growth on stalled downloads
       new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val t = new Thread(r, s"tantivy4spark-$name-${threadCounter.incrementAndGet()}")
@@ -116,27 +158,30 @@ object MergeIOThreadPools {
       maximumPoolSize = pool.getMaximumPoolSize
     )
 
-  /** Shutdown all thread pools gracefully. Waits up to 30 seconds for tasks to complete before forcing shutdown. */
-  def shutdown(): Unit = {
-    logger.info("Shutting down merge I/O thread pools")
+  /**
+   * Shutdown all thread pools gracefully. Uses backing fields directly to avoid creating pools just to shut them down.
+   * Waits up to 30 seconds for tasks to complete before forcing shutdown.
+   */
+  def shutdown(): Unit =
+    poolLock.synchronized {
+      logger.info("Shutting down merge I/O thread pools")
 
-    val pools = Seq(downloadCoordinationPool, uploadPool)
-    pools.foreach(_.shutdown())
-    scheduledPool.shutdown()
+      val regularPools = Seq(_downloadPool, _uploadPool).filter(_ != null)
+      regularPools.foreach(_.shutdown())
+      if (_scheduledPool != null) _scheduledPool.shutdown()
 
-    // Wait for termination
-    pools.foreach { pool =>
-      if (!pool.awaitTermination(30, TimeUnit.SECONDS)) {
-        logger.warn("Thread pool did not terminate gracefully, forcing shutdown")
-        pool.shutdownNow()
+      regularPools.foreach { pool =>
+        if (!pool.awaitTermination(30, TimeUnit.SECONDS)) {
+          logger.warn("Thread pool did not terminate gracefully, forcing shutdown")
+          pool.shutdownNow()
+        }
+      }
+
+      if (_scheduledPool != null && !_scheduledPool.awaitTermination(30, TimeUnit.SECONDS)) {
+        logger.warn("Scheduler pool did not terminate gracefully, forcing shutdown")
+        _scheduledPool.shutdownNow()
       }
     }
-
-    if (!scheduledPool.awaitTermination(30, TimeUnit.SECONDS)) {
-      logger.warn("Scheduler pool did not terminate gracefully, forcing shutdown")
-      scheduledPool.shutdownNow()
-    }
-  }
 
   /** Schedule a task to run after a delay. Returns a ScheduledFuture that can be cancelled. */
   def schedule(task: Runnable, delayMs: Long): ScheduledFuture[_] =

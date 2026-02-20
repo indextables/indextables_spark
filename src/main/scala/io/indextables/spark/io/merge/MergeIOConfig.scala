@@ -133,31 +133,11 @@ object MergeIOConfig {
     if (value == null || value.isEmpty) default else value.toLong
   }
 
-  /** Parse a byte size string (e.g., "2G", "512M", "1024K") into bytes. */
-  def parseBytes(size: String): Long = {
-    val trimmed = size.trim.toUpperCase
-    val multiplier = trimmed.last match {
-      case 'K' => 1024L
-      case 'M' => 1024L * 1024
-      case 'G' => 1024L * 1024 * 1024
-      case 'T' => 1024L * 1024 * 1024 * 1024
-      case _   => 1L
-    }
-
-    val numericPart = if (multiplier > 1) {
-      trimmed.dropRight(1).trim
-    } else {
-      trimmed
-    }
-
-    numericPart.toLong * multiplier
-  }
+  /** Parse a byte size string (e.g., "2G", "512M", "1.5G", "1024K") into bytes. */
+  def parseBytes(size: String): Long =
+    io.indextables.spark.merge.AsyncMergeOnWriteConfig.parseBytes(size)
 
   /** Format bytes as a human-readable string. */
   def formatBytes(bytes: Long): String =
-    if (bytes >= 1024L * 1024 * 1024 * 1024) s"${bytes / (1024L * 1024 * 1024 * 1024)}T"
-    else if (bytes >= 1024L * 1024 * 1024) s"${bytes / (1024L * 1024 * 1024)}G"
-    else if (bytes >= 1024L * 1024) s"${bytes / (1024L * 1024)}M"
-    else if (bytes >= 1024L) s"${bytes / 1024L}K"
-    else s"${bytes}B"
+    io.indextables.spark.merge.AsyncMergeOnWriteConfig.formatBytes(bytes)
 }
