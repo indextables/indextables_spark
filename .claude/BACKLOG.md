@@ -33,11 +33,8 @@ Moved to Completed.
 
 ## High
 
-### IT-006: Document both class name aliases in CLAUDE.md
-**Description**: README.md uses public aliases (`IndexTablesProvider`), CLAUDE.md uses internal names (`IndexTables4SparkTableProvider`). Both valid.
-**Acceptance Criteria**:
-- [ ] CLAUDE.md acknowledges both names
-- [ ] Recommends public alias as primary
+### ~~IT-006: Document both class name aliases in CLAUDE.md~~ **DONE**
+Moved to Completed.
 
 ### ~~IT-007: Fix storage class names in CLAUDE.md~~ **DONE**
 Moved to Completed.
@@ -127,3 +124,4 @@ Moved to Completed.
 | IT-004 | Fix extensions registration syntax | 2026-02 |
 | IT-005 | Annotate unwired data skipping SQL commands | 2026-02 |
 | IT-007 | Fix storage class names in CLAUDE.md | 2026-02 |
+| IT-006 | Document both class name aliases in CLAUDE.md | 2026-02 |
