@@ -17,8 +17,9 @@
 
 package io.indextables.spark.io.merge
 
-import java.io.File
+import java.io.{File, RandomAccessFile}
 import java.net.URI
+import java.nio.channels.FileChannel
 import java.nio.file.{Files, Paths}
 
 import com.azure.identity.ClientSecretCredentialBuilder
@@ -191,7 +192,6 @@ object MergeUploader {
     localFile: File
   ): Unit = {
     import software.amazon.awssdk.services.s3.model._
-    import java.io.RandomAccessFile
 
     val partSize = 128L * 1024 * 1024 // 128MB parts
     val fileSize = localFile.length()
@@ -208,13 +208,13 @@ object MergeUploader {
       val completedParts = new java.util.ArrayList[CompletedPart]()
       val raf            = new RandomAccessFile(localFile, "r")
       try {
+        val channel    = raf.getChannel
         var offset     = 0L
         var partNumber = 1
         while (offset < fileSize) {
           val currentPartSize = math.min(partSize, fileSize - offset).toInt
-          val buffer          = new Array[Byte](currentPartSize)
-          raf.seek(offset)
-          raf.readFully(buffer)
+          // Use memory-mapped I/O to avoid 128MB heap allocations per part
+          val mappedBuffer = channel.map(FileChannel.MapMode.READ_ONLY, offset, currentPartSize)
 
           val uploadRequest = UploadPartRequest
             .builder()
@@ -225,7 +225,7 @@ object MergeUploader {
             .contentLength(currentPartSize.toLong)
             .build()
 
-          val response = s3Client.uploadPart(uploadRequest, RequestBody.fromBytes(buffer))
+          val response = s3Client.uploadPart(uploadRequest, RequestBody.fromByteBuffer(mappedBuffer))
 
           completedParts.add(
             CompletedPart

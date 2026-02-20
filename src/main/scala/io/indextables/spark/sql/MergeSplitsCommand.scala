@@ -265,6 +265,10 @@ object MergeSplitsCommand {
             logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
             throw e
           }
+          // Exponential backoff before retry (1s, 2s, ...)
+          val delayMs = 1000L * math.pow(2, attempt - 1).toLong
+          logger.warn(s"Retrying $operationDesc in ${delayMs}ms")
+          Thread.sleep(delayMs)
           attempt += 1
         case e: Exception =>
           // Non-retryable errors are propagated immediately
@@ -417,7 +421,9 @@ class MergeSplitsExecutor(
   maxDestSplits: Option[Int],
   maxSourceSplitsPerMerge: Option[Int],
   preCommitMerge: Boolean = false,
-  overrideOptions: Option[Map[String, String]] = None) {
+  overrideOptions: Option[Map[String, String]] = None,
+  batchSizeOverride: Option[Int] = None,
+  maxConcurrentBatchesOverride: Option[Int] = None) {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
@@ -543,9 +549,12 @@ class MergeSplitsExecutor(
         clientSecret
       )
     } catch {
+      case ex: NoSuchElementException =>
+        // A required config key was not found — Azure is optional so return empty config
+        logger.debug(s"Azure config key not found, returning empty config: ${ex.getMessage}")
+        SerializableAzureConfig(None, None, None, None, None, None, None, None)
       case ex: Exception =>
-        logger.error("Failed to extract Azure config from Spark session", ex)
-        // Return empty config - Azure is optional
+        logger.warn(s"Unexpected error extracting Azure config from Spark session: ${ex.getMessage}", ex)
         SerializableAzureConfig(None, None, None, None, None, None, None, None)
     }
 
@@ -760,17 +769,21 @@ class MergeSplitsExecutor(
 
         // === SINGLE EXECUTION PHASE: Execute all batches with global numbering ===
 
-        // Get batch configuration
+        // Get batch configuration — prefer constructor overrides (from async manager) over SparkSession conf
         val defaultParallelism = sparkSession.sparkContext.defaultParallelism
-        val batchSize = sparkSession.conf
-          .getOption("spark.indextables.merge.batchSize")
-          .map(_.toInt)
-          .getOrElse(defaultParallelism)
+        val batchSize = batchSizeOverride.getOrElse(
+          sparkSession.conf
+            .getOption("spark.indextables.merge.batchSize")
+            .map(_.toInt)
+            .getOrElse(defaultParallelism)
+        )
 
-        val maxConcurrentBatches = sparkSession.conf
-          .getOption("spark.indextables.merge.maxConcurrentBatches")
-          .map(_.toInt)
-          .getOrElse(2)
+        val maxConcurrentBatches = maxConcurrentBatchesOverride.getOrElse(
+          sparkSession.conf
+            .getOption("spark.indextables.merge.maxConcurrentBatches")
+            .map(_.toInt)
+            .getOrElse(2)
+        )
 
         logger.info(s"Batch configuration: batchSize=$batchSize (defaultParallelism=$defaultParallelism), maxConcurrentBatches=$maxConcurrentBatches")
 
@@ -796,10 +809,10 @@ class MergeSplitsExecutor(
         val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
         batchResults.tasksupport = customTaskSupport
 
-        // Track batch success/failure
-        var failedBatchCount     = 0
-        var successfulBatchCount = 0
-        var totalBatches         = batches.length
+        // Track batch success/failure using AtomicInteger for thread-safe increments in parallel collections
+        val failedBatchCount     = new java.util.concurrent.atomic.AtomicInteger(0)
+        val successfulBatchCount = new java.util.concurrent.atomic.AtomicInteger(0)
+        val totalBatches         = batches.length
 
         val allResults =
           try {
@@ -908,7 +921,7 @@ class MergeSplitsExecutor(
                   val batchRemoveActions = ArrayBuffer[RemoveAction]()
                   val batchAddActions    = ArrayBuffer[AddAction]()
 
-                  val batchResults = physicalMergeResults.map { result =>
+                  val perGroupResults = physicalMergeResults.map { result =>
                     val startTime = System.currentTimeMillis()
 
                     logger.info(
@@ -926,7 +939,7 @@ class MergeSplitsExecutor(
 
                     // Always record skipped files regardless of whether merge was performed
                     if (skippedSplitPaths.nonEmpty) {
-                      logger.warn(s"⚠️  Merge operation skipped ${skippedSplitPaths.size} files (due to corruption/missing files): ${skippedSplitPaths.mkString(", ")}")
+                      logger.info(s"Merge operation skipped ${skippedSplitPaths.size} files (due to corruption/missing files): ${skippedSplitPaths.mkString(", ")}")
 
                       // Record skipped files in transaction log with cooldown period
                       val cooldownHours =
@@ -965,7 +978,7 @@ class MergeSplitsExecutor(
 
                     // Check if no merge was performed (null or empty indexUid indicates this)
                     if (indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)) {
-                      logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null/empty indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
+                      logger.info(s"No merge was performed for group with ${result.mergeGroup.files.length} files (null/empty indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
 
                       // Return without performing ADD/REMOVE operations
                       // Note: We still recorded the skipped files above, which is the desired behavior
@@ -1038,16 +1051,14 @@ class MergeSplitsExecutor(
                           }
                           val docMapping = Option(mergedMetadata.getDocMappingJson())
 
-                          // CRITICAL DEBUG: Verify docMappingJson returned from tantivy4java merge
                           docMapping match {
                             case Some(json) =>
-                              logger.warn(
-                                s"✅ MERGE RESULT: docMappingJson extracted from merged split (${json.length} chars)"
+                              logger.debug(
+                                s"docMappingJson extracted from merged split (${json.length} chars)"
                               )
-                              logger.warn(s"✅ MERGE RESULT: docMappingJson content: $json")
                             case None =>
-                              logger.error(
-                                s"❌ MERGE RESULT: No docMappingJson in merged split metadata - tantivy4java did not preserve it!"
+                              logger.debug(
+                                s"No docMappingJson in merged split metadata"
                               )
                           }
 
@@ -1078,13 +1089,8 @@ class MergeSplitsExecutor(
                           )
                         }
 
-                      // CRITICAL DEBUG: Verify docMappingJson being saved to AddAction
-                      docMappingJson match {
-                        case Some(json) =>
-                          logger.warn(s"✅ TRANSACTION LOG: Saving AddAction with docMappingJson (${json.length} chars)")
-                          logger.warn(s"✅ TRANSACTION LOG: docMappingJson being saved: $json")
-                        case None =>
-                          logger.error(s"❌ TRANSACTION LOG: AddAction has NO docMappingJson - fast fields will be lost!")
+                      if (docMappingJson.isEmpty) {
+                        logger.warn(s"AddAction has no docMappingJson - fast fields may not be preserved for this split")
                       }
 
                       // Merge companion fields from all source splits
@@ -1161,21 +1167,24 @@ class MergeSplitsExecutor(
                   val batchTotalTime = System.currentTimeMillis() - batchStartTime
                   logger.info(s"[Batch $batchNum] Total batch time (merge + transaction): ${batchTotalTime}ms")
 
-                  successfulBatchCount += 1
+                  successfulBatchCount.incrementAndGet()
 
                   // Return results from this batch
-                  batchResults
+                  perGroupResults
                 } match {
                   case Success(results) => results
                   case Failure(ex) =>
-                    failedBatchCount += 1
+                    failedBatchCount.incrementAndGet()
                     val batchNum = batchIdx + 1
                     logger.error(s"[Batch $batchNum] Failed to process batch", ex)
                     Seq.empty // Return empty sequence for failed batches
                 }
             }.toList
-          } finally
+          } finally {
             customTaskSupport.environment.shutdown()
+            try { broadcastAzureConfig.destroy() } catch { case _: Exception => }
+            try { broadcastTablePath.destroy() } catch { case _: Exception => }
+          }
 
         // Aggregate results from this generation's batches into accumulators
         val genMergedFiles  = allResults.map(_.mergedFiles).sum
@@ -1187,15 +1196,22 @@ class MergeSplitsExecutor(
         totalMergeGroupsAccum += genMergeGroups
         totalOriginalSizeAccum += genOriginalSize
         totalMergedSizeAccum += genMergedSize
-        totalSuccessfulBatchesAccum += successfulBatchCount
-        totalFailedBatchesAccum += failedBatchCount
+        totalSuccessfulBatchesAccum += successfulBatchCount.get()
+        totalFailedBatchesAccum += failedBatchCount.get()
         totalBatchesAccum += totalBatches
         totalGenerations = currentGeneration
+
+        // H4: Detect when all batches failed to provide a clear error rather than silent partial/no-action result
+        if (failedBatchCount.get() > 0 && successfulBatchCount.get() == 0) {
+          throw new RuntimeException(
+            s"All ${failedBatchCount.get()} merge batches failed in generation $currentGeneration. Check executor logs for details."
+          )
+        }
 
         logger.info(
           s"Generation $currentGeneration completed: merged $genMergedFiles files into $genMergeGroups new splits"
         )
-        logger.info(s"Generation $currentGeneration batches: $totalBatches, successful: $successfulBatchCount, failed: $failedBatchCount")
+        logger.info(s"Generation $currentGeneration batches: $totalBatches, successful: ${successfulBatchCount.get()}, failed: ${failedBatchCount.get()}")
         logger.info(s"Generation $currentGeneration size change: $genOriginalSize bytes -> $genMergedSize bytes")
 
         // Check if we need to continue (more generations might be needed)
@@ -1255,26 +1271,10 @@ class MergeSplitsExecutor(
    * fragmental splits are deleted after the merged split is uploaded and the transaction log never sees the original
    * splits.
    */
-  private def performPreCommitMerge(): Seq[Row] = {
-    logger.info("PRE-COMMIT MERGE: This functionality merges splits before they appear in transaction log")
-    logger.info("PRE-COMMIT MERGE: Original fragmental splits are deleted and never logged")
-
-    // For pre-commit merge, we need to work with pending/staging splits rather than committed ones
-    // This would typically integrate with the write path to merge splits during the commit process
-
-    // TODO: Implement actual pre-commit merge logic that:
-    // 1. Identifies pending splits that haven't been committed yet
-    // 2. Groups them by partition
-    // 3. Merges groups that exceed fragmentation thresholds
-    // 4. Deletes original fragmental splits from storage
-    // 5. Commits only the merged splits to transaction log
-
-    logger.warn("PRE-COMMIT MERGE: Implementation pending - this is a placeholder")
-
-    Seq(
-      Row(tablePath.toString, Row("pending", null, null, null, null, "Functionality pending implementation"), null, null)
+  private def performPreCommitMerge(): Seq[Row] =
+    throw new UnsupportedOperationException(
+      "PRECOMMIT merge is not yet implemented. Use the default post-commit merge instead."
     )
-  }
 
   /**
    * Find groups of files that should be merged within a partition. Follows bin packing approach similar to Delta Lake's
@@ -1802,16 +1802,18 @@ object MergeSplitsExecutor {
 
     val mergeId     = java.util.UUID.randomUUID().toString
     val downloadDir = new java.io.File(tempDir, s"merge-download-$mergeId")
-    downloadDir.mkdirs()
+    if (!downloadDir.mkdirs() && !downloadDir.exists()) {
+      throw new RuntimeException(s"Failed to create merge temp directory: ${downloadDir.getAbsolutePath}")
+    }
 
-    // Extract docMappingJson from first file to preserve fast fields configuration
-    val docMappingJson = mergeGroup.files.headOption
-      .flatMap(_.docMappingJson)
-      .getOrElse {
-        throw new IllegalStateException(
-          "No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
-        )
-      }
+    // Extract docMappingJson from first file to preserve fast fields configuration.
+    // Older splits (pre-docMappingJson) may not have this field; fall back gracefully.
+    val docMappingJsonOpt = mergeGroup.files.headOption.flatMap(_.docMappingJson)
+    if (docMappingJsonOpt.isEmpty) {
+      logger.warn(
+        s"No docMappingJson in source splits for merge group with ${mergeGroup.files.length} files - fast fields configuration may not be preserved"
+      )
+    }
 
     try {
       // ============ PHASE 1: DOWNLOAD SOURCE SPLITS ============
@@ -1906,7 +1908,6 @@ object MergeSplitsExecutor {
         .indexUid("merged-index-uid")
         .sourceId("tantivy4spark")
         .nodeId("merge-node")
-        .docMappingUid(docMappingJson)
         .partitionId(0L)
         .deleteQueries(java.util.Collections.emptyList[String]())
         .debugEnabled(awsConfig.debugEnabled)
@@ -1914,6 +1915,8 @@ object MergeSplitsExecutor {
       // Add temp directory and heap size
       mergeConfigBuilder.tempDirectoryPath(tempDir)
       Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
+      // Conditionally set docMappingUid — older splits may not have this field
+      docMappingJsonOpt.foreach(json => mergeConfigBuilder.docMappingUid(json))
 
       val mergeConfig = mergeConfigBuilder.build()
 
@@ -2014,7 +2017,7 @@ object MergeSplitsExecutor {
         s"[EXECUTOR] Merge complete: ${mergeGroup.files.length} splits -> $mergedPath ($finalMergedSize bytes)"
       )
 
-      MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
+      MergedSplitInfo(mergedPath, finalMergedSize, serializedMetadata)
 
     } catch {
       case e: Exception =>
@@ -2037,7 +2040,10 @@ object MergeSplitsExecutor {
 case class MergeGroup(
   partitionValues: Map[String, String],
   files: Seq[AddAction])
-    extends Serializable
+    extends Serializable {
+  override def toString: String =
+    s"MergeGroup(partition=$partitionValues, files=${files.length})"
+}
 
 /** Result of merging a group of splits. */
 case class MergeResult(

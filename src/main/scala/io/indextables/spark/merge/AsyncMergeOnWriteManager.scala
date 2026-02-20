@@ -80,9 +80,12 @@ object AsyncMergeOnWriteManager {
         shutdownTimeoutMs != config.shutdownTimeoutMs
 
       if (needsReconfigure) {
-        // Shutdown existing executor if reconfiguring
+        // Shutdown existing executor if reconfiguring, wait briefly for graceful termination
         if (executorService != null) {
           executorService.shutdown()
+          if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+            executorService.shutdownNow()
+          }
         }
 
         maxConcurrentBatches = config.maxConcurrentBatches
@@ -140,13 +143,6 @@ object AsyncMergeOnWriteManager {
     ensureInitialized()
     maybeCleanupOldJobs()
 
-    // Check if a job already exists for this table
-    if (isMergeInProgress(tablePath)) {
-      val existingJobId = tableJobIds.get(tablePath)
-      logger.info(s"Merge job rejected for $tablePath: job $existingJobId already in progress")
-      return Left(s"Merge already in progress for $tablePath (job: $existingJobId)")
-    }
-
     // Calculate number of batches
     val totalBatches = (totalMergeGroups + batchSize - 1) / batchSize // ceil division
 
@@ -166,8 +162,13 @@ object AsyncMergeOnWriteManager {
       status = new AtomicReference[MergeJobStatus](MergeJobStatus.Running)
     )
 
-    // Register table and job
-    tableJobIds.put(tablePath, jobId)
+    // Atomically register the table → jobId mapping, rejecting if a job is already running
+    val existingJobId = tableJobIds.putIfAbsent(tablePath, jobId)
+    if (existingJobId != null) {
+      logger.info(s"Merge job rejected for $tablePath: job $existingJobId already in progress")
+      return Left(s"Merge already in progress for $tablePath (job: $existingJobId)")
+    }
+
     activeJobs.put(jobId, job)
     logger.info(s"Starting async merge job $jobId for $tablePath: $totalMergeGroups groups in $totalBatches batches (batch size: $batchSize)")
 
@@ -228,17 +229,8 @@ object AsyncMergeOnWriteManager {
       return true // Job already completed
     }
 
-    // Wait for completion using a latch
-    val startTime      = System.currentTimeMillis()
-    val pollIntervalMs = 100L
-    while (System.currentTimeMillis() - startTime < timeoutMs) {
-      val status = job.status.get()
-      if (status != MergeJobStatus.Running) {
-        return true
-      }
-      Thread.sleep(pollIntervalMs)
-    }
-    false
+    // Wait for completion using a CountDownLatch — no CPU spinning
+    job.completionLatch.await(timeoutMs, TimeUnit.MILLISECONDS)
   }
 
   /** Get an active job by ID. */
@@ -361,7 +353,7 @@ object AsyncMergeOnWriteManager {
       // Merge write options with hadoop conf (credentials)
       val optionsToPass = serializedHadoopConf ++ writeOptions
 
-      // Create executor
+      // Create executor with explicit batch configuration to avoid mutating shared SparkSession conf
       val executor = new MergeSplitsExecutor(
         sparkSession = sparkSession,
         transactionLog = transactionLog,
@@ -371,7 +363,9 @@ object AsyncMergeOnWriteManager {
         maxDestSplits = None,
         maxSourceSplitsPerMerge = None,
         preCommitMerge = false,
-        overrideOptions = Some(optionsToPass)
+        overrideOptions = Some(optionsToPass),
+        batchSizeOverride = Some(job.batchSize),
+        maxConcurrentBatchesOverride = Some(maxConcurrentBatches)
       )
 
       // Create a custom batch executor that respects our semaphore and reports progress
@@ -413,35 +407,14 @@ object AsyncMergeOnWriteManager {
     // The executor uses Scala parallel collections with ForkJoinPool
     // to process multiple batches concurrently
 
-    // Set our batch size and concurrency in spark config for the executor to pick up
-    val originalBatchSize     = sparkSession.conf.getOption("spark.indextables.merge.batchSize")
-    val originalMaxConcurrent = sparkSession.conf.getOption("spark.indextables.merge.maxConcurrentBatches")
+    // Batch configuration is passed directly to MergeSplitsExecutor via constructor parameters
+    // (batchSizeOverride / maxConcurrentBatchesOverride), avoiding mutation of shared SparkSession conf.
+    logger.info(
+      s"Job ${job.jobId}: batchSize=${job.batchSize}, maxConcurrentBatches=$maxConcurrentBatches " +
+        s"(max concurrent groups: ${job.batchSize * maxConcurrentBatches})"
+    )
 
-    try {
-      // Configure the executor to use our batch size (1/6 of cluster CPUs)
-      sparkSession.conf.set("spark.indextables.merge.batchSize", job.batchSize.toString)
-      // Configure max concurrent batches (default 3, so up to 50% of cluster used)
-      sparkSession.conf.set("spark.indextables.merge.maxConcurrentBatches", maxConcurrentBatches.toString)
-
-      logger.info(
-        s"Job ${job.jobId}: batchSize=${job.batchSize}, maxConcurrentBatches=$maxConcurrentBatches " +
-          s"(max concurrent groups: ${job.batchSize * maxConcurrentBatches})"
-      )
-
-      // Execute merge - the executor handles parallel batch execution internally
-      executeMergeWithSemaphore(job, executor)
-
-    } finally {
-      // Restore original config values
-      originalBatchSize match {
-        case Some(v) => sparkSession.conf.set("spark.indextables.merge.batchSize", v)
-        case None    => sparkSession.conf.unset("spark.indextables.merge.batchSize")
-      }
-      originalMaxConcurrent match {
-        case Some(v) => sparkSession.conf.set("spark.indextables.merge.maxConcurrentBatches", v)
-        case None    => sparkSession.conf.unset("spark.indextables.merge.maxConcurrentBatches")
-      }
-    }
+    executeMergeWithSemaphore(job, executor)
   }
 
   /**
@@ -509,6 +482,7 @@ object AsyncMergeOnWriteManager {
     activeJobs.remove(job.jobId)
     tableJobIds.remove(job.tablePath)
     completedJobs.put(job.jobId, result)
+    job.completionLatch.countDown()
   }
 
   private def failJob(job: AsyncMergeJob, error: String): Unit =
@@ -569,7 +543,8 @@ case class AsyncMergeJob(
   batchSize: Int,
   completedGroups: AtomicInteger,
   completedBatches: AtomicInteger,
-  status: AtomicReference[MergeJobStatus])
+  status: AtomicReference[MergeJobStatus],
+  completionLatch: CountDownLatch = new CountDownLatch(1))
 
 /** Result from a completed async merge job. */
 case class AsyncMergeJobResult(
