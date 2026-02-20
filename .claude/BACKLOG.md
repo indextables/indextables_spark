@@ -5,6 +5,23 @@
 ### ~~IT-001: OOM running full test suite via `mvn test`~~ **DONE**
 Moved to Completed.
 
+### IT-035: Separate cloud tests from local test suite
+**Description**: 41 test classes require live S3/Azure credentials but run in the default test suite. 34 of them self-cancel via `assume()` and are counted as "passed" despite never actually running — masking the fact they weren't tested. 7 fail outright due to guards in `beforeAll()` or missing guards entirely. Tests that don't run should not pass.
+**Scope**:
+- Exclude cloud-dependent tests (`Cloud*`) from default `make test`
+- Add `make test-cloud` target for credential-requiring tests
+- Add `make test-all` target for the full suite
+- Rename 6 inconsistent cloud tests to follow `Cloud*` naming convention
+- Update `scripts/run-tests.sh` to support include/exclude patterns
+- Update default parallelism to use system CPU core count
+- Update CLAUDE.md and Makefile
+**Acceptance Criteria**:
+- [ ] `make test` runs only local tests (321 classes), all pass without credentials
+- [ ] `make test-cloud` runs only cloud tests (41 classes)
+- [ ] `make test-all` runs everything (362 classes)
+- [ ] No cloud test counted as "passed" without actually executing
+- [ ] Default JOBS uses `nproc` (Linux) / `sysctl -n hw.ncpu` (macOS)
+
 ### IT-002: JVM shutdown crashes in tantivy4java tests
 **Reporter**: Scott
 **Upstream**: tantivy4java

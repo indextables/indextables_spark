@@ -52,7 +52,7 @@ class PostCommitMergeCredentialBugTest extends TestBase with BeforeAndAfterEach 
   override def beforeAll(): Unit = {
     super.beforeAll()
 
-    // Load AWS credentials from ~/.aws/credentials (same as RealS3 tests)
+    // Load AWS credentials from ~/.aws/credentials (same as CloudS3 tests)
     awsCredentials = loadAwsCredentials()
 
     if (awsCredentials.isDefined) {
