@@ -4,6 +4,11 @@
 
 ## Essential Commands
 
+### First-Time Setup
+```bash
+./scripts/setup.sh  # Installs Java 11, Maven, Rust, protoc, builds tantivy4java
+```
+
 ### Build & Test
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # Set Java 11

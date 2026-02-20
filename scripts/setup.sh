@@ -15,6 +15,13 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REQUIRED_JAVA_MAJOR=11
 
+# tantivy4java build-from-source configuration
+TANTIVY4JAVA_VERSION="0.29.7"
+TANTIVY4JAVA_TAG="v${TANTIVY4JAVA_VERSION}"
+TANTIVY4JAVA_REPO="https://github.com/indextables/tantivy4java.git"
+QUICKWIT_REPO="https://github.com/indextables/quickwit.git"
+QUICKWIT_REF="d9eeb73f1f329dafa40fbbd4d0c266f54e228b89"  # HEAD at tantivy4java v0.29.7 release (2026-02-08)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -36,6 +43,9 @@ while [[ $# -gt 0 ]]; do
             echo "Dependencies installed:"
             echo "  - Java 11 (OpenJDK 11)"
             echo "  - Maven"
+            echo "  - Rust toolchain (rustc, cargo via rustup)"
+            echo "  - Protobuf compiler (protoc)"
+            echo "  - tantivy4java ${TANTIVY4JAVA_VERSION} (built from source)"
             echo ""
             echo "Supported platforms:"
             echo "  - macOS (via Homebrew)"
@@ -65,6 +75,23 @@ case "$OS" in
 esac
 
 info "Detected platform: $PLATFORM ($OS)"
+
+# ---------------------------------------------------------------------------
+# Platform classifier (matches Maven profile logic in pom.xml)
+# ---------------------------------------------------------------------------
+ARCH="$(uname -m)"
+case "${OS}-${ARCH}" in
+    Darwin-arm64)   PLATFORM_CLASSIFIER="darwin-aarch64" ;;
+    Darwin-x86_64)  PLATFORM_CLASSIFIER="darwin-x86_64" ;;
+    Linux-x86_64)   PLATFORM_CLASSIFIER="linux-x86_64" ;;
+    Linux-aarch64)  PLATFORM_CLASSIFIER="linux-aarch64" ;;
+    *)
+        error "Unsupported OS/architecture combination: ${OS}-${ARCH}"
+        exit 1
+        ;;
+esac
+
+info "Platform classifier: $PLATFORM_CLASSIFIER"
 
 # ---------------------------------------------------------------------------
 # Java version detection
@@ -121,6 +148,23 @@ check_maven() {
     command -v mvn &>/dev/null
 }
 
+# Check if Rust toolchain is available
+check_rust() {
+    command -v rustc &>/dev/null && command -v cargo &>/dev/null
+}
+
+# Check if protoc is available
+check_protoc() {
+    command -v protoc &>/dev/null
+}
+
+# Check if tantivy4java JAR exists in local Maven cache
+check_tantivy4java() {
+    local jar_path
+    jar_path="$HOME/.m2/repository/io/indextables/tantivy4java/${TANTIVY4JAVA_VERSION}/tantivy4java-${TANTIVY4JAVA_VERSION}-${PLATFORM_CLASSIFIER}.jar"
+    [[ -f "$jar_path" ]]
+}
+
 # ---------------------------------------------------------------------------
 # macOS installation (Homebrew)
 # ---------------------------------------------------------------------------
@@ -166,6 +210,15 @@ install_macos() {
         info "Installing Maven via Homebrew..."
         brew install maven
         ok "Maven installed"
+    fi
+
+    # --- Protobuf compiler ---
+    if check_protoc; then
+        ok "Protobuf compiler (protoc) already installed"
+    else
+        info "Installing protobuf via Homebrew..."
+        brew install protobuf
+        ok "Protobuf compiler installed"
     fi
 }
 
@@ -237,6 +290,162 @@ install_linux() {
         esac
         ok "Maven installed"
     fi
+
+    # --- Protobuf compiler ---
+    if check_protoc; then
+        ok "Protobuf compiler (protoc) already installed"
+    else
+        info "Installing protobuf compiler..."
+        case "$pkg_mgr" in
+            apt-get)
+                $sudo_cmd apt-get install -y protobuf-compiler
+                ;;
+            dnf)
+                $sudo_cmd dnf install -y protobuf-compiler
+                ;;
+            yum)
+                $sudo_cmd yum install -y protobuf-compiler
+                ;;
+        esac
+        ok "Protobuf compiler installed"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Rust toolchain installation (cross-platform via rustup)
+# ---------------------------------------------------------------------------
+install_rust() {
+    if check_rust; then
+        ok "Rust toolchain already installed: $(rustc --version)"
+        return
+    fi
+
+    info "Installing Rust toolchain via rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    # Source cargo environment for the rest of this script
+    # shellcheck disable=SC1091
+    . "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"
+    ok "Rust toolchain installed: $(rustc --version)"
+}
+
+# Ensure cargo is discoverable by Maven's exec-maven-plugin.
+# Maven spawns subprocesses that may not inherit the shell PATH, so we
+# symlink cargo/rustc into a directory that is on the default system PATH.
+ensure_cargo_on_system_path() {
+    # Check if cargo is already in a system PATH directory that Maven
+    # subprocesses would have on their default PATH.  We cannot rely on
+    # `command -v cargo` because install_rust() already sourced
+    # $HOME/.cargo/env into the current shell, which makes cargo appear
+    # reachable even though Maven subprocesses won't inherit that PATH.
+    local system_dirs=("/usr/local/bin" "/usr/bin")
+    if [[ "$PLATFORM" == "macos" ]] && command -v brew &>/dev/null; then
+        system_dirs=("$(brew --prefix)/bin" "${system_dirs[@]}")
+    fi
+
+    for dir in "${system_dirs[@]}"; do
+        if [[ -x "$dir/cargo" ]]; then
+            ok "cargo already on system PATH: $dir/cargo"
+            return
+        fi
+    done
+
+    local cargo_bin="$HOME/.cargo/bin/cargo"
+    local rustc_bin="$HOME/.cargo/bin/rustc"
+    if [[ ! -x "$cargo_bin" ]]; then
+        error "cargo not found at $cargo_bin"
+        exit 1
+    fi
+
+    # Pick a target directory that is on the default PATH
+    local target_dir=""
+    if [[ "$PLATFORM" == "macos" ]]; then
+        target_dir="$(brew --prefix 2>/dev/null)/bin"
+    fi
+    if [[ -z "$target_dir" ]] || [[ ! -d "$target_dir" ]]; then
+        target_dir="/usr/local/bin"
+    fi
+
+    if [[ -w "$target_dir" ]]; then
+        ln -sf "$cargo_bin" "$target_dir/cargo"
+        ln -sf "$rustc_bin" "$target_dir/rustc"
+        ok "Symlinked cargo/rustc into $target_dir"
+    else
+        warn "Cannot write to $target_dir; trying with sudo..."
+        sudo ln -sf "$cargo_bin" "$target_dir/cargo"
+        sudo ln -sf "$rustc_bin" "$target_dir/rustc"
+        ok "Symlinked cargo/rustc into $target_dir (via sudo)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# tantivy4java build-from-source
+# ---------------------------------------------------------------------------
+install_tantivy4java() {
+    if check_tantivy4java; then
+        local jar_path="$HOME/.m2/repository/io/indextables/tantivy4java/${TANTIVY4JAVA_VERSION}/tantivy4java-${TANTIVY4JAVA_VERSION}-${PLATFORM_CLASSIFIER}.jar"
+        ok "tantivy4java ${TANTIVY4JAVA_VERSION} (${PLATFORM_CLASSIFIER}) already in local Maven cache"
+        return
+    fi
+
+    info "Building tantivy4java ${TANTIVY4JAVA_VERSION} from source..."
+    info "This requires Rust, protoc, Java 11, and Maven (already verified above)."
+
+    # Create temp build directory
+    local build_dir
+    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/tantivy4java-build.XXXXXX")
+    # Ensure cleanup on any exit (build dirs can be multi-GB)
+    trap "rm -rf '$build_dir'" EXIT
+    info "Build directory: $build_dir"
+
+    # Clone tantivy4java at the specified tag
+    info "Cloning tantivy4java (tag: ${TANTIVY4JAVA_TAG})..."
+    git clone --depth 1 --branch "$TANTIVY4JAVA_TAG" "$TANTIVY4JAVA_REPO" "$build_dir/tantivy4java"
+
+    # Clone quickwit at the pinned ref (required as a sibling for Cargo path dependencies)
+    info "Cloning quickwit (ref: ${QUICKWIT_REF})..."
+    git clone "$QUICKWIT_REPO" "$build_dir/quickwit"
+    git -C "$build_dir/quickwit" checkout "$QUICKWIT_REF"
+
+    # Set JAVA_HOME for the Maven build
+    local build_java_home="${JAVA_HOME:-}"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        for brew_prefix in /opt/homebrew /usr/local; do
+            if [[ -d "${brew_prefix}/opt/openjdk@11" ]]; then
+                build_java_home="${brew_prefix}/opt/openjdk@11"
+                break
+            fi
+        done
+    fi
+
+    # Ensure cargo is on PATH for the Maven subprocess
+    local build_path="$PATH"
+    if [[ -d "$HOME/.cargo/bin" ]]; then
+        build_path="$HOME/.cargo/bin:$build_path"
+    fi
+
+    # Build and install to local Maven cache
+    info "Running Maven build (this may take several minutes on first build)..."
+    (
+        cd "$build_dir/tantivy4java"
+        export JAVA_HOME="$build_java_home"
+        export PATH="$build_path"
+        mvn clean install -DskipTests
+    )
+
+    # Verify the JAR was installed
+    if check_tantivy4java; then
+        ok "tantivy4java ${TANTIVY4JAVA_VERSION} (${PLATFORM_CLASSIFIER}) installed to local Maven cache"
+    else
+        error "tantivy4java build succeeded but JAR not found in Maven cache."
+        error "Expected: ~/.m2/repository/io/indextables/tantivy4java/${TANTIVY4JAVA_VERSION}/tantivy4java-${TANTIVY4JAVA_VERSION}-${PLATFORM_CLASSIFIER}.jar"
+        rm -rf "$build_dir"
+        exit 1
+    fi
+
+    # Clean up
+    info "Cleaning up build directory..."
+    rm -rf "$build_dir"
+    trap - EXIT  # Clear the trap after successful cleanup
 }
 
 # ---------------------------------------------------------------------------
@@ -251,6 +460,19 @@ case "$PLATFORM" in
     macos) install_macos ;;
     linux) install_linux ;;
 esac
+
+echo ""
+echo "=================================================================="
+info "Rust toolchain"
+echo "=================================================================="
+install_rust
+ensure_cargo_on_system_path
+
+echo ""
+echo "=================================================================="
+info "tantivy4java native dependency"
+echo "=================================================================="
+install_tantivy4java
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -297,6 +519,30 @@ if check_maven; then
     ok "Maven: $MVN_VERSION"
 else
     error "Maven not found on PATH"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# Validate Rust
+if check_rust; then
+    ok "Rust: $(rustc --version)"
+else
+    error "Rust toolchain not found"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# Validate protoc
+if check_protoc; then
+    ok "Protoc: $(protoc --version)"
+else
+    error "Protobuf compiler (protoc) not found"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# Validate tantivy4java
+if check_tantivy4java; then
+    ok "tantivy4java: ${TANTIVY4JAVA_VERSION} (${PLATFORM_CLASSIFIER})"
+else
+    error "tantivy4java ${TANTIVY4JAVA_VERSION} (${PLATFORM_CLASSIFIER}) not found in Maven cache"
     ERRORS=$((ERRORS + 1))
 fi
 
