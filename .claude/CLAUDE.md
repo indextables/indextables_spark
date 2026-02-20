@@ -4,14 +4,27 @@
 
 ## Essential Commands
 
+### First-Time Setup
+```bash
+./scripts/setup.sh  # Installs Java 11, Maven, Rust, protoc, builds tantivy4java
+```
+
 ### Build & Test
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # Set Java 11
-mvn clean compile  # Build
-mvn test          # Run tests
+mvn clean compile                              # Build
+
+# Run all tests (parallel, avoids OOM from `mvn test`):
+./scripts/run-tests.sh          # Default: 4 parallel jobs
+./scripts/run-tests.sh -j 8     # 8 parallel jobs
+./scripts/run-tests.sh -j 1     # Sequential
+./scripts/run-tests.sh --dry-run # List test classes without running
+
 # Run single test:
 mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.DateStringFilterValidationTest'
 ```
+
+> **Note:** `mvn test` may OOM on laptops due to 360+ test classes. Use `./scripts/run-tests.sh` which compiles once and runs each test class in a separate JVM. Per-test logs are saved to a temp directory; failed test log paths are printed in the summary.
 
 ## Core Features
 
@@ -144,6 +157,7 @@ All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/
 
 ## Development Principles
 
+- **Branch Workflow**: All work must be done on a feature branch and submitted as a pull request. Never commit directly to `main`.
 - **Design First**: All major features should have design documents before implementation
 - **Test Coverage**: Maintain 100% test pass rate with comprehensive integration tests
 - **Performance**: Benchmark all major features against baseline

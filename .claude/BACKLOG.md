@@ -2,14 +2,8 @@
 
 ## Blocking
 
-### IT-001: OOM running full test suite via `mvn test`
-**Reporter**: Scott
-**Description**: `mvn test` runs out of memory on laptops. A workaround script (`run_tests_individually.sh`) exists on the `fix/string-field-query-and-companion-aggregate-guard` branch that runs each test class separately.
-**Reference**: https://github.com/indextables/indextables_spark/blob/fix/string-field-query-and-companion-aggregate-guard/run_tests_individually.sh
-**Acceptance Criteria**:
-- [ ] Check `run_tests_individually.sh` into main
-- [ ] Add parallel execution support (Scott reports 4-wide works)
-- [ ] Document in CLAUDE.md as the recommended way to run the full suite
+### ~~IT-001: OOM running full test suite via `mvn test`~~ **DONE**
+Moved to Completed.
 
 ### IT-002: JVM shutdown crashes in tantivy4java tests
 **Reporter**: Scott
@@ -134,3 +128,4 @@
 | IT-032 | Reorganize docs/ into reference/design/archive | 2026-02 |
 | IT-033 | Move CLAUDE.md and BACKLOG.md to .claude/ | 2026-02 |
 | IT-034 | Move PROTOCOL.md and TABLE_PROTOCOL.md to docs/reference/ | 2026-02 |
+| IT-001 | Add parallel execution to test runner script | 2026-02 |
