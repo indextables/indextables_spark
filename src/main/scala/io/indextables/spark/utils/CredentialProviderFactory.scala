@@ -539,4 +539,55 @@ object CredentialProviderFactory {
     val hadoopConf = io.indextables.spark.util.ConfigUtils.getOrCreateHadoopConfiguration(configMap)
     createCredentialProvider(providerClassName, normalizedUri, hadoopConf)
   }
+
+  /**
+   * Resolve AWS credentials on the driver and return a modified config.
+   *
+   * Eliminates executor-side HTTP calls by resolving credentials once on the driver
+   * and injecting them as static config values. For credential providers like
+   * UnityCatalogAWSCredentialProvider, this reduces HTTP calls from O(executors) to O(1).
+   *
+   * If resolution fails, the original config is returned unchanged so that executors
+   * can attempt their own resolution (preserves backward compatibility).
+   *
+   * @param config    Original configuration map
+   * @param tablePath Table path for credential resolution (String form)
+   * @return Modified config with explicit credentials, or original config if resolution fails
+   */
+  def resolveCredentialsOnDriver(config: Map[String, String], tablePath: String): Map[String, String] = {
+    val providerClass = config
+      .get("spark.indextables.aws.credentialsProviderClass")
+      .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
+
+    providerClass match {
+      case Some(className) if className.nonEmpty =>
+        try {
+          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
+          val credentials = resolveAWSCredentialsFromConfig(config, normalizedPath)
+
+          credentials match {
+            case Some(creds) =>
+              logger.info(s"[DRIVER] Resolved AWS credentials from provider: $className (path: $normalizedPath)")
+              var newConfig = config -
+                "spark.indextables.aws.credentialsProviderClass" -
+                "spark.indextables.aws.credentialsproviderclass" +
+                ("spark.indextables.aws.accessKey" -> creds.accessKey) +
+                ("spark.indextables.aws.secretKey" -> creds.secretKey)
+
+              creds.sessionToken.foreach(token => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token))
+              newConfig
+
+            case None =>
+              logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
+              config
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
+            config
+        }
+
+      case _ => config
+    }
+  }
 }

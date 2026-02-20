@@ -202,10 +202,9 @@ class IndexTables4SparkScanBuilder(
               // Without this, TEXT fields default to "string" and get incorrect EqualTo pushdown.
               metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
                 try {
-                  val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
                   import scala.jdk.CollectionConverters._
                   val modes: java.util.Map[String, String] =
-                    mapper.readValue(json, classOf[java.util.HashMap[String, String]])
+                    IndexTables4SparkScanBuilder.objectMapper.readValue(json, classOf[java.util.HashMap[String, String]])
                   modes.asScala.foreach {
                     case (field, mode) =>
                       val key = s"spark.indextables.indexing.typemap.$field"
@@ -840,6 +839,10 @@ class IndexTables4SparkScanBuilder(
     // which silently prevents Spark from calling pushAggregation(), killing aggregate pushdown.
     // Since a value-bearing filter already implies non-null, stripping the redundant IsNotNull
     // is semantically safe and unblocks aggregate pushdown.
+    //
+    // NOTE: This is companion-mode-only because in non-companion mode, an unsupported IsNotNull
+    // correctly prevents Spark from attempting aggregate pushdown for text fields that lack fast
+    // field configuration. Making this universal would break text-field-filtered count queries.
     val effectiveInputFilters = if (isCompanionMode) {
       val stripped = FiltersToQueryConverter.removeRedundantIsNotNull(filters)
       if (stripped.length != filters.length) {
@@ -1991,7 +1994,15 @@ class IndexTables4SparkScanBuilder(
    *
    * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
    */
-  private def getActualFastFieldsFromSchema(): Set[String] =
+  // Memoized fast fields to avoid repeated transactionLog.listFiles() calls.
+  // This method is called from isSupportedFilter() (per filter), isNumericFastField(),
+  // isFastField(), validateGroupByColumnsOrThrow(), etc. Without memoization, a query
+  // with 10 filters could trigger 10+ listFiles() calls.
+  private lazy val cachedActualFastFields: Set[String] = computeActualFastFieldsFromSchema()
+
+  private def getActualFastFieldsFromSchema(): Set[String] = cachedActualFastFields
+
+  private def computeActualFastFieldsFromSchema(): Set[String] =
     try {
       logger.debug("Reading actual fast fields from transaction log")
 
@@ -2269,6 +2280,9 @@ class IndexTables4SparkScanBuilder(
  */
 object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
+
+  // Shared ObjectMapper for JSON parsing (thread-safe, reusable)
+  private[core] val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
 
   // WeakHashMap using DataSourceV2Relation object as key
   // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning

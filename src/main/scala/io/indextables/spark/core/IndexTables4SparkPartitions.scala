@@ -288,20 +288,20 @@ class IndexTables4SparkPartitionReader(
           val queryHash    = generateQueryHash(allFilters)
           val warmupJoined = PreWarmManager.joinWarmupFuture(addAction.path, queryHash, isPreWarmEnabled)
           if (warmupJoined) {
-            logger.info(s"🔥 Successfully joined warmup future for split: ${addAction.path}")
+            logger.info(s"Successfully joined warmup future for split: ${addAction.path}")
           }
         }
 
         // Create cache configuration from Spark options
         val cacheConfig = createCacheConfig()
 
-        // Defensive check: detect companion splits that are missing companion config
+        // Fail fast: detect companion splits that are missing companion config
         if (addAction.companionDeltaVersion.isDefined && cacheConfig.companionSourceTableRoot.isEmpty) {
-          logger.error(
+          throw new IllegalStateException(
             s"COMPANION CONFIG MISSING: Split ${addAction.path} has companionDeltaVersion=" +
               s"${addAction.companionDeltaVersion.get} but companionSourceTableRoot is None. " +
               s"Config keys: ${config.keys.filter(_.contains("companion")).mkString(", ")}. " +
-              s"This will cause 'parquet_table_root was not set' error during document retrieval."
+              s"This indicates the companion parquetTableRoot was not propagated from ScanBuilder.effectiveConfig."
           )
         }
 
@@ -760,27 +760,33 @@ class IndexTables4SparkPartitionReader(
     import org.apache.spark.sql.types._
     import org.apache.spark.unsafe.types.UTF8String
     if (value == null) return null
-    dataType match {
-      case StringType  => UTF8String.fromString(value)
-      case IntegerType => value.toInt
-      case LongType    => value.toLong
-      case DoubleType  => value.toDouble
-      case FloatType   => value.toFloat
-      case BooleanType => value.toBoolean
-      case ShortType   => value.toShort
-      case ByteType    => value.toByte
-      case DateType    =>
-        // Spark stores DateType as Int (days since epoch 1970-01-01)
-        java.time.LocalDate.parse(value).toEpochDay.toInt
-      case TimestampType =>
-        // Spark stores TimestampType as Long (microseconds since epoch)
-        val instant = if (value.contains("T")) {
-          java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant
-        } else {
-          java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-        }
-        instant.getEpochSecond * 1000000L + instant.getNano / 1000L
-      case _ => UTF8String.fromString(value) // fallback: treat as string
+    try {
+      dataType match {
+        case StringType  => UTF8String.fromString(value)
+        case IntegerType => value.toInt
+        case LongType    => value.toLong
+        case DoubleType  => value.toDouble
+        case FloatType   => value.toFloat
+        case BooleanType => value.toBoolean
+        case ShortType   => value.toShort
+        case ByteType    => value.toByte
+        case DateType    =>
+          // Spark stores DateType as Int (days since epoch 1970-01-01)
+          java.time.LocalDate.parse(value).toEpochDay.toInt
+        case TimestampType =>
+          // Spark stores TimestampType as Long (microseconds since epoch)
+          val instant = if (value.contains("T")) {
+            java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant
+          } else {
+            java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+          }
+          instant.getEpochSecond * 1000000L + instant.getNano / 1000L
+        case _ => UTF8String.fromString(value) // fallback: treat as string
+      }
+    } catch {
+      case e: Exception =>
+        throw new IllegalArgumentException(
+          s"Failed to convert partition value '$value' to $dataType: ${e.getMessage}", e)
     }
   }
 }
@@ -1363,7 +1369,7 @@ class IndexTables4SparkDataWriter(
           originalDocMapping
         } else {
           // WORKAROUND: If tantivy4java didn't provide docMappingJson, create a minimal schema mapping
-          logger.warn(s"🔧 WORKAROUND: tantivy4java docMappingJson is missing - creating minimal field mapping")
+          logger.warn(s"WORKAROUND: tantivy4java docMappingJson is missing - creating minimal field mapping")
 
           // Create a minimal field mapping that tantivy4java can understand
           // Based on Quickwit/Tantivy schema format expectations
@@ -1382,7 +1388,7 @@ class IndexTables4SparkDataWriter(
             .mkString(", ")
 
           val minimalSchema = s"""{"fields": {$fieldMappings}}"""
-          logger.warn(s"🔧 Using minimal field mapping as docMappingJson: ${minimalSchema
+          logger.warn(s"Using minimal field mapping as docMappingJson: ${minimalSchema
               .take(200)}${if (minimalSchema.length > 200) "..." else ""}")
 
           Some(minimalSchema)
@@ -1446,16 +1452,16 @@ class IndexTables4SparkDataWriter(
     )
 
     if (partitionValues.nonEmpty) {
-      logger.info(s"📁 Created partitioned split with values: $partitionValues")
+      logger.info(s"Created partitioned split with values: $partitionValues")
     }
 
     // Log footer offset optimization status
     if (hasFooterOffsets) {
-      logger.info(s"🚀 FOOTER OFFSET OPTIMIZATION: Split created with metadata for 87% network traffic reduction")
+      logger.info(s"FOOTER OFFSET OPTIMIZATION: Split created with metadata for 87% network traffic reduction")
       logger.debug(s"   Footer offsets: ${footerStartOffset.get}-${footerEndOffset.get}")
       logger.debug(s"   Hotcache: deprecated (using footer offsets instead)")
     } else {
-      logger.debug(s"📁 STANDARD: Split created without footer offset optimization")
+      logger.debug(s"STANDARD: Split created without footer offset optimization")
     }
 
     logger.info(s"📝 AddAction created with path: ${addAction.path}")
