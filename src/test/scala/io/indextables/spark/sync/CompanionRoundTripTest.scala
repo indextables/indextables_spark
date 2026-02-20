@@ -31,8 +31,8 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Round-trip validation tests for companion indexes.
  *
- * Each test writes known data to a Delta table, builds a companion index, reads ALL rows back
- * through the companion, and asserts that every column of every row matches the original source.
+ * Each test writes known data to a Delta table, builds a companion index, reads ALL rows back through the companion,
+ * and asserts that every column of every row matches the original source.
  */
 class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -113,8 +113,8 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
   }
 
   /**
-   * Compare two sets of rows column-by-column, ignoring row order.
-   * Rows are keyed by the given column name for deterministic matching.
+   * Compare two sets of rows column-by-column, ignoring row order. Rows are keyed by the given column name for
+   * deterministic matching.
    */
   private def assertRowsMatch(
     source: Array[Row],
@@ -134,7 +134,7 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
     for ((key, sourceRow) <- sourceByKey) {
       val companionRow = companionByKey(key)
       for (field <- schema.fields) {
-        val idx = schema.fieldIndex(field.name)
+        val idx          = schema.fieldIndex(field.name)
         val sourceVal    = sourceRow.get(idx)
         val companionVal = companionRow.get(idx)
 
@@ -165,11 +165,11 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
 
       val ss = spark; import ss.implicits._
       val sourceData = Seq(
-        (1, "alice",   100L, 1.5,  true),
-        (2, "bob",     200L, 2.7,  false),
+        (1, "alice", 100L, 1.5, true),
+        (2, "bob", 200L, 2.7, false),
         (3, "charlie", 300L, 3.14, true),
-        (4, "dave",    400L, 0.0,  false),
-        (5, "eve",     500L, 99.9, true)
+        (4, "dave", 400L, 0.0, false),
+        (5, "eve", 500L, 99.9, true)
       ).toDF("id", "name", "big_id", "score", "active")
 
       sourceData.write.format("delta").save(deltaPath)
@@ -232,7 +232,9 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
       val ss = spark; import ss.implicits._
       Seq((1, 1.5f), (2, 2.7f), (3, -0.5f), (4, 0.0f))
         .toDF("id", "value")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val companionDf   = buildAndReadCompanion(deltaPath, indexPath)
       val sourceRows    = spark.read.format("delta").load(deltaPath).collect()
@@ -255,10 +257,10 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
       val ss = spark; import ss.implicits._
       val sourceData = Seq(
         (1, "alice", 85.0, "us-east"),
-        (2, "bob",   92.0, "us-west"),
+        (2, "bob", 92.0, "us-west"),
         (3, "charlie", 78.0, "eu-west"),
-        (4, "dave",  95.0, "us-east"),
-        (5, "eve",   88.0, "eu-west")
+        (4, "dave", 95.0, "us-east"),
+        (5, "eve", 88.0, "eu-west")
       ).toDF("id", "name", "score", "region")
 
       sourceData.write.format("delta").partitionBy("region").save(deltaPath)
@@ -284,17 +286,18 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
         (3, "mar-report", 2024),
         (4, "apr-report", 2024),
         (5, "may-report", 2025)
-      ).toDF("id", "name", "year")
-        .write.format("delta").partitionBy("year").save(deltaPath)
+      ).toDF("id", "name", "year").write.format("delta").partitionBy("year").save(deltaPath)
 
       val companionDf   = buildAndReadCompanion(deltaPath, indexPath)
       val sourceRows    = spark.read.format("delta").load(deltaPath).collect()
       val companionRows = companionDf.collect()
-      val schema        = StructType(Seq(
-        StructField("id", IntegerType),
-        StructField("name", StringType),
-        StructField("year", IntegerType)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType),
+          StructField("name", StringType),
+          StructField("year", IntegerType)
+        )
+      )
 
       assertRowsMatch(sourceRows, companionRows, schema, "id")
     }
@@ -385,11 +388,10 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
 
       val ss = spark; import ss.implicits._
       Seq(
-        (1, "alice",   Seq("scala", "java")),
-        (2, "bob",     Seq("python")),
+        (1, "alice", Seq("scala", "java")),
+        (2, "bob", Seq("python")),
         (3, "charlie", Seq("rust", "go", "c"))
-      ).toDF("id", "name", "tags")
-        .write.format("delta").save(deltaPath)
+      ).toDF("id", "name", "tags").write.format("delta").save(deltaPath)
 
       val companionDf   = buildAndReadCompanion(deltaPath, indexPath)
       val sourceRows    = spark.read.format("delta").load(deltaPath).collect()
@@ -413,13 +415,20 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType),
-        StructField("info", StructType(Seq(
-          StructField("first_name", StringType),
-          StructField("age", IntegerType)
-        )))
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType),
+          StructField(
+            "info",
+            StructType(
+              Seq(
+                StructField("first_name", StringType),
+                StructField("age", IntegerType)
+              )
+            )
+          )
+        )
+      )
 
       val data = Seq(
         Row(1, Row("Alice", 30)),
@@ -427,8 +436,7 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
         Row(3, Row("Charlie", 35))
       )
 
-      spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-        .write.format("delta").save(deltaPath)
+      spark.createDataFrame(spark.sparkContext.parallelize(data), schema).write.format("delta").save(deltaPath)
 
       val companionDf   = buildAndReadCompanion(deltaPath, indexPath)
       val sourceRows    = spark.read.format("delta").load(deltaPath).collect()
@@ -456,11 +464,10 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
 
       val ss = spark; import ss.implicits._
       Seq(
-        (1, "alice",   Map("color" -> "red", "size" -> "small")),
-        (2, "bob",     Map("color" -> "blue")),
+        (1, "alice", Map("color" -> "red", "size" -> "small")),
+        (2, "bob", Map("color" -> "blue")),
         (3, "charlie", Map("color" -> "green", "size" -> "large", "weight" -> "heavy"))
-      ).toDF("id", "name", "attrs")
-        .write.format("delta").save(deltaPath)
+      ).toDF("id", "name", "attrs").write.format("delta").save(deltaPath)
 
       val companionDf   = buildAndReadCompanion(deltaPath, indexPath)
       val sourceRows    = spark.read.format("delta").load(deltaPath).collect()
@@ -537,11 +544,11 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      val ss = spark; import ss.implicits._
+      val ss      = spark; import ss.implicits._
       val regions = Seq("us-east", "us-west", "eu-west", "ap-south")
-      val sourceData = (1 to 50).map { i =>
-        (i, s"user_$i", i * 1.1, i % 2 == 0, regions(i % regions.size))
-      }.toDF("id", "name", "score", "active", "region")
+      val sourceData = (1 to 50)
+        .map(i => (i, s"user_$i", i * 1.1, i % 2 == 0, regions(i % regions.size)))
+        .toDF("id", "name", "score", "active", "region")
 
       sourceData.write.format("delta").partitionBy("region").save(deltaPath)
 

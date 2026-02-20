@@ -667,7 +667,8 @@ class IndexTables4SparkSimpleAggregateReader(
               }.flatten
 
               // Prefer numeric fast fields over string fast fields for counting performance
-              val numericTypes: Set[DataType] = Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
+              val numericTypes: Set[DataType] =
+                Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
 
               val selectedField = fieldFromAgg.getOrElse {
                 val fastFieldsFromDocMapping = getFastFieldsFromDocMapping()

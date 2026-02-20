@@ -184,7 +184,7 @@ case class PrewarmCacheCommand(
 
     // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
     // Prewarm is read-only, request PATH_READ credentials
-    val readConfig = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    val readConfig   = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
     val mergedConfig = resolveCredentialsOnDriver(readConfig, tablePath)
 
     // Create transaction log - CloudStorageProvider will handle credential resolution

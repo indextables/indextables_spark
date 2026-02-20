@@ -85,7 +85,7 @@ class IndexTables4SparkScanBuilder(
   // Aggregate pushdown state
   private var _pushedAggregation: Option[Aggregation] = None
   private var _pushedGroupBy: Option[Array[String]]   = None
-  private var _aggregationWasRequested: Boolean        = false // true if pushAggregation() was ever called
+  private var _aggregationWasRequested: Boolean       = false // true if pushAggregation() was ever called
 
   // Bucket aggregation state (DateHistogram, Histogram, Range)
   private var _bucketConfig: Option[BucketAggregationConfig] = None
@@ -373,7 +373,7 @@ class IndexTables4SparkScanBuilder(
     // Setting this to defaultParallelism ensures LIMIT queries use all available partitions.
     try {
       val limitPartitionsKey = "spark.sql.limit.initialNumPartitions"
-      val currentValue = sparkSession.conf.getOption(limitPartitionsKey)
+      val currentValue       = sparkSession.conf.getOption(limitPartitionsKey)
       if (currentValue.isEmpty) {
         val parallelism = sparkSession.sparkContext.defaultParallelism
         sparkSession.conf.set(limitPartitionsKey, parallelism)
@@ -1059,9 +1059,8 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * When aggregate pushdown fails, the regular scan path will be used, which produces incorrect
-   * aggregate results. Throw an error instead of allowing silently wrong results, unless the
-   * safety check is explicitly disabled.
+   * When aggregate pushdown fails, the regular scan path will be used, which produces incorrect aggregate results.
+   * Throw an error instead of allowing silently wrong results, unless the safety check is explicitly disabled.
    */
   private def rejectAggregatePushdownFailure(reason: String): Unit =
     if (isAggregatePushdownRequired) {
@@ -1204,7 +1203,6 @@ class IndexTables4SparkScanBuilder(
         true
     }
   }
-
 
   /**
    * Extract IndexQuery expressions directly using the companion object storage. This eliminates the need for global
@@ -2253,7 +2251,8 @@ object IndexTables4SparkScanBuilder {
   // Track whether pushAggregation() was called (and rejected) for cross-instance detection.
   // When build() runs on a different ScanBuilder instance, this flag lets us know that
   // an aggregate was requested but pushdown failed.
-  private val relationAggregationRequested: WeakHashMap[AnyRef, java.lang.Boolean] = new WeakHashMap[AnyRef, java.lang.Boolean]()
+  private val relationAggregationRequested: WeakHashMap[AnyRef, java.lang.Boolean] =
+    new WeakHashMap[AnyRef, java.lang.Boolean]()
 
   // ThreadLocal to pass the actual relation object from V2 rule to ScanBuilder
   // This works even with AQE because the same relation object is used throughout planning
