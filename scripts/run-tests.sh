@@ -17,6 +17,7 @@ set -euo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@11}"
+export SPARK_LOCAL_IP="127.0.0.1"
 
 # Auto-detect CPU cores for default parallelism
 if command -v nproc &>/dev/null; then
@@ -36,7 +37,7 @@ ONLY_PATTERN=""
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -j)
+        -j|--jobs)
             if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[0-9]+$ ]] || [[ "$2" -lt 1 ]]; then
                 echo "[ERROR] -j requires a positive integer argument" >&2
                 exit 1
@@ -68,16 +69,16 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [-j N] [--exclude PATTERN] [--only PATTERN] [--dry-run]"
             echo ""
             echo "Options:"
-            echo "  -j N              Number of parallel test jobs (default: auto-detect CPU cores)"
+            echo "  -j, --jobs N      Number of parallel test jobs (default: auto-detect CPU cores)"
             echo "  --exclude PATTERN Exclude test classes whose simple name matches the glob pattern"
             echo "  --only PATTERN    Include ONLY test classes whose simple name matches the glob pattern"
             echo "  --dry-run         List test classes without running them"
-            echo "  -h                Show this help message"
+            echo "  -h, --help        Show this help message"
             echo ""
             echo "Examples:"
             echo "  $0 --exclude 'Cloud*'     # Skip cloud tests (CloudS3*, CloudAzure*)"
             echo "  $0 --only 'Cloud*'        # Run only cloud tests"
-            echo "  $0 -j 4 --exclude 'Cloud*'"
+            echo "  $0 --jobs 4 --exclude 'Cloud*'"
             exit 0
             ;;
         *)
@@ -176,6 +177,47 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Check tantivy4java dependency (auto-build from source if missing)
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+POM_FILE="$PROJECT_ROOT/pom.xml"
+
+# Extract tantivy4java version from pom.xml (single source of truth)
+TANTIVY4JAVA_VERSION=$(
+    grep -A2 '<artifactId>tantivy4java</artifactId>' "$POM_FILE" \
+    | grep '<version>' \
+    | sed 's/.*<version>\(.*\)<\/version>.*/\1/' \
+    | tr -d '[:space:]'
+)
+
+# Detect platform classifier (matches Maven profile logic in pom.xml)
+_OS="$(uname -s)"
+_ARCH="$(uname -m)"
+case "${_OS}-${_ARCH}" in
+    Darwin-arm64)   PLATFORM_CLASSIFIER="darwin-aarch64" ;;
+    Darwin-x86_64)  PLATFORM_CLASSIFIER="darwin-x86_64" ;;
+    Linux-x86_64)   PLATFORM_CLASSIFIER="linux-x86_64" ;;
+    Linux-aarch64)  PLATFORM_CLASSIFIER="linux-aarch64" ;;
+    *)
+        echo "[ERROR] Unsupported OS/architecture: ${_OS}-${_ARCH}" >&2
+        exit 1
+        ;;
+esac
+
+if [[ -n "$TANTIVY4JAVA_VERSION" ]]; then
+    TANTIVY4JAVA_JAR="$HOME/.m2/repository/io/indextables/tantivy4java/${TANTIVY4JAVA_VERSION}/tantivy4java-${TANTIVY4JAVA_VERSION}-${PLATFORM_CLASSIFIER}.jar"
+    if [[ ! -f "$TANTIVY4JAVA_JAR" ]]; then
+        echo "[INFO] tantivy4java ${TANTIVY4JAVA_VERSION} (${PLATFORM_CLASSIFIER}) not found in local Maven cache"
+        echo "[INFO] Running setup.sh to build from source..."
+        if ! "$SCRIPT_DIR/setup.sh"; then
+            echo "[ERROR] Failed to build tantivy4java. Run ./scripts/setup.sh manually for details." >&2
+            exit 1
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Compile once up front
 # ---------------------------------------------------------------------------
 echo "[INFO] Compiling test sources..."
@@ -204,9 +246,11 @@ start_epoch=$(date +%s)
 PASS_FILE="$LOG_DIR/.pass_count"
 FAIL_FILE="$LOG_DIR/.fail_count"
 FAIL_LIST="$LOG_DIR/.fail_list"
+TIMINGS_FILE="$LOG_DIR/.timings"
 echo 0 > "$PASS_FILE"
 echo 0 > "$FAIL_FILE"
 : > "$FAIL_LIST"
+: > "$TIMINGS_FILE"
 
 # Lock file for atomic counter updates
 LOCK_FILE="$LOG_DIR/.lock"
@@ -241,6 +285,21 @@ append_fail() {
     done
 }
 
+# Append timing entry atomically (duration|class_name|status)
+append_timing() {
+    local duration="$1"
+    local class_name="$2"
+    local status="$3"
+    while true; do
+        if (set -o noclobber; echo $$ > "$LOCK_FILE") 2>/dev/null; then
+            echo "$duration|$class_name|$status" >> "$TIMINGS_FILE"
+            rm -f "$LOCK_FILE"
+            return
+        fi
+        sleep 0.01
+    done
+}
+
 run_single_test() {
     local index="$1"
     local class_name="$2"
@@ -254,6 +313,7 @@ run_single_test() {
         local duration=$((test_end - test_start))
         printf "[PASS] [%3d/%d] %s (%ds)\n" "$index" "$total_tests" "$class_name" "$duration"
         increment_counter "$PASS_FILE"
+        append_timing "$duration" "$class_name" "PASS"
     else
         local test_end
         test_end=$(date +%s)
@@ -261,11 +321,26 @@ run_single_test() {
         printf "[FAIL] [%3d/%d] %s (%ds) -> %s\n" "$index" "$total_tests" "$class_name" "$duration" "$log_file"
         increment_counter "$FAIL_FILE"
         append_fail "$class_name" "$log_file"
+        append_timing "$duration" "$class_name" "FAIL"
     fi
 }
 
-export -f run_single_test increment_counter append_fail
-export LOG_DIR PASS_FILE FAIL_FILE FAIL_LIST LOCK_FILE total_tests
+export -f run_single_test increment_counter append_fail append_timing
+export LOG_DIR PASS_FILE FAIL_FILE FAIL_LIST TIMINGS_FILE LOCK_FILE total_tests
+
+# ---------------------------------------------------------------------------
+# Background progress reporter (every 30 seconds)
+# ---------------------------------------------------------------------------
+(
+    while true; do
+        sleep 30
+        p=$(<"$PASS_FILE")
+        f=$(<"$FAIL_FILE")
+        r=$((total_tests - p - f))
+        echo "[INFO] Progress: $p passed, $f failed, $r remaining"
+    done
+) &
+PROGRESS_PID=$!
 
 if [[ "$PARALLEL_JOBS" -eq 1 ]]; then
     # Sequential mode
@@ -278,6 +353,10 @@ else
         printf '%d\t%s\n' "$((i + 1))" "${class_names[$i]}"
     done | xargs -P "$PARALLEL_JOBS" -L 1 bash -c 'run_single_test "$1" "$2"' _
 fi
+
+# Kill the progress reporter
+kill "$PROGRESS_PID" 2>/dev/null || true
+wait "$PROGRESS_PID" 2>/dev/null || true
 
 end_epoch=$(date +%s)
 elapsed=$((end_epoch - start_epoch))
@@ -299,6 +378,31 @@ echo "[INFO] Passed:  $passed"
 echo "[INFO] Failed:  $failed"
 echo "[INFO] Elapsed: ${elapsed_min}m ${elapsed_sec}s"
 echo "[INFO] Logs:    $LOG_DIR"
+
+# ---------------------------------------------------------------------------
+# Slowest Tests (top 5)
+# ---------------------------------------------------------------------------
+if [[ -s "$TIMINGS_FILE" ]]; then
+    echo ""
+    echo "------------------------------------------------------------------"
+    echo "[INFO] Slowest Tests"
+    echo "------------------------------------------------------------------"
+    sort -t'|' -k1 -nr "$TIMINGS_FILE" | head -5 | while IFS='|' read -r dur name status; do
+        short="${name##*.}"
+        if [[ "$status" == "PASS" ]]; then
+            tag="[PASS]"
+        else
+            tag="[FAIL]"
+        fi
+        if [[ "$dur" -ge 60 ]]; then
+            mins=$((dur / 60))
+            secs=$((dur % 60))
+            printf "  %s %3dm %02ds  %s\n" "$tag" "$mins" "$secs" "$short"
+        else
+            printf "  %s %6ds  %s\n" "$tag" "$dur" "$short"
+        fi
+    done
+fi
 
 if [[ "$failed" -gt 0 ]]; then
     echo ""
