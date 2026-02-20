@@ -93,7 +93,7 @@ class IndexTables4SparkGroupByAggregateScan(
     val tablePath = transactionLog.getTablePath()
     // Read path only needs PATH_READ credentials
     val readConfig = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-    resolveCredentialsOnDriver(readConfig, tablePath)
+    io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath.toString)
   }
 
   override def readSchema(): StructType = {
@@ -120,50 +120,7 @@ class IndexTables4SparkGroupByAggregateScan(
       partitionColumns
     )
 
-  /**
-   * Resolve AWS credentials on the driver and return a modified config. See
-   * IndexTables4SparkScan.resolveCredentialsOnDriver for detailed documentation.
-   */
-  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path)
-    : Map[String, String] = {
-    val providerClass = config
-      .get("spark.indextables.aws.credentialsProviderClass")
-      .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
-
-    providerClass match {
-      case Some(className) if className.nonEmpty =>
-        try {
-          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath.toString)
-          val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config,
-            normalizedPath
-          )
-
-          credentials match {
-            case Some(creds) =>
-              logger.info(s"[DRIVER] Resolved AWS credentials from provider: $className")
-              var newConfig = config -
-                "spark.indextables.aws.credentialsProviderClass" -
-                "spark.indextables.aws.credentialsproviderclass" +
-                ("spark.indextables.aws.accessKey" -> creds.accessKey) +
-                ("spark.indextables.aws.secretKey" -> creds.secretKey)
-
-              creds.sessionToken.foreach(token => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token))
-              newConfig
-
-            case None =>
-              logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
-              config
-          }
-        } catch {
-          case ex: Exception =>
-            logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
-            config
-        }
-
-      case None => config
-    }
-  }
+  // Credential resolution centralized in CredentialProviderFactory.resolveCredentialsOnDriver()
 
   override def description(): String = {
     val groupByDesc = groupByColumns.mkString(", ")

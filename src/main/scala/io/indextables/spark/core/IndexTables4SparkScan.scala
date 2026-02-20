@@ -72,7 +72,29 @@ class IndexTables4SparkScan(
 
   // Cache for filtered actions (computed once, reused between planInputPartitions and estimateStatistics)
   // This avoids duplicate calls to transactionLog.listFiles() and applyDataSkipping()
-  @volatile private var cachedFilteredActions: Option[Seq[AddAction]] = None
+  // Uses lazy val for thread-safe, once-only initialization (replaces @volatile + check-then-act pattern)
+  private lazy val cachedFilteredActions: Seq[AddAction] = {
+    // Extract partition-only filters for Avro manifest pruning optimization
+    val partitionColumns = transactionLog.getPartitionColumns()
+    val partitionFilters = if (partitionColumns.nonEmpty && pushedFilters.nonEmpty) {
+      pushedFilters.filter { filter =>
+        val referencedCols = getFilterReferencedColumns(filter)
+        referencedCols.nonEmpty && referencedCols.forall(partitionColumns.contains)
+      }.toSeq
+    } else {
+      Seq.empty
+    }
+
+    // Use partition filter pass-through for Avro state format optimization
+    val addActions = if (partitionFilters.nonEmpty) {
+      logger.debug(s"Passing ${partitionFilters.length} partition filters for Avro manifest pruning")
+      transactionLog.listFilesWithPartitionFilters(partitionFilters)
+    } else {
+      transactionLog.listFiles()
+    }
+
+    applyDataSkipping(addActions, pushedFilters)
+  }
 
   // Pre-computed filter hash for cache lookups (computed once in constructor)
   // This avoids recomputing O(filters) hash on every cache lookup in applyDataSkipping
@@ -89,37 +111,12 @@ class IndexTables4SparkScan(
   }
 
   /**
-   * Get filtered actions, computing and caching on first call. This optimization reduces redundant listFiles() and
-   * applyDataSkipping() calls that would otherwise occur in both planInputPartitions() and estimateStatistics().
+   * Get filtered actions from the lazy cache. Thread-safe via lazy val initialization.
    *
    * For Avro state format, partition-only filters are passed through to enable manifest pruning at the checkpoint read
    * level, avoiding I/O for manifests that don't contain matching partitions.
    */
-  private def getFilteredActions(): Seq[AddAction] =
-    cachedFilteredActions.getOrElse {
-      // Extract partition-only filters for Avro manifest pruning optimization
-      val partitionColumns = transactionLog.getPartitionColumns()
-      val partitionFilters = if (partitionColumns.nonEmpty && pushedFilters.nonEmpty) {
-        pushedFilters.filter { filter =>
-          val referencedCols = getFilterReferencedColumns(filter)
-          referencedCols.nonEmpty && referencedCols.forall(partitionColumns.contains)
-        }.toSeq
-      } else {
-        Seq.empty
-      }
-
-      // Use partition filter pass-through for Avro state format optimization
-      val addActions = if (partitionFilters.nonEmpty) {
-        logger.debug(s"Passing ${partitionFilters.length} partition filters for Avro manifest pruning")
-        transactionLog.listFilesWithPartitionFilters(partitionFilters)
-      } else {
-        transactionLog.listFiles()
-      }
-
-      val filtered = applyDataSkipping(addActions, pushedFilters)
-      cachedFilteredActions = Some(filtered)
-      filtered
-    }
+  private def getFilteredActions(): Seq[AddAction] = cachedFilteredActions
 
   if (logger.isDebugEnabled) {
     logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
@@ -386,7 +383,7 @@ class IndexTables4SparkScan(
     // Note: companion mode config (parquetTableRoot) is already injected by ScanBuilder.effectiveConfig
     // Read path only needs PATH_READ credentials (no write operations via table credentials)
     val readConfig     = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-    val resolvedConfig = resolveCredentialsOnDriver(readConfig, tablePath)
+    val resolvedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath.toString)
 
     // Diagnostic: log companion config state on driver before serialization to executors
     val hasCompanionKey = resolvedConfig.contains("spark.indextables.companion.parquetTableRoot")
@@ -402,81 +399,7 @@ class IndexTables4SparkScan(
     new IndexTables4SparkReaderFactory(readSchema, limit, resolvedConfig, tablePath, metricsAccumulator)
   }
 
-  /**
-   * Resolve AWS credentials on the driver and return a modified config.
-   *
-   * This is a key performance optimization for credential providers like UnityCatalogAWSCredentialProvider:
-   *   - BEFORE: Each executor creates a provider instance, making HTTP calls to Databricks API
-   *   - AFTER: Driver resolves credentials once, executors use explicit credentials (no HTTP calls)
-   *
-   * For a scan with 1000 splits across 100 executors:
-   *   - BEFORE: Up to 100 HTTP calls (one per executor)
-   *   - AFTER: 1 HTTP call (on driver only)
-   *
-   * If credential resolution fails, the original config is returned unchanged so that executors can attempt their own
-   * resolution (preserves backward compatibility).
-   *
-   * @param config
-   *   Original configuration map
-   * @param tablePath
-   *   Table path for credential resolution
-   * @return
-   *   Modified config with explicit credentials, or original config if resolution fails
-   */
-  private def resolveCredentialsOnDriver(config: Map[String, String], tablePath: org.apache.hadoop.fs.Path)
-    : Map[String, String] = {
-    val providerClass = config
-      .get("spark.indextables.aws.credentialsProviderClass")
-      .orElse(config.get("spark.indextables.aws.credentialsproviderclass"))
-
-    providerClass match {
-      case Some(className) if className.nonEmpty =>
-        try {
-          // Normalize table path for consistent cache keys
-          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath.toString)
-
-          // Resolve credentials on driver (single HTTP call for UC provider)
-          val credentials = io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(
-            config,
-            normalizedPath
-          )
-
-          credentials match {
-            case Some(creds) =>
-              logger.info(s"[DRIVER] Resolved AWS credentials from provider: $className (path: $normalizedPath)")
-
-              // Create new config with actual credentials, remove provider class
-              // This ensures executors use static credentials instead of making their own HTTP calls
-              var newConfig = config -
-                "spark.indextables.aws.credentialsProviderClass" -
-                "spark.indextables.aws.credentialsproviderclass" +
-                ("spark.indextables.aws.accessKey" -> creds.accessKey) +
-                ("spark.indextables.aws.secretKey" -> creds.secretKey)
-
-              // Add session token if present (important for temporary credentials)
-              creds.sessionToken match {
-                case Some(token) => newConfig = newConfig + ("spark.indextables.aws.sessionToken" -> token)
-                case None        => // no session token
-              }
-
-              logger.debug(s"[DRIVER] Config modified: removed providerClass, added explicit credentials")
-              newConfig
-
-            case None =>
-              logger.warn(s"[DRIVER] Failed to resolve credentials from provider $className, passing to executors")
-              config // Fall back to executor-side resolution
-          }
-        } catch {
-          case ex: Exception =>
-            logger.warn(s"[DRIVER] Driver-side credential resolution failed: ${ex.getMessage}, passing to executors")
-            config // Fall back to executor-side resolution
-        }
-
-      case None =>
-        // No provider class configured, use config as-is
-        config
-    }
-  }
+  // Credential resolution centralized in CredentialProviderFactory.resolveCredentialsOnDriver()
 
   /**
    * Enable metrics collection for batch optimization validation.
