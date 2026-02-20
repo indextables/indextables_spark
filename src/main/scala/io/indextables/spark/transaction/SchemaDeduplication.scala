@@ -48,6 +48,11 @@ object SchemaDeduplication {
   /** Hash length (16 characters of Base64 = 96 bits of entropy, virtually collision-free) */
   private val HASH_LENGTH = 16
 
+  /** ThreadLocal MessageDigest to avoid provider lookup on each call */
+  private val digestThreadLocal: ThreadLocal[MessageDigest] = ThreadLocal.withInitial(
+    () => MessageDigest.getInstance("SHA-256")
+  )
+
   /** ObjectMapper for parsing JSON */
   // Configure ObjectMapper to sort properties alphabetically for consistent hashing
   // This ensures that JSON serialization produces the same output regardless of
@@ -151,7 +156,8 @@ object SchemaDeduplication {
           docMappingJson
       }
 
-    val digest    = MessageDigest.getInstance("SHA-256")
+    val digest = digestThreadLocal.get()
+    digest.reset()
     val hashBytes = digest.digest(canonicalJson.getBytes("UTF-8"))
     // Use URL-safe Base64 to avoid special characters in keys
     val base64 = Base64.getUrlEncoder.withoutPadding().encodeToString(hashBytes)

@@ -1018,35 +1018,31 @@ class TransactionLogCheckpoint(
       case Some(checkpointVersion) if checkpointVersion <= currentVersion =>
         val currentTime = System.currentTimeMillis()
 
+        // List files once, build a map for O(1) lookups
+        val allFiles = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
+        val fileInfoByName = allFiles.map(f => new Path(f.path).getName -> f).toMap
+
         // Clean up old log files based on retention policy
         val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
         var deletedCount    = 0
 
         versionsToCheck.foreach { version =>
-          val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
-          val versionFilePath = versionFile.toString
+          val fileName = f"$version%020d.json"
 
-          if (cloudProvider.exists(versionFilePath)) {
-            try {
-              val fileInfo = cloudProvider
-                .listFiles(transactionLogPath.toString, recursive = false)
-                .find(f => new Path(f.path).getName == f"$version%020d.json")
-
-              fileInfo match {
-                case Some(info) =>
-                  val fileAge = currentTime - info.modificationTime
-                  if (fileAge > logRetentionDuration && version < checkpointVersion) {
-                    cloudProvider.deleteFile(versionFilePath)
-                    deletedCount += 1
-                    logger.debug(s"Deleted old version file: $versionFilePath (age: ${fileAge / 1000}s)")
-                  }
-                case None =>
-                  logger.debug(s"Could not get file info for $versionFilePath")
+          fileInfoByName.get(fileName) match {
+            case Some(info) =>
+              try {
+                val fileAge = currentTime - info.modificationTime
+                if (fileAge > logRetentionDuration) {
+                  cloudProvider.deleteFile(info.path)
+                  deletedCount += 1
+                  logger.debug(s"Deleted old version file: ${info.path} (age: ${fileAge / 1000}s)")
+                }
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"Failed to process version file ${info.path}", e)
               }
-            } catch {
-              case e: Exception =>
-                logger.warn(s"Failed to process version file $versionFilePath", e)
-            }
+            case None => // File doesn't exist, nothing to clean up
           }
         }
 

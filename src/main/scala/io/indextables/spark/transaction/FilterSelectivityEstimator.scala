@@ -106,8 +106,8 @@ object FilterSelectivityEstimator {
         math.max(estimateSelectivity(left), estimateSelectivity(right))
 
       case Not(child) =>
-        // NOT inverts selectivity, but we use same score for simplicity
-        estimateSelectivity(child)
+        // NOT inverts selectivity: highly selective child -> low selectivity NOT
+        math.min(UNKNOWN_SCORE - estimateSelectivity(child), UNKNOWN_SCORE)
 
       // Unknown filter types
       case _ => UNKNOWN_SCORE

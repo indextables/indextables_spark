@@ -17,7 +17,6 @@
 
 package io.indextables.spark.transaction.avro
 
-import scala.io.Source
 import scala.util.Try
 
 import org.apache.avro.generic.GenericRecord
@@ -367,26 +366,6 @@ object AvroSchemas {
 
   /** Parsed StateManifest schema (lazily initialized) */
   lazy val STATE_MANIFEST_SCHEMA: Schema = new Schema.Parser().parse(STATE_MANIFEST_SCHEMA_JSON)
-
-  /**
-   * Load schema from resources (alternative to embedded schema).
-   *
-   * @param resourcePath
-   *   Path to schema resource file
-   * @return
-   *   Parsed Avro schema
-   */
-  def loadSchemaFromResource(resourcePath: String): Schema = {
-    val stream = getClass.getResourceAsStream(resourcePath)
-    if (stream == null) {
-      throw new IllegalArgumentException(s"Schema resource not found: $resourcePath")
-    }
-    try {
-      val schemaJson = Source.fromInputStream(stream).mkString
-      new Schema.Parser().parse(schemaJson)
-    } finally
-      stream.close()
-  }
 
   /**
    * Convert a GenericRecord to a FileEntry.

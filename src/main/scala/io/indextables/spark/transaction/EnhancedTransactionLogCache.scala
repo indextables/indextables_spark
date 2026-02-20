@@ -262,30 +262,30 @@ object EnhancedTransactionLogCache {
    * Get or compute MetadataAction from global cache - shared across all TransactionLog instances. This avoids
    * re-parsing transaction log JSON when creating new DataFrames on the same table.
    */
-  def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction =
-    Option(globalMetadataCache.getIfPresent(tablePath)) match {
-      case Some(metadata) =>
-        logger.debug(s"GLOBAL metadata cache HIT for $tablePath")
-        metadata
-      case None =>
-        logger.debug(s"GLOBAL metadata cache MISS for $tablePath - computing")
-        val metadata = compute
-        globalMetadataCache.put(tablePath, metadata)
-        metadata
+  def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction = {
+    val cached = globalMetadataCache.getIfPresent(tablePath)
+    if (cached != null) {
+      cached
+    } else {
+      logger.debug(s"GLOBAL metadata cache MISS for $tablePath - computing")
+      val metadata = compute
+      globalMetadataCache.put(tablePath, metadata)
+      metadata
     }
+  }
 
   /** Get or compute ProtocolAction from global cache - shared across all TransactionLog instances. */
-  def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction =
-    Option(globalProtocolCache.getIfPresent(tablePath)) match {
-      case Some(protocol) =>
-        logger.debug(s"GLOBAL protocol cache HIT for $tablePath")
-        protocol
-      case None =>
-        logger.debug(s"GLOBAL protocol cache MISS for $tablePath - computing")
-        val protocol = compute
-        globalProtocolCache.put(tablePath, protocol)
-        protocol
+  def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction = {
+    val cached = globalProtocolCache.getIfPresent(tablePath)
+    if (cached != null) {
+      cached
+    } else {
+      logger.debug(s"GLOBAL protocol cache MISS for $tablePath - computing")
+      val protocol = compute
+      globalProtocolCache.put(tablePath, protocol)
+      protocol
     }
+  }
 
   /**
    * Get or compute version actions from global cache - shared across all TransactionLog instances. This avoids
@@ -295,17 +295,18 @@ object EnhancedTransactionLogCache {
     tablePath: String,
     version: Long,
     compute: => Seq[Action]
-  ): Seq[Action] =
-    Option(globalVersionCache.getIfPresent(VersionCacheKey(tablePath, version))) match {
-      case Some(actions) =>
-        logger.debug(s"GLOBAL version cache HIT for $tablePath version $version")
-        actions
-      case None =>
-        logger.debug(s"GLOBAL version cache MISS for $tablePath version $version - computing")
-        val actions = compute
-        globalVersionCache.put(VersionCacheKey(tablePath, version), actions)
-        actions
+  ): Seq[Action] = {
+    val key    = VersionCacheKey(tablePath, version)
+    val cached = globalVersionCache.getIfPresent(key)
+    if (cached != null) {
+      cached
+    } else {
+      logger.debug(s"GLOBAL version cache MISS for $tablePath version $version - computing")
+      val actions = compute
+      globalVersionCache.put(key, actions)
+      actions
     }
+  }
 
   /**
    * Get or compute a filtered schema - caches the result of filterEmptyObjectMappings.
@@ -320,16 +321,17 @@ object EnhancedTransactionLogCache {
    * @return
    *   Filtered schema string
    */
-  def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String =
-    Option(globalFilteredSchemaCache.getIfPresent(schemaHash)) match {
-      case Some(filtered) =>
-        filtered
-      case None =>
-        logger.info(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing (cache size=${globalFilteredSchemaCache.size()})")
-        val filtered = compute
-        globalFilteredSchemaCache.put(schemaHash, filtered)
-        filtered
+  def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String = {
+    val cached = globalFilteredSchemaCache.getIfPresent(schemaHash)
+    if (cached != null) {
+      cached
+    } else {
+      logger.debug(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing (cache size=${globalFilteredSchemaCache.size()})")
+      val filtered = compute
+      globalFilteredSchemaCache.put(schemaHash, filtered)
+      filtered
     }
+  }
 
   /**
    * Get or compute DocMappingMetadata - parses docMappingJson once and caches the extracted metadata.
@@ -344,15 +346,16 @@ object EnhancedTransactionLogCache {
    * @return
    *   Parsed DocMappingMetadata
    */
-  def getOrComputeDocMappingMetadata(key: String, docMappingJson: String): DocMappingMetadata =
-    Option(globalDocMappingMetadataCache.getIfPresent(key)) match {
-      case Some(metadata) =>
-        metadata
-      case None =>
-        val metadata = DocMappingMetadata.parse(docMappingJson)
-        globalDocMappingMetadataCache.put(key, metadata)
-        metadata
+  def getOrComputeDocMappingMetadata(key: String, docMappingJson: String): DocMappingMetadata = {
+    val cached = globalDocMappingMetadataCache.getIfPresent(key)
+    if (cached != null) {
+      cached
+    } else {
+      val metadata = DocMappingMetadata.parse(docMappingJson)
+      globalDocMappingMetadataCache.put(key, metadata)
+      metadata
     }
+  }
 
   /** Get DocMappingMetadata for an AddAction, using the schema hash as cache key when available. */
   def getDocMappingMetadata(addAction: AddAction): DocMappingMetadata =
@@ -381,18 +384,17 @@ object EnhancedTransactionLogCache {
   def getOrComputeAvroManifestFile(
     manifestPath: String,
     compute: => Seq[io.indextables.spark.transaction.avro.FileEntry]
-  ): Seq[io.indextables.spark.transaction.avro.FileEntry] =
-    Option(globalAvroManifestFileCache.getIfPresent(manifestPath)) match {
-      case Some(entries) =>
-        logger.debug(s"GLOBAL Avro manifest file cache HIT for $manifestPath (${entries.size} entries)")
-        entries
-      case None =>
-        logger.debug(s"GLOBAL Avro manifest file cache MISS for $manifestPath - reading from storage")
-        val entries = compute
-        globalAvroManifestFileCache.put(manifestPath, entries)
-        logger.debug(s"Cached Avro manifest file $manifestPath (${entries.size} entries)")
-        entries
+  ): Seq[io.indextables.spark.transaction.avro.FileEntry] = {
+    val cached = globalAvroManifestFileCache.getIfPresent(manifestPath)
+    if (cached != null) {
+      cached
+    } else {
+      logger.debug(s"GLOBAL Avro manifest file cache MISS for $manifestPath - reading from storage")
+      val entries = compute
+      globalAvroManifestFileCache.put(manifestPath, entries)
+      entries
     }
+  }
 
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {
@@ -421,12 +423,13 @@ object EnhancedTransactionLogCache {
       .asScala
       .filter(_.tablePath == tablePath)
       .foreach(globalCheckpointActionsCache.invalidate)
-    // Invalidate Avro state manifests for this table (state dir paths contain the table path)
+    // Invalidate Avro state manifests for this table (state dir paths start with table path)
+    val tablePathWithSep = if (tablePath.endsWith("/")) tablePath else tablePath + "/"
     globalAvroStateManifestCache
       .asMap()
       .keySet()
       .asScala
-      .filter(_.contains(tablePath))
+      .filter(k => k.startsWith(tablePathWithSep) || k == tablePath)
       .foreach(globalAvroStateManifestCache.invalidate)
     // Invalidate Avro file lists for this table
     globalAvroFileListCache
@@ -675,7 +678,7 @@ class EnhancedTransactionLogCache(
         compute match {
           case Some(actions) =>
             EnhancedTransactionLogCache.globalCheckpointActionsCache.put(key, actions)
-            logger.info(
+            logger.debug(
               s"Cached ${actions.size} checkpoint actions in GLOBAL cache for $tablePath version $checkpointVersion"
             )
             Some(actions)
@@ -705,7 +708,7 @@ class EnhancedTransactionLogCache(
           tablePath,
           LastCheckpointInfoCached(info, System.currentTimeMillis())
         )
-        logger.info(s"Cached last checkpoint info in GLOBAL cache for $tablePath: ${info.map(_.version)}")
+        logger.debug(s"Cached last checkpoint info in GLOBAL cache for $tablePath: ${info.map(_.version)}")
         info
     }
 
@@ -740,7 +743,7 @@ class EnhancedTransactionLogCache(
         logger.debug(s"GLOBAL Avro state manifest cache MISS for $stateDirPath - reading from storage")
         val manifest = compute
         EnhancedTransactionLogCache.globalAvroStateManifestCache.put(stateDirPath, manifest)
-        logger.info(s"Cached Avro state manifest in GLOBAL cache for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)")
+        logger.debug(s"Cached Avro state manifest in GLOBAL cache for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)")
         manifest
     }
 
@@ -775,7 +778,7 @@ class EnhancedTransactionLogCache(
         )
         val files = compute
         EnhancedTransactionLogCache.globalAvroFileListCache.put(key, files)
-        logger.info(s"Cached Avro file list in GLOBAL cache for $tablePath version $avroVersion (${files.size} files)")
+        logger.debug(s"Cached Avro file list in GLOBAL cache for $tablePath version $avroVersion (${files.size} files)")
         files
     }
   }

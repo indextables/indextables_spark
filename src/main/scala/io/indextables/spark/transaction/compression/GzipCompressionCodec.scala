@@ -28,9 +28,12 @@ class GzipCompressionCodec(level: Int = 6) extends CompressionCodec {
       var bytesRead = 0
       while ({ bytesRead = input.read(buffer); bytesRead != -1 })
         gzipOut.write(buffer, 0, bytesRead)
+      // Use finish() instead of close() to finalize GZIP stream without closing the underlying output stream
+      gzipOut.finish()
       gzipOut.flush()
-    } finally
-      gzipOut.close()
+    } finally {
+      // Do not close gzipOut here as it would close the caller's output stream
+    }
   }
 
   override def decompress(input: InputStream, output: OutputStream): Unit = {
