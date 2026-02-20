@@ -417,17 +417,21 @@ class IndexTables4SparkScanBuilder(
         }
 
         // Check for unsupported filters that would block aggregate pushdown.
-        // When Spark has unsupported filters, it won't call pushAggregation(), which means
+        // When Spark has unsupported filters, it may not call pushAggregation(), which means
         // any aggregation in the query will produce incorrect results (due to our default limit).
         //
-        // Note: IsNull/IsNotNull on non-FAST fields are "safely unsupported" - they will be
-        // handled by Spark's post-filtering, which doesn't affect aggregate correctness.
-        // We only block on truly problematic unsupported filters.
+        // IsNull/IsNotNull on non-FAST fields are "safely unsupported" for regular scans
+        // (Spark post-filters the rows). But when an aggregate was requested, they are NOT safe
+        // because their presence may have prevented Spark from calling pushAggregation() at all,
+        // silently falling back to a full scan with wrong aggregate results.
+        //
+        // For companion mode this is already handled: redundant IsNotNull filters are stripped
+        // in pushFilters() before classification, so they never appear in unsupported filters.
         //
         // Use explicit isInstanceOf checks to ensure proper filtering (pattern matching can
         // be tricky with Filter subclasses).
         def isSafelyUnsupportedFilter(f: Filter): Boolean =
-          f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull]
+          (f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull]) && !_aggregationWasRequested
 
         val safelyUnsupportedFilters   = effectiveUnsupportedFilters.filter(isSafelyUnsupportedFilter)
         val blockingUnsupportedFilters = effectiveUnsupportedFilters.filterNot(isSafelyUnsupportedFilter)
@@ -457,11 +461,12 @@ class IndexTables4SparkScanBuilder(
         if (_aggregationWasRequested && isAggregatePushdownRequired) {
           if (blockingUnsupportedFilters.nonEmpty) {
             val unsupportedDesc = blockingUnsupportedFilters.map(_.toString).mkString(", ")
-            // Build specific guidance for string pattern filters
+            // Build specific guidance for different filter types
             val hasStringStartsWith    = blockingUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
             val hasStringEndsWith      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
             val hasStringContains      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringContains])
             val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
+            val hasNullFilter          = blockingUnsupportedFilters.exists(f => f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull])
 
             val stringPatternHint = if (hasStringPatternFilter) {
               val patternTypes = Seq(
@@ -475,12 +480,21 @@ class IndexTables4SparkScanBuilder(
                 s"or individually: ${patternTypes.map(t => s"spark.indextables.filter.$t.pushdown=true").mkString(", ")}."
             } else ""
 
+            val nullFilterHint = if (hasNullFilter) {
+              val nullFields = blockingUnsupportedFilters.collect {
+                case IsNull(attr)    => attr
+                case IsNotNull(attr) => attr
+              }.distinct
+              s" IsNull/IsNotNull filters on non-FAST fields [${nullFields.mkString(", ")}] block aggregate pushdown." +
+                s" To fix: add these fields to spark.indextables.indexing.fastfields configuration."
+            } else ""
+
             throw new IllegalStateException(
               s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
                 s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
                 s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
-                s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not. " +
-                s"Note: IsNull/IsNotNull on non-FAST fields are handled by Spark post-filtering and don't block aggregates." +
+                s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNull (FAST fields), IsNotNull (FAST fields), And, Or, Not." +
+                nullFilterHint +
                 stringPatternHint +
                 s" To disable this safety check (results may be incorrect), set" +
                 s" spark.indextables.read.requireAggregatePushdown=false."
@@ -819,7 +833,24 @@ class IndexTables4SparkScanBuilder(
 
     // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
     // we only need to handle regular Spark filters here.
-    val (supported, unsupported) = filters.partition(isSupportedFilter)
+    //
+    // For companion mode, strip redundant IsNotNull filters before classification.
+    // Spark always generates IsNotNull(field) alongside value-bearing filters (EqualTo, etc.).
+    // For non-fast string fields in companion mode, IsNotNull is classified as "unsupported"
+    // which silently prevents Spark from calling pushAggregation(), killing aggregate pushdown.
+    // Since a value-bearing filter already implies non-null, stripping the redundant IsNotNull
+    // is semantically safe and unblocks aggregate pushdown.
+    val effectiveInputFilters = if (isCompanionMode) {
+      val stripped = FiltersToQueryConverter.removeRedundantIsNotNull(filters)
+      if (stripped.length != filters.length) {
+        logger.info(s"PUSHFILTERS: Companion mode - stripped ${filters.length - stripped.length} redundant IsNotNull filter(s)")
+      }
+      stripped
+    } else {
+      filters
+    }
+
+    val (supported, unsupported) = effectiveInputFilters.partition(isSupportedFilter)
 
     // NOTE: IsNull and IsNotNull are marked as "supported" for regular fields (not JSON fields)
     // in isSupportedFilter. The query converter uses wildcardQuery to properly filter these:
@@ -1072,6 +1103,10 @@ class IndexTables4SparkScanBuilder(
           s" spark.indextables.read.requireAggregatePushdown=false."
       )
     }
+
+  /** Whether this table is in companion mode (index-only splits backed by external parquet). */
+  private lazy val isCompanionMode: Boolean =
+    effectiveConfig.contains("spark.indextables.companion.parquetTableRoot")
 
   // Configuration helpers for string pattern filter pushdown
   // Helper to get config value from both options (reader options) and config (session config)

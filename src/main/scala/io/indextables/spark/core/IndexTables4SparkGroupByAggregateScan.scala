@@ -916,6 +916,7 @@ class IndexTables4SparkGroupByAggregateReader(
       }
 
       logger.debug(s"GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations and filter query")
+      logger.info(s"GroupBy aggregate pushdown for ${partition.split.path}: splitQuery='$query', groupBy=[${partition.groupByColumns.mkString(", ")}]")
 
       val result = searcher.search(query, 0, "group_by_terms", termsAgg)
 
@@ -1379,12 +1380,14 @@ class IndexTables4SparkGroupByAggregateReader(
       val splitFieldNames = getSplitFieldNames(splitSearchEngine)
       import scala.jdk.CollectionConverters._
       val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
-      FiltersToQueryConverter.convertToSplitQuery(
+      val query = FiltersToQueryConverter.convertToSplitQuery(
         allFilters,
         splitSearchEngine,
         splitFieldNames,
         Some(optionsFromBroadcast)
       )
+      logger.info(s"Bucket aggregate pushdown for ${partition.split.path}: splitQuery='$query'")
+      query
     } else {
       logger.debug(s"BUCKET EXECUTION: No filters, using match-all query")
       new SplitMatchAllQuery()

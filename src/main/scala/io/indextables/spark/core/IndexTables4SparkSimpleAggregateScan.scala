@@ -749,6 +749,7 @@ class IndexTables4SparkSimpleAggregateReader(
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Aggregation names: ${aggNames.mkString(", ")}")
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Query: ${splitQuery.getClass.getSimpleName}")
+      logger.info(s"Aggregate pushdown for ${partition.split.path}: splitQuery='$splitQuery', aggregations=[${aggNames.mkString(", ")}]")
       val result = searcher.aggregate(splitQuery, aggregations)
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Aggregate call completed, hasAggregations: ${result.hasAggregations()}")
 
