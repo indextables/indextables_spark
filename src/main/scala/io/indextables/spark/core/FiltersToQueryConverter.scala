@@ -136,7 +136,7 @@ object FiltersToQueryConverter {
    * attribute. A document matching EqualTo(X, v) or GreaterThan(X, v) inherently has a non-null X, so the existence
    * check is meaningless.
    */
-  private def removeRedundantIsNotNull(filters: Array[Filter]): Array[Filter] = {
+  private[core] def removeRedundantIsNotNull(filters: Array[Filter]): Array[Filter] = {
     import org.apache.spark.sql.sources._
 
     def getValueAttributes(f: Filter): Set[String] = f match {

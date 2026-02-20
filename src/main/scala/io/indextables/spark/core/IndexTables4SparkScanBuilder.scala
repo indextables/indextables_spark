@@ -819,7 +819,24 @@ class IndexTables4SparkScanBuilder(
 
     // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
     // we only need to handle regular Spark filters here.
-    val (supported, unsupported) = filters.partition(isSupportedFilter)
+    //
+    // For companion mode, strip redundant IsNotNull filters before classification.
+    // Spark always generates IsNotNull(field) alongside value-bearing filters (EqualTo, etc.).
+    // For non-fast string fields in companion mode, IsNotNull is classified as "unsupported"
+    // which silently prevents Spark from calling pushAggregation(), killing aggregate pushdown.
+    // Since a value-bearing filter already implies non-null, stripping the redundant IsNotNull
+    // is semantically safe and unblocks aggregate pushdown.
+    val effectiveInputFilters = if (isCompanionMode) {
+      val stripped = FiltersToQueryConverter.removeRedundantIsNotNull(filters)
+      if (stripped.length != filters.length) {
+        logger.info(s"PUSHFILTERS: Companion mode - stripped ${filters.length - stripped.length} redundant IsNotNull filter(s)")
+      }
+      stripped
+    } else {
+      filters
+    }
+
+    val (supported, unsupported) = effectiveInputFilters.partition(isSupportedFilter)
 
     // NOTE: IsNull and IsNotNull are marked as "supported" for regular fields (not JSON fields)
     // in isSupportedFilter. The query converter uses wildcardQuery to properly filter these:
@@ -1072,6 +1089,10 @@ class IndexTables4SparkScanBuilder(
           s" spark.indextables.read.requireAggregatePushdown=false."
       )
     }
+
+  /** Whether this table is in companion mode (index-only splits backed by external parquet). */
+  private lazy val isCompanionMode: Boolean =
+    effectiveConfig.contains("spark.indextables.companion.parquetTableRoot")
 
   // Configuration helpers for string pattern filter pushdown
   // Helper to get config value from both options (reader options) and config (session config)
