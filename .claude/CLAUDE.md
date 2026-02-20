@@ -97,9 +97,9 @@ val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProv
 // Standard filters (pushed down for string fields)
 df.filter($"title" === "exact title").show()
 
-// IndexQuery (for text fields)
-import org.apache.spark.sql.indextables.IndexQueryExpression._
-df.filter($"content" indexquery "machine learning").show()
+// IndexQuery (for text fields) - use SQL syntax
+df.createOrReplaceTempView("documents")
+spark.sql("SELECT * FROM documents WHERE content indexquery 'machine learning'").show()
 
 // Aggregations (pushed down to tantivy)
 df.agg(count("*"), sum("score"), avg("score")).show()
@@ -121,10 +121,13 @@ df.filter($"date" === "2024-01-01" && $"hour" === 10).show()
 
 Register extensions for SQL commands:
 ```scala
-spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+// In SparkSession builder:
+val spark = SparkSession.builder()
+  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+  .getOrCreate()
 ```
 
-Available commands: `MERGE SPLITS`, `PURGE INDEXTABLE`, `DROP INDEXTABLES PARTITIONS`, `CHECKPOINT/COMPACT INDEXTABLES`, `TRUNCATE INDEXTABLES TIME TRAVEL`, `PREWARM INDEXTABLES CACHE`, `DESCRIBE INDEXTABLES STATE/DISK CACHE/STORAGE STATS/DATA SKIPPING STATS/ENVIRONMENT/MERGE JOBS`, `FLUSH INDEXTABLES DISK CACHE/DATA SKIPPING STATS`, `INVALIDATE INDEXTABLES DATA SKIPPING CACHE`.
+Available commands: `MERGE SPLITS`, `PURGE INDEXTABLE`, `DROP INDEXTABLES PARTITIONS`, `CHECKPOINT/COMPACT INDEXTABLES`, `TRUNCATE INDEXTABLES TIME TRAVEL`, `PREWARM INDEXTABLES CACHE`, `DESCRIBE INDEXTABLES STATE/DISK CACHE/STORAGE STATS/ENVIRONMENT/MERGE JOBS`, `FLUSH INDEXTABLES DISK CACHE/SEARCHER CACHE`, `INVALIDATE INDEXTABLES TRANSACTION LOG CACHE`.
 
 All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/reference/sql-commands.md` for full syntax, examples, and output schemas.
 
@@ -142,7 +145,7 @@ All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/
 - **Checkpoints**: `*.checkpoint.json` files for performance
 - **Compression**: GZIP compression enabled by default (60-70% size reduction)
 - **Caching**: JVM-wide SplitCacheManager with locality tracking
-- **Storage**: S3OptimizedReader for S3, StandardFileReader for local/HDFS
+- **Storage**: S3CloudStorageProvider for S3, HadoopCloudStorageProvider for local/HDFS
 
 ## Key Behaviors
 

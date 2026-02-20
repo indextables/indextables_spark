@@ -5,22 +5,8 @@
 ### ~~IT-001: OOM running full test suite via `mvn test`~~ **DONE**
 Moved to Completed.
 
-### IT-035: Separate cloud tests from local test suite
-**Description**: 41 test classes require live S3/Azure credentials but run in the default test suite. 34 of them self-cancel via `assume()` and are counted as "passed" despite never actually running — masking the fact they weren't tested. 7 fail outright due to guards in `beforeAll()` or missing guards entirely. Tests that don't run should not pass.
-**Scope**:
-- Exclude cloud-dependent tests (`Cloud*`) from default `make test`
-- Add `make test-cloud` target for credential-requiring tests
-- Add `make test-all` target for the full suite
-- Rename 6 inconsistent cloud tests to follow `Cloud*` naming convention
-- Update `scripts/run-tests.sh` to support include/exclude patterns
-- Update default parallelism to use system CPU core count
-- Update CLAUDE.md and Makefile
-**Acceptance Criteria**:
-- [ ] `make test` runs only local tests (321 classes), all pass without credentials
-- [ ] `make test-cloud` runs only cloud tests (41 classes)
-- [ ] `make test-all` runs everything (362 classes)
-- [ ] No cloud test counted as "passed" without actually executing
-- [ ] Default JOBS uses `nproc` (Linux) / `sysctl -n hw.ncpu` (macOS)
+### ~~IT-035: Separate cloud tests from local test suite~~ **DONE**
+Moved to Completed.
 
 ### IT-002: JVM shutdown crashes in tantivy4java tests
 **Reporter**: Scott
@@ -34,22 +20,14 @@ Moved to Completed.
 
 ## Critical
 
-### IT-003: Fix IndexQuery usage in CLAUDE.md
-**Description**: CLAUDE.md line 84 shows wrong import path (`org.apache.spark.sql.indextables.IndexQueryExpression._`) and a DataFrame API syntax that doesn't exist. All tests use SQL syntax.
-**Acceptance Criteria**:
-- [ ] Replace with correct SQL-based usage pattern
-- [ ] Verify against actual test files
+### ~~IT-003: Fix IndexQuery usage in CLAUDE.md~~ **DONE**
+Moved to Completed.
 
-### IT-004: Fix extensions registration syntax
-**Description**: CLAUDE.md and `docs/reference/sql-commands.md` show `spark.sparkSession.extensions.add(...)` which is not a valid Spark API.
-**Acceptance Criteria**:
-- [ ] Replace with `.config("spark.sql.extensions", "...")` pattern in both files
-- [ ] Verify against actual test files
+### ~~IT-004: Fix extensions registration syntax~~ **DONE**
+Moved to Completed.
 
-### IT-005: Remove or annotate unwired data skipping SQL commands
-**Description**: CLAUDE.md and `docs/reference/sql-commands.md` document `DESCRIBE/FLUSH/INVALIDATE INDEXTABLES DATA SKIPPING` commands that are NOT wired into the ANTLR grammar.
-**Acceptance Criteria**:
-- [ ] Either wire commands into parser with tests, OR remove from docs
+### ~~IT-005: Remove or annotate unwired data skipping SQL commands~~ **DONE**
+Moved to Completed.
 
 ---
 
@@ -61,10 +39,8 @@ Moved to Completed.
 - [ ] CLAUDE.md acknowledges both names
 - [ ] Recommends public alias as primary
 
-### IT-007: Fix storage class names in CLAUDE.md
-**Description**: CLAUDE.md references `S3OptimizedReader` and `StandardFileReader` which don't exist. Actual: `S3CloudStorageProvider`, `HadoopCloudStorageProvider`.
-**Acceptance Criteria**:
-- [ ] Correct class names in CLAUDE.md
+### ~~IT-007: Fix storage class names in CLAUDE.md~~ **DONE**
+Moved to Completed.
 
 ### IT-008: Document missing SQL commands
 **Description**: 8 commands exist in ANTLR grammar but are absent from docs: `BUILD COMPANION`, `DESCRIBE COMPONENT SIZES`, `DESCRIBE PREWARM JOBS`, `WAIT FOR PREWARM JOBS`, `DESCRIBE TRANSACTION LOG`, `REPAIR INDEXFILES TRANSACTION LOG`, `FLUSH SEARCHER CACHE`, `INVALIDATE TRANSACTION LOG CACHE`.
@@ -146,3 +122,8 @@ Moved to Completed.
 | IT-033 | Move CLAUDE.md and BACKLOG.md to .claude/ | 2026-02 |
 | IT-034 | Move PROTOCOL.md and TABLE_PROTOCOL.md to docs/reference/ | 2026-02 |
 | IT-001 | Add parallel execution to test runner script | 2026-02 |
+| IT-035 | Separate cloud tests from local test suite | 2026-02 |
+| IT-003 | Fix IndexQuery usage in CLAUDE.md | 2026-02 |
+| IT-004 | Fix extensions registration syntax | 2026-02 |
+| IT-005 | Annotate unwired data skipping SQL commands | 2026-02 |
+| IT-007 | Fix storage class names in CLAUDE.md | 2026-02 |

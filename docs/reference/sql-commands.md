@@ -3,7 +3,10 @@
 All SQL commands require the extensions to be registered:
 
 ```scala
-spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+// In SparkSession builder:
+val spark = SparkSession.builder()
+  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+  .getOrCreate()
 ```
 
 All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords interchangeably.
@@ -320,7 +323,7 @@ Output includes: `executor_id`, `host`, `bytes_fetched`, `requests`. Counters ar
 
 ## Describe Data Skipping Stats
 
-View data skipping effectiveness statistics.
+> **Note**: These commands are not yet wired into the SQL grammar. The command implementations exist (`DescribeDataSkippingStatsCommand`, `FlushDataSkippingStatsCommand`, `InvalidateDataSkippingCacheCommand`) but require ANTLR grammar rules to be added before they can be invoked via SQL.
 
 ```sql
 DESCRIBE INDEXTABLES DATA SKIPPING STATS;
