@@ -84,10 +84,11 @@ case class TruncateTimeTravelCommand(
       val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
       val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+        ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
-      // Create transaction log - CloudStorageProvider will handle credential resolution
-      // with proper refresh logic via V1ToV2CredentialsProviderAdapter
+      // Create transaction log with PATH_READ_WRITE credentials since truncate
+      // deletes old version files and creates checkpoints
       val options        = new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
 

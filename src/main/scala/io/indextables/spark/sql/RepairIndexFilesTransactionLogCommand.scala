@@ -105,7 +105,10 @@ case class RepairIndexFilesTransactionLogCommand(
       // Create transaction log instance for source
       logger.info(s"Reading source transaction log from: $sourcePath")
       val sourceOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-        Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava
+        Map(
+          "spark.indextables.transaction.allowDirectUsage" -> "true",
+          "spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE"
+        ).asJava
       )
 
       // Extract table path from transaction log path (remove /_transaction_log suffix)

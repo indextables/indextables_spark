@@ -22,6 +22,7 @@ import java.nio.file.Files
 import java.sql.{Date, Timestamp}
 
 import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.functions.{avg, col, count, sum}
 
 import org.apache.hadoop.fs.Path
 
@@ -606,6 +607,181 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Should have 2 date groups: 2025-01-15 (2 rows) and 2025-02-10 (3 rows)
       groupByResult.length shouldBe 2
+    }
+  }
+
+  // -------------------------------------------------------
+  //  Aggregation and filter coverage for companion splits
+  //  (mirrors the tantivy4java PR #86 string-hash test cases)
+  // -------------------------------------------------------
+
+  test("COUNT(string column) should return value_count of non-null rows") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_vc_str").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_vc_str").getAbsolutePath
+
+      createLocalParquetData(parquetPath, numRows = 20)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // COUNT(name) is value_count on the string fast field.
+      // In HYBRID mode this is hash-redirected (no parquet transcode).
+      // All 20 name values are non-null so the count should be 20.
+      val result = companionDf.agg(count("name")).collect()
+      result.length shouldBe 1
+      result(0).getLong(0) shouldBe 20L
+    }
+  }
+
+  test("GROUP BY string column with sum and avg should resolve hash bucket keys correctly") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_groupby_metric").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_groupby_metric").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = Seq(
+        (1L, "alice", 10.0),
+        (2L, "bob",   20.0),
+        (3L, "alice", 30.0),
+        (4L, "bob",   40.0),
+        (5L, "alice", 50.0)
+      )
+      data.toDF("id", "name", "score").repartition(1).write.parquet(parquetPath)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // terms(name) with sum(score) and avg(score) sub-aggregations.
+      // Outer keys are hash-resolved back to the original strings;
+      // inner metric values are computed over the per-bucket doc sets.
+      val result = companionDf
+        .groupBy("name")
+        .agg(sum("score"), avg("score"))
+        .orderBy("name")
+        .collect()
+
+      result.length shouldBe 2
+      result(0).getString(0) shouldBe "alice"
+      result(0).getDouble(1) shouldBe (10.0 + 30.0 + 50.0) +- 0.01
+      result(0).getDouble(2) shouldBe (10.0 + 30.0 + 50.0) / 3 +- 0.01
+      result(1).getString(0) shouldBe "bob"
+      result(1).getDouble(1) shouldBe (20.0 + 40.0) +- 0.01
+      result(1).getDouble(2) shouldBe (20.0 + 40.0) / 2 +- 0.01
+    }
+  }
+
+  test("IS NOT NULL filter on string column should return all non-null rows") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_isnotnull").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_isnotnull").getAbsolutePath
+
+      createLocalParquetData(parquetPath, numRows = 15)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // IS NOT NULL on a string field maps to an exists/FieldPresence query in tantivy4java.
+      // In HYBRID mode this is hash-redirected to _phash_name (no parquet transcode).
+      val result = companionDf.filter(col("name").isNotNull).collect()
+      result.length shouldBe 15
+    }
+  }
+
+  test("IS NULL filter on string column should return zero rows when no nulls present") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_isnull").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_isnull").getAbsolutePath
+
+      createLocalParquetData(parquetPath, numRows = 15)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // IS NULL on a non-nullable string field should return no rows.
+      val result = companionDf.filter(col("name").isNull).collect()
+      result.length shouldBe 0
+    }
+  }
+
+  test("COUNT(*) on companion split should count all rows even when numeric fast field has nulls") {
+    // Regression test for: COUNT(*) picked the first numeric fast field which may contain nulls,
+    // causing value_count to undercount. Companion splits now prefer __pq_file_hash which is
+    // a non-null u64 field present on every indexed document.
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_null_score").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_null_score").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+
+      // score is the only numeric column and has 3 nulls out of 5 rows.
+      // The old code could pick `score` for COUNT(*) → value_count returns 2 (wrong).
+      // The fixed code picks __pq_file_hash (always non-null) → returns 5 (correct).
+      val data = Seq(
+        ("alice", Some(10.0)),
+        ("bob",   None: Option[Double]),
+        ("carol", None: Option[Double]),
+        ("dave",  None: Option[Double]),
+        ("eve",   Some(50.0))
+      )
+      data.toDF("name", "score").repartition(1).write.parquet(parquetPath)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // A filter forces SimpleAggregateScan (not TransactionLogCountScan).
+      // All 5 rows have a non-null name, so the filter returns all rows.
+      // COUNT(*) must return 5 regardless of null scores.
+      val result = companionDf.filter($"name" >= "a").agg(count("*")).collect()
+      result.length shouldBe 1
+      result(0).getLong(0) shouldBe 5L
+    }
+  }
+
+  test("IN filter on string column should return only the matching rows") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_in_str").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_in_str").getAbsolutePath
+
+      createLocalParquetData(parquetPath, numRows = 20)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // IN on a string field: should match exactly the specified values.
+      val result = companionDf
+        .filter(col("name").isin("name_0", "name_5", "name_10"))
+        .collect()
+
+      result.length shouldBe 3
+      val names = result.map(r => r.getString(r.fieldIndex("name"))).toSet
+      names shouldBe Set("name_0", "name_5", "name_10")
     }
   }
 }

@@ -492,7 +492,7 @@ class MergeSplitsExecutor(
     logger.info(s"Merge config: ${mergedConfigs.size} entries, tempDir=${tempDirectoryPath.getOrElse("default")}")
 
     SerializableAwsConfig(
-      configs = mergedConfigs,
+      configs = mergedConfigs + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE"),
       tablePath = tablePath.toString,
       tempDirectoryPath = tempDirectoryPath,
       heapSize = heapSize,
@@ -1794,16 +1794,33 @@ object MergeSplitsExecutor {
     val isCloudPath = isS3Path || isAzurePath
 
     // Determine temp directory for downloads
-    val tempDir = awsConfig.tempDirectoryPath
+    val configuredTempDir = awsConfig.tempDirectoryPath
       .getOrElse(
         if (MergeSplitsCommand.isLocalDisk0Available()) "/local_disk0/tantivy4spark-merge"
         else System.getProperty("java.io.tmpdir")
       )
 
-    val mergeId     = java.util.UUID.randomUUID().toString
-    val downloadDir = new java.io.File(tempDir, s"merge-download-$mergeId")
-    if (!downloadDir.mkdirs() && !downloadDir.exists()) {
-      throw new RuntimeException(s"Failed to create merge temp directory: ${downloadDir.getAbsolutePath}")
+    val mergeId = java.util.UUID.randomUUID().toString
+
+    // Try the configured temp directory; fall back to system temp if it can't be created
+    val (tempDir, downloadDir) = {
+      val primaryDir = new java.io.File(configuredTempDir, s"merge-download-$mergeId")
+      if (primaryDir.mkdirs() || primaryDir.exists()) {
+        (configuredTempDir, primaryDir)
+      } else {
+        val systemTmpDir = System.getProperty("java.io.tmpdir")
+        logger.warn(
+          s"[EXECUTOR] Failed to create merge temp directory at configured path '$configuredTempDir', " +
+            s"falling back to system temp directory: $systemTmpDir"
+        )
+        val fallbackDir = new java.io.File(systemTmpDir, s"merge-download-$mergeId")
+        if (!fallbackDir.mkdirs() && !fallbackDir.exists()) {
+          throw new RuntimeException(
+            s"Failed to create merge temp directory: tried '$configuredTempDir' and system temp '$systemTmpDir'"
+          )
+        }
+        (systemTmpDir, fallbackDir)
+      }
     }
 
     // Extract docMappingJson from first file to preserve fast fields configuration.

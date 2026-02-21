@@ -1477,7 +1477,7 @@ class PurgeOrphanedSplitsExecutor(
     // Merge with override options (override takes precedence)
     // CloudStorageProvider will handle credential resolution with proper refresh logic
     // via V1ToV2CredentialsProviderAdapter
-    overrideOptions match {
+    val base = overrideOptions match {
       case Some(overrides) =>
         val merged = sparkConfigs ++ overrides.filter { case (key, _) => key.startsWith("spark.indextables.") }
         logger.info(s"Extracted ${merged.size} spark.indextables.* configuration keys (${sparkConfigs.size} from Spark session, ${overrides.size} from override options)")
@@ -1486,6 +1486,8 @@ class PurgeOrphanedSplitsExecutor(
         logger.info(s"Extracted ${sparkConfigs.size} spark.indextables.* configuration keys from Spark session")
         sparkConfigs
     }
+    // Purge operations delete split files, so ensure PATH_READ_WRITE credentials
+    base + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
   }
 
   /**
