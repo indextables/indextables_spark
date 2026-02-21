@@ -51,7 +51,6 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Batch retrieval optimization**: 90-95% reduction in S3 GET requests (enabled by default)
 - **L2 Disk Cache**: Persistent NVMe caching, auto-enabled on Databricks/EMR when `/local_disk0` detected
 - **Optimized Writes**: Iceberg-style shuffle before writing for well-sized splits
-- **Companion/sync**: Build companion search indexes for external Delta, Parquet, and Iceberg tables
 
 ## Field Types
 
@@ -128,7 +127,7 @@ val spark = SparkSession.builder()
   .getOrCreate()
 ```
 
-Available commands: `MERGE SPLITS`, `PURGE INDEXTABLE`, `DROP INDEXTABLES PARTITIONS`, `CHECKPOINT/COMPACT INDEXTABLES`, `TRUNCATE INDEXTABLES TIME TRAVEL`, `PREWARM INDEXTABLES CACHE`, `WAIT FOR INDEXTABLES PREWARM JOBS`, `BUILD INDEXTABLES COMPANION`, `DESCRIBE INDEXTABLES STATE/DISK CACHE/STORAGE STATS/ENVIRONMENT/MERGE JOBS/COMPONENT SIZES/PREWARM JOBS/TRANSACTION LOG`, `FLUSH INDEXTABLES DISK CACHE/SEARCHER CACHE`, `INVALIDATE INDEXTABLES TRANSACTION LOG CACHE`, `REPAIR INDEXFILES TRANSACTION LOG`.
+Available commands: `MERGE SPLITS`, `PURGE INDEXTABLE`, `DROP INDEXTABLES PARTITIONS`, `CHECKPOINT/COMPACT INDEXTABLES`, `TRUNCATE INDEXTABLES TIME TRAVEL`, `PREWARM INDEXTABLES CACHE`, `DESCRIBE INDEXTABLES STATE/DISK CACHE/STORAGE STATS/ENVIRONMENT/MERGE JOBS`, `FLUSH INDEXTABLES DISK CACHE/SEARCHER CACHE`, `INVALIDATE INDEXTABLES TRANSACTION LOG CACHE`.
 
 All commands support both `INDEXTABLES` and `TANTIVY4SPARK` keywords. See `docs/reference/sql-commands.md` for full syntax, examples, and output schemas.
 
