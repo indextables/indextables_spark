@@ -402,3 +402,342 @@ FLUSH INDEXTABLES DISK CACHE;
 - Clears split locality assignments and prewarm state tracking
 - Deletes all disk cache files at the configured path
 - Useful for testing, maintenance, and troubleshooting
+
+---
+
+## Flush Searcher Cache
+
+Flush in-memory searcher caches on the driver (split cache, locality manager, tantivy4java native caches).
+
+```sql
+FLUSH INDEXTABLES SEARCHER CACHE;
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `cache_type` | String | Cache component: "split_cache", "locality_manager", "tantivy_java_cache", or "error" |
+| `status` | String | "success" or "failed" |
+| `cleared_entries` | Long | Number of entries/managers flushed |
+| `message` | String | Descriptive message |
+
+- Flushes GlobalSplitCacheManager instances (closes split cache handles)
+- Clears driver-side split locality assignments
+- Flushes tantivy4java native caches
+- Returns one row per operation with success/failure status
+
+---
+
+## Invalidate Transaction Log Cache
+
+Invalidate transaction log caches to force fresh reads from storage.
+
+```sql
+-- Global invalidation (all caches)
+INVALIDATE INDEXTABLES TRANSACTION LOG CACHE;
+
+-- For a specific table
+INVALIDATE INDEXTABLES TRANSACTION LOG CACHE FOR 's3://bucket/path';
+INVALIDATE INDEXTABLES TRANSACTION LOG CACHE FOR my_table;
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_path` | String | Table path or "GLOBAL" for global invalidation |
+| `result` | String | Descriptive result message |
+| `cache_hits_before` | Long | Total cache hits before invalidation |
+| `cache_misses_before` | Long | Total cache misses before invalidation |
+| `hit_rate_before` | String | Cache hit rate percentage (e.g., "85.3%") or "N/A" |
+
+- **Global** (no FOR clause): Clears all caches in EnhancedTransactionLogCache (actions, checkpoint, Avro manifest, filtered schema caches)
+- **Table-specific** (with FOR): Reads cache stats, then invalidates cache for that table
+- Returns hit/miss statistics collected before invalidation
+
+---
+
+## Describe Transaction Log
+
+View all transaction log actions for a table.
+
+```sql
+-- Current state (from latest checkpoint forward)
+DESCRIBE INDEXTABLES TRANSACTION LOG 's3://bucket/path';
+DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table;
+
+-- Complete history from version 0
+DESCRIBE INDEXTABLES TRANSACTION LOG 's3://bucket/path' INCLUDE ALL;
+```
+
+**Output schema (key columns -- 47 columns total):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `version` | Long | Transaction version number |
+| `log_file_path` | String | Path to the transaction log file |
+| `action_type` | String | "add", "remove", "skip", "protocol", "metadata", "unknown" |
+| `path` | String | File path (for add/remove/skip actions) |
+| `partition_values` | String | JSON map of partition values |
+| `size` | Long | File size in bytes |
+| `data_change` | Boolean | Whether action represents a data change |
+| `num_records` | Long | Number of records (add actions) |
+| `deletion_timestamp` | Timestamp | When file was deleted (remove actions) |
+| `is_checkpoint` | Boolean | True if action came from a checkpoint file |
+
+Additional columns include: `tags`, `modification_time`, `stats`, `min_values`, `max_values`, `footer_start_offset`, `footer_end_offset`, `hotcache_start_offset`, `hotcache_length`, `has_footer_offsets`, `time_range_start`, `time_range_end`, `split_tags`, `delete_opstamp`, `num_merge_ops`, `doc_mapping_json`, `doc_mapping_ref`, `uncompressed_size_bytes`, `extended_file_metadata`, `skip_timestamp`, `skip_reason`, `skip_operation`, `skip_retry_after`, `skip_count`, `protocol_min_reader_version`, `protocol_min_writer_version`, `protocol_reader_features`, `protocol_writer_features`, `metadata_id`, `metadata_name`, `metadata_description`, `metadata_format_provider`, `metadata_format_options`, `metadata_schema_string`, `metadata_partition_columns`, `metadata_configuration`, `metadata_created_time`.
+
+- Without `INCLUDE ALL`: Reads from latest checkpoint forward (more efficient for large tables)
+- With `INCLUDE ALL`: Reads complete history from version 0
+- Shows all action types: AddAction (files added), RemoveAction (files removed), SkipAction (files skipped), ProtocolAction (protocol versions), MetadataAction (schema/config)
+- Queryable via temp views for analysis
+
+```scala
+spark.sql("DESCRIBE INDEXTABLES TRANSACTION LOG '/path'").createOrReplaceTempView("txlog")
+spark.sql("SELECT version, action_type, COUNT(*) FROM txlog GROUP BY version, action_type").show()
+```
+
+---
+
+## Repair IndexFiles Transaction Log
+
+Repair corrupted or problematic transaction logs by validating split files exist and writing a clean log.
+
+```sql
+REPAIR INDEXFILES TRANSACTION LOG 's3://bucket/table/_transaction_log'
+  AT LOCATION 's3://bucket/table/_transaction_log_repaired';
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_path` | String | Source transaction log path |
+| `target_path` | String | Target (repaired) transaction log path |
+| `source_version` | Long | Version of the source transaction log (-1 on error) |
+| `total_splits` | Integer | Total splits in source |
+| `valid_splits` | Integer | Splits validated as existing in storage |
+| `missing_splits` | Integer | Splits not found in storage (excluded from repair) |
+| `status` | String | "SUCCESS" or "ERROR: message" |
+
+- **Read-only repair**: Never modifies or deletes source files
+- Validates all referenced split files actually exist in storage
+- Writes clean transaction log to a NEW location (target must not exist or be empty)
+- Applies statistics truncation automatically
+- Uses streaming write to avoid OOM for large tables
+- Source path must end with `_transaction_log`
+
+**Common scenarios:**
+- Corrupted checkpoint recovery
+- Orphaned file cleanup (create log excluding missing splits)
+- Transaction log optimization (consolidate fragmented history)
+- Migration preparation
+
+**Post-repair workflow:**
+```scala
+// 1. Run repair
+spark.sql("""REPAIR INDEXFILES TRANSACTION LOG '/path/table/_transaction_log'
+  AT LOCATION '/path/repaired/_transaction_log'""").show()
+
+// 2. Backup original and swap
+val fs = new Path(tablePath).getFileSystem(hadoopConf)
+fs.rename(originalLogPath, backupPath)
+fs.rename(repairedLogPath, originalLogPath)
+
+// 3. Table is now readable with the repaired log
+spark.read.format("io.indextables.provider.IndexTablesProvider").load(tablePath)
+```
+
+---
+
+## Describe Component Sizes
+
+Inspect per-field sub-component sizes across all splits for storage analysis.
+
+```sql
+DESCRIBE INDEXTABLES COMPONENT SIZES 's3://bucket/path';
+DESCRIBE INDEXTABLES COMPONENT SIZES my_table;
+
+-- With partition filter
+DESCRIBE INDEXTABLES COMPONENT SIZES '/path' WHERE year = '2024';
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `split_path` | String | Path to the split file |
+| `partition_values` | String | JSON map of partition key/values (null if unpartitioned) |
+| `component_key` | String | Component identifier (e.g., `score.fastfield`, `_term_total`) |
+| `size_bytes` | Long | Size in bytes |
+| `component_type` | String | Category: `fastfield`, `fieldnorm`, `term`, `postings`, `positions`, `store` |
+| `field_name` | String | Field name (null for segment-level components like `_term_total`) |
+
+- Component key formats: per-field (`{field}.fastfield`, `{field}.fieldnorm`) and segment-level (`_term_total`, `_postings_total`, `_positions_total`, `_store`)
+- Supports WHERE clause for partition filtering
+- Executes in parallel across executors
+- Queryable via temp views:
+
+```scala
+spark.sql("DESCRIBE INDEXTABLES COMPONENT SIZES '/path'").createOrReplaceTempView("components")
+spark.sql("SELECT component_type, SUM(size_bytes) FROM components GROUP BY component_type").show()
+```
+
+---
+
+## Describe Prewarm Jobs
+
+View async prewarm job status across all executors.
+
+```sql
+DESCRIBE INDEXTABLES PREWARM JOBS;
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `executor_id` | String | Executor identifier (e.g., "executor-0", "driver") |
+| `host` | String | Host address of the executor |
+| `job_id` | String | Unique job identifier |
+| `table_path` | String | Path of the table being prewarmed |
+| `status` | String | RUNNING, COMPLETED, FAILED, CANCELLED |
+| `total_splits` | Integer | Total splits to prewarm |
+| `completed_splits` | Integer | Splits prewarmed so far |
+| `progress_pct` | Double | Percentage progress |
+| `duration_ms` | Long | Duration in milliseconds |
+| `error_message` | String | Error message if failed (null otherwise) |
+
+- Collects job status from every executor and the driver
+- Each executor maintains its own async prewarm job state
+
+---
+
+## Wait For Prewarm Jobs
+
+Block until async prewarm jobs complete or timeout.
+
+```sql
+-- Wait for all jobs (1 hour default timeout)
+WAIT FOR INDEXTABLES PREWARM JOBS;
+
+-- Wait for jobs on a specific table
+WAIT FOR INDEXTABLES PREWARM JOBS 's3://bucket/table';
+WAIT FOR INDEXTABLES PREWARM JOBS my_table;
+
+-- Wait for a specific job
+WAIT FOR INDEXTABLES PREWARM JOBS JOB 'abc-123-def-456';
+
+-- Wait with custom timeout (seconds)
+WAIT FOR INDEXTABLES PREWARM JOBS TIMEOUT 300;
+
+-- Full syntax
+WAIT FOR INDEXTABLES PREWARM JOBS 's3://bucket/path' JOB 'job-123' TIMEOUT 1800;
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `executor_id` | String | Executor identifier |
+| `host` | String | Host address of the executor |
+| `job_id` | String | Unique job identifier |
+| `table_path` | String | Path of the table prewarmed |
+| `status` | String | COMPLETED, FAILED, CANCELLED, TIMEOUT, not_found |
+| `total_splits` | Integer | Total number of splits |
+| `splits_prewarmed` | Integer | Splits successfully prewarmed |
+| `duration_ms` | Long | Total duration in milliseconds |
+| `error_message` | String | Error message if failed (null otherwise) |
+
+- Polls all executors every 5 seconds
+- Default timeout: 3600 seconds (1 hour)
+- Can filter by table path, specific job ID, or both
+- Returns immediately with `not_found` if no matching jobs
+- On timeout, returns current status as `TIMEOUT (was: RUNNING)`
+
+---
+
+## Build Companion
+
+Build a companion search index for an external table (Delta, Parquet, or Iceberg).
+
+```sql
+-- Basic Delta companion
+BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta_table'
+  AT LOCATION 's3://bucket/index';
+
+-- Delta with options
+BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+  INDEXING MODES ('content':'text', 'status':'string')
+  FASTFIELDS MODE PARQUET_ONLY
+  TARGET INPUT SIZE 1G
+  WRITER HEAP SIZE 512M
+  FROM VERSION 42
+  WHERE year = '2024'
+  AT LOCATION 's3://bucket/index'
+  DRY RUN;
+
+-- Delta with Unity Catalog
+BUILD INDEXTABLES COMPANION FOR DELTA 'my_schema.events'
+  CATALOG 'unity' TYPE 'rest'
+  AT LOCATION 's3://bucket/companion';
+
+-- Parquet with schema source
+BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data'
+  SCHEMA SOURCE 's3://bucket/data/part-00000.parquet'
+  AT LOCATION 's3://bucket/index';
+
+-- Iceberg with catalog and warehouse
+BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
+  CATALOG 'uc_catalog' TYPE 'rest'
+  WAREHOUSE 's3://unity-warehouse/iceberg'
+  AT LOCATION 's3://bucket/index';
+```
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_path` | String | Destination IndexTables path |
+| `source_path` | String | Source table path |
+| `status` | String | "success", "no_action", "dry_run", or "error" |
+| `source_version` | Long | Delta version, Iceberg snapshot ID, or null |
+| `splits_created` | Integer | Companion splits created |
+| `splits_invalidated` | Integer | Companion splits invalidated |
+| `parquet_files_indexed` | Integer | Parquet files processed |
+| `parquet_bytes_downloaded` | Long | Bytes downloaded from source |
+| `split_bytes_uploaded` | Long | Bytes uploaded for splits |
+| `duration_ms` | Long | Duration in milliseconds |
+| `message` | String | Descriptive status message |
+
+**Options:**
+
+| Option | Applies To | Description |
+|--------|-----------|-------------|
+| `SCHEMA SOURCE path` | Parquet only | Path to a parquet file for schema inference |
+| `CATALOG name` | Delta, Iceberg | Catalog name for table resolution |
+| `TYPE type` | Delta, Iceberg | Catalog type (e.g., "rest" for Unity Catalog) |
+| `WAREHOUSE path` | Iceberg only | Warehouse path |
+| `INDEXING MODES (...)` | All | Per-field indexing modes, e.g., `('content':'text', 'ip_addr':'ipaddress')` |
+| `FASTFIELDS MODE` | All | HYBRID (default), DISABLED, or PARQUET_ONLY |
+| `TARGET INPUT SIZE size` | All | Max input size per indexing group (default: 2GB) |
+| `WRITER HEAP SIZE size` | All | Writer heap memory per executor |
+| `FROM VERSION n` | Delta only | Start from a specific Delta version |
+| `FROM SNAPSHOT n` | Iceberg only | Start from a specific snapshot ID |
+| `WHERE predicate` | All | Partition filter predicate |
+| `DRY RUN` | All | Preview without creating splits |
+
+**Configuration:**
+```scala
+spark.indextables.companion.sync.batchSize: <defaultParallelism> (indexing tasks per batch)
+spark.indextables.companion.sync.maxConcurrentBatches: 6
+spark.indextables.companion.writerHeapSize: 1G
+spark.indextables.companion.readerBatchSize: 8192
+spark.indextables.companion.schedulerPool: "indextables-companion" (FAIR scheduler pool)
+```
+
+- Creates minimal Quickwit splits that reference external parquet files (45-70% split size reduction)
+- Supports incremental sync via anti-join reconciliation (detects new/removed parquet files)
+- Batched concurrent dispatch using Spark's FAIR scheduler
+- Companion index is read via standard IndexTables DataSource API
