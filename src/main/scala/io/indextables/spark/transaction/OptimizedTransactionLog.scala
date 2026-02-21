@@ -998,57 +998,54 @@ class OptimizedTransactionLog(
         }
 
         // In Avro mode, checkpoint is the complete source of truth - no JSON versions to scan
+        // NOTE: Do NOT use `return` here - it causes a non-local return from the enclosing
+        // getMetadata() method, bypassing getOrComputeMetadata's globalMetadataCache.put().
         if (isAvroMode && baseMetadata.isDefined) {
           logger.info("Avro mode: using checkpoint metadata directly (no version scanning needed)")
-          return baseMetadata.get
-        }
+          baseMetadata.get
+        } else {
+          logger.info(
+            s"getMetadata: NOT using Avro shortcut (isAvroMode=$isAvroMode, baseMetadata=${baseMetadata.isDefined})"
+          )
 
-        logger.info(
-          s"getMetadata: NOT using Avro shortcut (isAvroMode=$isAvroMode, baseMetadata=${baseMetadata.isDefined})"
-        )
+          // JSON mode: Check versions AFTER checkpoint for MetadataAction updates
+          // Schema deduplication may have registered new schemas after the checkpoint
+          val latestVersion = getLatestVersion()
+          val startVersion  = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
 
-        // JSON mode: Check versions AFTER checkpoint for MetadataAction updates
-        // Schema deduplication may have registered new schemas after the checkpoint
-        val latestVersion = getLatestVersion()
-        val startVersion  = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
-
-        // Search from checkpoint+1 to latest for any metadata updates
-        for (version <- latestVersion to startVersion by -1) {
-          val actions = readVersionOptimized(version)
-          actions.collectFirst { case metadata: MetadataAction => metadata } match {
-            case Some(metadata) =>
-              // Found newer metadata - merge schema registries
+          // Search from checkpoint+1 to latest for any metadata updates
+          val versionMetadata: Option[MetadataAction] = (latestVersion to startVersion by -1).view
+            .flatMap(v => readVersionOptimized(v).collectFirst { case m: MetadataAction => (v, m) })
+            .headOption
+            .map { case (version, metadata) =>
               baseMetadata match {
                 case Some(base) =>
-                  // Merge configurations: newer entries override older ones
                   val mergedConfig = base.configuration ++ metadata.configuration
                   logger.info(s"Merging metadata from version $version with checkpoint (${metadata.configuration.size} + ${base.configuration.size} = ${mergedConfig.size} config entries)")
-                  return metadata.copy(configuration = mergedConfig)
+                  metadata.copy(configuration = mergedConfig)
                 case None =>
                   logger.info(s"Found metadata in version $version")
-                  return metadata
-              }
-            case None => // Continue searching
-          }
-        }
-
-        // If we found checkpoint metadata but no newer updates, return checkpoint metadata
-        baseMetadata match {
-          case Some(metadata) =>
-            logger.info("Using checkpoint metadata (no newer updates found)")
-            return metadata
-          case None =>
-            // No checkpoint, search all versions from latest to 0
-            for (version <- latestVersion to 0L by -1) {
-              val actions = readVersionOptimized(version)
-              actions.collectFirst { case metadata: MetadataAction => metadata } match {
-                case Some(metadata) => return metadata
-                case None           => // Continue searching
+                  metadata
               }
             }
-        }
 
-        throw new RuntimeException("No metadata found in transaction log")
+          versionMetadata.getOrElse {
+            // No newer metadata in version files - try checkpoint metadata
+            baseMetadata.map { m =>
+              logger.info("Using checkpoint metadata (no newer updates found)")
+              m
+            }.getOrElse {
+              // No checkpoint either - search all versions from latest to 0
+              val fallback = (latestVersion to 0L by -1).view
+                .flatMap(v => readVersionOptimized(v).collectFirst { case m: MetadataAction => m })
+                .headOption
+
+              fallback.getOrElse(
+                throw new RuntimeException("No metadata found in transaction log")
+              )
+            }
+          }
+        }
       }
     )
 
@@ -1125,40 +1122,36 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing protocol from transaction log")
 
+        // NOTE: Do NOT use `return` here - it causes a non-local return from the enclosing
+        // getProtocol() method, bypassing getOrComputeProtocol's globalProtocolCache.put().
+
+        // Try checkpoint first if available - uses cached checkpoint actions
+        val baseProtocol: Option[ProtocolAction] = getCheckpointActionsCached().flatMap { actions =>
+          actions.collectFirst { case protocol: ProtocolAction => protocol }.map { protocol =>
+            logger.info("Found protocol in checkpoint (cached)")
+            protocol
+          }
+        }
+
         // Check if we're in Avro mode - checkpoint is complete source of truth
         val checkpointInfoOpt = getLastCheckpointInfoCached()
         val isAvroMode        = checkpointInfoOpt.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
 
-        // Try checkpoint first if available - uses cached checkpoint actions
-        getCheckpointActionsCached() match {
-          case Some(checkpointActions) =>
-            checkpointActions.collectFirst { case protocol: ProtocolAction => protocol } match {
-              case Some(protocol) =>
-                logger.info("Found protocol in checkpoint (cached)")
-                return protocol
-              case None =>
-              // No protocol in checkpoint, continue searching in version files
-            }
-          case None =>
-          // No checkpoint, continue with version files
-        }
+        if (isAvroMode && baseProtocol.isDefined) {
+          baseProtocol.get
+        } else {
+          // Look for protocol in reverse chronological order
+          val latestVersion = getLatestVersion()
+          val versionProtocol = (latestVersion to 0L by -1).view
+            .flatMap(v => readVersionOptimized(v).collectFirst { case p: ProtocolAction => p })
+            .headOption
 
-        // In Avro mode with checkpoint, we already returned above if protocol was found
-        // If we get here in Avro mode, fall through to version file search (handles edge cases)
-
-        // Look for protocol in reverse chronological order
-        val latestVersion = getLatestVersion()
-        for (version <- latestVersion to 0L by -1) {
-          val actions = readVersionOptimized(version)
-          actions.collectFirst { case protocol: ProtocolAction => protocol } match {
-            case Some(protocol) => return protocol
-            case None           => // Continue searching
+          versionProtocol.orElse(baseProtocol).getOrElse {
+            // No protocol found - default to version 1 for legacy tables
+            logger.warn(s"No protocol action found in transaction log at $tablePath, defaulting to version 1 (legacy table)")
+            ProtocolVersion.legacyProtocol()
           }
         }
-
-        // No protocol found - default to version 1 for legacy tables
-        logger.warn(s"No protocol action found in transaction log at $tablePath, defaulting to version 1 (legacy table)")
-        ProtocolVersion.legacyProtocol()
       }
     )
 
