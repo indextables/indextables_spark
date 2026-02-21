@@ -159,9 +159,9 @@ object PartitionPredicateUtils {
    * @return
    *   Typed value suitable for InternalRow storage
    */
-  private def convertPartitionValue(value: String, dataType: DataType): Any =
+  private def convertPartitionValue(value: String, dataType: DataType): Any = {
     if (value == null) return null
-    try
+    try {
       dataType match {
         case StringType    => UTF8String.fromString(value)
         case IntegerType   => value.toInt
@@ -193,11 +193,12 @@ object PartitionPredicateUtils {
           logger.debug(s"Unknown partition column type ${dataType.simpleString}, using string representation")
           UTF8String.fromString(value)
       }
-    catch {
+    } catch {
       case e: Exception =>
         logger.warn(s"Failed to convert partition value '$value' to ${dataType.simpleString}: ${e.getMessage}, falling back to string")
         UTF8String.fromString(value)
     }
+  }
 
   /**
    * Resolve an expression against a schema to handle UnresolvedAttribute references and ensure type-correct literal
