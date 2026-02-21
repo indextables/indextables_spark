@@ -2361,21 +2361,55 @@ class IndexTables4SparkGroupByAggregateReader(
     // Build filter query to count matching documents
     val query = buildFilterQuery(splitSearchEngine)
 
-    // Execute a simple count aggregation to get document count matching filters
-    val countAgg = new io.indextables.tantivy4java.aggregation.CountAggregation("count_agg")
-    val result   = searcher.search(query, 0, "count_agg", countAgg)
+    // CountAggregation(name, fieldName) uses Tantivy's value_count on a fast field.
+    // The single-arg constructor CountAggregation(fieldName) treats its argument as the
+    // field name (not the aggregation name), so calling it as CountAggregation("count_agg")
+    // would create value_count on a non-existent field "count_agg" and name the aggregation
+    // "count_count_agg" — causing getAggregation("count_agg") to always return null → 0.
+    //
+    // Priority for the count field:
+    //   1. Companion tracking fields (__pq_file_hash / __pq_row_in_file) — always non-null.
+    //   2. The explicit COUNT(col) column, if it is a fast field.
+    //   3. Any other fast field from the split's docMapping.
+    val fastFields =
+      io.indextables.spark.transaction.EnhancedTransactionLogCache
+        .getDocMappingMetadata(partition.split)
+        .fastFields
 
-    val docCount = if (result.hasAggregations()) {
-      val countResult = result.getAggregation("count_agg")
-      if (countResult != null) {
-        countResult.asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult].getCount
-      } else {
-        // Fallback to hits size if count aggregation not available
-        Option(result.getHits).map(_.size.toLong).getOrElse(0L)
+    val countFieldOpt: Option[String] =
+      if (fastFields.contains("__pq_file_hash")) Some("__pq_file_hash")
+      else if (fastFields.contains("__pq_row_in_file")) Some("__pq_row_in_file")
+      else {
+        val colFromAgg = partition.aggregation.aggregateExpressions.collectFirst {
+          case count: Count =>
+            val fieldName = getFieldName(count.column)
+            if (fastFields.contains(fieldName)) Some(fieldName) else None
+        }.flatten
+        colFromAgg.orElse(if (fastFields.nonEmpty) Some(fastFields.head) else None)
       }
-    } else {
-      // Fallback to hits size if no aggregations
-      Option(result.getHits).map(_.size.toLong).getOrElse(0L)
+
+    val docCount = countFieldOpt match {
+      case Some(countField) =>
+        val countAgg = new io.indextables.tantivy4java.aggregation.CountAggregation("count_agg", countField)
+        val result   = searcher.search(query, 0, "count_agg", countAgg)
+        if (result.hasAggregations()) {
+          val countResult = result.getAggregation("count_agg")
+          if (countResult != null)
+            countResult.asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult].getCount
+          else {
+            logger.warn(s"GROUP BY OPTIMIZATION: count_agg result was null for split ${partition.split.path}")
+            0L
+          }
+        } else {
+          logger.warn(s"GROUP BY OPTIMIZATION: no aggregation results returned for split ${partition.split.path}")
+          0L
+        }
+      case None =>
+        logger.warn(
+          s"GROUP BY OPTIMIZATION: no fast fields available in split ${partition.split.path} — " +
+            s"document count may be inaccurate (returning partition numRecords)"
+        )
+        partition.split.numRecords.getOrElse(0L)
     }
 
     logger.info(s"GROUP BY OPTIMIZATION: Split has $docCount documents matching filters")

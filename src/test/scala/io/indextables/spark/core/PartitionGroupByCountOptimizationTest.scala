@@ -199,6 +199,103 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
     }
   }
 
+  test("GROUP BY partition-only with non-partition data filter should return correct count (not zero)") {
+    val sparkImplicits = spark.implicits
+    import sparkImplicits._
+
+    withTempPath { tempDir =>
+      val tablePath = s"$tempDir/partition_only_data_filter_test"
+
+      // 6 docs across 2 dates; "category" is a non-partition data column used as the filter
+      val data = Seq(
+        ("doc1", "A", "2024-01-01"),
+        ("doc2", "A", "2024-01-01"),
+        ("doc3", "B", "2024-01-01"),
+        ("doc4", "A", "2024-01-02"),
+        ("doc5", "B", "2024-01-02"),
+        ("doc6", "B", "2024-01-02")
+      ).toDF("id", "category", "load_date")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("load_date")
+        .option("spark.indextables.indexing.fastfields", "category")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // Bug: SELECT partition_col, COUNT(col) WHERE non_partition_col='val'
+      // previously returned 0 because executePartitionOnlyAggregation used
+      // CountAggregation("count_agg") — treating the agg name as the field name.
+      println("🧪 TEST: GROUP BY load_date, COUNT(id) WHERE category='A'")
+      val result = df
+        .filter($"category" === "A")
+        .groupBy("load_date")
+        .agg(count("id").as("cnt"))
+        .orderBy("load_date")
+        .collect()
+
+      println("🧪 Results:")
+      result.foreach(row => println(s"  ${row.getString(0)} => ${row.getLong(1)}"))
+
+      result.length should be(2)
+      result(0).getString(0) should be("2024-01-01")
+      result(0).getLong(1) should be(2) // doc1, doc2
+
+      result(1).getString(0) should be("2024-01-02")
+      result(1).getLong(1) should be(1) // doc4
+    }
+  }
+
+  test("GROUP BY partition-only with COUNT(*) and non-partition data filter should return correct count") {
+    val sparkImplicits = spark.implicits
+    import sparkImplicits._
+
+    withTempPath { tempDir =>
+      val tablePath = s"$tempDir/partition_only_count_star_data_filter_test"
+
+      val data = Seq(
+        ("doc1", "A", "2024-01-01"),
+        ("doc2", "A", "2024-01-01"),
+        ("doc3", "B", "2024-01-01"),
+        ("doc4", "A", "2024-01-02"),
+        ("doc5", "B", "2024-01-02")
+      ).toDF("id", "category", "load_date")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .partitionBy("load_date")
+        .option("spark.indextables.indexing.fastfields", "category")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      println("🧪 TEST: GROUP BY load_date, COUNT(*) WHERE category='A'")
+      val result = df
+        .filter($"category" === "A")
+        .groupBy("load_date")
+        .agg(count("*").as("cnt"))
+        .orderBy("load_date")
+        .collect()
+
+      println("🧪 Results:")
+      result.foreach(row => println(s"  ${row.getString(0)} => ${row.getLong(1)}"))
+
+      result.length should be(2)
+      result(0).getString(0) should be("2024-01-01")
+      result(0).getLong(1) should be(2) // doc1, doc2
+
+      result(1).getString(0) should be("2024-01-02")
+      result(1).getLong(1) should be(1) // doc4
+    }
+  }
+
   test("GROUP BY mix of partition and non-partition columns should NOT use transaction log") {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
