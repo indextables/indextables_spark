@@ -138,9 +138,8 @@ case class DropPartitionsCommand(
         s"Found ${metadata.partitionColumns.size} partition columns: ${metadata.partitionColumns.mkString(", ")}"
       )
 
-      // Build partition schema with real types from full table schema
-      val fullSchema      = PartitionPredicateUtils.extractFullSchema(metadata)
-      val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns, fullSchema)
+      // Build partition schema with real types from full table schema (cached in TransactionLog)
+      val partitionSchema = transactionLog.getPartitionSchema()
 
       // Parse and validate predicates (will throw if invalid columns are referenced)
       val parsedPredicates = PartitionPredicateUtils.parseAndValidatePredicates(

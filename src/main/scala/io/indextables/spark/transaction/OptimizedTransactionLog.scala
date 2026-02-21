@@ -1309,6 +1309,74 @@ class OptimizedTransactionLog(
   def isPartitioned(): Boolean =
     getPartitionColumns().nonEmpty
 
+  /**
+   * Cached full Spark schema parsed from MetadataAction.schemaString.
+   *
+   * Parsing schemaString JSON (via DataType.fromJson) costs 20-30ms for wide tables. This method
+   * caches the result so the parse is performed at most once per TransactionLog instance, avoiding
+   * repeated parsing on the hot path (e.g., partition predicate evaluation in SQL commands).
+   *
+   * Thread-safe via @volatile + synchronization on first computation.
+   *
+   * @return Some(StructType) if the schema can be parsed, None if parsing fails
+   */
+  @volatile private var cachedSparkSchema: Option[Option[StructType]] = None
+  private val sparkSchemaLock = new Object()
+
+  def getSparkSchema(): Option[StructType] =
+    cachedSparkSchema match {
+      case Some(schema) => schema
+      case None =>
+        sparkSchemaLock.synchronized {
+          cachedSparkSchema match {
+            case Some(schema) => schema
+            case None =>
+              val schema = try {
+                val metadata = getMetadata()
+                import org.apache.spark.sql.types.DataType
+                Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"Failed to parse schema from MetadataAction: ${e.getMessage}")
+                  None
+              }
+              cachedSparkSchema = Some(schema)
+              schema
+          }
+        }
+    }
+
+  /**
+   * Cached partition schema with real column types derived from the full table schema.
+   *
+   * Combines getSparkSchema() (cached) and getPartitionColumns() (cached via getMetadata()) to
+   * build a StructType containing only partition columns with their real types from the full schema.
+   * Falls back to StringType if the full schema is unavailable.
+   *
+   * Thread-safe via @volatile + synchronization on first computation.
+   *
+   * @return StructType with partition columns using their real types
+   */
+  @volatile private var cachedPartitionSchema: Option[StructType] = None
+  private val partitionSchemaLock = new Object()
+
+  def getPartitionSchema(): StructType =
+    cachedPartitionSchema match {
+      case Some(schema) => schema
+      case None =>
+        partitionSchemaLock.synchronized {
+          cachedPartitionSchema match {
+            case Some(schema) => schema
+            case None =>
+              val fullSchema = getSparkSchema()
+              val partitionColumns = getPartitionColumns()
+              val schema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
+              cachedPartitionSchema = Some(schema)
+              schema
+          }
+        }
+    }
+
   /** Get last checkpoint version (cached) */
   def getLastCheckpointVersion(): Option[Long] =
     getLastCheckpointInfoCached().map(_.version)

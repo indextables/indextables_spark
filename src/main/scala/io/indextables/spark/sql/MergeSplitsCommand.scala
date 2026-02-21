@@ -575,8 +575,7 @@ class MergeSplitsExecutor(
       logger.debug(s"MERGE DEBUG: Configuration has ${metadata.configuration.size} entries")
     }
 
-    val fullSchema      = PartitionPredicateUtils.extractFullSchema(metadata)
-    val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns, fullSchema)
+    val partitionSchema = transactionLog.getPartitionSchema()
 
     logger.debug(s"MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
 
@@ -1541,8 +1540,7 @@ class MergeSplitsExecutor(
 
       // Apply partition predicates if specified
       val filteredPartitions = if (partitionPredicates.nonEmpty) {
-        val countFullSchema      = PartitionPredicateUtils.extractFullSchema(metadata)
-        val partitionSchema      = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns, countFullSchema)
+        val partitionSchema = transactionLog.getPartitionSchema()
         applyPartitionPredicates(partitionsToMerge, partitionSchema)
       } else {
         partitionsToMerge

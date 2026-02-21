@@ -155,10 +155,9 @@ case class PrewarmCacheCommand(
     )
 
     try {
-      // Get partition schema for predicate validation (with real types from full table schema)
-      val metadata        = transactionLog.getMetadata()
-      val fullSchema      = PartitionPredicateUtils.extractFullSchema(metadata)
-      val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns, fullSchema)
+      // Get partition schema for predicate validation (with real types from full table schema, cached)
+      val metadata           = transactionLog.getMetadata()
+      val partitionSchema    = transactionLog.getPartitionSchema()
       val partitionColumnSet = metadata.partitionColumns.map(_.toLowerCase).toSet
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
@@ -451,10 +450,9 @@ case class PrewarmCacheCommand(
     )
 
     try {
-      // Get partition schema for predicate validation (with real types from full table schema)
-      val metadata             = transactionLog.getMetadata()
-      val asyncFullSchema      = PartitionPredicateUtils.extractFullSchema(metadata)
-      val partitionSchema      = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns, asyncFullSchema)
+      // Get partition schema for predicate validation (with real types from full table schema, cached)
+      val metadata        = transactionLog.getMetadata()
+      val partitionSchema = transactionLog.getPartitionSchema()
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {

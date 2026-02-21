@@ -159,6 +159,12 @@ class TransactionLogAdapter(
   override def getSchema(): Option[org.apache.spark.sql.types.StructType] =
     optimizedLog.getSchema()
 
+  override def getSparkSchema(): Option[org.apache.spark.sql.types.StructType] =
+    optimizedLog.getSparkSchema()
+
+  override def getPartitionSchema(): org.apache.spark.sql.types.StructType =
+    optimizedLog.getPartitionSchema()
+
   override def getLastCheckpointVersion(): Option[Long] =
     optimizedLog.getLastCheckpointVersion()
 

@@ -102,9 +102,7 @@ case class DescribeComponentSizesCommand(
 
       try {
         // Get partition schema for predicate validation (with real types from full table schema)
-        val metadata        = transactionLog.getMetadata()
-        val fullSchema      = PartitionPredicateUtils.extractFullSchema(metadata)
-        val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns, fullSchema)
+        val partitionSchema = transactionLog.getPartitionSchema()
 
         // Parse predicates and convert to Spark Filters for Avro manifest pruning
         val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {

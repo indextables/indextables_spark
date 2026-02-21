@@ -431,24 +431,6 @@ object PartitionPredicateUtils {
     }
 
   /**
-   * Extract the full table schema from MetadataAction.schemaString. This is used to determine the real types of
-   * partition columns for type-aware predicate evaluation.
-   *
-   * @param metadata
-   *   The MetadataAction containing the schemaString
-   * @return
-   *   Some(StructType) if the schema can be parsed, None otherwise
-   */
-  def extractFullSchema(metadata: MetadataAction): Option[StructType] =
-    try
-      Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
-    catch {
-      case e: Exception =>
-        logger.warn(s"Failed to parse schema from MetadataAction: ${e.getMessage}")
-        None
-    }
-
-  /**
    * Convert Catalyst Expression predicates to Spark sources Filter objects for Avro manifest pruning.
    *
    * This enables commands like PREWARM, DROP PARTITIONS, and MERGE SPLITS to benefit from partition-based manifest
