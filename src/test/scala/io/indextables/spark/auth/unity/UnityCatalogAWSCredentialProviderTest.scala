@@ -705,6 +705,87 @@ class UnityCatalogAWSCredentialProviderTest
     requestLog.count(_.path.contains("tables")) shouldBe 2 // Two different tables = two requests
   }
 
+  // ==================== Cache Poisoning Regression Tests ====================
+
+  test("PATH_READ cached credentials do not satisfy PATH_READ_WRITE request") {
+    val callCount = new AtomicInteger(0)
+
+    setupMockHandlerWithCallback { request =>
+      val num = callCount.incrementAndGet()
+      if (request.body.contains("PATH_READ_WRITE")) {
+        (200, successResponse(accessKeyId = s"WRITE_KEY_$num"))
+      } else {
+        (200, successResponse(accessKeyId = s"READ_KEY_$num"))
+      }
+    }
+
+    // First: create a PATH_READ provider and fetch credentials (populates cache)
+    val readConfig = configMap + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    val readProvider = UnityCatalogAWSCredentialProvider.fromConfig(
+      new URI("s3://test-bucket/table"),
+      readConfig
+    )
+    val readCreds = readProvider.getCredentials()
+    assert(readCreds.getAWSAccessKeyId == "READ_KEY_1")
+    assert(requestLog.size == 1)
+    assert(requestLog.last.body.contains("PATH_READ"))
+    assert(!requestLog.last.body.contains("PATH_READ_WRITE"))
+
+    // Second: create a PATH_READ_WRITE provider for the SAME path
+    val writeConfig = configMap + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+    val writeProvider = UnityCatalogAWSCredentialProvider.fromConfig(
+      new URI("s3://test-bucket/table"),
+      writeConfig
+    )
+    val writeCreds = writeProvider.getCredentials()
+
+    // Must get WRITE credentials, NOT the cached READ credentials
+    assert(writeCreds.getAWSAccessKeyId == "WRITE_KEY_2",
+      "PATH_READ_WRITE should get its own credentials, not reuse cached PATH_READ credentials")
+    assert(requestLog.size == 2, "Should have made a second API call for PATH_READ_WRITE")
+    assert(requestLog.last.body.contains("PATH_READ_WRITE"))
+  }
+
+  test("PATH_READ_WRITE cached credentials do not satisfy PATH_READ request") {
+    val callCount = new AtomicInteger(0)
+
+    setupMockHandlerWithCallback { request =>
+      val num = callCount.incrementAndGet()
+      if (request.body.contains("PATH_READ_WRITE")) {
+        (200, successResponse(accessKeyId = s"WRITE_KEY_$num"))
+      } else {
+        (200, successResponse(accessKeyId = s"READ_KEY_$num"))
+      }
+    }
+
+    // First: create a PATH_READ_WRITE provider and fetch credentials (populates cache)
+    val writeConfig = configMap + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+    val writeProvider = UnityCatalogAWSCredentialProvider.fromConfig(
+      new URI("s3://test-bucket/table"),
+      writeConfig
+    )
+    val writeCreds = writeProvider.getCredentials()
+    assert(writeCreds.getAWSAccessKeyId == "WRITE_KEY_1")
+    assert(requestLog.size == 1)
+
+    // Second: create a PATH_READ provider for the SAME path
+    val readConfig = configMap + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    val readProvider = UnityCatalogAWSCredentialProvider.fromConfig(
+      new URI("s3://test-bucket/table"),
+      readConfig
+    )
+    val readCreds = readProvider.getCredentials()
+
+    // Must get READ credentials, NOT the cached WRITE credentials
+    assert(readCreds.getAWSAccessKeyId == "READ_KEY_2",
+      "PATH_READ should get its own credentials, not reuse cached PATH_READ_WRITE credentials")
+    assert(requestLog.size == 2, "Should have made a second API call for PATH_READ")
+    assert(requestLog.last.body.contains("PATH_READ"))
+    assert(!requestLog.last.body.contains("PATH_READ_WRITE"))
+  }
+
+  // ==================== Table Resolution Tests (continued) ====================
+
   test("resolveTableId is consistent with resolveTableInfo.tableId") {
     val tableResponse =
       """{

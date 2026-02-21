@@ -378,7 +378,8 @@ object SyncTaskExecutor {
     // Remove source table ID from config so uploads resolve credentials for the
     // DESTINATION path, not the source Iceberg table. The table ID is only valid
     // for the source table's storage location.
-    val uploadConfig = storageConfig - "spark.indextables.iceberg.uc.tableId"
+    val uploadConfig = storageConfig - "spark.indextables.iceberg.uc.tableId" +
+      ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(localPath, destPath, uploadConfig, tablePath)
   }
 

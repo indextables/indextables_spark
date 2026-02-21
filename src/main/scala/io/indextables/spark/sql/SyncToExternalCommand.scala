@@ -147,7 +147,8 @@ case class SyncToExternalCommand(
     val hadoopConf        = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs      = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs     = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+      ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
     // For Iceberg and Delta + table credential providers: auto-derive catalog config
     // defaults, resolve the table UUID (and storage location for Delta) on the driver,

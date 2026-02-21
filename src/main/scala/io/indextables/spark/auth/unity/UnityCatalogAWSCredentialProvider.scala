@@ -97,7 +97,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
    */
   override def getCredentials(): AWSCredentials = {
     val path     = extractPath(uri)
-    val cacheKey = buildCacheKey(token, path)
+    val cacheKey = buildCacheKey(token, credentialOperation, path)
 
     logger.debug(s"Getting credentials for path: $path")
 
@@ -131,7 +131,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   /** Refresh credentials (forced refresh, bypassing cache). */
   override def refresh(): Unit = {
     val path     = extractPath(uri)
-    val cacheKey = buildCacheKey(token, path)
+    val cacheKey = buildCacheKey(token, credentialOperation, path)
 
     logger.info(s"Refreshing credentials for path: $path")
 
@@ -390,14 +390,16 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     }
 
   /**
-   * Build a cache key that includes token identity for multi-user support.
+   * Build a cache key that includes token identity and credential operation for multi-user support.
    *
-   * Format: tokenHash:path This ensures different API tokens get separate cached credentials.
+   * Format: tokenHash:credentialOperation:path This ensures different API tokens AND different
+   * credential operations (PATH_READ vs PATH_READ_WRITE) get separate cached credentials,
+   * preventing read queries from poisoning the write credential cache.
    */
-  private def buildCacheKey(token: String, path: String): String = {
+  private def buildCacheKey(token: String, credentialOperation: String, path: String): String = {
     // Use hash of token to avoid storing the full token in memory
     val tokenHash = Integer.toHexString(token.hashCode)
-    s"$tokenHash:$path"
+    s"$tokenHash:$credentialOperation:$path"
   }
 
   /** Log cache statistics for monitoring. */
