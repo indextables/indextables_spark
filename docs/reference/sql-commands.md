@@ -471,7 +471,7 @@ DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table;
 DESCRIBE INDEXTABLES TRANSACTION LOG 's3://bucket/path' INCLUDE ALL;
 ```
 
-**Output schema (key columns -- 41 columns total):**
+**Output schema (key columns -- 47 columns total):**
 
 | Column | Type | Description |
 |--------|------|-------------|
