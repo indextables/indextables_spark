@@ -615,6 +615,25 @@ class IndexTables4SparkSimpleAggregateReader(
               //           docMapping, 3) string fast field, 4) auto-fast-field from schema
               logger.debug(s"COUNT(*) FIELD SELECTION: Looking for fast field for COUNT(*) aggregation")
 
+              // Prefer numeric fast fields over string fast fields for counting performance
+              val numericTypes: Set[DataType] =
+                Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
+
+              val fastFieldsFromDocMapping = getFastFieldsFromDocMapping()
+
+              // Companion splits carry __pq_file_hash and __pq_row_in_file as non-null u64 fast
+              // fields on every indexed document. Using a user field for COUNT(*) is incorrect when
+              // that field has nulls — value_count skips null entries, undercounting the split.
+              // The companion tracking fields never have nulls, so always prefer them.
+              val companionTrackingField =
+                if (fastFieldsFromDocMapping.contains("__pq_file_hash")) Some("__pq_file_hash")
+                else if (fastFieldsFromDocMapping.contains("__pq_row_in_file")) Some("__pq_row_in_file")
+                else None
+
+              companionTrackingField.foreach(f =>
+                logger.debug(s"COUNT(*) FIELD SELECTION: Companion split — using tracking field '$f' (guaranteed non-null)")
+              )
+
               // Try to find a numeric field from other aggregations first (guaranteed to be fast)
               val fieldFromAgg = partition.aggregation.aggregateExpressions.collectFirst {
                 case sum: Sum     => Some(getFieldName(sum.column))
@@ -623,35 +642,31 @@ class IndexTables4SparkSimpleAggregateReader(
                 case count: Count => Some(getFieldName(count.column))
               }.flatten
 
-              // Prefer numeric fast fields over string fast fields for counting performance
-              val numericTypes: Set[DataType] =
-                Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
+              val selectedField = companionTrackingField.getOrElse {
+                fieldFromAgg.getOrElse {
+                  if (fastFieldsFromDocMapping.nonEmpty) {
+                    val numericFastField = fastFieldsFromDocMapping.find { fieldName =>
+                      partition.schema.fields.find(_.name == fieldName).exists(f => numericTypes.contains(f.dataType))
+                    }
+                    val field = numericFastField.getOrElse(fastFieldsFromDocMapping.head)
+                    logger.debug(s"COUNT(*) FIELD SELECTION: Using fast field from docMapping: '$field' (numeric preferred: ${numericFastField.isDefined})")
+                    field
+                  } else {
+                    // No docMapping fast fields - fall back to auto-fast-field, numeric first
+                    val numericField = partition.schema.fields
+                      .find(f => numericTypes.contains(f.dataType))
+                      .map(_.name)
 
-              val selectedField = fieldFromAgg.getOrElse {
-                val fastFieldsFromDocMapping = getFastFieldsFromDocMapping()
+                    val autoFastField = numericField.orElse {
+                      partition.schema.fields.find(_.dataType == StringType).map(_.name)
+                    }
 
-                if (fastFieldsFromDocMapping.nonEmpty) {
-                  val numericFastField = fastFieldsFromDocMapping.find { fieldName =>
-                    partition.schema.fields.find(_.name == fieldName).exists(f => numericTypes.contains(f.dataType))
-                  }
-                  val field = numericFastField.getOrElse(fastFieldsFromDocMapping.head)
-                  logger.debug(s"COUNT(*) FIELD SELECTION: Using fast field from docMapping: '$field' (numeric preferred: ${numericFastField.isDefined})")
-                  field
-                } else {
-                  // No docMapping fast fields - fall back to auto-fast-field, numeric first
-                  val numericField = partition.schema.fields
-                    .find(f => numericTypes.contains(f.dataType))
-                    .map(_.name)
-
-                  val autoFastField = numericField.orElse {
-                    partition.schema.fields.find(_.dataType == StringType).map(_.name)
-                  }
-
-                  autoFastField.getOrElse {
-                    throw new IllegalArgumentException(
-                      s"COUNT(*) aggregation requires at least one fast field. " +
-                        s"Please configure a fast field using spark.indextables.indexing.fastfields."
-                    )
+                    autoFastField.getOrElse {
+                      throw new IllegalArgumentException(
+                        s"COUNT(*) aggregation requires at least one fast field. " +
+                          s"Please configure a fast field using spark.indextables.indexing.fastfields."
+                      )
+                    }
                   }
                 }
               }
