@@ -625,6 +625,111 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       spark.conf.unset("spark.indextables.state.format")
   }
 
+  // ==========================================================================
+  // IT-036: Numeric Partition Predicate Regression Tests
+  // These tests verify correct numeric comparison for partition predicates.
+  // With the old code (lexicographic), these would fail because "10" < "2".
+  // ==========================================================================
+
+  test("IT-036 REGRESSION: DROP PARTITIONS with numeric month > 9 should correctly identify months 10-12") {
+    val tablePath = s"$tempDir/it036_numeric_gt"
+
+    val sparkSession = spark
+    import sparkSession.implicits._
+
+    // Write data with integer month partitions 1-12
+    val data = (1 to 12).map(m => (m, s"data_$m", m)).toDF("id", "name", "month")
+
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .partitionBy("month")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Verify initial data
+    val beforeDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    assert(beforeDrop.count() == 12)
+
+    // Drop partitions where month > 9 — should remove months 10, 11, 12
+    // BUG: With lexicographic comparison, "10" < "9" so months 10-12 would NOT match month > 9
+    val result = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE month > 9").collect()
+    assert(result.length == 1)
+    assert(result(0).getString(1) == "success")
+    assert(result(0).getLong(2) == 3, s"Expected 3 partitions dropped (10, 11, 12), got ${result(0).getLong(2)}")
+
+    // Verify data after drop - should only see months 1-9
+    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    assert(afterDrop.count() == 9, s"Expected 9 records after drop, got ${afterDrop.count()}")
+
+    // Verify each remaining month
+    for (m <- 1 to 9) {
+      assert(afterDrop.filter($"month" === m).count() == 1, s"Month $m should still exist")
+    }
+    for (m <- 10 to 12) {
+      assert(afterDrop.filter($"month" === m).count() == 0, s"Month $m should be dropped")
+    }
+  }
+
+  test("IT-036 REGRESSION: DROP PARTITIONS with numeric BETWEEN 2 AND 11 should correctly match months 2-11") {
+    val tablePath = s"$tempDir/it036_numeric_between"
+
+    val sparkSession = spark
+    import sparkSession.implicits._
+
+    // Write data with integer month partitions 1-12
+    val data = (1 to 12).map(m => (m, s"data_$m", m)).toDF("id", "name", "month")
+
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .partitionBy("month")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Drop partitions where month BETWEEN 2 AND 11
+    // BUG: With lexicographic comparison, "10" < "2" so months 10-11 would be missed
+    val result = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE month BETWEEN 2 AND 11").collect()
+    assert(result.length == 1)
+    assert(result(0).getString(1) == "success")
+    assert(result(0).getLong(2) == 10, s"Expected 10 partitions dropped (months 2-11), got ${result(0).getLong(2)}")
+
+    // Verify data after drop - should only see months 1 and 12
+    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    assert(afterDrop.count() == 2, s"Expected 2 records after drop, got ${afterDrop.count()}")
+    assert(afterDrop.filter($"month" === 1).count() == 1, "Month 1 should still exist")
+    assert(afterDrop.filter($"month" === 12).count() == 1, "Month 12 should still exist")
+  }
+
+  test("IT-036 REGRESSION: DROP PARTITIONS with numeric month < 10 should correctly match months 1-9 only") {
+    val tablePath = s"$tempDir/it036_numeric_lt"
+
+    val sparkSession = spark
+    import sparkSession.implicits._
+
+    // Write data with integer month partitions 1-12
+    val data = (1 to 12).map(m => (m, s"data_$m", m)).toDF("id", "name", "month")
+
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .partitionBy("month")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Drop partitions where month < 10 — should remove months 1-9
+    // BUG: With lexicographic comparison, "10" < "10" is false (correct),
+    // but "2" < "10" is ALSO false because '2' > '1'
+    val result = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE month < 10").collect()
+    assert(result.length == 1)
+    assert(result(0).getString(1) == "success")
+    assert(result(0).getLong(2) == 9, s"Expected 9 partitions dropped (months 1-9), got ${result(0).getLong(2)}")
+
+    // Verify data after drop - should only see months 10, 11, 12
+    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    assert(afterDrop.count() == 3, s"Expected 3 records after drop, got ${afterDrop.count()}")
+    for (m <- 10 to 12) {
+      assert(afterDrop.filter($"month" === m).count() == 1, s"Month $m should still exist")
+    }
+  }
+
   test("Multiple DROP INDEXTABLES PARTITIONS operations should be cumulative") {
     val tablePath = s"$tempDir/cumulative_test"
 
