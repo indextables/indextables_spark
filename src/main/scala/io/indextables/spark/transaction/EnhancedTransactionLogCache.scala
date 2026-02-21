@@ -17,7 +17,7 @@
 
 package io.indextables.spark.transaction
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{Callable, TimeUnit}
 
 import scala.collection.concurrent.TrieMap
 
@@ -98,7 +98,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global checkpoint actions cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(globalCheckpointCacheMaxSize)
       .recordStats()
       .removalListener(new RemovalListener[CheckpointActionsKey, Seq[Action]] {
@@ -113,7 +113,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global last checkpoint info cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(globalCheckpointCacheMaxSize)
       .recordStats()
       .build[String, LastCheckpointInfoCached]()
@@ -126,7 +126,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global Avro state manifest cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(globalCheckpointCacheMaxSize)
       .recordStats()
       .removalListener(new RemovalListener[String, StateManifest] {
@@ -146,7 +146,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global Avro file list cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(globalCheckpointCacheMaxSize)
       .recordStats()
       .removalListener(new RemovalListener[AvroFileListKey, Seq[AddAction]] {
@@ -164,7 +164,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global filtered schema cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=1000")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(1000) // Typically few unique schemas even for large tables
       .recordStats()
       .build[String, String]()
@@ -179,7 +179,7 @@ object EnhancedTransactionLogCache {
     )
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(1000) // Typically few unique schemas
       .recordStats()
       .build[String, DocMappingMetadata]()
@@ -196,7 +196,7 @@ object EnhancedTransactionLogCache {
       )
       CacheBuilder
         .newBuilder()
-        .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+        .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
         .maximumSize(500) // Each manifest can be large, limit total cached manifests
         .recordStats()
         .build[String, Seq[io.indextables.spark.transaction.avro.FileEntry]]()
@@ -210,7 +210,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global metadata cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(globalCheckpointCacheMaxSize)
       .recordStats()
       .build[String, MetadataAction]()
@@ -222,7 +222,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global protocol cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(globalCheckpointCacheMaxSize)
       .recordStats()
       .build[String, ProtocolAction]()
@@ -236,7 +236,7 @@ object EnhancedTransactionLogCache {
     logger.info(s"Initializing global version cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=500")
     CacheBuilder
       .newBuilder()
-      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .expireAfterWrite(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
       .maximumSize(500) // Cache multiple versions across tables
       .recordStats()
       .build[VersionCacheKey, Seq[Action]]()
@@ -259,33 +259,33 @@ object EnhancedTransactionLogCache {
   private[transaction] def globalVersionCache: Cache[VersionCacheKey, Seq[Action]] = _globalVersionCache
 
   /**
+   * Atomic get-or-compute: uses Guava's `Cache.get(key, Callable)` to ensure only one thread
+   * computes a missing entry for a given key. Without this, concurrent cache misses on the same
+   * key would redundantly re-read from storage.
+   */
+  private def atomicGetOrCompute[K, V](cache: Cache[K, V], key: K, compute: => V): V =
+    try {
+      cache.get(key, new Callable[V] { override def call(): V = compute })
+    } catch {
+      case e: java.util.concurrent.ExecutionException => throw e.getCause
+    }
+
+  /**
    * Get or compute MetadataAction from global cache - shared across all TransactionLog instances. This avoids
    * re-parsing transaction log JSON when creating new DataFrames on the same table.
    */
-  def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction = {
-    val cached = globalMetadataCache.getIfPresent(tablePath)
-    if (cached != null) {
-      cached
-    } else {
+  def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction =
+    atomicGetOrCompute(globalMetadataCache, tablePath, {
       logger.debug(s"GLOBAL metadata cache MISS for $tablePath - computing")
-      val metadata = compute
-      globalMetadataCache.put(tablePath, metadata)
-      metadata
-    }
-  }
+      compute
+    })
 
   /** Get or compute ProtocolAction from global cache - shared across all TransactionLog instances. */
-  def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction = {
-    val cached = globalProtocolCache.getIfPresent(tablePath)
-    if (cached != null) {
-      cached
-    } else {
+  def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction =
+    atomicGetOrCompute(globalProtocolCache, tablePath, {
       logger.debug(s"GLOBAL protocol cache MISS for $tablePath - computing")
-      val protocol = compute
-      globalProtocolCache.put(tablePath, protocol)
-      protocol
-    }
-  }
+      compute
+    })
 
   /**
    * Get or compute version actions from global cache - shared across all TransactionLog instances. This avoids
@@ -296,16 +296,11 @@ object EnhancedTransactionLogCache {
     version: Long,
     compute: => Seq[Action]
   ): Seq[Action] = {
-    val key    = VersionCacheKey(tablePath, version)
-    val cached = globalVersionCache.getIfPresent(key)
-    if (cached != null) {
-      cached
-    } else {
+    val key = VersionCacheKey(tablePath, version)
+    atomicGetOrCompute(globalVersionCache, key, {
       logger.debug(s"GLOBAL version cache MISS for $tablePath version $version - computing")
-      val actions = compute
-      globalVersionCache.put(key, actions)
-      actions
-    }
+      compute
+    })
   }
 
   /**
@@ -321,17 +316,11 @@ object EnhancedTransactionLogCache {
    * @return
    *   Filtered schema string
    */
-  def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String = {
-    val cached = globalFilteredSchemaCache.getIfPresent(schemaHash)
-    if (cached != null) {
-      cached
-    } else {
+  def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String =
+    atomicGetOrCompute(globalFilteredSchemaCache, schemaHash, {
       logger.debug(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing (cache size=${globalFilteredSchemaCache.size()})")
-      val filtered = compute
-      globalFilteredSchemaCache.put(schemaHash, filtered)
-      filtered
-    }
-  }
+      compute
+    })
 
   /**
    * Get or compute DocMappingMetadata - parses docMappingJson once and caches the extracted metadata.
@@ -346,16 +335,8 @@ object EnhancedTransactionLogCache {
    * @return
    *   Parsed DocMappingMetadata
    */
-  def getOrComputeDocMappingMetadata(key: String, docMappingJson: String): DocMappingMetadata = {
-    val cached = globalDocMappingMetadataCache.getIfPresent(key)
-    if (cached != null) {
-      cached
-    } else {
-      val metadata = DocMappingMetadata.parse(docMappingJson)
-      globalDocMappingMetadataCache.put(key, metadata)
-      metadata
-    }
-  }
+  def getOrComputeDocMappingMetadata(key: String, docMappingJson: String): DocMappingMetadata =
+    atomicGetOrCompute(globalDocMappingMetadataCache, key, DocMappingMetadata.parse(docMappingJson))
 
   /** Get DocMappingMetadata for an AddAction, using the schema hash as cache key when available. */
   def getDocMappingMetadata(addAction: AddAction): DocMappingMetadata =
@@ -384,17 +365,11 @@ object EnhancedTransactionLogCache {
   def getOrComputeAvroManifestFile(
     manifestPath: String,
     compute: => Seq[io.indextables.spark.transaction.avro.FileEntry]
-  ): Seq[io.indextables.spark.transaction.avro.FileEntry] = {
-    val cached = globalAvroManifestFileCache.getIfPresent(manifestPath)
-    if (cached != null) {
-      cached
-    } else {
+  ): Seq[io.indextables.spark.transaction.avro.FileEntry] =
+    atomicGetOrCompute(globalAvroManifestFileCache, manifestPath, {
       logger.debug(s"GLOBAL Avro manifest file cache MISS for $manifestPath - reading from storage")
-      val entries = compute
-      globalAvroManifestFileCache.put(manifestPath, entries)
-      entries
-    }
-  }
+      compute
+    })
 
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {
@@ -481,6 +456,10 @@ class EnhancedTransactionLogCache(
   case class SnapshotCacheKey(tablePath: String, version: Long)
   case class FileListCacheKey(tablePath: String, checksum: String)
   case class MetadataCacheKey(tablePath: String)
+
+  // Instance-level caches use expireAfterAccess (not expireAfterWrite) because they are scoped
+  // to a single TransactionLog instance, not shared across JVMs. An active instance should keep
+  // its working set warm while it is being used; staleness is only a cross-JVM concern.
 
   // Log-level cache for transaction log instances
   private val logCache: Cache[LogCacheKey, TransactionLogSnapshot] = CacheBuilder
