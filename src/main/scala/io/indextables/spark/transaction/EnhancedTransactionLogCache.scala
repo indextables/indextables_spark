@@ -820,7 +820,8 @@ class EnhancedTransactionLogCache(
   def invalidateProtocol(tablePath: String): Unit = {
     val key = MetadataCacheKey(tablePath)
     protocolCache.invalidate(key)
-    logger.debug(s"Invalidated protocol cache for $tablePath")
+    EnhancedTransactionLogCache.globalProtocolCache.invalidate(tablePath)
+    logger.debug(s"Invalidated protocol cache (instance + global) for $tablePath")
   }
 
   /** Invalidate all caches for a specific table */

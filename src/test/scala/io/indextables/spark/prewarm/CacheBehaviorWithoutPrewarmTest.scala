@@ -118,6 +118,7 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
     val count1 = readDf.filter($"id" > 50).count()
     println(s"First query result: $count1 rows")
 
+    java.lang.Thread.sleep(5000)
     val cacheAfterQuery1     = countCacheFiles()
     val componentsFromQuery1 = cacheAfterQuery1 - cacheBeforeQuery1
     println(s"📁 Cache files AFTER first query: $cacheAfterQuery1")
