@@ -39,11 +39,8 @@ Moved to Completed.
 ### ~~IT-007: Fix storage class names in CLAUDE.md~~ **DONE**
 Moved to Completed.
 
-### IT-008: Document missing SQL commands
-**Description**: 8 commands exist in ANTLR grammar but are absent from docs: `BUILD COMPANION`, `DESCRIBE COMPONENT SIZES`, `DESCRIBE PREWARM JOBS`, `WAIT FOR PREWARM JOBS`, `DESCRIBE TRANSACTION LOG`, `REPAIR INDEXFILES TRANSACTION LOG`, `FLUSH SEARCHER CACHE`, `INVALIDATE TRANSACTION LOG CACHE`.
-**Acceptance Criteria**:
-- [ ] All grammar-wired commands documented in `docs/reference/sql-commands.md`
-- [ ] CLAUDE.md SQL Extensions section updated
+### ~~IT-008: Document missing SQL commands~~ **DONE**
+Moved to Completed.
 
 ### IT-009: ReplaceWhere with Partition Predicates
 **Status**: Design Complete
@@ -125,3 +122,4 @@ Moved to Completed.
 | IT-005 | Annotate unwired data skipping SQL commands | 2026-02 |
 | IT-007 | Fix storage class names in CLAUDE.md | 2026-02 |
 | IT-006 | Document both class name aliases in CLAUDE.md | 2026-02 |
+| IT-008 | Document missing SQL commands | 2026-02 |
