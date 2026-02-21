@@ -64,17 +64,17 @@ See `docs/reference/field-indexing.md` for tokenizers, index record options, tok
 ## Common Usage
 
 ### DataSource API
-Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for all read/write operations.
+Use `io.indextables.provider.IndexTablesProvider` for all read/write operations. This is the recommended public alias. The internal class `io.indextables.spark.core.IndexTables4SparkTableProvider` is also valid and used extensively in tests — both are interchangeable.
 
 ### Basic Write
 ```scala
-df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+df.write.format("io.indextables.provider.IndexTablesProvider")
   .save("s3://bucket/path")
 ```
 
 ### Write with Field Configuration
 ```scala
-df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.indexing.typemap.title", "string")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score")
@@ -83,7 +83,7 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
 
 ### Optimized Write (shuffle before writing)
 ```scala
-df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.write.optimizeWrite.enabled", "true")
   .option("spark.indextables.write.optimizeWrite.targetSplitSize", "1G")
   .partitionBy("date")
@@ -92,7 +92,7 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
 
 ### Read & Query
 ```scala
-val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider").load("s3://bucket/path")
 
 // Standard filters (pushed down for string fields)
 df.filter($"title" === "exact title").show()
@@ -108,22 +108,22 @@ df.agg(count("*"), sum("score"), avg("score")).show()
 ### Partitioned Datasets
 ```scala
 // Write
-df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+df.write.format("io.indextables.provider.IndexTablesProvider")
   .partitionBy("date", "hour")
   .save("s3://bucket/path")
 
 // Read with partition pruning
-val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider").load("s3://bucket/path")
 df.filter($"date" === "2024-01-01" && $"hour" === 10).show()
 ```
 
 ## SQL Extensions
 
-Register extensions for SQL commands:
+Register extensions for SQL commands. The public alias `io.indextables.extensions.IndexTablesSparkExtensions` is recommended. The internal class `io.indextables.spark.extensions.IndexTables4SparkExtensions` is also valid — both are interchangeable.
 ```scala
 // In SparkSession builder:
 val spark = SparkSession.builder()
-  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+  .config("spark.sql.extensions", "io.indextables.extensions.IndexTablesSparkExtensions")
   .getOrCreate()
 ```
 

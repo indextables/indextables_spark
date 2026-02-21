@@ -5,7 +5,7 @@ All SQL commands require the extensions to be registered:
 ```scala
 // In SparkSession builder:
 val spark = SparkSession.builder()
-  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+  .config("spark.sql.extensions", "io.indextables.extensions.IndexTablesSparkExtensions")
   .getOrCreate()
 ```
 
