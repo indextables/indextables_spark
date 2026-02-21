@@ -71,11 +71,13 @@ Moved to Completed.
 **Acceptance Criteria**:
 - [x] Adversarial analysis complete
 - [x] Priority assigned
-- [ ] Follow-up posted to GitHub issue #85
-- [ ] Fix implemented in `PartitionPredicateUtils.resolveExpression`
-- [ ] MergeSplitsCommand duplicate code consolidated
-- [ ] Regression tests with multi-digit numeric partition values
-- [ ] All 7 affected call sites updated
+- [ ] Follow-up posted to GitHub issue #85 (pending Scott's review of PR #173)
+- [x] Fix implemented in `PartitionPredicateUtils.resolveExpression`
+- [x] MergeSplitsCommand duplicate code consolidated
+- [x] Regression tests with multi-digit numeric partition values (27 unit + 3 integration)
+- [x] All 7 affected call sites updated
+- [ ] Full test suite validation (blocked on tantivy4java 0.30.1 build)
+- **PR**: [#173](https://github.com/indextables/indextables_spark/pull/173) — awaiting Scott's review
 
 ---
 
