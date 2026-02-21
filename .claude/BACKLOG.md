@@ -76,7 +76,7 @@ Moved to Completed.
 - [x] MergeSplitsCommand duplicate code consolidated
 - [x] Regression tests with multi-digit numeric partition values (27 unit + 3 integration)
 - [x] All 7 affected call sites updated
-- [ ] Full test suite validation (blocked on tantivy4java 0.30.1 build)
+- [ ] Full test suite validation
 - **PR**: [#173](https://github.com/indextables/indextables_spark/pull/173) — awaiting Scott's review
 
 ---
