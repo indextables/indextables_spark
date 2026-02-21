@@ -492,7 +492,7 @@ class MergeSplitsExecutor(
     logger.info(s"Merge config: ${mergedConfigs.size} entries, tempDir=${tempDirectoryPath.getOrElse("default")}")
 
     SerializableAwsConfig(
-      configs = mergedConfigs,
+      configs = mergedConfigs + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE"),
       tablePath = tablePath.toString,
       tempDirectoryPath = tempDirectoryPath,
       heapSize = heapSize,

@@ -78,6 +78,8 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       sparkSession.conf.getAll.filter(_._1.startsWith("spark.indextables.")).foreach {
         case (k, v) => optionsMap.put(k, v)
       }
+      // Checkpoint writes files, so ensure PATH_READ_WRITE credentials
+      optionsMap.put("spark.indextables.databricks.credential.operation", "PATH_READ_WRITE")
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
 
       // Create transaction log instance to read current state

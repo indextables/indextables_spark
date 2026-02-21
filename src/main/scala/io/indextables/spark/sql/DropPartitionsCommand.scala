@@ -105,11 +105,12 @@ case class DropPartitionsCommand(
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // Create transaction log - CloudStorageProvider will handle credential resolution
-    // with proper refresh logic via V1ToV2CredentialsProviderAdapter
+    // Create transaction log with PATH_READ_WRITE credentials since drop partitions
+    // performs write operations (removing split files and updating transaction log)
     import scala.jdk.CollectionConverters._
+    val writeConfigs = mergedConfigs + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
     val transactionLog =
-      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(mergedConfigs.asJava))
+      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(writeConfigs.asJava))
 
     // Invalidate cache to ensure fresh read of transaction log state
     transactionLog.invalidateCache()
