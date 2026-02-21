@@ -59,6 +59,24 @@ Moved to Completed.
 - [ ] Determine if Parquet-based approach is still needed on top of Avro state
 - [ ] If yes, implement. If no, close and archive design doc.
 
+### IT-036: Partition predicate WHERE clause — broken numeric comparisons
+**GitHub**: [#85](https://github.com/indextables/indextables_spark/issues/85)
+**Reporter**: Issue filer (follow-up needed)
+**Type**: Bug
+**Priority**: High (assigned 2026-02-20)
+**Analysis**: [.claude/artifacts/it036-partition-predicate-analysis.md](artifacts/it036-partition-predicate-analysis.md)
+**Description**: `PartitionPredicateUtils.resolveExpression` converts all non-string literals to UTF8String, causing lexicographic comparison where `"10" < "2"`. Affects 7 code paths including DROP PARTITIONS (destructive), MERGE SPLITS, PREWARM CACHE, DESCRIBE COMPONENT SIZES, BUILD COMPANION. Standard read path is NOT affected. Silent data correctness bug — no error or warning on wrong results.
+**Recommended Fix**: Type-aware literal handling (Solution 3). Partition column types are available via `MetadataAction.schemaString`. Also consolidate 3-way duplicated comparison logic and remove code duplication in `MergeSplitsCommand`.
+**Blocks**: IT-009 (ReplaceWhere builds on the same partition predicate infrastructure)
+**Acceptance Criteria**:
+- [x] Adversarial analysis complete
+- [x] Priority assigned
+- [ ] Follow-up posted to GitHub issue #85
+- [ ] Fix implemented in `PartitionPredicateUtils.resolveExpression`
+- [ ] MergeSplitsCommand duplicate code consolidated
+- [ ] Regression tests with multi-digit numeric partition values
+- [ ] All 7 affected call sites updated
+
 ---
 
 ## Medium
@@ -80,6 +98,68 @@ Moved to Completed.
 **Acceptance Criteria**:
 - [ ] IP address field type documented in `docs/reference/field-indexing.md`
 - [ ] Structured streaming documented in CLAUDE.md or `docs/reference/features.md`
+
+---
+
+## Needs Evaluation
+
+Items imported from GitHub issues. Each requires adversarial analysis before prioritization, followed by follow-up with the issue filer.
+
+### IT-037: Text/JSON exists queries broken in companion splits
+**GitHub**: [#146](https://github.com/indextables/indextables_spark/issues/146)
+**Reporter**: Issue filer (follow-up needed)
+**Type**: Bug
+**Description**: `SplitExistsQuery` on text and JSON fields returns 0 hits in companion mode. Companion transcode pipeline excludes text/JSON from fast fields; exists queries rely on fast field metadata. Standard (non-companion) splits unaffected.
+**Initial Signal**: High — bug in documented feature (companion/sync). Upstream tantivy4java transcode implications.
+**Acceptance Criteria**:
+- [ ] Adversarial analysis complete
+- [ ] Priority assigned
+- [ ] Follow-up posted to GitHub issue #146
+
+### IT-038: Replace indexquery with textsearch/fieldmatch operators
+**GitHub**: [#133](https://github.com/indextables/indextables_spark/issues/133)
+**Reporter**: Issue filer (follow-up needed)
+**Type**: Enhancement
+**Description**: Split `indexquery` into two operators: `textsearch` (tokenized text fields, phrase queries) and `fieldmatch` (non-tokenized fields, exact match). Adds type validation with clear error messages when operator/field type mismatch.
+**Initial Signal**: Medium — API design change, potentially breaking. Needs design doc and backward compatibility analysis.
+**Acceptance Criteria**:
+- [ ] Adversarial analysis complete
+- [ ] Priority assigned
+- [ ] Follow-up posted to GitHub issue #133
+
+### IT-039: Support Spark structured streaming
+**GitHub**: [#129](https://github.com/indextables/indextables_spark/issues/129)
+**Reporter**: Issue filer (follow-up needed)
+**Type**: Enhancement
+**Description**: Full structured streaming support similar to Delta Lake. Note: `StructuredStreamingTest.scala` already exists — need to determine current implementation status vs. what's being requested.
+**Initial Signal**: Medium — overlaps IT-013 (documentation). Need to assess if this is "document what exists" or "build new functionality."
+**Acceptance Criteria**:
+- [ ] Adversarial analysis complete (including current implementation assessment)
+- [ ] Priority assigned
+- [ ] Relationship to IT-013 clarified
+- [ ] Follow-up posted to GitHub issue #129
+
+### IT-040: Fast fields missing for GROUP BY — best practices guidance
+**GitHub**: [#140](https://github.com/indextables/indextables_spark/issues/140)
+**Reporter**: Issue filer (follow-up needed)
+**Type**: Enhancement / Documentation
+**Description**: User hit `IllegalArgumentException` when GROUP BY field not configured as fast field. Error message already provides the fix. Requests: default fast field templates for security datasets, pre-deployment config validation, best practices documentation.
+**Initial Signal**: Low-Medium — not a code bug (config issue), but highlights UX gap in onboarding and configuration guidance.
+**Acceptance Criteria**:
+- [ ] Adversarial analysis complete
+- [ ] Priority assigned
+- [ ] Follow-up posted to GitHub issue #140
+
+### IT-041: Clean up Scala compiler warnings
+**GitHub**: [#10](https://github.com/indextables/indextables_spark/issues/10)
+**Reporter**: Issue filer (follow-up needed)
+**Type**: Tech Debt
+**Description**: Systematic elimination of all Scala compiler warnings. Phased approach: audit/categorize, cleanup by priority, then add `-Xfatal-warnings` to prevent regressions.
+**Initial Signal**: Low — code quality improvement, no functional impact. Good housekeeping.
+**Acceptance Criteria**:
+- [ ] Adversarial analysis complete
+- [ ] Priority assigned
+- [ ] Follow-up posted to GitHub issue #10
 
 ---
 
