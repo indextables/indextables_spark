@@ -74,10 +74,10 @@ spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'error'").show()
 |-------|-------------|
 | [Getting Started](https://www.indextables.io/docs/getting-started/installation) | Installation, quickstart, first index |
 | [Core Concepts](https://www.indextables.io/docs/core-concepts/split-architecture) | Split architecture, transaction log, field types |
-| [Configuration](https://www.indextables.io/docs/configuration/writer-settings) | Writer, reader, cache, and cloud settings |
+| [Configuration](https://www.indextables.io/docs/configuration/index-writer) | Writer, reader, cache, and cloud settings |
 | [Query Guide](https://www.indextables.io/docs/query-guide/filter-pushdown) | Filter pushdown, aggregations, full-text search |
 | [SQL Commands](https://www.indextables.io/docs/sql-commands/merge-splits) | MERGE SPLITS, PURGE, PREWARM CACHE, and more |
-| [Cloud Deployment](https://www.indextables.io/docs/cloud-deployment/databricks) | Databricks, AWS EMR deployment guides |
+| [Cloud Deployment](https://www.indextables.io/docs/cloud/databricks) | Databricks, AWS EMR deployment guides |
 | [Configuration Reference](https://www.indextables.io/docs/reference/configuration-reference) | Complete configuration options |
 | [Protocol Specification](docs/reference/protocol.md) | Transaction log format, file structure, protocol versions |
 | [Table Protocol](docs/reference/table-protocol.md) | ACID guarantees, schema evolution, time travel |
@@ -101,6 +101,6 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Support
 
-- **Issues & Features**: [GitHub Issues](https://github.com/indextables/indextables/issues)
+- **Issues & Features**: [GitHub Issues](https://github.com/indextables/indextables_spark/issues)
 - **Contact**: [Scott Schenkein](https://www.linkedin.com/in/schenksj/) (maintainer)
 - **Documentation**: [https://www.indextables.io](https://www.indextables.io)
