@@ -31,7 +31,7 @@ Each write operation produces a single version file containing all actions (adds
 
 The transaction log enforces a consistent view of the table at every version:
 
-- **Version 0 is sacrosanct.** It contains the ProtocolAction and MetadataAction that define the table's identity, schema, and partition columns. Version 0 is protected by conditional writes and is never deleted by any cleanup operation.
+- **Version 0 establishes the table.** It contains the ProtocolAction and MetadataAction that define the table's identity, schema, and partition columns. Version 0 is protected by conditional writes during initial table creation to prevent duplicate initialization. Once its contents are captured in a checkpoint or Avro state snapshot, version 0 may be cleaned up by PURGE or TRUNCATE TIME TRAVEL operations -- the table's identity is preserved in the checkpoint.
 - **Active file computation** is deterministic: replay all adds and removes from the latest checkpoint forward to derive the set of live files.
 - **Protocol version checks** run before every read and write, preventing incompatible clients from corrupting the table.
 
@@ -63,7 +63,7 @@ Once a version file is successfully written to cloud storage, its contents are d
 │   └── splits/
 │       └── split-<uuid>.split
 └── _transaction_log/
-    ├── 00000000000000000000.json        # Version 0 (protocol + metadata, never deleted)
+    ├── 00000000000000000000.json        # Version 0 (protocol + metadata)
     ├── 00000000000000000001.json        # Version 1 (incremental changes)
     ├── ...
     ├── _last_checkpoint                 # Pointer to latest checkpoint/state
@@ -163,6 +163,18 @@ Transaction 101: +100 files
 | **Overwrite** | Removes all existing files and adds new ones. Version file contains RemoveActions for every active file, followed by AddActions. |
 | **Merge** | Consolidates small splits. Removes source files, adds merged output. A single atomic version. |
 
+### Merge Resilience (SkipAction)
+
+During a merge operation, individual split files may fail to process -- for example, due to transient I/O errors or data corruption. Rather than failing the entire merge, the system records a SkipAction for the problematic file. The merge proceeds with the remaining files, and the skipped file is left in place as an active split.
+
+Skipped files have a cooldown period (`retryAfter` timestamp) before the system attempts to include them in a subsequent merge. Each skip increments a counter (`skipCount`) that tracks how many times the file has been skipped. The current skip state for a table is visible via `DESCRIBE INDEXTABLES STATE`. For the SkipAction field-level schema, see [protocol.md](protocol.md).
+
+### Automatic Maintenance
+
+**Purge-on-write.** When enabled (`spark.indextables.purgeOnWrite.enabled`), write operations automatically trigger cleanup of orphaned split files and old transaction log versions as part of the write commit. This provides transparent table hygiene without requiring scheduled maintenance. See [configuration.md](configuration.md) for purge-on-write settings and thresholds.
+
+**Merge-on-write.** When enabled (`spark.indextables.mergeOnWrite.enabled`), the system evaluates whether a merge is warranted after each write commits. If the number of small splits exceeds a configurable threshold, a merge is initiated -- asynchronously by default (`spark.indextables.mergeOnWrite.async.enabled`). See [configuration.md](configuration.md) for merge-on-write settings.
+
 ---
 
 ## Checkpoint and State Management
@@ -218,6 +230,12 @@ Returns the current format (`avro-state`, `json`, etc.), version, file count, ma
 
 ## Retention and Cleanup
 
+### Time Travel
+
+The transaction log enables time travel -- the ability to query the table's state at any historical version. Because each version file records a delta of changes (files added and removed), replaying versions from a checkpoint (or from version 0 if no checkpoint exists) up to version N reconstructs the exact table state at version N.
+
+Time travel is bounded by retention settings. As old version files and state directories are cleaned up, the range of reachable historical versions narrows. Once a version file is deleted, the table state at that version can no longer be reconstructed. The `TRUNCATE INDEXTABLES TIME TRAVEL` SQL command explicitly removes all historical versions, collapsing the table to only its current state. Always run with `DRY RUN` first to preview what will be deleted.
+
 ### Transaction Log Retention
 
 Old version files are cleaned up when all conditions are met:
@@ -225,7 +243,7 @@ Old version files are cleaned up when all conditions are met:
 1. File age exceeds retention period (default: configurable via `spark.indextables.purge.txLogRetentionHours`).
 2. File version is covered by an existing checkpoint.
 3. File is not the current version.
-4. **Version 0 is never deleted.**
+4. Version 0 follows the same rules -- it may be deleted once covered by a checkpoint. The checkpoint preserves the protocol and metadata information originally recorded in version 0.
 
 ### State Retention
 
@@ -398,14 +416,18 @@ During rolling upgrades where some nodes run older code:
 
 ### Table Unreadable ("No transaction log found")
 
-**Cause:** Version 0 is missing or corrupted.
+**Cause:** No checkpoint and no version 0 exist. On a healthy table, version 0 may have been deleted after a checkpoint captured its contents -- this is normal. The error indicates that neither a checkpoint nor version 0 can be found.
 
 ```bash
-# Verify version 0 exists
+# Check for a checkpoint or state directory
+aws s3 ls s3://bucket/table/_transaction_log/_last_checkpoint
+aws s3 ls s3://bucket/table/_transaction_log/state-v
+
+# If no checkpoint exists, check for version 0
 aws s3 ls s3://bucket/table/_transaction_log/00000000000000000000.json
 ```
 
-**Recovery:** Restore version 0 from backup, or use `REPAIR INDEXFILES TRANSACTION LOG '<path>'` to reconstruct from existing split files.
+**Recovery:** If a checkpoint exists but `_last_checkpoint` is missing or corrupted, recreate it. If no checkpoint or version files exist, use `REPAIR INDEXFILES TRANSACTION LOG '<path>'` to reconstruct from existing split files.
 
 ### Slow Reads
 
@@ -457,7 +479,7 @@ COMPACT INDEXTABLES 's3://bucket/path';
 
 - **Run periodic PURGE** -- Schedule `PURGE INDEXTABLE` to clean up orphaned files and old state directories.
 - **Monitor tombstone ratio** -- Use `DESCRIBE INDEXTABLES STATE` to check health. Compact when tombstone ratio exceeds 10%.
-- **Monitor version 0** -- Alert if version 0 is ever missing; it is the table's identity and cannot be recreated.
+- **Monitor checkpoint existence** -- Ensure at least one valid checkpoint or Avro state directory exists. Version 0 is routinely deleted after checkpoints, so monitor for checkpoint health rather than version 0 file presence.
 - **Use TRUNCATE TIME TRAVEL with caution** -- This is irreversible. Always run with `DRY RUN` first.
 
 ---
@@ -492,6 +514,6 @@ COMPACT INDEXTABLES 's3://bucket/path';
 
 - Initial protocol specification
 - S3 Conditional Writes implementation
-- Version 0 immutability protection
+- Version 0 conditional write protection
 - JSON checkpoint system
 - SkipAction for merge resilience
