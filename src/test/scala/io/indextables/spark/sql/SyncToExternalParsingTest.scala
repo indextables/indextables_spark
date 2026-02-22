@@ -707,4 +707,67 @@ class SyncToExternalParsingTest extends TestBase {
       )
     }
   }
+
+  // ==========================================================================
+  // FINGERPRINTS INCLUDE / EXCLUDE tests
+  // ==========================================================================
+
+  test("parse SYNC with FINGERPRINTS INCLUDE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data' FINGERPRINTS INCLUDE ('title', 'category') AT LOCATION '/index'"
+    )
+    cmd.fingerprintInclude shouldBe Seq("title", "category")
+    cmd.fingerprintExclude shouldBe empty
+  }
+
+  test("parse SYNC with FINGERPRINTS EXCLUDE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/data' FINGERPRINTS EXCLUDE ('huge_blob', 'raw_html') AT LOCATION '/index'"
+    )
+    cmd.fingerprintInclude shouldBe empty
+    cmd.fingerprintExclude shouldBe Seq("huge_blob", "raw_html")
+  }
+
+  test("parse SYNC with FINGERPRINTS INCLUDE single field") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data' FINGERPRINTS INCLUDE ('title') AT LOCATION '/index'"
+    )
+    cmd.fingerprintInclude shouldBe Seq("title")
+    cmd.fingerprintExclude shouldBe empty
+  }
+
+  test("parse SYNC with all options combined including FINGERPRINTS") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+        |  INDEXING MODES ('content':'text', 'status':'string')
+        |  FASTFIELDS MODE HYBRID
+        |  FINGERPRINTS INCLUDE ('title', 'category')
+        |  TARGET INPUT SIZE 1G
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "delta"
+    cmd.fingerprintInclude shouldBe Seq("title", "category")
+    cmd.fingerprintExclude shouldBe empty
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.targetInputSize shouldBe Some(1L * 1024L * 1024L * 1024L)
+    cmd.dryRun shouldBe true
+    cmd.indexingModes should have size 2
+  }
+
+  test("default fingerprint fields should be empty") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.fingerprintInclude shouldBe empty
+    cmd.fingerprintExclude shouldBe empty
+  }
+
+  test("case-insensitive FINGERPRINTS keyword") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data' fingerprints include ('title', 'category') AT LOCATION '/index'"
+    )
+    cmd.fingerprintInclude shouldBe Seq("title", "category")
+    cmd.fingerprintExclude shouldBe empty
+  }
 }

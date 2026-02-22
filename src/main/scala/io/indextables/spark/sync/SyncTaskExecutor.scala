@@ -40,7 +40,9 @@ case class SyncConfig(
   readerBatchSize: Int = 8192,
   schemaSourceParquetFile: Option[String] = None,
   columnNameMapping: Map[String, String] = Map.empty,
-  autoDetectNameMapping: Boolean = false)
+  autoDetectNameMapping: Boolean = false,
+  fingerprintInclude: Seq[String] = Seq.empty,
+  fingerprintExclude: Seq[String] = Seq.empty)
     extends Serializable
 
 /**
@@ -169,6 +171,15 @@ object SyncTaskExecutor {
       }
       if (config.autoDetectNameMapping) {
         companionConfig.withAutoDetectNameMapping(true)
+      }
+
+      // Apply string fingerprint include/exclude configuration
+      if (config.fingerprintInclude.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying fingerprint include: ${config.fingerprintInclude.mkString(", ")}")
+        companionConfig.withStringFingerprints(config.fingerprintInclude: _*)
+      } else if (config.fingerprintExclude.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying fingerprint exclude: ${config.fingerprintExclude.mkString(", ")}")
+        companionConfig.withoutStringFingerprints(config.fingerprintExclude: _*)
       }
 
       // 3. Call QuickwitSplit.createFromParquet()

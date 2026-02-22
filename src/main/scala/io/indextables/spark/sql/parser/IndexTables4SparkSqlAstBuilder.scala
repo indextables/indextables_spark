@@ -782,6 +782,18 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Fast field mode: $fastFieldMode")
 
+      // Fingerprint include/exclude
+      val (fingerprintInclude, fingerprintExclude): (Seq[String], Seq[String]) = {
+        if (ctx.fingerprintFields != null) {
+          val fields = ctx.fingerprintFields.STRING().asScala.map(ParserUtils.string(_)).toSeq
+          ctx.fingerprintMode.getText.toUpperCase match {
+            case "INCLUDE" => (fields, Seq.empty)
+            case "EXCLUDE" => (Seq.empty, fields)
+          }
+        } else (Seq.empty, Seq.empty)
+      }
+      logger.debug(s"Fingerprint include: $fingerprintInclude, exclude: $fingerprintExclude")
+
       // Target input size
       val targetInputSize = if (ctx.targetInputSize != null) {
         Some(parseAlphanumericSize(ctx.targetInputSize.getText))
@@ -866,6 +878,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         catalogName = catalogName,
         catalogType = catalogType,
         warehouse = warehouse,
+        fingerprintInclude = fingerprintInclude,
+        fingerprintExclude = fingerprintExclude,
         wherePredicates = wherePredicates,
         dryRun = dryRun
       )

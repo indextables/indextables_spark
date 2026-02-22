@@ -76,6 +76,8 @@ case class SyncToExternalCommand(
   catalogName: Option[String] = None,
   catalogType: Option[String] = None,
   warehouse: Option[String] = None,
+  fingerprintInclude: Seq[String] = Seq.empty,
+  fingerprintExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
@@ -414,6 +416,28 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
+      // Resolve effective fingerprint include/exclude: use stored config from metadata if not specified
+      val (effectiveFpInclude, effectiveFpExclude) = if (fingerprintInclude.nonEmpty || fingerprintExclude.nonEmpty) {
+        (fingerprintInclude, fingerprintExclude)
+      } else if (!isInitialSync) {
+        try {
+          val existingMeta = transactionLog.getMetadata()
+          val inc = existingMeta.configuration
+            .get("indextables.companion.fingerprintInclude")
+            .map(_.split(",").filter(_.nonEmpty).toSeq)
+            .getOrElse(Seq.empty)
+          val exc = existingMeta.configuration
+            .get("indextables.companion.fingerprintExclude")
+            .map(_.split(",").filter(_.nonEmpty).toSeq)
+            .getOrElse(Seq.empty)
+          (inc, exc)
+        } catch {
+          case _: Exception => (Seq.empty[String], Seq.empty[String])
+        }
+      } else {
+        (Seq.empty[String], Seq.empty[String])
+      }
+
       // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
       // All source readers return relative paths, so the anti-join is bucket-independent
       // and works across cross-region failover (different S3 buckets, same relative paths).
@@ -483,7 +507,9 @@ case class SyncToExternalCommand(
         readerBatchSize = readerBatchSize,
         schemaSourceParquetFile = reader.schemaSourceParquetFile(),
         columnNameMapping = reader.columnNameMapping(),
-        autoDetectNameMapping = sourceFormat == "iceberg"
+        autoDetectNameMapping = sourceFormat == "iceberg",
+        fingerprintInclude = effectiveFpInclude,
+        fingerprintExclude = effectiveFpExclude
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
@@ -498,6 +524,8 @@ case class SyncToExternalCommand(
         splitsToInvalidate,
         effectiveIndexingModes,
         effectiveWherePredicates,
+        effectiveFpInclude,
+        effectiveFpExclude,
         sourceVersion,
         batchSize,
         maxConcurrentBatches,
@@ -522,6 +550,8 @@ case class SyncToExternalCommand(
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
+    effectiveFpInclude: Seq[String],
+    effectiveFpExclude: Seq[String],
     sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
@@ -663,6 +693,8 @@ case class SyncToExternalCommand(
                     transactionLog,
                     effectiveIndexingModes,
                     effectiveWherePredicates,
+                    effectiveFpInclude,
+                    effectiveFpExclude,
                     sourceVersion,
                     externalStorageRoot
                   )
@@ -735,6 +767,8 @@ case class SyncToExternalCommand(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
+    effectiveFpInclude: Seq[String],
+    effectiveFpExclude: Seq[String],
     sourceVersion: Long,
     externalStorageRoot: Option[String]
   ): MetadataAction = {
@@ -772,7 +806,11 @@ case class SyncToExternalCommand(
                                                         )
                                                       } else Map.empty) ++ fromVersion.map(v =>
       "indextables.companion.fromVersion" -> v.toString
-    )
+    ) ++ (if (effectiveFpInclude.nonEmpty)
+            Map("indextables.companion.fingerprintInclude" -> effectiveFpInclude.mkString(","))
+          else Map.empty) ++ (if (effectiveFpExclude.nonEmpty)
+                                Map("indextables.companion.fingerprintExclude" -> effectiveFpExclude.mkString(","))
+                              else Map.empty)
     existingMetadata.copy(configuration = companionConfig)
   }
 
