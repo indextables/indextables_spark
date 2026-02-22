@@ -276,10 +276,12 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createCustomPatternParquetData(parquetPath)
 
+      // Note: Spark SQL treats \ as escape in string literals, so \d requires \\d in SQL.
+      // From Scala regular string: "\\\\d" → actual chars "\\d" → SQL parser → "\d"
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"""INDEXING MODES ('audit_log':'text_custom_strip:ORD-\\d{8}') """ +
-          s"AT LOCATION '$indexPath'"
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '" + parquetPath + "' " +
+          "INDEXING MODES ('audit_log':'text_custom_strip:ORD-\\\\d{8}') " +
+          "AT LOCATION '" + indexPath + "'"
       )
       val row = result.collect()
       row.length shouldBe 1
@@ -298,6 +300,14 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       ).collect()
       // 4 out of 5 messages contain "Processing order"
       textResults.length shouldBe 4
+
+      // Verify stripped pattern is NOT searchable via phrase query on audit_log.
+      // text_custom_strip should have removed ORD-XXXXXXXX from indexed text,
+      // so a phrase query for "ORD-00000001" on audit_log should return 0.
+      val strippedResults = spark.sql(
+        "SELECT * FROM custom_strip_test WHERE audit_log indexquery '\"ORD-00000001\"'"
+      ).collect()
+      strippedResults.length shouldBe 0
     }
   }
 

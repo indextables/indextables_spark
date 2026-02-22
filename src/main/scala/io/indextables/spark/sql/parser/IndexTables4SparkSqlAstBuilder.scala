@@ -806,7 +806,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
           .asScala
           .map { entry =>
             val fieldName = ParserUtils.string(entry.fieldName)
-            val fieldMode = ParserUtils.string(entry.fieldMode).toLowerCase
+            val fieldMode = ParserUtils.string(entry.fieldMode)
             fieldName -> fieldMode
           }
           .toMap
