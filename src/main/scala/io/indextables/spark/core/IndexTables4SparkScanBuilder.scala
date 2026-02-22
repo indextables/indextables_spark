@@ -1220,21 +1220,16 @@ class IndexTables4SparkScanBuilder(
     // Use lowercase attribute: CaseInsensitiveStringMap lowercases keys, so config has
     // "spark.indextables.indexing.typemap.myfield" even if user wrote "typemap.myField".
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
-    val fieldType    = effectiveConfig.get(fieldTypeKey)
+    val fieldType = effectiveConfig.get(fieldTypeKey)
 
     fieldType match {
-      case Some("string") =>
-        logger.debug(s"Field '$attribute' configured as 'string' - supporting exact matching")
-        true
-      case Some("text") =>
-        logger.debug(s"Field '$attribute' configured as 'text' - deferring exact matching to Spark")
-        false
-      case Some("ip") =>
-        logger.debug(s"Field '$attribute' configured as 'ip' - supporting exact matching")
-        true
-      case Some(other) =>
-        logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
-        true
+      case Some(mode) =>
+        val supports = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
+        if (supports)
+          logger.debug(s"Field '$attribute' configured as '$mode' - supporting exact matching")
+        else
+          logger.debug(s"Field '$attribute' configured as '$mode' - deferring exact matching to Spark")
+        supports
       case None =>
         // No explicit configuration - assume string type (new default)
         logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")

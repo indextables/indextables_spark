@@ -129,13 +129,17 @@ object SyncTaskExecutor {
         .withReaderBatchSize(config.readerBatchSize)
 
       // Apply indexing modes: "text" fields get a tokenizer override (forces TEXT indexing),
+      // compact string modes pass through as-is (e.g., "exact_only", "text_uuid_exactonly"),
       // "ip"/"ipaddress" fields get registered as IP address fields
       if (config.indexingModes.nonEmpty) {
         val tokenizerOverrides = config.indexingModes.collect {
-          case (field, mode) if mode.toLowerCase == "text" => field -> "default"
+          case (field, mode) if mode.toLowerCase == "text" =>
+            field -> "default"
+          case (field, mode) if io.indextables.spark.util.IndexingModes.isCompactStringMode(mode) =>
+            field -> io.indextables.spark.util.IndexingModes.normalizeForNative(mode)
         }
         if (tokenizerOverrides.nonEmpty) {
-          logger.info(s"Sync task ${group.groupIndex}: applying tokenizer overrides for TEXT fields: ${tokenizerOverrides.keys.mkString(", ")}")
+          logger.info(s"Sync task ${group.groupIndex}: applying tokenizer overrides: ${tokenizerOverrides.map { case (f, m) => s"$f=$m" }.mkString(", ")}")
           companionConfig.withTokenizerOverrides(tokenizerOverrides.asJava)
         }
 

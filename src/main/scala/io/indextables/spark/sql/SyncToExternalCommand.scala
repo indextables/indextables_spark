@@ -342,7 +342,8 @@ case class SyncToExternalCommand(
 
     try {
       // 5. Determine sync mode: initial vs incremental
-      val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, reader.schema(), partitionColumns)
+      val sourceSchema = reader.schema()
+      val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, sourceSchema, partitionColumns)
 
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
       val effectiveIndexingModes = if (indexingModes.nonEmpty) {
@@ -364,6 +365,36 @@ case class SyncToExternalCommand(
         }
       } else {
         Map.empty[String, String]
+      }
+
+      // Validate indexing mode values
+      import io.indextables.spark.util.IndexingModes
+      effectiveIndexingModes.foreach { case (field, mode) =>
+        if (!IndexingModes.isRecognized(mode)) {
+          throw new IllegalArgumentException(
+            s"Unrecognized indexing mode '$mode' for field '$field'. " +
+            s"Valid modes: ${IndexingModes.validModesDescription}")
+        }
+        // Validate non-empty regex for custom modes
+        IndexingModes.extractCustomRegex(mode).foreach { regex =>
+          if (regex.isEmpty) {
+            throw new IllegalArgumentException(
+              s"Custom regex mode '$mode' for field '$field' requires a non-empty regex pattern after ':'")
+          }
+        }
+      }
+
+      // Validate field names exist in source schema
+      if (effectiveIndexingModes.nonEmpty) {
+        val schemaFieldNames = sourceSchema.fieldNames.map(_.toLowerCase).toSet ++
+          partitionColumns.map(_.toLowerCase).toSet
+        effectiveIndexingModes.foreach { case (field, mode) =>
+          if (!schemaFieldNames.contains(field.toLowerCase)) {
+            throw new IllegalArgumentException(
+              s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
+              s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}")
+          }
+        }
       }
 
       // Resolve effective WHERE predicates: use stored WHERE from metadata if not specified

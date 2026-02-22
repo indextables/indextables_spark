@@ -481,7 +481,10 @@ class IndexTables4SparkPartitionReader(
           searchResults.iterator
         }
         initialized = true
-        logger.info(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', limit=$effectiveLimit, results=${searchResults.length}")
+        if (logger.isDebugEnabled)
+          logger.debug(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', queryAstJson='${splitQuery.toQueryAstJson()}', limit=$effectiveLimit, results=${searchResults.length}")
+        else
+          logger.info(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', limit=$effectiveLimit, results=${searchResults.length}")
 
       } catch {
         case ex: Exception =>
