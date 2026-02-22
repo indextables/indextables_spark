@@ -943,26 +943,50 @@ object FiltersToQueryConverter {
 
         case GreaterThan(attribute, value) =>
           queryLog(s"Creating GreaterThan query: $attribute > $value")
-          val fieldType      = getFieldType(schema, attribute)
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.UNSIGNED) {
+            throw new IllegalArgumentException(
+              s"Range query on field '$attribute' is not supported: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Use EqualTo for exact matching instead."
+            )
+          }
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           logger.info(s"Creating GreaterThan range query: field='$attribute', fieldType=$fieldType, min=$convertedValue (exclusive)")
           Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, false, true)
 
         case GreaterThanOrEqual(attribute, value) =>
           queryLog(s"Creating GreaterThanOrEqual query: $attribute >= $value")
-          val fieldType      = getFieldType(schema, attribute)
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.UNSIGNED) {
+            throw new IllegalArgumentException(
+              s"Range query on field '$attribute' is not supported: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Use EqualTo for exact matching instead."
+            )
+          }
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, true, true)
 
         case LessThan(attribute, value) =>
           queryLog(s"Creating LessThan query: $attribute < $value")
-          val fieldType      = getFieldType(schema, attribute)
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.UNSIGNED) {
+            throw new IllegalArgumentException(
+              s"Range query on field '$attribute' is not supported: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Use EqualTo for exact matching instead."
+            )
+          }
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.rangeQuery(schema, attribute, fieldType, null, convertedValue, true, false)
 
         case LessThanOrEqual(attribute, value) =>
           queryLog(s"Creating LessThanOrEqual query: $attribute <= $value")
-          val fieldType      = getFieldType(schema, attribute)
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.UNSIGNED) {
+            throw new IllegalArgumentException(
+              s"Range query on field '$attribute' is not supported: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Use EqualTo for exact matching instead."
+            )
+          }
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.rangeQuery(schema, attribute, fieldType, null, convertedValue, true, true)
 
@@ -1643,6 +1667,10 @@ object FiltersToQueryConverter {
         // Validate field type supports range operations
         fieldType match {
           case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
+          case FieldType.UNSIGNED =>
+            logger.warn(s"Range query on field '$attribute' rejected: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Filter will be applied by Spark instead.")
+            return None
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1678,6 +1706,10 @@ object FiltersToQueryConverter {
         // Validate field type supports range operations
         fieldType match {
           case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
+          case FieldType.UNSIGNED =>
+            logger.warn(s"Range query on field '$attribute' rejected: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Filter will be applied by Spark instead.")
+            return None
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1747,6 +1779,10 @@ object FiltersToQueryConverter {
         // Validate field type supports range operations
         fieldType match {
           case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
+          case FieldType.UNSIGNED =>
+            logger.warn(s"Range query on field '$attribute' rejected: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Filter will be applied by Spark instead.")
+            return None
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1816,6 +1852,10 @@ object FiltersToQueryConverter {
         // Validate field type supports range operations
         fieldType match {
           case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE | FieldType.IP_ADDR => // OK
+          case FieldType.UNSIGNED =>
+            logger.warn(s"Range query on field '$attribute' rejected: field uses exact_only indexing mode " +
+              s"(values stored as U64 hashes). Filter will be applied by Spark instead.")
+            return None
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None

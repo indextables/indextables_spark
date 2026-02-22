@@ -651,6 +651,51 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("range query on exact_only field should be handled by Spark post-filter") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_range").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_range").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      // Get known trace_ids for verification
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sortedTraceIds = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
+      val midTraceId = sortedTraceIds(sortedTraceIds.length / 2)
+
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('trace_id':'exact_only') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Range queries on exact_only should not crash — Spark handles them as post-filters
+      // on the parquet data (which has the original string values)
+      val gtResults = companionDf.filter(col("trace_id") > midTraceId).collect()
+      val expectedGt = sortedTraceIds.count(_ > midTraceId)
+      gtResults.length shouldBe expectedGt
+
+      val gteResults = companionDf.filter(col("trace_id") >= midTraceId).collect()
+      val expectedGte = sortedTraceIds.count(_ >= midTraceId)
+      gteResults.length shouldBe expectedGte
+
+      val ltResults = companionDf.filter(col("trace_id") < midTraceId).collect()
+      val expectedLt = sortedTraceIds.count(_ < midTraceId)
+      ltResults.length shouldBe expectedLt
+
+      val lteResults = companionDf.filter(col("trace_id") <= midTraceId).collect()
+      val expectedLte = sortedTraceIds.count(_ <= midTraceId)
+      lteResults.length shouldBe expectedLte
+
+      // Total of gt + lte should equal total rows (they're complementary)
+      (gtResults.length + lteResults.length) shouldBe 10
+    }
+  }
+
   test("compact string modes should be stored in companion metadata") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_meta_compact").getAbsolutePath

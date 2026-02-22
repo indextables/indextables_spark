@@ -1173,10 +1173,10 @@ class IndexTables4SparkScanBuilder(
     filter match {
       case EqualTo(attribute, _)            => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _)      => isFieldSuitableForExactMatching(attribute)
-      case GreaterThan(attribute, _)        => true // Support range on all fields (both regular and JSON)
-      case GreaterThanOrEqual(attribute, _) => true // Support range on all fields (both regular and JSON)
-      case LessThan(attribute, _)           => true // Support range on all fields (both regular and JSON)
-      case LessThanOrEqual(attribute, _)    => true // Support range on all fields (both regular and JSON)
+      case GreaterThan(attribute, _)        => isFieldSuitableForRangeQuery(attribute)
+      case GreaterThanOrEqual(attribute, _) => isFieldSuitableForRangeQuery(attribute)
+      case LessThan(attribute, _)           => isFieldSuitableForRangeQuery(attribute)
+      case LessThanOrEqual(attribute, _)    => isFieldSuitableForRangeQuery(attribute)
       case _: In                            => true
       // IsNull/IsNotNull supported when field is fast (ExistsQuery requires FAST field)
       // or when field is a partition column (partition values are never null, so
@@ -1201,6 +1201,16 @@ class IndexTables4SparkScanBuilder(
 
     // TODO: Implement proper predicate type checking based on Spark's V2 Predicate types
     true // Accept all for now to see what comes through
+  }
+
+  /** Check if a field supports range query pushdown. exact_only fields store
+    * U64 hashes — range comparison would compare hashes, not original values. */
+  private def isFieldSuitableForRangeQuery(attribute: String): Boolean = {
+    val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
+    effectiveConfig.get(fieldTypeKey) match {
+      case Some(mode) => io.indextables.spark.util.IndexingModes.supportsRangeQuery(mode)
+      case None       => true // No explicit config — assume standard string field
+    }
   }
 
   /**
