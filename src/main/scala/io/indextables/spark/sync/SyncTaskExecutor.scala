@@ -136,7 +136,7 @@ object SyncTaskExecutor {
           case (field, mode) if mode.toLowerCase == "text" =>
             field -> "default"
           case (field, mode) if io.indextables.spark.util.IndexingModes.isCompactStringMode(mode) =>
-            field -> mode // pass through as-is: "exact_only", "text_uuid_exactonly", etc.
+            field -> io.indextables.spark.util.IndexingModes.normalizeForNative(mode)
         }
         if (tokenizerOverrides.nonEmpty) {
           logger.info(s"Sync task ${group.groupIndex}: applying tokenizer overrides: ${tokenizerOverrides.map { case (f, m) => s"$f=$m" }.mkString(", ")}")

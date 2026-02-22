@@ -486,6 +486,137 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("case-insensitive mode names should work (regression for parser .toLowerCase removal)") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_case").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_case").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 5)
+
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val targetTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
+
+      // Use UPPER CASE mode name — should be recognized by IndexingModes.isRecognized
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('trace_id':'EXACT_ONLY') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 5
+
+      // EqualTo filter should still work
+      val filtered = companionDf.filter(col("trace_id") === targetTraceId).collect()
+      filtered.length shouldBe 1
+      filtered(0).getString(filtered(0).fieldIndex("trace_id")) shouldBe targetTraceId
+    }
+  }
+
+  test("empty regex in custom mode should return error") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_empty_regex").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_empty_regex").getAbsolutePath
+
+      createCustomPatternParquetData(parquetPath)
+
+      val rows = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('audit_log':'text_custom_strip:') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()
+      rows.length shouldBe 1
+      rows(0).getString(2) shouldBe "error"
+      rows(0).getString(10) should include("empty regex")
+    }
+  }
+
+  test("text_uuid_strip should actually strip UUIDs from indexed text") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_strip_verify").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_strip_verify").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 5)
+
+      // Get a known UUID from the source data
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val knownTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
+      // Extract first 8 hex chars from UUID for a targeted search
+      val uuidPrefix = knownTraceId.split("-")(0) // e.g., "550e8400"
+
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('message':'text_uuid_strip') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Text search for non-UUID content should still work
+      companionDf.createOrReplaceTempView("uuid_strip_verify")
+      val textResults = spark.sql(
+        "SELECT * FROM uuid_strip_verify WHERE message indexquery 'processing'"
+      ).collect()
+      textResults.length shouldBe 5
+
+      // UUID prefix should NOT be searchable — it was stripped before indexing
+      val uuidResults = spark.sql(
+        s"SELECT * FROM uuid_strip_verify WHERE message indexquery '$uuidPrefix'"
+      ).collect()
+      uuidResults.length shouldBe 0
+    }
+  }
+
+  test("text_uuid_exactonly should strip UUIDs from text but preserve them via parquet readback") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_exactonly_verify").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_exactonly_verify").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 5)
+
+      // Get a known UUID from the source data
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val knownMessage = sourceData(0).getString(sourceData(0).fieldIndex("message"))
+      val knownTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
+      val uuidPrefix = knownTraceId.split("-")(0)
+
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('message':'text_uuid_exactonly') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.createOrReplaceTempView("uuid_exactonly_verify")
+
+      // UUID prefix should NOT be searchable via IndexQuery — stripped from text
+      val uuidResults = spark.sql(
+        s"SELECT * FROM uuid_exactonly_verify WHERE message indexquery '$uuidPrefix'"
+      ).collect()
+      uuidResults.length shouldBe 0
+
+      // Wildcard on UUID prefix should also NOT match — hex chars were fully removed
+      val wildcardResults = spark.sql(
+        s"SELECT * FROM uuid_exactonly_verify WHERE message indexquery '$uuidPrefix*'"
+      ).collect()
+      wildcardResults.length shouldBe 0
+
+      // But EqualTo on message should still work — parquet has the original unstripped value
+      val equalToResults = companionDf.filter(col("message") === knownMessage).collect()
+      equalToResults.length shouldBe 1
+      equalToResults(0).getString(equalToResults(0).fieldIndex("message")) shouldBe knownMessage
+    }
+  }
+
   test("compact string modes should be stored in companion metadata") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_meta_compact").getAbsolutePath
