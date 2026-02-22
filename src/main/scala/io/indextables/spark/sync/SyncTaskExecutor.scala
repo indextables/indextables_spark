@@ -135,7 +135,7 @@ object SyncTaskExecutor {
         val tokenizerOverrides = config.indexingModes.collect {
           case (field, mode) if mode.toLowerCase == "text" =>
             field -> "default"
-          case (field, mode) if isCompactStringMode(mode) =>
+          case (field, mode) if io.indextables.spark.util.IndexingModes.isCompactStringMode(mode) =>
             field -> mode // pass through as-is: "exact_only", "text_uuid_exactonly", etc.
         }
         if (tokenizerOverrides.nonEmpty) {
@@ -416,15 +416,6 @@ object SyncTaskExecutor {
     val baseSegments = segments.reverse.dropWhile(_.contains("=")).reverse
 
     scheme + baseSegments.mkString("/")
-  }
-
-  private def isCompactStringMode(mode: String): Boolean = {
-    val lower = mode.toLowerCase
-    lower == "exact_only" ||
-    lower == "text_uuid_exactonly" ||
-    lower == "text_uuid_strip" ||
-    lower.startsWith("text_custom_exactonly:") ||
-    lower.startsWith("text_custom_strip:")
   }
 
   private def deleteRecursively(file: File): Unit =

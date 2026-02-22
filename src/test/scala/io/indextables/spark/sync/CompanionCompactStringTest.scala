@@ -269,6 +269,38 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("text_custom_strip mode should build companion with custom regex stripped") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_custom_strip").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_custom_strip").getAbsolutePath
+
+      createCustomPatternParquetData(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"""INDEXING MODES ('audit_log':'text_custom_strip:ORD-\\d{8}') """ +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 5
+
+      // Verify text search works — "processing" should match even after ORD-* patterns stripped
+      companionDf.createOrReplaceTempView("custom_strip_test")
+      val textResults = spark.sql(
+        "SELECT * FROM custom_strip_test WHERE audit_log indexquery 'processing'"
+      ).collect()
+      // 4 out of 5 messages contain "Processing order"
+      textResults.length shouldBe 4
+    }
+  }
+
   test("incremental sync should preserve compact modes from metadata") {
     withTempPath { tempDir =>
       val parquetPath  = new File(tempDir, "parquet_inc").getAbsolutePath

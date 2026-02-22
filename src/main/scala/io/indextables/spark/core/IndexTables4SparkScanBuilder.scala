@@ -1220,29 +1220,16 @@ class IndexTables4SparkScanBuilder(
     // Use lowercase attribute: CaseInsensitiveStringMap lowercases keys, so config has
     // "spark.indextables.indexing.typemap.myfield" even if user wrote "typemap.myField".
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
-    val fieldType    = effectiveConfig.get(fieldTypeKey)
+    val fieldType = effectiveConfig.get(fieldTypeKey)
 
     fieldType match {
-      case Some("string") =>
-        logger.debug(s"Field '$attribute' configured as 'string' - supporting exact matching")
-        true
-      case Some("text") =>
-        logger.debug(s"Field '$attribute' configured as 'text' - deferring exact matching to Spark")
-        false
-      case Some("ip") =>
-        logger.debug(s"Field '$attribute' configured as 'ip' - supporting exact matching")
-        true
-      case Some(mode) if mode == "exact_only" =>
-        logger.debug(s"Field '$attribute' configured as 'exact_only' - supporting exact matching (hash-based)")
-        true
-      case Some(mode) if mode.startsWith("text_") =>
-        // text_uuid_exactonly, text_uuid_strip, text_custom_exactonly:*, text_custom_strip:*
-        // These are TEXT fields — defer exact matching to Spark
-        logger.debug(s"Field '$attribute' configured as '$mode' - deferring exact matching to Spark (text-based compact mode)")
-        false
-      case Some(other) =>
-        logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
-        true
+      case Some(mode) =>
+        val supports = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
+        if (supports)
+          logger.debug(s"Field '$attribute' configured as '$mode' - supporting exact matching")
+        else
+          logger.debug(s"Field '$attribute' configured as '$mode' - deferring exact matching to Spark")
+        supports
       case None =>
         // No explicit configuration - assume string type (new default)
         logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")

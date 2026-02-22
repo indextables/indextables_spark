@@ -368,19 +368,19 @@ case class SyncToExternalCommand(
       }
 
       // Validate indexing mode values
-      val recognizedModes = Set("string", "text", "ip", "ipaddress", "json",
-        "exact_only", "text_uuid_exactonly", "text_uuid_strip")
-      val recognizedPrefixes = Seq("text_custom_exactonly:", "text_custom_strip:")
-
+      import io.indextables.spark.util.IndexingModes
       effectiveIndexingModes.foreach { case (field, mode) =>
-        val lower = mode.toLowerCase
-        val isRecognized = recognizedModes.contains(lower) ||
-          recognizedPrefixes.exists(p => lower.startsWith(p))
-        if (!isRecognized) {
+        if (!IndexingModes.isRecognized(mode)) {
           throw new IllegalArgumentException(
             s"Unrecognized indexing mode '$mode' for field '$field'. " +
-            s"Valid modes: string, text, ip, ipaddress, json, exact_only, " +
-            s"text_uuid_exactonly, text_uuid_strip, text_custom_exactonly:<regex>, text_custom_strip:<regex>")
+            s"Valid modes: ${IndexingModes.validModesDescription}")
+        }
+        // Validate non-empty regex for custom modes
+        IndexingModes.extractCustomRegex(mode).foreach { regex =>
+          if (regex.isEmpty) {
+            throw new IllegalArgumentException(
+              s"Custom regex mode '$mode' for field '$field' requires a non-empty regex pattern after ':'")
+          }
         }
       }
 

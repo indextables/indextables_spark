@@ -62,15 +62,11 @@ class SplitSearchEngine private (
     * First access per table triggers JNI + JSON parse; subsequent
     * SplitSearchEngine instances for the same table get a cache hit.
     * Note: depends on splitSearcher being initialized first (safe because
-    * this is only accessed from convertSearchResultToRows, after search). */
+    * this is only accessed from convertSearchResultToRows, after search).
+    * Exceptions propagate — returning empty overrides would silently produce
+    * wrong data for exact_only fields (UNSIGNED treated as raw instead of TEXT). */
   private lazy val exactOnlyFieldOverrides: Map[String, io.indextables.tantivy4java.core.FieldType] =
-    try
-      SplitSearchEngine.getExactOnlyOverrides(cacheConfig.cacheName, splitSearcher)
-    catch {
-      case e: Exception =>
-        logger.warn(s"Failed to get exact_only overrides for '${cacheConfig.cacheName}': ${e.getMessage}")
-        Map.empty
-    }
+    SplitSearchEngine.getExactOnlyOverrides(cacheConfig.cacheName, splitSearcher)
 
   // Create the split searcher using the shared cache
   logger.info(s"Creating SplitSearchEngine for path: $splitPath")
@@ -446,6 +442,17 @@ object SplitSearchEngine {
     * to avoid stale overrides after schema evolution or table recreation. */
   def clearOverrideCache(): Unit = exactOnlyOverrideCache.clear()
 
+  /** Extract mode string from a JSON node. Handles both flat ("ExactOnly")
+    * and nested ({"mode":"exact_only"}) formats from the native layer. */
+  private def extractMode(node: com.fasterxml.jackson.databind.JsonNode): String =
+    if (node.isTextual) node.asText()
+    else if (node.isObject && node.has("mode")) node.get("mode").asText()
+    else ""
+
+  /** Check if a mode string represents exact_only (case-insensitive, with or without underscore). */
+  private def isExactOnlyMode(mode: String): Boolean =
+    mode.equalsIgnoreCase("exact_only") || mode == "ExactOnly"
+
   private[search] def getExactOnlyOverrides(
     cacheName: String,
     splitSearcher: => SplitSearcher
@@ -457,17 +464,12 @@ object SplitSearchEngine {
       if (modesJson != null && modesJson.nonEmpty) {
         val tree = objectMapper.readTree(modesJson)
         import scala.jdk.CollectionConverters._
-        tree.fields().asScala.collect {
-          case entry if {
-            val node = entry.getValue
-            // Handle both flat ("ExactOnly") and nested ({"mode":"exact_only"}) formats
-            val mode = if (node.isTextual) node.asText()
-                       else if (node.isObject && node.has("mode")) node.get("mode").asText()
-                       else ""
-            mode.equalsIgnoreCase("exact_only") || mode == "ExactOnly"
-          } =>
+        tree.fields().asScala.flatMap { entry =>
+          val mode = extractMode(entry.getValue)
+          if (isExactOnlyMode(mode)) {
             logger.info(s"Detected exact_only field '${entry.getKey}' in cache '$cacheName' — will remap UNSIGNED→TEXT on read")
-            entry.getKey -> FieldType.TEXT
+            Some(entry.getKey -> FieldType.TEXT)
+          } else None
         }.toMap
       } else {
         Map.empty
