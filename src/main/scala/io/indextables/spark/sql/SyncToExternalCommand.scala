@@ -342,7 +342,8 @@ case class SyncToExternalCommand(
 
     try {
       // 5. Determine sync mode: initial vs incremental
-      val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, reader.schema(), partitionColumns)
+      val sourceSchema = reader.schema()
+      val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, sourceSchema, partitionColumns)
 
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
       val effectiveIndexingModes = if (indexingModes.nonEmpty) {
@@ -364,6 +365,36 @@ case class SyncToExternalCommand(
         }
       } else {
         Map.empty[String, String]
+      }
+
+      // Validate indexing mode values
+      val recognizedModes = Set("string", "text", "ip", "ipaddress", "json",
+        "exact_only", "text_uuid_exactonly", "text_uuid_strip")
+      val recognizedPrefixes = Seq("text_custom_exactonly:", "text_custom_strip:")
+
+      effectiveIndexingModes.foreach { case (field, mode) =>
+        val lower = mode.toLowerCase
+        val isRecognized = recognizedModes.contains(lower) ||
+          recognizedPrefixes.exists(p => lower.startsWith(p))
+        if (!isRecognized) {
+          throw new IllegalArgumentException(
+            s"Unrecognized indexing mode '$mode' for field '$field'. " +
+            s"Valid modes: string, text, ip, ipaddress, json, exact_only, " +
+            s"text_uuid_exactonly, text_uuid_strip, text_custom_exactonly:<regex>, text_custom_strip:<regex>")
+        }
+      }
+
+      // Validate field names exist in source schema
+      if (effectiveIndexingModes.nonEmpty) {
+        val schemaFieldNames = sourceSchema.fieldNames.map(_.toLowerCase).toSet ++
+          partitionColumns.map(_.toLowerCase).toSet
+        effectiveIndexingModes.foreach { case (field, mode) =>
+          if (!schemaFieldNames.contains(field.toLowerCase)) {
+            throw new IllegalArgumentException(
+              s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
+              s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}")
+          }
+        }
       }
 
       // Resolve effective WHERE predicates: use stored WHERE from metadata if not specified

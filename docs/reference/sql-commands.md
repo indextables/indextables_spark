@@ -719,7 +719,7 @@ BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
 | `CATALOG name` | Delta, Iceberg | Catalog name for table resolution |
 | `TYPE type` | Delta, Iceberg | Catalog type (e.g., "rest" for Unity Catalog) |
 | `WAREHOUSE path` | Iceberg only | Warehouse path |
-| `INDEXING MODES (...)` | All | Per-field indexing modes, e.g., `('content':'text', 'ip_addr':'ipaddress')` |
+| `INDEXING MODES (...)` | All | Per-field indexing modes (see table below) |
 | `FASTFIELDS MODE` | All | HYBRID (default), DISABLED, or PARQUET_ONLY |
 | `TARGET INPUT SIZE size` | All | Max input size per indexing group (default: 2GB) |
 | `WRITER HEAP SIZE size` | All | Writer heap memory per executor |
@@ -735,6 +735,35 @@ spark.indextables.companion.sync.maxConcurrentBatches: 6
 spark.indextables.companion.writerHeapSize: 1G
 spark.indextables.companion.readerBatchSize: 8192
 spark.indextables.companion.schedulerPool: "indextables-companion" (FAIR scheduler pool)
+```
+
+**Indexing Modes:**
+
+| Mode | Description |
+|------|-------------|
+| `string` | Default. Exact matching with full filter pushdown (`===`, `>`, `<`, `IN`, etc.) |
+| `text` | Full-text search via IndexQuery. No exact-match pushdown. |
+| `ip` / `ipaddress` | IP address field type |
+| `json` | JSON field (automatic for Struct/Array/Map) |
+| `exact_only` | Replace string with U64 xxHash64. ~80% size reduction for ID/UUID fields. Supports `EqualTo` pushdown (hash-based). |
+| `text_uuid_exactonly` | Strip UUIDs from text for "default" tokenizer; UUIDs indexed in companion U64 hash field. Use IndexQuery for queries. |
+| `text_uuid_strip` | Strip UUIDs from text for "default" tokenizer; UUIDs discarded. Use IndexQuery for queries. |
+| `text_custom_exactonly:<regex>` | Same as `text_uuid_exactonly` but with custom regex pattern. |
+| `text_custom_strip:<regex>` | Same as `text_uuid_strip` but with custom regex pattern. |
+
+**Compact String Indexing Examples:**
+```sql
+-- Hash UUID/ID columns for ~80% size reduction
+BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data'
+  INDEXING MODES (
+    'trace_id':'exact_only',
+    'request_id':'exact_only',
+    'message':'text_uuid_exactonly',
+    'raw_log':'text_uuid_strip',
+    'audit_log':'text_custom_exactonly:\d{3}-\d{2}-\d{4}',
+    'notes':'text_custom_strip:ORD-\d{8}'
+  )
+  AT LOCATION 's3://bucket/index';
 ```
 
 - Creates minimal Quickwit splits that reference external parquet files (45-70% split size reduction)

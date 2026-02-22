@@ -1232,6 +1232,14 @@ class IndexTables4SparkScanBuilder(
       case Some("ip") =>
         logger.debug(s"Field '$attribute' configured as 'ip' - supporting exact matching")
         true
+      case Some(mode) if mode == "exact_only" =>
+        logger.debug(s"Field '$attribute' configured as 'exact_only' - supporting exact matching (hash-based)")
+        true
+      case Some(mode) if mode.startsWith("text_") =>
+        // text_uuid_exactonly, text_uuid_strip, text_custom_exactonly:*, text_custom_strip:*
+        // These are TEXT fields — defer exact matching to Spark
+        logger.debug(s"Field '$attribute' configured as '$mode' - deferring exact matching to Spark (text-based compact mode)")
+        false
       case Some(other) =>
         logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
         true

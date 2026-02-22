@@ -193,6 +193,69 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
 
 ---
 
+## Compact String Indexing (Companion Splits)
+
+Reduces index size for high-cardinality string fields and UUID-heavy text in companion splits. Configured via `INDEXING MODES` in the `BUILD INDEXTABLES COMPANION` command.
+
+### Modes
+
+| Mode | Effect | Size Reduction |
+|------|--------|----------------|
+| `exact_only` | Replace string with U64 xxHash64 hash. Supports `EqualTo` filter pushdown (hash-based). | ~80% for ID fields |
+| `text_uuid_exactonly` | Strip UUIDs from text, index with "default" tokenizer. UUIDs go to companion U64 hash field for exact lookup. | Significant for UUID-heavy logs |
+| `text_uuid_strip` | Strip UUIDs from text, index with "default" tokenizer. UUIDs discarded entirely. | Maximum for UUID-heavy logs |
+| `text_custom_exactonly:<regex>` | Same as `text_uuid_exactonly` but with custom regex for pattern extraction. | Depends on pattern frequency |
+| `text_custom_strip:<regex>` | Same as `text_uuid_strip` but with custom regex for pattern stripping. | Depends on pattern frequency |
+
+### When to Use Each Mode
+
+- **`exact_only`**: ID columns (trace IDs, request IDs, UUIDs) where you only need exact equality lookups. Wildcard/regex queries are not supported.
+- **`text_uuid_exactonly`**: Log messages containing UUIDs where you need both text search on the message and exact UUID lookup.
+- **`text_uuid_strip`**: Log messages containing UUIDs where you only need text search and UUIDs are noise.
+- **`text_custom_exactonly:<regex>`**: Like `text_uuid_exactonly` but for custom patterns (e.g., order numbers, SSN-like patterns).
+- **`text_custom_strip:<regex>`**: Like `text_uuid_strip` but for custom patterns.
+
+### Query Behavior
+
+Query rewriting is handled transparently by tantivy4java:
+
+- **`exact_only`**: `EqualTo`, `parseQuery()`, and phrase queries are auto-converted to hashed U64 term queries. Wildcard/regex/phrase_prefix queries are blocked with a clear error.
+- **`text_*_exactonly`**: Regex-matching values route to companion hash field; non-matching values search stripped text.
+- **`text_*_strip`**: All queries operate on stripped text.
+
+### Filter Pushdown
+
+- **`exact_only`**: `EqualTo` is pushed down to tantivy (hash-based).
+- **`text_*` modes**: `EqualTo` is NOT pushed down (deferred to Spark). Use IndexQuery for text search.
+
+### Example
+
+```sql
+BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/logs'
+  INDEXING MODES (
+    'trace_id':'exact_only',
+    'request_id':'exact_only',
+    'message':'text_uuid_exactonly',
+    'raw_log':'text_uuid_strip'
+  )
+  AT LOCATION 's3://bucket/log_index';
+```
+
+```scala
+// After building companion:
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("s3://bucket/log_index")
+
+// exact_only: EqualTo pushed down (hash-based)
+df.filter($"trace_id" === "abc-123-def-456").show()
+
+// text_uuid_exactonly: Use IndexQuery for text search
+df.createOrReplaceTempView("logs")
+spark.sql("SELECT * FROM logs WHERE message indexquery 'error timeout'").show()
+```
+
+---
+
 ## Optimized Writes
 
 Iceberg-style shuffle before writing. Disabled by default. When enabled, uses Spark's `RequiresDistributionAndOrdering` to shuffle data by partition columns, producing well-sized (~1GB) splits. Uses AQE advisory partition size with history-based or sampling-based estimation.

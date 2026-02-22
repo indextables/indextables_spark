@@ -58,6 +58,12 @@ class SplitSearchEngine private (
   // Get the global cache manager for this configuration
   private val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
 
+  /** Cached exact_only field overrides for this split's table.
+    * First access per table triggers JNI + JSON parse; subsequent
+    * SplitSearchEngine instances for the same table get a cache hit. */
+  private lazy val exactOnlyFieldOverrides: Map[String, io.indextables.tantivy4java.core.FieldType] =
+    SplitSearchEngine.getExactOnlyOverrides(cacheConfig.cacheName, splitSearcher)
+
   // Create the split searcher using the shared cache
   logger.info(s"Creating SplitSearchEngine for path: $splitPath")
 
@@ -322,7 +328,13 @@ class SplitSearchEngine private (
 
       // Build field type cache once before processing documents (avoids N×M JNI calls)
       val fieldTypeCache = SchemaMapping.Read.buildFieldTypeCache(splitSchema, sparkSchema)
-      logger.debug(s"Built field type cache for ${fieldTypeCache.size} fields")
+      // Remap exact_only fields: tantivy reports UNSIGNED (U64 hash) but underlying
+      // parquet data is STRING — use TEXT so convertValue takes the (TEXT, StringType) path
+      val adjustedFieldTypeCache =
+        if (exactOnlyFieldOverrides.nonEmpty) fieldTypeCache ++ exactOnlyFieldOverrides
+        else fieldTypeCache
+      logger.debug(s"Built field type cache for ${fieldTypeCache.size} fields" +
+        (if (exactOnlyFieldOverrides.nonEmpty) s", ${exactOnlyFieldOverrides.size} exact_only overrides applied" else ""))
 
       // Convert documents to InternalRows
       val rows = documents.zipWithIndex.map {
@@ -330,7 +342,7 @@ class SplitSearchEngine private (
           try
             if (document != null) {
               // Use cached field types for fast conversion (no JNI calls per field)
-              val values = SchemaMapping.Read.convertDocumentWithCache(document, sparkSchema, fieldTypeCache, options)
+              val values = SchemaMapping.Read.convertDocumentWithCache(document, sparkSchema, adjustedFieldTypeCache, options)
               org.apache.spark.sql.catalyst.InternalRow.fromSeq(values)
             } else {
               // Fallback to empty row if document retrieval fails
@@ -411,6 +423,47 @@ class SplitSearchEngine private (
 /** Factory for creating SplitSearchEngine instances. */
 object SplitSearchEngine {
   private val logger = LoggerFactory.getLogger(getClass)
+
+  import java.util.concurrent.ConcurrentHashMap
+  import io.indextables.tantivy4java.core.FieldType
+
+  /** Process-wide cache: cacheName → exact_only field overrides.
+    * Avoids repeated JNI calls + JSON parsing across SplitSearchEngine instances
+    * for splits in the same table. */
+  private val exactOnlyOverrideCache = new ConcurrentHashMap[String, Map[String, FieldType]]()
+
+  private[search] def getExactOnlyOverrides(
+    cacheName: String,
+    splitSearcher: => SplitSearcher
+  ): Map[String, FieldType] =
+    exactOnlyOverrideCache.computeIfAbsent(cacheName, _ => {
+      try {
+        val modesJson = splitSearcher.getStringIndexingModes()
+        if (modesJson != null && modesJson.nonEmpty) {
+          val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+          val tree = mapper.readTree(modesJson)
+          import scala.jdk.CollectionConverters._
+          tree.fields().asScala.collect {
+            case entry if {
+              val node = entry.getValue
+              // Handle both flat ("ExactOnly") and nested ({"mode":"exact_only"}) formats
+              val mode = if (node.isTextual) node.asText()
+                         else if (node.isObject && node.has("mode")) node.get("mode").asText()
+                         else ""
+              mode.equalsIgnoreCase("exact_only") || mode == "ExactOnly"
+            } =>
+              logger.info(s"Detected exact_only field '${entry.getKey}' in cache '$cacheName' — will remap UNSIGNED→TEXT on read")
+              entry.getKey -> FieldType.TEXT
+          }.toMap
+        } else {
+          Map.empty
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to get string indexing modes for cache '$cacheName': ${e.getMessage}")
+          Map.empty
+      }
+    })
 
   /**
    * Create a SplitSearchEngine with footer offset optimization (87% network traffic reduction). Uses pre-computed
