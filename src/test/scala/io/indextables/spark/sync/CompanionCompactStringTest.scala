@@ -696,6 +696,177 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("range query on non-exact_only string field should not be blocked by exact_only validation") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_string_range").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_string_range").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      // trace_id is exact_only; name has no explicit mode (defaults to string)
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('trace_id':'exact_only') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Range on regular string field 'name' should not crash (not blocked by exact_only validation).
+      // Note: pre-existing behavior — STRING range queries are accepted by the ScanBuilder but
+      // the converter returns None (STRING not in INTEGER/FLOAT/DATE/IP_ADDR). Spark trusts the
+      // data source claimed it handled the filter, so no post-filter is applied. All rows returned.
+      val results = companionDf.filter(col("name") > "name_5").collect()
+      results.length shouldBe 10 // Pre-existing: filter not actually applied
+
+      // Contrast with exact_only: isFilterSupported returns false, so Spark post-filters correctly
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sortedTraceIds = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
+      val midTraceId = sortedTraceIds(sortedTraceIds.length / 2)
+      val exactOnlyResults = companionDf.filter(col("trace_id") > midTraceId).collect()
+      val expectedGt = sortedTraceIds.count(_ > midTraceId)
+      exactOnlyResults.length shouldBe expectedGt // exact_only: Spark post-filters correctly
+    }
+  }
+
+  test("range query on text_uuid_exactonly field should not be blocked by exact_only validation") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_text_range").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_text_range").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('message':'text_uuid_exactonly') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Range on text_uuid_exactonly should not crash (not blocked by exact_only validation).
+      // Same pre-existing behavior as STRING: ScanBuilder accepts, converter returns None,
+      // Spark doesn't post-filter → all rows returned.
+      val results = companionDf.filter(col("message") > "zzz").collect()
+      results.length shouldBe 10 // Pre-existing: filter not actually applied
+
+      // Key assertion: text_uuid_exactonly is NOT treated as exact_only by supportsRangeQuery.
+      // If it were mistakenly blocked, Spark would post-filter and return 0 rows for "> zzz".
+    }
+  }
+
+  test("range filter on exact_only should not be pushed down to tantivy") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_explain").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_explain").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val targetTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
+
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('trace_id':'exact_only') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Range filter on exact_only should NOT appear in pushed filters
+      val filtered = companionDf.filter(col("trace_id") > targetTraceId)
+      val planString = filtered.queryExecution.executedPlan.toString()
+      planString should not include "GreaterThan(trace_id"
+
+      // EqualTo on exact_only SHOULD appear in pushed filters (it's supported)
+      val equalFiltered = companionDf.filter(col("trace_id") === targetTraceId)
+      val equalPlanString = equalFiltered.queryExecution.executedPlan.toString()
+      equalPlanString should include("trace_id")
+    }
+  }
+
+  test("combined filter: range on exact_only with equality on string field") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_combined").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_combined").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sortedTraceIds = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
+      val midTraceId = sortedTraceIds(sortedTraceIds.length / 2)
+
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('trace_id':'exact_only') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Separate filters: range on exact_only (deferred to Spark) + equality on string (pushed)
+      val results = companionDf
+        .filter(col("trace_id") > midTraceId)
+        .filter(col("name") === "name_3")
+        .collect()
+
+      // Compute expected from source data
+      val expected = sourceData.count { row =>
+        row.getString(row.fieldIndex("trace_id")) > midTraceId &&
+        row.getString(row.fieldIndex("name")) == "name_3"
+      }
+      results.length shouldBe expected
+
+      // Also verify the AND form (single combined filter)
+      val andResults = companionDf
+        .filter(col("trace_id") > midTraceId && col("name") === "name_3")
+        .collect()
+      andResults.length shouldBe expected
+    }
+  }
+
+  test("range query on numeric field should not be affected by exact_only validation") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_numeric_range").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_numeric_range").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      // exact_only on trace_id; id (Long) and score (Double) are default numeric types
+      spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('trace_id':'exact_only') " +
+          s"AT LOCATION '$indexPath'"
+      ).collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // GreaterThan on numeric 'id' (Long → INTEGER type) should still work
+      val gtResults = companionDf.filter(col("id") > 5L).collect()
+      gtResults.length shouldBe 4 // id 6, 7, 8, 9
+      gtResults.foreach { row =>
+        row.getLong(row.fieldIndex("id")) should be > 5L
+      }
+
+      // LessThanOrEqual on numeric 'id' should also work
+      val lteResults = companionDf.filter(col("id") <= 2L).collect()
+      lteResults.length shouldBe 3 // id 0, 1, 2
+      lteResults.foreach { row =>
+        row.getLong(row.fieldIndex("id")) should be <= 2L
+      }
+    }
+  }
+
   test("compact string modes should be stored in companion metadata") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_meta_compact").getAbsolutePath
