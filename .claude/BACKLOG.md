@@ -205,3 +205,5 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 | IT-007 | Fix storage class names in CLAUDE.md | 2026-02 |
 | IT-006 | Document both class name aliases in CLAUDE.md | 2026-02 |
 | IT-008 | Document missing SQL commands | 2026-02 |
+| IT-042 | Fix broken README.md links ([#176](https://github.com/indextables/indextables_spark/issues/176)) | 2026-02 |
+| IT-043 | Rewrite table-protocol.md for V4 Avro state ([#175](https://github.com/indextables/indextables_spark/issues/175)) | 2026-02 |
