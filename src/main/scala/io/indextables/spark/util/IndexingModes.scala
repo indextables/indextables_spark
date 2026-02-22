@@ -55,6 +55,13 @@ object IndexingModes {
     lower.startsWith("text_custom_strip:")
   }
 
+  /** Check if a mode supports range filter pushdown (>, <, >=, <=).
+    * exact_only stores U64 hashes — range comparison is meaningless. */
+  def supportsRangeQuery(mode: String): Boolean = {
+    val lower = mode.toLowerCase
+    lower != "exact_only"
+  }
+
   /** Check if a mode supports EqualTo filter pushdown to tantivy. */
   def supportsExactMatchPushdown(mode: String): Boolean = {
     val lower = mode.toLowerCase
