@@ -39,6 +39,37 @@ object PartitionPruner {
   private val log = LoggerFactory.getLogger(getClass)
 
   /**
+   * Numeric-aware string comparison. When both values are parseable as numbers (Long or Double),
+   * compares them numerically. Otherwise falls back to lexicographic string comparison.
+   *
+   * This is critical for partition bounds pruning where partition values like "1", "9", "10", "12"
+   * are stored as strings but represent numeric values. Without numeric-aware comparison,
+   * "9" > "10" lexicographically, which would incorrectly prune manifests containing months 10-12
+   * when filtering for month > 9.
+   *
+   * @return negative if a < b, zero if a == b, positive if a > b
+   */
+  private[avro] def numericAwareCompare(a: String, b: String): Int =
+    try {
+      // Try Long first (most common for partition values like month, year, day)
+      val aLong = a.toLong
+      val bLong = b.toLong
+      java.lang.Long.compare(aLong, bLong)
+    } catch {
+      case _: NumberFormatException =>
+        try {
+          // Try Double for decimal partition values
+          val aDouble = a.toDouble
+          val bDouble = b.toDouble
+          java.lang.Double.compare(aDouble, bDouble)
+        } catch {
+          case _: NumberFormatException =>
+            // Fall back to lexicographic comparison for non-numeric values
+            a.compareTo(b)
+        }
+    }
+
+  /**
    * Prune manifests based on partition filter.
    *
    * @param manifests
@@ -173,7 +204,7 @@ object PartitionPruner {
         true
     }
 
-  /** Check if value falls within partition bounds. */
+  /** Check if value falls within partition bounds. Uses numeric-aware comparison. */
   private def boundsContainValue(
     bounds: Map[String, PartitionBounds],
     attr: String,
@@ -181,15 +212,15 @@ object PartitionPruner {
   ): Boolean =
     bounds.get(attr) match {
       case Some(b) =>
-        val minOk = b.min.forall(_ <= value)
-        val maxOk = b.max.forall(_ >= value)
+        val minOk = b.min.forall(min => numericAwareCompare(min, value) <= 0)
+        val maxOk = b.max.forall(max => numericAwareCompare(max, value) >= 0)
         minOk && maxOk
       case None =>
         // Attribute not in bounds - can't prune
         true
     }
 
-  /** Check if bounds have values greater than the given value. */
+  /** Check if bounds have values greater than the given value. Uses numeric-aware comparison. */
   private def boundsGreaterThan(
     bounds: Map[String, PartitionBounds],
     attr: String,
@@ -200,7 +231,8 @@ object PartitionPruner {
       case Some(b) =>
         b.max match {
           case Some(max) =>
-            if (inclusive) max >= value else max > value
+            val cmp = numericAwareCompare(max, value)
+            if (inclusive) cmp >= 0 else cmp > 0
           case None =>
             // No max bound - could have any value
             true
@@ -209,7 +241,7 @@ object PartitionPruner {
         true
     }
 
-  /** Check if bounds have values less than the given value. */
+  /** Check if bounds have values less than the given value. Uses numeric-aware comparison. */
   private def boundsLessThan(
     bounds: Map[String, PartitionBounds],
     attr: String,
@@ -220,7 +252,8 @@ object PartitionPruner {
       case Some(b) =>
         b.min match {
           case Some(min) =>
-            if (inclusive) min <= value else min < value
+            val cmp = numericAwareCompare(min, value)
+            if (inclusive) cmp <= 0 else cmp < 0
           case None =>
             // No min bound - could have any value
             true

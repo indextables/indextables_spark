@@ -191,12 +191,7 @@ class IndexTables4SparkScan(
         val partitionFilterConfig = config.getOrElse("spark.indextables.prewarm.partitionFilter", "")
         val prewarmActions = if (partitionFilterConfig.nonEmpty) {
           try {
-            val metadata = transactionLog.getMetadata()
-            val partitionSchema = StructType(
-              metadata.partitionColumns.map(name =>
-                org.apache.spark.sql.types.StructField(name, org.apache.spark.sql.types.StringType, nullable = true)
-              )
-            )
+            val partitionSchema = transactionLog.getPartitionSchema()
 
             if (partitionSchema.nonEmpty) {
               val predicates = Seq(partitionFilterConfig)

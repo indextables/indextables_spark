@@ -91,9 +91,9 @@ object TombstoneDistributor {
                 true
 
               case Some(value) =>
-                // Check if value is within min/max bounds
-                val withinMin = bound.min.forall(min => value >= min)
-                val withinMax = bound.max.forall(max => value <= max)
+                // Check if value is within min/max bounds (numeric-aware comparison)
+                val withinMin = bound.min.forall(min => PartitionPruner.numericAwareCompare(value, min) >= 0)
+                val withinMax = bound.max.forall(max => PartitionPruner.numericAwareCompare(value, max) <= 0)
                 withinMin && withinMax
             }
         }

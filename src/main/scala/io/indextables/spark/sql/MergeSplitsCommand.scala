@@ -21,13 +21,11 @@ import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.hadoop.fs.Path
 
@@ -577,9 +575,7 @@ class MergeSplitsExecutor(
       logger.debug(s"MERGE DEBUG: Configuration has ${metadata.configuration.size} entries")
     }
 
-    val partitionSchema = StructType(
-      metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
-    )
+    val partitionSchema = transactionLog.getPartitionSchema()
 
     logger.debug(s"MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
 
@@ -1544,9 +1540,7 @@ class MergeSplitsExecutor(
 
       // Apply partition predicates if specified
       val filteredPartitions = if (partitionPredicates.nonEmpty) {
-        val partitionSchema = StructType(
-          metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
-        )
+        val partitionSchema = transactionLog.getPartitionSchema()
         applyPartitionPredicates(partitionsToMerge, partitionSchema)
       } else {
         partitionsToMerge
@@ -1582,100 +1576,26 @@ class MergeSplitsExecutor(
     }
 
   /**
-   * Apply partition predicates to filter which partitions should be processed. Follows Delta Lake pattern of parsing
-   * WHERE clause expressions.
+   * Apply partition predicates to filter which partitions should be processed. Delegates to PartitionPredicateUtils for
+   * type-aware predicate evaluation.
    */
   private def applyPartitionPredicates(
     partitions: Seq[(Map[String, String], Seq[AddAction])],
     partitionSchema: StructType
   ): Seq[(Map[String, String], Seq[AddAction])] = {
-
-    // If no partition columns are defined, reject any WHERE clauses
-    if (partitionSchema.isEmpty && partitionPredicates.nonEmpty) {
-      throw new IllegalArgumentException(
-        s"WHERE clause not supported for non-partitioned tables. Partition predicates: ${partitionPredicates.mkString(", ")}"
-      )
-    }
-
-    val parsedPredicates = partitionPredicates.flatMap { predicate =>
-      try {
-        val expression = sparkSession.sessionState.sqlParser.parseExpression(predicate)
-        validatePartitionColumnReferences(expression, partitionSchema)
-        Some(expression)
-      } catch {
-        case ex: Exception =>
-          logger.error(s"Failed to parse partition predicate: $predicate", ex)
-          throw new IllegalArgumentException(s"Invalid partition predicate: $predicate", ex)
-      }
-    }
+    val parsedPredicates = PartitionPredicateUtils.parseAndValidatePredicates(
+      partitionPredicates,
+      partitionSchema,
+      sparkSession
+    )
 
     if (parsedPredicates.isEmpty) return partitions
 
     partitions.filter {
       case (partitionValues, _) =>
-        val row = createRowFromPartitionValues(partitionValues, partitionSchema)
-        parsedPredicates.forall { predicate =>
-          try {
-            // Resolve the expression against the partition schema before evaluation
-            val resolvedPredicate = resolveExpression(predicate, partitionSchema)
-            resolvedPredicate.eval(row).asInstanceOf[Boolean]
-          } catch {
-            case ex: Exception =>
-              logger.error(s"Failed to evaluate predicate $predicate on partition $partitionValues", ex)
-              false
-          }
-        }
+        PartitionPredicateUtils.evaluatePredicates(partitionValues, partitionSchema, parsedPredicates)
     }
   }
-
-  /** Validate that the expression only references partition columns. */
-  private def validatePartitionColumnReferences(expression: Expression, partitionSchema: StructType): Unit = {
-    val partitionColumns  = partitionSchema.fieldNames.toSet
-    val referencedColumns = expression.references.map(_.name).toSet
-
-    val invalidColumns = referencedColumns -- partitionColumns
-    if (invalidColumns.nonEmpty) {
-      throw new IllegalArgumentException(
-        s"WHERE clause references non-partition columns: ${invalidColumns.mkString(", ")}. " +
-          s"Only partition columns are allowed: ${partitionColumns.mkString(", ")}"
-      )
-    }
-  }
-
-  /** Create an InternalRow from partition values for predicate evaluation. */
-  private def createRowFromPartitionValues(
-    partitionValues: Map[String, String],
-    partitionSchema: StructType
-  ): InternalRow = {
-    val values = partitionSchema.fieldNames.map { fieldName =>
-      partitionValues.get(fieldName) match {
-        case Some(value) => UTF8String.fromString(value)
-        case None        => null
-      }
-    }
-    InternalRow.fromSeq(values)
-  }
-
-  /**
-   * Resolve an expression against a schema to handle UnresolvedAttribute references and cast literals to UTF8String.
-   */
-  private def resolveExpression(expression: Expression, schema: StructType): Expression =
-    expression.transform {
-      case unresolvedAttr: org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute =>
-        val fieldName  = unresolvedAttr.name
-        val fieldIndex = schema.fieldIndex(fieldName)
-        val field      = schema(fieldIndex)
-        org.apache.spark.sql.catalyst.expressions.BoundReference(fieldIndex, field.dataType, field.nullable)
-      case literal: org.apache.spark.sql.catalyst.expressions.Literal =>
-        // Cast all literals to UTF8String since partition values are stored as strings
-        import org.apache.spark.sql.types._
-        literal.dataType match {
-          case StringType => literal
-          case _          =>
-            // Convert non-string literals to UTF8String for comparison with partition values
-            org.apache.spark.sql.catalyst.expressions.Literal(UTF8String.fromString(literal.value.toString), StringType)
-        }
-    }
 }
 
 /** Companion object for MergeSplitsExecutor with static methods for distributed execution. */

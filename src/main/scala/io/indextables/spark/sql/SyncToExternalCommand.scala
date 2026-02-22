@@ -22,7 +22,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.types.{IntegerType, LongType, StringType}
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
@@ -286,6 +286,7 @@ case class SyncToExternalCommand(
     val icebergStorageRoot: Option[String] = reader.storageRoot()
 
     val partitionColumns = reader.partitionColumns()
+    val sourceSchema     = Some(reader.schema())
 
     logger.info(
       s"Source table at $sourcePath: version=${sourceVersionOpt.getOrElse("none")}, " +
@@ -295,7 +296,7 @@ case class SyncToExternalCommand(
     // 2. DRY RUN mode: compute plan from source table only, no filesystem modifications
     if (dryRun) {
       var allFiles = allSourceFiles
-      allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession)
+      allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession, fullSchema = sourceSchema)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups       = planIndexingGroups(allFiles, maxGroupSize)
       val durationMs   = System.currentTimeMillis() - startTime
@@ -422,7 +423,7 @@ case class SyncToExternalCommand(
 
       // 7b. Apply WHERE partition filter
       val parquetFilesToIndex =
-        applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession, effectiveWherePredicates)
+        applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession, effectiveWherePredicates, sourceSchema)
 
       // Source version for commits (Delta version, Iceberg snapshot ID, or -1 for Parquet)
       val sourceVersion = sourceVersionOpt.getOrElse(-1L)
@@ -703,12 +704,13 @@ case class SyncToExternalCommand(
     files: Seq[CompanionSourceFile],
     partitionColumns: Seq[String],
     sparkSession: SparkSession,
-    predicates: Seq[String] = Seq.empty
+    predicates: Seq[String] = Seq.empty,
+    fullSchema: Option[StructType] = None
   ): Seq[CompanionSourceFile] = {
     val effectivePreds = if (predicates.nonEmpty) predicates else wherePredicates
     if (effectivePreds.isEmpty || partitionColumns.isEmpty) return files
 
-    val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns)
+    val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
     val parsedPredicates =
       PartitionPredicateUtils.parseAndValidatePredicates(effectivePreds, partitionSchema, sparkSession)
 

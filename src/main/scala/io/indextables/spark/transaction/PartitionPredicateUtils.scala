@@ -34,7 +34,7 @@ import org.apache.spark.sql.catalyst.expressions.{
 import org.apache.spark.sql.catalyst.expressions.{StartsWith => CatalystStartsWith}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.sources._
-import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -124,22 +124,23 @@ object PartitionPredicateUtils {
   }
 
   /**
-   * Create an InternalRow from partition values for predicate evaluation.
+   * Create an InternalRow from partition values for predicate evaluation. Partition values stored as strings in the
+   * transaction log are converted to their actual typed values based on the partition schema's data types.
    *
    * @param partitionValues
-   *   Map of partition column names to values
+   *   Map of partition column names to values (stored as strings in transaction log)
    * @param partitionSchema
-   *   Schema defining the partition columns
+   *   Schema defining the partition columns with their real data types
    * @return
-   *   InternalRow with partition values
+   *   InternalRow with typed partition values
    */
   def createRowFromPartitionValues(
     partitionValues: Map[String, String],
     partitionSchema: StructType
   ): InternalRow = {
-    val values = partitionSchema.fieldNames.map { fieldName =>
-      partitionValues.get(fieldName) match {
-        case Some(value) => UTF8String.fromString(value)
+    val values = partitionSchema.fields.map { field =>
+      partitionValues.get(field.name) match {
+        case Some(value) => convertPartitionValue(value, field.dataType)
         case None        => null
       }
     }
@@ -147,30 +148,263 @@ object PartitionPredicateUtils {
   }
 
   /**
-   * Resolve an expression against a schema to handle UnresolvedAttribute references and cast literals to UTF8String.
+   * Convert a partition value string to a typed value for InternalRow storage. This is the inverse of Spark's partition
+   * value serialization: partition values are stored as strings in the transaction log but need to be converted to their
+   * actual types for correct comparison semantics.
+   *
+   * @param value
+   *   String representation of the partition value
+   * @param dataType
+   *   Target data type from the partition schema
+   * @return
+   *   Typed value suitable for InternalRow storage
+   */
+  private def convertPartitionValue(value: String, dataType: DataType): Any = {
+    if (value == null) return null
+    try {
+      dataType match {
+        case StringType    => UTF8String.fromString(value)
+        case IntegerType   => value.toInt
+        case LongType      => value.toLong
+        case FloatType     => value.toFloat
+        case DoubleType    => value.toDouble
+        case BooleanType   => value.toBoolean
+        case ShortType     => value.toShort
+        case ByteType      => value.toByte
+        case _: DecimalType =>
+          Decimal(new java.math.BigDecimal(value))
+        case DateType =>
+          // Date partition values are stored as YYYY-MM-DD strings
+          val localDate = java.time.LocalDate.parse(value)
+          localDate.toEpochDay.toInt
+        case TimestampType =>
+          // Timestamp partition values may be ISO-8601 or JDBC format
+          try {
+            val instant = java.time.Instant.parse(value)
+            java.time.Duration.between(java.time.Instant.EPOCH, instant).getSeconds * 1000000L +
+              instant.getNano / 1000L
+          } catch {
+            case _: Exception =>
+              val ts = java.sql.Timestamp.valueOf(value)
+              ts.getTime * 1000L + (ts.getNanos % 1000000) / 1000L
+          }
+        case _ =>
+          // Unknown type - fall back to string
+          logger.debug(s"Unknown partition column type ${dataType.simpleString}, using string representation")
+          UTF8String.fromString(value)
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to convert partition value '$value' to ${dataType.simpleString}: ${e.getMessage}, falling back to string")
+        UTF8String.fromString(value)
+    }
+  }
+
+  /**
+   * Resolve an expression against a schema to handle UnresolvedAttribute references and ensure type-correct literal
+   * handling. Uses a two-pass approach:
+   *
+   * '''Pass 1''': Resolves UnresolvedAttributes to BoundReferences with the correct data type from the schema.
+   *
+   * '''Pass 2''': Coerces literals to match the data type of their paired BoundReference in comparison expressions.
+   * This column-context-aware coercion handles mixed-type schemas correctly:
+   *   - For `month > 9` where month is IntegerType: literal stays as IntegerType
+   *   - For `date > 5` where date is StringType: literal is converted to UTF8String("5")
+   *
+   * This approach replaces the previous schema-global decision (all-string vs typed) which could cause
+   * ClassCastException for cross-type comparisons in mixed-type schemas.
    *
    * @param expression
    *   The expression to resolve
    * @param schema
-   *   Schema to resolve against
+   *   Schema to resolve against (with real partition column types)
    * @return
    *   Resolved expression ready for evaluation
    */
-  def resolveExpression(expression: Expression, schema: StructType): Expression =
-    expression.transform {
+  def resolveExpression(expression: Expression, schema: StructType): Expression = {
+    // First pass: resolve UnresolvedAttributes to BoundReferences with correct types
+    val withBoundRefs = expression.transform {
       case unresolvedAttr: org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute =>
         val fieldName  = unresolvedAttr.name
         val fieldIndex = schema.fieldIndex(fieldName)
         val field      = schema(fieldIndex)
         org.apache.spark.sql.catalyst.expressions.BoundReference(fieldIndex, field.dataType, field.nullable)
-      case literal: org.apache.spark.sql.catalyst.expressions.Literal =>
-        // Cast all literals to UTF8String since partition values are stored as strings
-        literal.dataType match {
-          case StringType => literal
-          case _          =>
-            // Convert non-string literals to UTF8String for comparison with partition values
-            org.apache.spark.sql.catalyst.expressions.Literal(UTF8String.fromString(literal.value.toString), StringType)
-        }
+    }
+
+    // Second pass: coerce literals to match the data type of their paired BoundReference
+    // in comparison expressions. This handles mixed-type schemas correctly:
+    // - For `month > 9` (IntegerType column): literal stays as IntegerType
+    // - For `date > 5` (StringType column): literal is converted to UTF8String
+    // Without this column-context-aware coercion, a mixed-type schema would leave
+    // cross-type comparisons unresolved, causing ClassCastException at eval time
+    // (caught by evaluatePredicates' catch block but resulting in silent partition exclusion).
+    withBoundRefs.transform {
+      case CatalystGreaterThan(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, lit: Literal) =>
+        CatalystGreaterThan(ref, coerceLiteralToType(lit, ref.dataType))
+      case CatalystGreaterThan(lit: Literal, ref: org.apache.spark.sql.catalyst.expressions.BoundReference) =>
+        CatalystGreaterThan(coerceLiteralToType(lit, ref.dataType), ref)
+      case CatalystGreaterThanOrEqual(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, lit: Literal) =>
+        CatalystGreaterThanOrEqual(ref, coerceLiteralToType(lit, ref.dataType))
+      case CatalystGreaterThanOrEqual(lit: Literal, ref: org.apache.spark.sql.catalyst.expressions.BoundReference) =>
+        CatalystGreaterThanOrEqual(coerceLiteralToType(lit, ref.dataType), ref)
+      case CatalystLessThan(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, lit: Literal) =>
+        CatalystLessThan(ref, coerceLiteralToType(lit, ref.dataType))
+      case CatalystLessThan(lit: Literal, ref: org.apache.spark.sql.catalyst.expressions.BoundReference) =>
+        CatalystLessThan(coerceLiteralToType(lit, ref.dataType), ref)
+      case CatalystLessThanOrEqual(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, lit: Literal) =>
+        CatalystLessThanOrEqual(ref, coerceLiteralToType(lit, ref.dataType))
+      case CatalystLessThanOrEqual(lit: Literal, ref: org.apache.spark.sql.catalyst.expressions.BoundReference) =>
+        CatalystLessThanOrEqual(coerceLiteralToType(lit, ref.dataType), ref)
+      case CatalystEqualTo(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, lit: Literal) =>
+        CatalystEqualTo(ref, coerceLiteralToType(lit, ref.dataType))
+      case CatalystEqualTo(lit: Literal, ref: org.apache.spark.sql.catalyst.expressions.BoundReference) =>
+        CatalystEqualTo(coerceLiteralToType(lit, ref.dataType), ref)
+      case CatalystIn(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, values) =>
+        CatalystIn(ref, values.map {
+          case lit: Literal => coerceLiteralToType(lit, ref.dataType)
+          case other        => other
+        })
+    }
+  }
+
+  /**
+   * Coerce a literal to match a target data type. If the literal already matches or no safe
+   * conversion exists, the literal is returned unchanged. For StringType targets, non-string
+   * literals are converted to their string representation as UTF8String.
+   *
+   * @param literal
+   *   The literal to coerce
+   * @param targetType
+   *   The target data type (typically from a BoundReference)
+   * @return
+   *   A literal with a value compatible with the target type
+   */
+  private def coerceLiteralToType(literal: Literal, targetType: DataType): Literal =
+    if (literal.dataType == targetType) {
+      literal
+    } else {
+      targetType match {
+        case StringType =>
+          // Convert any literal to its string representation for string column comparisons
+          literal.value match {
+            case null => Literal(null, StringType)
+            case _    => Literal(UTF8String.fromString(literal.value.toString), StringType)
+          }
+        case IntegerType =>
+          // Try to convert string literal to integer
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toInt, IntegerType)
+          } catch {
+            case _: NumberFormatException => literal // Can't convert, leave as-is
+          }
+        case LongType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toLong, LongType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case DoubleType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toDouble, DoubleType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case FloatType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toFloat, FloatType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case BooleanType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toBoolean, BooleanType)
+          } catch {
+            case _: IllegalArgumentException => literal
+          }
+        case ShortType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toShort, ShortType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case ByteType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toByte, ByteType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case _: DecimalType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(Decimal(new java.math.BigDecimal(strVal)), targetType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case DateType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            val localDate = java.time.LocalDate.parse(strVal)
+            Literal(localDate.toEpochDay.toInt, DateType)
+          } catch {
+            case _: Exception => literal
+          }
+        case TimestampType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            val micros = try {
+              val instant = java.time.Instant.parse(strVal)
+              java.time.Duration.between(java.time.Instant.EPOCH, instant).getSeconds * 1000000L +
+                instant.getNano / 1000L
+            } catch {
+              case _: Exception =>
+                val ts = java.sql.Timestamp.valueOf(strVal)
+                ts.getTime * 1000L + (ts.getNanos % 1000000) / 1000L
+            }
+            Literal(micros, TimestampType)
+          } catch {
+            case _: Exception => literal
+          }
+        case _ =>
+          // For other types, leave as-is; evaluatePredicates' catch block provides safety
+          literal
+      }
     }
 
   /**
@@ -237,16 +471,35 @@ object PartitionPredicateUtils {
   }
 
   /**
-   * Build a partition schema from partition column names. All partition columns are treated as StringType for
-   * evaluation purposes since partition values are stored as strings in the transaction log.
+   * Build a partition schema from partition column names using real types from the full table schema. This enables
+   * type-aware comparisons (e.g., numeric comparisons instead of lexicographic string comparisons) for partition
+   * predicates.
    *
    * @param partitionColumns
    *   Sequence of partition column names
+   * @param fullSchema
+   *   Optional full table schema (from MetadataAction.schemaString). If provided, partition columns will use their real
+   *   types. If None, falls back to StringType for all columns (legacy behavior).
    * @return
-   *   StructType with all columns as StringType
+   *   StructType with partition columns using their real types (or StringType if schema is unavailable)
    */
-  def buildPartitionSchema(partitionColumns: Seq[String]): StructType =
-    StructType(partitionColumns.map(name => StructField(name, StringType, nullable = true)))
+  def buildPartitionSchema(partitionColumns: Seq[String], fullSchema: Option[StructType] = None): StructType =
+    fullSchema match {
+      case Some(schema) =>
+        StructType(partitionColumns.map { name =>
+          try {
+            val fieldIndex = schema.fieldIndex(name)
+            schema(fieldIndex)
+          } catch {
+            case _: IllegalArgumentException =>
+              // Partition column not found in full schema - fall back to StringType
+              logger.warn(s"Partition column '$name' not found in full schema, falling back to StringType")
+              StructField(name, StringType, nullable = true)
+          }
+        })
+      case None =>
+        StructType(partitionColumns.map(name => StructField(name, StringType, nullable = true)))
+    }
 
   /**
    * Convert Catalyst Expression predicates to Spark sources Filter objects for Avro manifest pruning.

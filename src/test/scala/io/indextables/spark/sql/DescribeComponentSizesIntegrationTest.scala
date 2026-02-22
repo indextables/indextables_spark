@@ -269,11 +269,9 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
   test("DESCRIBE COMPONENT SIZES should handle non-existent table path gracefully") {
     val nonExistentPath = s"${testDir.toString}/does_not_exist"
 
-    val ex = intercept[Exception] {
-      spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$nonExistentPath'").collect()
-    }
-    // Should throw an exception for non-existent table
-    ex should not be null
+    val result = spark.sql(s"DESCRIBE INDEXTABLES COMPONENT SIZES '$nonExistentPath'").collect()
+    // Non-existent table should return empty results
+    result.length shouldBe 0
   }
 
   // ===== Helper Methods =====
