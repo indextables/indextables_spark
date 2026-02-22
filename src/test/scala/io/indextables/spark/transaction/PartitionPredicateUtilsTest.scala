@@ -934,4 +934,440 @@ class PartitionPredicateUtilsTest extends AnyFunSuite with Matchers {
     filtered.length shouldBe 2
     filtered.map(_.path).toSet shouldBe Set("split_1.split", "split_4.split")
   }
+
+  // ==========================================================================
+  // IT-036: buildPartitionSchema tests for additional types
+  // (Boolean, Short, Byte, Date, Timestamp)
+  // ==========================================================================
+
+  test("IT-036: buildPartitionSchema should extract BooleanType from full schema") {
+    val fullSchema = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val schema = PartitionPredicateUtils.buildPartitionSchema(Seq("is_active"), Some(fullSchema))
+    schema.length shouldBe 1
+    schema(0).name shouldBe "is_active"
+    schema(0).dataType shouldBe BooleanType
+  }
+
+  test("IT-036: buildPartitionSchema should extract ShortType from full schema") {
+    val fullSchema = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("priority", ShortType, nullable = true)
+    ))
+    val schema = PartitionPredicateUtils.buildPartitionSchema(Seq("priority"), Some(fullSchema))
+    schema.length shouldBe 1
+    schema(0).name shouldBe "priority"
+    schema(0).dataType shouldBe ShortType
+  }
+
+  test("IT-036: buildPartitionSchema should extract ByteType from full schema") {
+    val fullSchema = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("level", ByteType, nullable = true)
+    ))
+    val schema = PartitionPredicateUtils.buildPartitionSchema(Seq("level"), Some(fullSchema))
+    schema.length shouldBe 1
+    schema(0).name shouldBe "level"
+    schema(0).dataType shouldBe ByteType
+  }
+
+  test("IT-036: buildPartitionSchema should extract DateType from full schema") {
+    val fullSchema = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("event_date", DateType, nullable = true)
+    ))
+    val schema = PartitionPredicateUtils.buildPartitionSchema(Seq("event_date"), Some(fullSchema))
+    schema.length shouldBe 1
+    schema(0).name shouldBe "event_date"
+    schema(0).dataType shouldBe DateType
+  }
+
+  test("IT-036: buildPartitionSchema should extract TimestampType from full schema") {
+    val fullSchema = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("created_at", TimestampType, nullable = true)
+    ))
+    val schema = PartitionPredicateUtils.buildPartitionSchema(Seq("created_at"), Some(fullSchema))
+    schema.length shouldBe 1
+    schema(0).name shouldBe "created_at"
+    schema(0).dataType shouldBe TimestampType
+  }
+
+  test("IT-036: buildPartitionSchema should handle mixed schema with all supported types") {
+    val fullSchema = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("name", StringType, nullable = true),
+      StructField("is_active", BooleanType, nullable = true),
+      StructField("priority", ShortType, nullable = true),
+      StructField("level", ByteType, nullable = true),
+      StructField("event_date", DateType, nullable = true),
+      StructField("created_at", TimestampType, nullable = true),
+      StructField("score", DoubleType, nullable = true)
+    ))
+    val partCols = Seq("is_active", "priority", "level", "event_date", "created_at", "score")
+    val schema = PartitionPredicateUtils.buildPartitionSchema(partCols, Some(fullSchema))
+    schema.length shouldBe 6
+    schema(0).dataType shouldBe BooleanType
+    schema(1).dataType shouldBe ShortType
+    schema(2).dataType shouldBe ByteType
+    schema(3).dataType shouldBe DateType
+    schema(4).dataType shouldBe TimestampType
+    schema(5).dataType shouldBe DoubleType
+  }
+
+  // ==========================================================================
+  // IT-036: createRowFromPartitionValues tests for additional types
+  // (Boolean, Short, Byte, Date, Timestamp)
+  // ==========================================================================
+
+  test("IT-036: createRowFromPartitionValues should convert boolean 'true' partition value") {
+    val partitionSchema = StructType(Seq(
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val row = PartitionPredicateUtils.createRowFromPartitionValues(Map("is_active" -> "true"), partitionSchema)
+    row.getBoolean(0) shouldBe true
+  }
+
+  test("IT-036: createRowFromPartitionValues should convert boolean 'false' partition value") {
+    val partitionSchema = StructType(Seq(
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val row = PartitionPredicateUtils.createRowFromPartitionValues(Map("is_active" -> "false"), partitionSchema)
+    row.getBoolean(0) shouldBe false
+  }
+
+  test("IT-036: createRowFromPartitionValues should convert short partition value") {
+    val partitionSchema = StructType(Seq(
+      StructField("priority", ShortType, nullable = true)
+    ))
+    val row = PartitionPredicateUtils.createRowFromPartitionValues(Map("priority" -> "100"), partitionSchema)
+    row.getShort(0) shouldBe 100.toShort
+  }
+
+  test("IT-036: createRowFromPartitionValues should convert byte partition value") {
+    val partitionSchema = StructType(Seq(
+      StructField("level", ByteType, nullable = true)
+    ))
+    val row = PartitionPredicateUtils.createRowFromPartitionValues(Map("level" -> "42"), partitionSchema)
+    row.getByte(0) shouldBe 42.toByte
+  }
+
+  test("IT-036: createRowFromPartitionValues should convert date partition value to epoch day int") {
+    val partitionSchema = StructType(Seq(
+      StructField("event_date", DateType, nullable = true)
+    ))
+    val row = PartitionPredicateUtils.createRowFromPartitionValues(Map("event_date" -> "2024-01-15"), partitionSchema)
+    val expectedEpochDay = java.time.LocalDate.parse("2024-01-15").toEpochDay.toInt
+    row.getInt(0) shouldBe expectedEpochDay
+  }
+
+  test("IT-036: createRowFromPartitionValues should convert timestamp partition value to microseconds") {
+    val partitionSchema = StructType(Seq(
+      StructField("created_at", TimestampType, nullable = true)
+    ))
+    val row = PartitionPredicateUtils.createRowFromPartitionValues(Map("created_at" -> "2024-01-15T10:30:00Z"), partitionSchema)
+    val instant = java.time.Instant.parse("2024-01-15T10:30:00Z")
+    val expectedMicros = java.time.Duration.between(java.time.Instant.EPOCH, instant).getSeconds * 1000000L +
+      instant.getNano / 1000L
+    row.getLong(0) shouldBe expectedMicros
+  }
+
+  // ==========================================================================
+  // IT-036: resolveExpression / coerceLiteralToType tests for additional types
+  // Verifies that type coercion works or gracefully handles unsupported types.
+  // ==========================================================================
+
+  test("IT-036: resolveExpression should preserve boolean literal for BooleanType column") {
+    // Boolean literal matching a BooleanType column - no coercion needed
+    val schema = StructType(Seq(
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val expr = CatalystEqualTo(UnresolvedAttribute("is_active"), Literal(true))
+    val resolved = PartitionPredicateUtils.resolveExpression(expr, schema)
+
+    resolved match {
+      case CatalystEqualTo(
+        org.apache.spark.sql.catalyst.expressions.BoundReference(0, BooleanType, _),
+        Literal(true, BooleanType)
+      ) => // correct: boolean literal preserved for boolean column
+      case other => fail(s"Expected EqualTo(BoundReference(BooleanType), Literal(true, BooleanType)), got: $other")
+    }
+  }
+
+  test("IT-036: resolveExpression should coerce string 'true' to boolean for BooleanType column") {
+    // String literal "true" compared to BooleanType column
+    // coerceLiteralToType handles BooleanType coercion: converts "true"/"false" strings to Boolean.
+    val schema = StructType(Seq(
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val expr = CatalystEqualTo(UnresolvedAttribute("is_active"), Literal(utf8("true"), StringType))
+    val resolved = PartitionPredicateUtils.resolveExpression(expr, schema)
+
+    // coerceLiteralToType converts string "true" to boolean true with BooleanType.
+    resolved match {
+      case CatalystEqualTo(
+        org.apache.spark.sql.catalyst.expressions.BoundReference(0, BooleanType, _),
+        Literal(true, BooleanType)
+      ) => // correct: string "true" coerced to boolean true
+      case other => fail(s"Expected EqualTo(BoundReference(BooleanType), Literal(true, BooleanType)), got: $other")
+    }
+  }
+
+  test("IT-036: resolveExpression should coerce int literal to ShortType column") {
+    // Integer literal compared to ShortType column
+    // coerceLiteralToType handles ShortType coercion: converts integer string to Short.
+    val schema = StructType(Seq(
+      StructField("priority", ShortType, nullable = true)
+    ))
+    val expr = CatalystGreaterThan(UnresolvedAttribute("priority"), Literal(100))
+    val resolved = PartitionPredicateUtils.resolveExpression(expr, schema)
+
+    resolved match {
+      case CatalystGreaterThan(
+        org.apache.spark.sql.catalyst.expressions.BoundReference(0, ShortType, _),
+        Literal(_, ShortType)
+      ) => // correct: integer literal coerced to ShortType
+      case other => fail(s"Expected GreaterThan(BoundReference(ShortType), Literal(_, ShortType)), got: $other")
+    }
+  }
+
+  test("IT-036: resolveExpression should coerce int literal to ByteType column") {
+    // Integer literal compared to ByteType column
+    // coerceLiteralToType handles ByteType coercion: converts integer string to Byte.
+    val schema = StructType(Seq(
+      StructField("level", ByteType, nullable = true)
+    ))
+    val expr = CatalystEqualTo(UnresolvedAttribute("level"), Literal(5))
+    val resolved = PartitionPredicateUtils.resolveExpression(expr, schema)
+
+    resolved match {
+      case CatalystEqualTo(
+        org.apache.spark.sql.catalyst.expressions.BoundReference(0, ByteType, _),
+        Literal(_, ByteType)
+      ) => // correct: integer literal coerced to ByteType
+      case other => fail(s"Expected EqualTo(BoundReference(ByteType), Literal(_, ByteType)), got: $other")
+    }
+  }
+
+  test("IT-036: resolveExpression should coerce string literal to DateType column") {
+    // String literal compared to DateType column
+    // coerceLiteralToType handles DateType coercion: converts date string to epoch day Int.
+    val schema = StructType(Seq(
+      StructField("event_date", DateType, nullable = true)
+    ))
+    val expr = CatalystGreaterThan(UnresolvedAttribute("event_date"), Literal(utf8("2024-06-01"), StringType))
+    val resolved = PartitionPredicateUtils.resolveExpression(expr, schema)
+
+    resolved match {
+      case CatalystGreaterThan(
+        org.apache.spark.sql.catalyst.expressions.BoundReference(0, DateType, _),
+        Literal(_, DateType)
+      ) => // correct: string "2024-06-01" coerced to epoch day Int with DateType
+      case other => fail(s"Expected GreaterThan(BoundReference(DateType), Literal(_, DateType)), got: $other")
+    }
+  }
+
+  test("IT-036: resolveExpression should coerce string literal to TimestampType column") {
+    // String literal compared to TimestampType column
+    // coerceLiteralToType handles TimestampType coercion: converts timestamp string to microseconds Long.
+    val schema = StructType(Seq(
+      StructField("created_at", TimestampType, nullable = true)
+    ))
+    val expr = CatalystGreaterThan(UnresolvedAttribute("created_at"), Literal(utf8("2024-01-01T00:00:00Z"), StringType))
+    val resolved = PartitionPredicateUtils.resolveExpression(expr, schema)
+
+    resolved match {
+      case CatalystGreaterThan(
+        org.apache.spark.sql.catalyst.expressions.BoundReference(0, TimestampType, _),
+        Literal(_, TimestampType)
+      ) => // correct: string timestamp coerced to microseconds Long with TimestampType
+      case other => fail(s"Expected GreaterThan(BoundReference(TimestampType), Literal(_, TimestampType)), got: $other")
+    }
+  }
+
+  // ==========================================================================
+  // IT-036: evaluatePredicates regression tests for additional types
+  // Boolean, Short, Byte, Date, Timestamp
+  // ==========================================================================
+
+  test("IT-036: evaluatePredicates with BooleanType - equality matching") {
+    val partitionSchema = StructType(Seq(
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val predicate = CatalystEqualTo(UnresolvedAttribute("is_active"), Literal(true))
+
+    PartitionPredicateUtils.evaluatePredicates(Map("is_active" -> "true"), partitionSchema, Seq(predicate)) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(Map("is_active" -> "false"), partitionSchema, Seq(predicate)) shouldBe false
+  }
+
+  test("IT-036: evaluatePredicates with BooleanType - false equality") {
+    val partitionSchema = StructType(Seq(
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+    val predicate = CatalystEqualTo(UnresolvedAttribute("is_active"), Literal(false))
+
+    PartitionPredicateUtils.evaluatePredicates(Map("is_active" -> "false"), partitionSchema, Seq(predicate)) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(Map("is_active" -> "true"), partitionSchema, Seq(predicate)) shouldBe false
+  }
+
+  test("IT-036 REGRESSION: ShortType comparison with boundary values") {
+    val partitionSchema = StructType(Seq(
+      StructField("priority", ShortType, nullable = true)
+    ))
+    val predicate = CatalystGreaterThan(UnresolvedAttribute("priority"), Literal(100.toShort, ShortType))
+
+    // Should match: values > 100
+    PartitionPredicateUtils.evaluatePredicates(Map("priority" -> "101"), partitionSchema, Seq(predicate)) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(Map("priority" -> "200"), partitionSchema, Seq(predicate)) shouldBe true
+
+    // Should NOT match: values <= 100
+    PartitionPredicateUtils.evaluatePredicates(Map("priority" -> "100"), partitionSchema, Seq(predicate)) shouldBe false
+    PartitionPredicateUtils.evaluatePredicates(Map("priority" -> "50"), partitionSchema, Seq(predicate)) shouldBe false
+    PartitionPredicateUtils.evaluatePredicates(Map("priority" -> "1"), partitionSchema, Seq(predicate)) shouldBe false
+  }
+
+  test("IT-036: ByteType equality matching") {
+    val partitionSchema = StructType(Seq(
+      StructField("level", ByteType, nullable = true)
+    ))
+    val predicate = CatalystEqualTo(UnresolvedAttribute("level"), Literal(5.toByte, ByteType))
+
+    PartitionPredicateUtils.evaluatePredicates(Map("level" -> "5"), partitionSchema, Seq(predicate)) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(Map("level" -> "4"), partitionSchema, Seq(predicate)) shouldBe false
+    PartitionPredicateUtils.evaluatePredicates(Map("level" -> "6"), partitionSchema, Seq(predicate)) shouldBe false
+  }
+
+  test("IT-036 REGRESSION: DateType comparison with date boundaries") {
+    val partitionSchema = StructType(Seq(
+      StructField("event_date", DateType, nullable = true)
+    ))
+    // Use an integer literal matching the epoch day value for 2024-06-01
+    val epochDay2024_06_01 = java.time.LocalDate.parse("2024-06-01").toEpochDay.toInt
+    val predicate = CatalystGreaterThan(UnresolvedAttribute("event_date"), Literal(epochDay2024_06_01, DateType))
+
+    // Should match: dates after 2024-06-01
+    PartitionPredicateUtils.evaluatePredicates(Map("event_date" -> "2024-06-02"), partitionSchema, Seq(predicate)) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(Map("event_date" -> "2024-12-31"), partitionSchema, Seq(predicate)) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(Map("event_date" -> "2025-01-01"), partitionSchema, Seq(predicate)) shouldBe true
+
+    // Should NOT match: dates on or before 2024-06-01
+    PartitionPredicateUtils.evaluatePredicates(Map("event_date" -> "2024-06-01"), partitionSchema, Seq(predicate)) shouldBe false
+    PartitionPredicateUtils.evaluatePredicates(Map("event_date" -> "2024-01-01"), partitionSchema, Seq(predicate)) shouldBe false
+    PartitionPredicateUtils.evaluatePredicates(Map("event_date" -> "2023-12-31"), partitionSchema, Seq(predicate)) shouldBe false
+  }
+
+  test("IT-036 REGRESSION: TimestampType comparison with timestamp boundaries") {
+    val partitionSchema = StructType(Seq(
+      StructField("created_at", TimestampType, nullable = true)
+    ))
+    // Use a long literal matching microseconds since epoch for 2024-01-01T00:00:00Z
+    val instant2024 = java.time.Instant.parse("2024-01-01T00:00:00Z")
+    val micros2024 = java.time.Duration.between(java.time.Instant.EPOCH, instant2024).getSeconds * 1000000L
+    val predicate = CatalystGreaterThan(UnresolvedAttribute("created_at"), Literal(micros2024, TimestampType))
+
+    // Should match: timestamps after 2024-01-01T00:00:00Z
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("created_at" -> "2024-06-15T12:00:00Z"), partitionSchema, Seq(predicate)
+    ) shouldBe true
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("created_at" -> "2024-01-01T00:00:01Z"), partitionSchema, Seq(predicate)
+    ) shouldBe true
+
+    // Should NOT match: timestamps on or before 2024-01-01T00:00:00Z
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("created_at" -> "2024-01-01T00:00:00Z"), partitionSchema, Seq(predicate)
+    ) shouldBe false
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("created_at" -> "2023-12-31T23:59:59Z"), partitionSchema, Seq(predicate)
+    ) shouldBe false
+  }
+
+  // ==========================================================================
+  // IT-036: Mixed-type schema with all supported types
+  // Combined predicates across String, Int, Boolean, Date columns
+  // ==========================================================================
+
+  test("IT-036: combined predicates on String, Int, Boolean, Date columns") {
+    val partitionSchema = StructType(Seq(
+      StructField("region", StringType, nullable = true),
+      StructField("month", IntegerType, nullable = true),
+      StructField("is_active", BooleanType, nullable = true),
+      StructField("event_date", DateType, nullable = true)
+    ))
+
+    val predRegion = CatalystEqualTo(UnresolvedAttribute("region"), Literal(utf8("us-east")))
+    val predMonth = CatalystGreaterThan(UnresolvedAttribute("month"), Literal(6))
+    val predActive = CatalystEqualTo(UnresolvedAttribute("is_active"), Literal(true))
+    val epochDay2024_06_01 = java.time.LocalDate.parse("2024-06-01").toEpochDay.toInt
+    val predDate = CatalystGreaterThan(UnresolvedAttribute("event_date"), Literal(epochDay2024_06_01, DateType))
+
+    val predicates = Seq(predRegion, predMonth, predActive, predDate)
+
+    // All predicates satisfied
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("region" -> "us-east", "month" -> "10", "is_active" -> "true", "event_date" -> "2024-07-15"),
+      partitionSchema,
+      predicates
+    ) shouldBe true
+
+    // Region doesn't match
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("region" -> "eu-west", "month" -> "10", "is_active" -> "true", "event_date" -> "2024-07-15"),
+      partitionSchema,
+      predicates
+    ) shouldBe false
+
+    // Month doesn't match (6 is not > 6)
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("region" -> "us-east", "month" -> "6", "is_active" -> "true", "event_date" -> "2024-07-15"),
+      partitionSchema,
+      predicates
+    ) shouldBe false
+
+    // is_active doesn't match
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("region" -> "us-east", "month" -> "10", "is_active" -> "false", "event_date" -> "2024-07-15"),
+      partitionSchema,
+      predicates
+    ) shouldBe false
+
+    // Date doesn't match (2024-05-15 is not > 2024-06-01)
+    PartitionPredicateUtils.evaluatePredicates(
+      Map("region" -> "us-east", "month" -> "10", "is_active" -> "true", "event_date" -> "2024-05-15"),
+      partitionSchema,
+      predicates
+    ) shouldBe false
+  }
+
+  test("IT-036: filterAddActionsByPredicates with all-types mixed schema") {
+    val partitionSchema = StructType(Seq(
+      StructField("region", StringType, nullable = true),
+      StructField("month", IntegerType, nullable = true),
+      StructField("is_active", BooleanType, nullable = true)
+    ))
+
+    val predRegion = CatalystEqualTo(UnresolvedAttribute("region"), Literal(utf8("us-east")))
+    val predMonth = CatalystGreaterThan(UnresolvedAttribute("month"), Literal(9))
+    val predActive = CatalystEqualTo(UnresolvedAttribute("is_active"), Literal(true))
+
+    val actions = Seq(
+      AddAction("split_1.split", Map("region" -> "us-east", "month" -> "10", "is_active" -> "true"), 1000L, System.currentTimeMillis(), true),
+      AddAction("split_2.split", Map("region" -> "us-east", "month" -> "10", "is_active" -> "false"), 1000L, System.currentTimeMillis(), true),
+      AddAction("split_3.split", Map("region" -> "us-east", "month" -> "5", "is_active" -> "true"), 1000L, System.currentTimeMillis(), true),
+      AddAction("split_4.split", Map("region" -> "eu-west", "month" -> "11", "is_active" -> "true"), 1000L, System.currentTimeMillis(), true),
+      AddAction("split_5.split", Map("region" -> "us-east", "month" -> "12", "is_active" -> "true"), 1000L, System.currentTimeMillis(), true)
+    )
+
+    val filtered = PartitionPredicateUtils.filterAddActionsByPredicates(actions, partitionSchema, Seq(predRegion, predMonth, predActive))
+
+    // Only split_1 (region=us-east, month=10>9, is_active=true) and split_5 (region=us-east, month=12>9, is_active=true) match
+    filtered.length shouldBe 2
+    filtered.map(_.path).toSet shouldBe Set("split_1.split", "split_5.split")
+  }
+
+  // Note: TimestampNTZType is available in Spark 3.4+ but is not currently used in
+  // the codebase's partition handling. If TimestampNTZ partition support is needed,
+  // it would require adding a case to convertPartitionValue and coerceLiteralToType.
 }

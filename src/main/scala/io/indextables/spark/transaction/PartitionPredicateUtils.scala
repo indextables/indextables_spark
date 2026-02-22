@@ -331,6 +331,76 @@ object PartitionPredicateUtils {
           } catch {
             case _: NumberFormatException => literal
           }
+        case BooleanType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toBoolean, BooleanType)
+          } catch {
+            case _: IllegalArgumentException => literal
+          }
+        case ShortType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toShort, ShortType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case ByteType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(strVal.toByte, ByteType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case _: DecimalType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            Literal(Decimal(new java.math.BigDecimal(strVal)), targetType)
+          } catch {
+            case _: NumberFormatException => literal
+          }
+        case DateType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            val localDate = java.time.LocalDate.parse(strVal)
+            Literal(localDate.toEpochDay.toInt, DateType)
+          } catch {
+            case _: Exception => literal
+          }
+        case TimestampType =>
+          try {
+            val strVal = literal.value match {
+              case u: UTF8String => u.toString
+              case other         => other.toString
+            }
+            val micros = try {
+              val instant = java.time.Instant.parse(strVal)
+              java.time.Duration.between(java.time.Instant.EPOCH, instant).getSeconds * 1000000L +
+                instant.getNano / 1000L
+            } catch {
+              case _: Exception =>
+                val ts = java.sql.Timestamp.valueOf(strVal)
+                ts.getTime * 1000L + (ts.getNanos % 1000000) / 1000L
+            }
+            Literal(micros, TimestampType)
+          } catch {
+            case _: Exception => literal
+          }
         case _ =>
           // For other types, leave as-is; evaluatePredicates' catch block provides safety
           literal
