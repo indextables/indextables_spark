@@ -244,10 +244,12 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createCustomPatternParquetData(parquetPath)
 
+      // Note: Spark SQL treats \ as escape in string literals, so \d requires \\d in SQL.
+      // From Scala regular string: "\\\\d" → actual chars "\\d" → SQL parser → "\d"
       val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"""INDEXING MODES ('audit_log':'text_custom_exactonly:ORD-\\d{8}') """ +
-          s"AT LOCATION '$indexPath'"
+        "BUILD INDEXTABLES COMPANION FOR PARQUET '" + parquetPath + "' " +
+          "INDEXING MODES ('audit_log':'text_custom_exactonly:ORD-\\\\d{8}') " +
+          "AT LOCATION '" + indexPath + "'"
       )
       val row = result.collect()
       row.length shouldBe 1
@@ -259,13 +261,45 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       companionDf.count() shouldBe 5
 
-      // Verify text search works
+      // Verify text search works on non-pattern content
       companionDf.createOrReplaceTempView("custom_test")
       val textResults = spark.sql(
         "SELECT * FROM custom_test WHERE audit_log indexquery 'processing'"
       ).collect()
       // 4 out of 5 messages contain "Processing order"
       textResults.length shouldBe 4
+
+      // Verify the regex-matched pattern was stripped from indexed TEXT.
+      // "00000001" is a token produced by the default tokenizer from "ORD-00000001".
+      // After stripping, this token should NOT exist in the text index.
+      // Note: we can't use "ORD-00000001" because the hash_field_rewriter
+      // redirects regex-matching queries to the companion U64 hash field (expected).
+      val tokenResults = spark.sql(
+        "SELECT * FROM custom_test WHERE audit_log indexquery '00000001'"
+      ).collect()
+      tokenResults.length shouldBe 0
+
+      // Term "ORD" should also return 0 — "ord" token only exists if text wasn't stripped.
+      // (The default tokenizer splits "ORD-00000001" into tokens "ord" and "00000001".)
+      // Note: can't use "OR*" because it also matches "order" from "Processing order...".
+      val ordResults = spark.sql(
+        "SELECT * FROM custom_test WHERE audit_log indexquery 'ORD'"
+      ).collect()
+      ordResults.length shouldBe 0
+
+      // Wildcard "00*" should return 0 — tokens starting with "00" (e.g., "00000001")
+      // only exist if the ORD-XXXXXXXX pattern was not stripped from the text.
+      val zeroWildcardResults = spark.sql(
+        "SELECT * FROM custom_test WHERE audit_log indexquery '00*'"
+      ).collect()
+      zeroWildcardResults.length shouldBe 0
+
+      // Verify the extracted pattern IS still queryable via the companion hash redirect.
+      // This is the key difference from text_custom_strip: exactonly preserves exact lookups.
+      val exactResults = spark.sql(
+        "SELECT * FROM custom_test WHERE audit_log indexquery '\"ORD-00000001\"'"
+      ).collect()
+      exactResults.length shouldBe 1
     }
   }
 
