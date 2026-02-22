@@ -60,9 +60,17 @@ class SplitSearchEngine private (
 
   /** Cached exact_only field overrides for this split's table.
     * First access per table triggers JNI + JSON parse; subsequent
-    * SplitSearchEngine instances for the same table get a cache hit. */
+    * SplitSearchEngine instances for the same table get a cache hit.
+    * Note: depends on splitSearcher being initialized first (safe because
+    * this is only accessed from convertSearchResultToRows, after search). */
   private lazy val exactOnlyFieldOverrides: Map[String, io.indextables.tantivy4java.core.FieldType] =
-    SplitSearchEngine.getExactOnlyOverrides(cacheConfig.cacheName, splitSearcher)
+    try
+      SplitSearchEngine.getExactOnlyOverrides(cacheConfig.cacheName, splitSearcher)
+    catch {
+      case e: Exception =>
+        logger.warn(s"Failed to get exact_only overrides for '${cacheConfig.cacheName}': ${e.getMessage}")
+        Map.empty
+    }
 
   // Create the split searcher using the shared cache
   logger.info(s"Creating SplitSearchEngine for path: $splitPath")
@@ -432,36 +440,37 @@ object SplitSearchEngine {
     * for splits in the same table. */
   private val exactOnlyOverrideCache = new ConcurrentHashMap[String, Map[String, FieldType]]()
 
+  private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+
+  /** Clear the exact_only override cache. Called when split caches are flushed
+    * to avoid stale overrides after schema evolution or table recreation. */
+  def clearOverrideCache(): Unit = exactOnlyOverrideCache.clear()
+
   private[search] def getExactOnlyOverrides(
     cacheName: String,
     splitSearcher: => SplitSearcher
   ): Map[String, FieldType] =
+    // Let exceptions propagate: ConcurrentHashMap.computeIfAbsent does NOT cache
+    // the result when the function throws, so transient JNI failures will be retried.
     exactOnlyOverrideCache.computeIfAbsent(cacheName, _ => {
-      try {
-        val modesJson = splitSearcher.getStringIndexingModes()
-        if (modesJson != null && modesJson.nonEmpty) {
-          val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
-          val tree = mapper.readTree(modesJson)
-          import scala.jdk.CollectionConverters._
-          tree.fields().asScala.collect {
-            case entry if {
-              val node = entry.getValue
-              // Handle both flat ("ExactOnly") and nested ({"mode":"exact_only"}) formats
-              val mode = if (node.isTextual) node.asText()
-                         else if (node.isObject && node.has("mode")) node.get("mode").asText()
-                         else ""
-              mode.equalsIgnoreCase("exact_only") || mode == "ExactOnly"
-            } =>
-              logger.info(s"Detected exact_only field '${entry.getKey}' in cache '$cacheName' — will remap UNSIGNED→TEXT on read")
-              entry.getKey -> FieldType.TEXT
-          }.toMap
-        } else {
-          Map.empty
-        }
-      } catch {
-        case e: Exception =>
-          logger.warn(s"Failed to get string indexing modes for cache '$cacheName': ${e.getMessage}")
-          Map.empty
+      val modesJson = splitSearcher.getStringIndexingModes()
+      if (modesJson != null && modesJson.nonEmpty) {
+        val tree = objectMapper.readTree(modesJson)
+        import scala.jdk.CollectionConverters._
+        tree.fields().asScala.collect {
+          case entry if {
+            val node = entry.getValue
+            // Handle both flat ("ExactOnly") and nested ({"mode":"exact_only"}) formats
+            val mode = if (node.isTextual) node.asText()
+                       else if (node.isObject && node.has("mode")) node.get("mode").asText()
+                       else ""
+            mode.equalsIgnoreCase("exact_only") || mode == "ExactOnly"
+          } =>
+            logger.info(s"Detected exact_only field '${entry.getKey}' in cache '$cacheName' — will remap UNSIGNED→TEXT on read")
+            entry.getKey -> FieldType.TEXT
+        }.toMap
+      } else {
+        Map.empty
       }
     })
 

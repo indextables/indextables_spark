@@ -938,6 +938,10 @@ object GlobalSplitCacheManager {
       }
     }
 
+    // Also clear the exact_only field override cache so stale overrides
+    // don't persist after schema evolution or table recreation.
+    io.indextables.spark.search.SplitSearchEngine.clearOverrideCache()
+
     logger.info(s"Successfully flushed all split cache managers")
     SplitCacheFlushResult(flushedCount)
   }
