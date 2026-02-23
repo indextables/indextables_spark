@@ -782,17 +782,17 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Fast field mode: $fastFieldMode")
 
-      // Fingerprint include/exclude
-      val (fingerprintInclude, fingerprintExclude): (Seq[String], Seq[String]) = {
-        if (ctx.fingerprintFields != null) {
-          val fields = ctx.fingerprintFields.STRING().asScala.map(ParserUtils.string(_)).toSeq
-          ctx.fingerprintMode.getText.toUpperCase match {
+      // Hashed fastfields include/exclude
+      val (hashedFastfieldsInclude, hashedFastfieldsExclude): (Seq[String], Seq[String]) = {
+        if (ctx.hashedFastfieldsList != null) {
+          val fields = ctx.hashedFastfieldsList.STRING().asScala.map(ParserUtils.string(_)).toSeq
+          ctx.hashedFastfieldsMode.getText.toUpperCase match {
             case "INCLUDE" => (fields, Seq.empty)
             case "EXCLUDE" => (Seq.empty, fields)
           }
         } else (Seq.empty, Seq.empty)
       }
-      logger.debug(s"Fingerprint include: $fingerprintInclude, exclude: $fingerprintExclude")
+      logger.debug(s"Hashed fastfields include: $hashedFastfieldsInclude, exclude: $hashedFastfieldsExclude")
 
       // Target input size
       val targetInputSize = if (ctx.targetInputSize != null) {
@@ -878,8 +878,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         catalogName = catalogName,
         catalogType = catalogType,
         warehouse = warehouse,
-        fingerprintInclude = fingerprintInclude,
-        fingerprintExclude = fingerprintExclude,
+        hashedFastfieldsInclude = hashedFastfieldsInclude,
+        hashedFastfieldsExclude = hashedFastfieldsExclude,
         wherePredicates = wherePredicates,
         dryRun = dryRun
       )

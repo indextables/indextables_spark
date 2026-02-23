@@ -41,8 +41,8 @@ case class SyncConfig(
   schemaSourceParquetFile: Option[String] = None,
   columnNameMapping: Map[String, String] = Map.empty,
   autoDetectNameMapping: Boolean = false,
-  fingerprintInclude: Seq[String] = Seq.empty,
-  fingerprintExclude: Seq[String] = Seq.empty)
+  hashedFastfieldsInclude: Seq[String] = Seq.empty,
+  hashedFastfieldsExclude: Seq[String] = Seq.empty)
     extends Serializable
 
 /**
@@ -173,13 +173,13 @@ object SyncTaskExecutor {
         companionConfig.withAutoDetectNameMapping(true)
       }
 
-      // Apply string fingerprint include/exclude configuration
-      if (config.fingerprintInclude.nonEmpty) {
-        logger.info(s"Sync task ${group.groupIndex}: applying fingerprint include: ${config.fingerprintInclude.mkString(", ")}")
-        companionConfig.withStringFingerprints(config.fingerprintInclude: _*)
-      } else if (config.fingerprintExclude.nonEmpty) {
-        logger.info(s"Sync task ${group.groupIndex}: applying fingerprint exclude: ${config.fingerprintExclude.mkString(", ")}")
-        companionConfig.withoutStringFingerprints(config.fingerprintExclude: _*)
+      // Apply hashed fastfields include/exclude configuration
+      if (config.hashedFastfieldsInclude.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying hashed fastfields include: ${config.hashedFastfieldsInclude.mkString(", ")}")
+        companionConfig.withStringFingerprints(config.hashedFastfieldsInclude: _*)
+      } else if (config.hashedFastfieldsExclude.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying hashed fastfields exclude: ${config.hashedFastfieldsExclude.mkString(", ")}")
+        companionConfig.withoutStringFingerprints(config.hashedFastfieldsExclude: _*)
       }
 
       // 3. Call QuickwitSplit.createFromParquet()

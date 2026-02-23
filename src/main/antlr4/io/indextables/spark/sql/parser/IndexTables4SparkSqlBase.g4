@@ -91,7 +91,7 @@ statement
         (WAREHOUSE warehouse=STRING)?
         (INDEXING MODES '(' indexingModeList ')')?
         (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
-        (FINGERPRINTS fingerprintMode=(INCLUDE | EXCLUDE) '(' fingerprintFields=stringList ')')?
+        (HASHED FASTFIELDS hashedFastfieldsMode=(INCLUDE | EXCLUDE) '(' hashedFastfieldsList=stringList ')')?
         (TARGET INPUT SIZE targetInputSize=alphanumericValue)?
         (WRITER HEAP SIZE writerHeapSize=alphanumericValue)?
         (FROM VERSION fromVersion=INTEGER_VALUE)?
@@ -156,7 +156,7 @@ nonReserved
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
     | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
-    | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | FINGERPRINTS | EXCLUDE
+    | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE
     ;
 
 // Keywords (case-insensitive)
@@ -245,7 +245,7 @@ CATALOG: [Cc][Aa][Tt][Aa][Ll][Oo][Gg];
 SNAPSHOT: [Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt];
 TYPE: [Tt][Yy][Pp][Ee];
 WAREHOUSE: [Ww][Aa][Rr][Ee][Hh][Oo][Uu][Ss][Ee];
-FINGERPRINTS: [Ff][Ii][Nn][Gg][Ee][Rr][Pp][Rr][Ii][Nn][Tt][Ss];
+HASHED: [Hh][Aa][Ss][Hh][Ee][Dd];
 EXCLUDE: [Ee][Xx][Cc][Ll][Uu][Dd][Ee];
 
 // Literals

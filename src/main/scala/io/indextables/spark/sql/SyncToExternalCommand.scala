@@ -76,8 +76,8 @@ case class SyncToExternalCommand(
   catalogName: Option[String] = None,
   catalogType: Option[String] = None,
   warehouse: Option[String] = None,
-  fingerprintInclude: Seq[String] = Seq.empty,
-  fingerprintExclude: Seq[String] = Seq.empty,
+  hashedFastfieldsInclude: Seq[String] = Seq.empty,
+  hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
@@ -416,18 +416,18 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
-      // Resolve effective fingerprint include/exclude: use stored config from metadata if not specified
-      val (effectiveFpInclude, effectiveFpExclude) = if (fingerprintInclude.nonEmpty || fingerprintExclude.nonEmpty) {
-        (fingerprintInclude, fingerprintExclude)
+      // Resolve effective hashed fastfields include/exclude: use stored config from metadata if not specified
+      val (effectiveHfInclude, effectiveHfExclude) = if (hashedFastfieldsInclude.nonEmpty || hashedFastfieldsExclude.nonEmpty) {
+        (hashedFastfieldsInclude, hashedFastfieldsExclude)
       } else if (!isInitialSync) {
         try {
           val existingMeta = transactionLog.getMetadata()
           val inc = existingMeta.configuration
-            .get("indextables.companion.fingerprintInclude")
+            .get("indextables.companion.hashedFastfieldsInclude")
             .map(_.split(",").filter(_.nonEmpty).toSeq)
             .getOrElse(Seq.empty)
           val exc = existingMeta.configuration
-            .get("indextables.companion.fingerprintExclude")
+            .get("indextables.companion.hashedFastfieldsExclude")
             .map(_.split(",").filter(_.nonEmpty).toSeq)
             .getOrElse(Seq.empty)
           (inc, exc)
@@ -508,8 +508,8 @@ case class SyncToExternalCommand(
         schemaSourceParquetFile = reader.schemaSourceParquetFile(),
         columnNameMapping = reader.columnNameMapping(),
         autoDetectNameMapping = sourceFormat == "iceberg",
-        fingerprintInclude = effectiveFpInclude,
-        fingerprintExclude = effectiveFpExclude
+        hashedFastfieldsInclude = effectiveHfInclude,
+        hashedFastfieldsExclude = effectiveHfExclude
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
@@ -524,8 +524,8 @@ case class SyncToExternalCommand(
         splitsToInvalidate,
         effectiveIndexingModes,
         effectiveWherePredicates,
-        effectiveFpInclude,
-        effectiveFpExclude,
+        effectiveHfInclude,
+        effectiveHfExclude,
         sourceVersion,
         batchSize,
         maxConcurrentBatches,
@@ -550,8 +550,8 @@ case class SyncToExternalCommand(
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
-    effectiveFpInclude: Seq[String],
-    effectiveFpExclude: Seq[String],
+    effectiveHfInclude: Seq[String],
+    effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
@@ -693,8 +693,8 @@ case class SyncToExternalCommand(
                     transactionLog,
                     effectiveIndexingModes,
                     effectiveWherePredicates,
-                    effectiveFpInclude,
-                    effectiveFpExclude,
+                    effectiveHfInclude,
+                    effectiveHfExclude,
                     sourceVersion,
                     externalStorageRoot
                   )
@@ -767,8 +767,8 @@ case class SyncToExternalCommand(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
-    effectiveFpInclude: Seq[String],
-    effectiveFpExclude: Seq[String],
+    effectiveHfInclude: Seq[String],
+    effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     externalStorageRoot: Option[String]
   ): MetadataAction = {
@@ -806,10 +806,10 @@ case class SyncToExternalCommand(
                                                         )
                                                       } else Map.empty) ++ fromVersion.map(v =>
       "indextables.companion.fromVersion" -> v.toString
-    ) ++ (if (effectiveFpInclude.nonEmpty)
-            Map("indextables.companion.fingerprintInclude" -> effectiveFpInclude.mkString(","))
-          else Map.empty) ++ (if (effectiveFpExclude.nonEmpty)
-                                Map("indextables.companion.fingerprintExclude" -> effectiveFpExclude.mkString(","))
+    ) ++ (if (effectiveHfInclude.nonEmpty)
+            Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
+          else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
+                                Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
                               else Map.empty)
     existingMetadata.copy(configuration = companionConfig)
   }

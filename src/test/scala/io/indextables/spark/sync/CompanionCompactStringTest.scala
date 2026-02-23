@@ -894,10 +894,10 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
   }
 
   // -------------------------------------------------------
-  //  FINGERPRINTS INCLUDE / EXCLUDE tests
+  //  HASHED FASTFIELDS INCLUDE / EXCLUDE tests
   // -------------------------------------------------------
 
-  test("FINGERPRINTS INCLUDE should build companion successfully") {
+  test("HASHED FASTFIELDS INCLUDE should build companion successfully") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_fp_include").getAbsolutePath
       val indexPath   = new File(tempDir, "companion_fp_include").getAbsolutePath
@@ -906,7 +906,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"FINGERPRINTS INCLUDE ('name', 'trace_id') " +
+          s"HASHED FASTFIELDS INCLUDE ('name', 'trace_id') " +
           s"AT LOCATION '$indexPath'"
       )
       val row = result.collect()
@@ -921,7 +921,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("FINGERPRINTS EXCLUDE should build companion successfully") {
+  test("HASHED FASTFIELDS EXCLUDE should build companion successfully") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_fp_exclude").getAbsolutePath
       val indexPath   = new File(tempDir, "companion_fp_exclude").getAbsolutePath
@@ -930,7 +930,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"FINGERPRINTS EXCLUDE ('message') " +
+          s"HASHED FASTFIELDS EXCLUDE ('message') " +
           s"AT LOCATION '$indexPath'"
       )
       val row = result.collect()
@@ -945,7 +945,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("incremental sync should preserve fingerprint config from metadata") {
+  test("incremental sync should preserve hashed fastfields config from metadata") {
     withTempPath { tempDir =>
       val parquetPath  = new File(tempDir, "parquet_fp_inc").getAbsolutePath
       val parquetPath2 = new File(tempDir, "parquet_fp_inc2").getAbsolutePath
@@ -956,25 +956,25 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       val data1 = (0 until 5).map(i => (i.toLong, UUID.randomUUID().toString, s"name_$i", i * 1.5))
       data1.toDF("id", "trace_id", "name", "score").repartition(1).write.parquet(parquetPath)
 
-      // Initial sync with FINGERPRINTS INCLUDE
+      // Initial sync with HASHED FASTFIELDS INCLUDE
       val result1 = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"FINGERPRINTS INCLUDE ('name', 'trace_id') " +
+          s"HASHED FASTFIELDS INCLUDE ('name', 'trace_id') " +
           s"AT LOCATION '$indexPath'"
       )
       result1.collect()(0).getString(2) shouldBe "success"
 
-      // Verify fingerprint config is stored in metadata
+      // Verify hashed fastfields config is stored in metadata
       val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
       try {
         val metadata = txLog.getMetadata()
-        val fpInclude = metadata.configuration("indextables.companion.fingerprintInclude")
-        fpInclude should include("name")
-        fpInclude should include("trace_id")
+        val hfInclude = metadata.configuration("indextables.companion.hashedFastfieldsInclude")
+        hfInclude should include("name")
+        hfInclude should include("trace_id")
       } finally
         txLog.close()
 
-      // Add more data and re-sync WITHOUT specifying fingerprint config
+      // Add more data and re-sync WITHOUT specifying hashed fastfields config
       val data2 = (5 until 10).map(i => (i.toLong, UUID.randomUUID().toString, s"name_$i", i * 1.5))
       data2.toDF("id", "trace_id", "name", "score").repartition(1).write.parquet(parquetPath2)
 
@@ -987,7 +987,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         java.nio.file.Files.copy(f.toPath, new File(combinedPath, "batch2_" + f.getName).toPath)
       }
 
-      // Re-sync from combined path — fingerprint config should be inherited from metadata
+      // Re-sync from combined path — hashed fastfields config should be inherited from metadata
       val result2 = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR PARQUET '$combinedPath' " +
           s"AT LOCATION '$indexPath'"
@@ -1023,14 +1023,14 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("text field with fingerprint should support GROUP BY aggregation") {
+  test("text field with hashed fastfield should support GROUP BY aggregation") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_text_groupby").getAbsolutePath
       val indexPath   = new File(tempDir, "companion_text_groupby").getAbsolutePath
 
       val ss = spark
       import ss.implicits._
-      // Create data with a string category column that will have fingerprints
+      // Create data with a string category column that will have hashed fastfields
       val data = Seq(
         (1L, "First document about cats", "animals"),
         (2L, "Second document about cats", "animals"),
@@ -1044,7 +1044,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
           s"INDEXING MODES ('content':'text') " +
           s"FASTFIELDS MODE HYBRID " +
-          s"FINGERPRINTS INCLUDE ('category') " +
+          s"HASHED FASTFIELDS INCLUDE ('category') " +
           s"AT LOCATION '$indexPath'"
       )
       result.collect()(0).getString(2) shouldBe "success"
@@ -1056,7 +1056,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       // Total count should be correct
       companionDf.count() shouldBe 5
 
-      // GROUP BY on the fingerprinted category field should work
+      // GROUP BY on the hashed category field should work
       val grouped = companionDf.groupBy("category").agg(count("*").as("cnt")).collect()
       grouped.length shouldBe 2
       val groupMap = grouped.map(r => r.getString(0) -> r.getLong(1)).toMap
