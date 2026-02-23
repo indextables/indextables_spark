@@ -441,9 +441,8 @@ install_tantivy4java() {
     # --- tantivy (required if Cargo.toml has ../../tantivy path dependencies) ---
     # The [patch] section in Cargo.toml redirects the git dependency to the local
     # path (../../tantivy), so cargo uses whatever is on disk — not the rev in the
-    # git dependency. We extract the pinned rev from Cargo.toml and advance one
-    # commit to pick up any immediate fixes (e.g., pub mod visibility) without
-    # pulling in breaking changes from HEAD.
+    # git dependency. We extract the pinned rev from Cargo.toml and check out that
+    # exact revision to ensure a reproducible build.
     if grep -q 'path = "../../tantivy' "$cargo_toml" 2>/dev/null; then
         local tantivy_rev
         tantivy_rev=$(
@@ -455,17 +454,7 @@ install_tantivy4java() {
         if [[ -n "$tantivy_rev" ]]; then
             info "Cloning tantivy (pinned rev: ${tantivy_rev})..."
             git clone "$TANTIVY_REPO" "$build_dir/tantivy"
-            # Advance one commit past the pinned rev if available (picks up
-            # immediate fixes like pub module visibility without pulling in
-            # breaking API changes from HEAD)
-            local next_commit
-            next_commit=$(git -C "$build_dir/tantivy" log --oneline --ancestry-path "${tantivy_rev}..origin/main" 2>/dev/null | tail -1 | awk '{print $1}')
-            if [[ -n "$next_commit" ]]; then
-                info "Checking out pinned rev + 1 (${next_commit})..."
-                git -C "$build_dir/tantivy" checkout "$next_commit" --quiet
-            else
-                git -C "$build_dir/tantivy" checkout "$tantivy_rev" --quiet
-            fi
+            git -C "$build_dir/tantivy" checkout "$tantivy_rev" --quiet
         else
             info "Cloning tantivy (HEAD)..."
             git clone --depth 1 "$TANTIVY_REPO" "$build_dir/tantivy"
