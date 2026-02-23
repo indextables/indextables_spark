@@ -1,15 +1,15 @@
 # IndexTables Table Protocol
 
-**Version:** 2.0
+**Version:** 2.1
 **Status:** Production
 **Last Updated:** February 2026
 **Protocol Version:** V4 (Avro State)
 
 ## Overview
 
-IndexTables implements a Delta Lake-inspired transaction log protocol that provides ACID guarantees, time travel, and schema evolution safety for tables of Tantivy search indexes. Every table operation -- write, merge, overwrite, purge -- is recorded as an atomic, versioned transaction. The protocol's current version (V4) uses an Avro-based state format that delivers 10-28x faster state reads compared to the original JSON format.
+IndexTables implements a Delta Lake-inspired transaction log protocol that provides ACID guarantees, time travel, and schema evolution safety for tables of Tantivy search indexes. Every table operation -- write, merge, overwrite, purge -- is recorded as an atomic, versioned transaction. The current protocol version (V4) uses an Avro-based state format with Iceberg-style manifest reuse for efficient incremental state writes.
 
-This document covers the conceptual architecture, ACID guarantees, operational guidance, and performance characteristics of the table protocol. For the detailed wire-level specification -- action schemas, Avro field IDs, file format details, and configuration reference -- see [protocol.md](protocol.md).
+This document covers the conceptual architecture, ACID guarantees, operational guidance, and performance characteristics of the table protocol. For the detailed wire-level specification -- action schemas, Avro field IDs, file format details, and configuration reference -- see [protocol.md](protocol.md). For the original design rationale and implementation details of the Avro state format, see [Avro State Design Document](../design/avro-state-file.md).
 
 ## Design Principles
 
@@ -86,14 +86,14 @@ For detailed file naming conventions, version file format, and compression optio
 
 ## Protocol Versions
 
-| Version | Introduced | Key Features |
-|---------|-----------|--------------|
-| V1 | Initial | Basic transaction log: AddAction, RemoveAction, MetadataAction |
-| V2 | | SkipAction, extended AddAction metadata, footer offsets |
-| V3 | | Multi-part JSON checkpoints, schema deduplication (`docMappingRef`), feature flags |
-| V4 | Current | Avro state format, manifest-level partition pruning, 10-28x faster reads |
+| Version | Status | Key Features |
+|---------|--------|--------------|
+| V1 | Historical | Basic transaction log: AddAction, RemoveAction, MetadataAction |
+| V2 | Historical | SkipAction, extended AddAction metadata, footer offsets |
+| V3 | Historical | Schema deduplication (`docMappingRef`), feature flags |
+| **V4** | **Current** | **Avro state format, manifest-level partition pruning, incremental state writes** |
 
-New tables are created at V4 by default. Tables at older protocol versions are automatically upgraded when a checkpoint is created. The current implementation can read all versions (V1-V4) and writes at V4.
+All new tables are created at V4. Tables at older protocol versions are automatically upgraded to V4 when a checkpoint is created.
 
 For the complete feature flag list and version compatibility matrix, see [protocol.md -- Protocol Versions](protocol.md#protocol-versions).
 
@@ -103,27 +103,26 @@ For the complete feature flag list and version compatibility matrix, see [protoc
 
 ### How a Read Works
 
-1. **Check `_last_checkpoint`** -- Determine whether the latest checkpoint is Avro state, JSON multi-part, or single-file JSON.
-2. **Load base state:**
-   - **Avro state (V4):** Read `_manifest.avro` from the state directory. Apply partition pruning at the manifest level to skip irrelevant manifests entirely. Read matching Avro manifests in parallel (default: 8 threads). Filter out tombstoned entries.
-   - **JSON checkpoint (legacy):** Parse the JSON checkpoint file(s), converting to the same in-memory representation.
-3. **Apply incremental versions** -- Read any version files written after the checkpoint and apply their adds/removes.
+1. **Check `_last_checkpoint`** -- Locate the latest Avro state directory.
+2. **Load base state** -- Read `_manifest.avro` from the state directory. Apply partition pruning at the manifest level to skip irrelevant manifests entirely. Read matching Avro manifests in parallel (default: 8 threads). Filter out tombstoned entries.
+3. **Apply incremental versions** -- Read any version files written after the state snapshot and apply their adds/removes.
 4. **Return active files** -- The final set of AddActions represents all live splits in the table.
 
 ### Partition Pruning
 
-With V4 Avro state, each manifest entry in `_manifest.avro` carries `partitionBounds` -- the min/max values for each partition column across all files in that manifest. When a query includes partition filters, entire manifests are skipped if their bounds don't overlap the filter predicates.
+Each manifest entry in `_manifest.avro` carries `partitionBounds` -- the min/max values for each partition column across all files in that manifest. When a query includes partition filters, entire manifests are skipped if their bounds don't overlap the filter predicates.
 
 For a table with 1M files across 1,000 partitions, a single-partition query can skip 99.9% of manifests when compaction has sorted files by partition (see [Compaction](#compaction) below).
 
 ### Performance Characteristics
 
-| Scenario | JSON Checkpoint | Avro State (V4) |
-|----------|----------------|-----------------|
-| Read 70K files | ~14 seconds | <500ms |
-| Read 100K files | ~20 seconds | <700ms |
-| Query 1 partition (1M file table) | Load all 1M entries | Load only matching manifests |
-| Cold read (no checkpoint) | Parse all version files | Direct state read |
+| Scenario | Performance |
+|----------|-------------|
+| Read 70K files | <500ms |
+| Read 100K files | <700ms |
+| Incremental write (add 100 files to 70K file table) | Write only 100 new entries (O(delta), not O(N)) |
+| Query 1 partition (1M file table) | Load only matching manifests |
+| Cold read (no state snapshot) | Parse all version files from version 0 |
 
 ---
 
@@ -135,7 +134,7 @@ For a table with 1M files across 1,000 partitions, a single-partition query can 
 2. **Determine next version** -- Read the latest version and increment atomically.
 3. **Write version file** -- Serialize all actions (adds, removes) as newline-delimited JSON, optionally GZIP-compressed. Write with conditional `ifNotExists`.
 4. **Update state** (if checkpoint interval reached):
-   - Write a new Avro manifest to `manifests/` containing only the new file entries.
+   - Write a new Avro manifest to `manifests/` containing only the new file entries (incremental -- existing manifests are not rewritten).
    - Write a new `_manifest.avro` in `state-v<version>/` that references all existing manifests plus the new one, with any new tombstones appended.
    - Update `_last_checkpoint` to point to the new state directory.
 5. **Handle conflicts** -- If the version file write fails (412), re-read state and retry with exponential backoff.
@@ -179,15 +178,18 @@ Skipped files have a cooldown period (`retryAfter` timestamp) before the system 
 
 ## Checkpoint and State Management
 
-### Checkpoint Formats
+### State Format
 
-| Format | Protocol | Description |
-|--------|----------|-------------|
-| Single-file JSON | V1-V2 | `<version>.checkpoint.json` -- all actions in one GZIP-compressed file |
-| Multi-part JSON | V3 | Manifest + parts: `<version>.checkpoint.<uuid>.<part>.json` |
-| **Avro state** | **V4 (default)** | `state-v<version>/_manifest.avro` referencing shared Avro manifests |
+The Avro state format uses a `state-v<version>/` directory containing a `_manifest.avro` file that references shared Avro manifest files in the `manifests/` directory. Each manifest file contains binary Avro-encoded `FileEntry` records representing live splits.
 
-Avro state is the default for all new tables and checkpoint operations. JSON formats are supported for reading (backward compatibility) but deprecated for writing.
+Key properties of the Avro state format:
+
+- **Binary encoding** -- Avro binary format for fast serialization/deserialization.
+- **Manifest reuse** -- New transactions write only a manifest for new files, referencing existing manifests by path (Iceberg-style incremental writes).
+- **Partition bounds** -- Each manifest entry in the state manifest carries min/max partition values, enabling manifest-level pruning before any file entries are read.
+- **Zstandard compression** -- Manifests use zstd compression by default (configurable).
+
+For the full Avro schema (FileEntry, ManifestInfo, PartitionBounds) and field ID ranges, see [protocol.md -- Avro State Format](protocol.md#avro-state-format-v4). For design rationale, see [Avro State Design Document](../design/avro-state-file.md).
 
 ### When Checkpoints Are Created
 
@@ -224,7 +226,7 @@ Use `DESCRIBE INDEXTABLES STATE` to inspect the current state:
 DESCRIBE INDEXTABLES STATE 's3://bucket/path';
 ```
 
-Returns the current format (`avro-state`, `json`, etc.), version, file count, manifest count, tombstone count and ratio, and whether compaction is recommended.
+Returns the current state format, version, file count, manifest count, tombstone count and ratio, and whether compaction is recommended.
 
 ---
 
@@ -268,7 +270,7 @@ The age-based safety window prevents race conditions with in-flight writes that 
 
 | Command | Purpose |
 |---------|---------|
-| `CHECKPOINT INDEXTABLES '<path>'` | Force checkpoint creation (upgrades to V4 Avro) |
+| `CHECKPOINT INDEXTABLES '<path>'` | Force state snapshot creation |
 | `COMPACT INDEXTABLES '<path>'` | Alias for CHECKPOINT -- forces full compaction |
 | `TRUNCATE INDEXTABLES TIME TRAVEL '<path>'` | Remove all historical versions, keep only current state |
 | `PURGE INDEXTABLE '<path>' OLDER THAN 7 DAYS` | Remove orphaned splits, old versions, old state dirs |
@@ -366,9 +368,9 @@ IndexTables' state architecture is most similar to Iceberg's manifest list + man
 
 ## Migration Guide
 
-### Upgrading to V4 (Avro State)
+### Upgrading Existing Tables
 
-Tables at V1, V2, or V3 are automatically upgraded to V4 when any checkpoint is created. You can also force the upgrade:
+Tables created at older protocol versions (V1, V2, V3) are automatically upgraded to V4 Avro state when a checkpoint is created. You can also force the upgrade explicitly:
 
 ```sql
 -- Check current state format
@@ -382,33 +384,7 @@ DESCRIBE INDEXTABLES STATE 's3://bucket/path';
 -- format should now show "avro-state"
 ```
 
-The upgrade process:
-
-1. Reads current state from whatever format exists (JSON, JSON multi-part, or version file replay).
-2. Writes a new Avro state directory with all live files.
-3. Updates `_last_checkpoint` with `format: "avro-state"`.
-4. Subsequent reads use the new Avro format automatically.
-
-No data files are modified during upgrade. The upgrade only affects transaction log metadata.
-
-### Emergency Downgrade
-
-If issues are discovered with the Avro format (not expected in production):
-
-```scala
-spark.conf.set("spark.indextables.state.format", "json")
-spark.sql("CHECKPOINT INDEXTABLES '<table_path>'")
-```
-
-This forces the next checkpoint to use JSON format. JSON format is deprecated and will be removed in a future release. Keep read support indefinitely.
-
-### Mixed-Version Clusters
-
-During rolling upgrades where some nodes run older code:
-
-- Older code (pre-V4) can only read JSON checkpoints.
-- Newer code reads both JSON and Avro.
-- **Recommendation:** Upgrade all nodes before enabling Avro writes, or ensure all checkpoint-creating operations run on upgraded nodes.
+The upgrade reads the current table state (from version files or any existing checkpoint), writes a new Avro state directory with all live files, and updates `_last_checkpoint`. No data files are modified -- the upgrade only affects transaction log metadata.
 
 ---
 
@@ -431,13 +407,13 @@ aws s3 ls s3://bucket/table/_transaction_log/00000000000000000000.json
 
 ### Slow Reads
 
-**Cause:** No checkpoint exists, forcing replay of all version files. Or JSON checkpoint on a large table.
+**Cause:** No state snapshot exists, forcing replay of all version files from version 0.
 
 ```sql
 -- Check current state
 DESCRIBE INDEXTABLES STATE 's3://bucket/path';
 
--- Create/upgrade checkpoint
+-- Create a state snapshot
 CHECKPOINT INDEXTABLES 's3://bucket/path';
 ```
 
@@ -471,7 +447,7 @@ COMPACT INDEXTABLES 's3://bucket/path';
 
 ### For Readers
 
-- **Use Avro state (V4)** -- Ensure tables are upgraded for optimal read performance.
+- **Upgrade older tables** -- Run `CHECKPOINT INDEXTABLES` on any pre-V4 tables to upgrade them to the Avro state format.
 - **Leverage partition pruning** -- Partition your data and filter by partition columns to skip irrelevant manifests.
 - **Configure cache TTL appropriately** -- Default cache expiration is 5 minutes (`spark.indextables.transaction.cache.expirationSeconds`). Increase for read-heavy workloads; decrease for write-heavy workloads where freshness matters.
 
@@ -497,13 +473,19 @@ COMPACT INDEXTABLES 's3://bucket/path';
 
 ## Changelog
 
+### v2.1 (February 2026)
+
+- Removed all references to the deprecated JSON checkpoint/state format
+- Document now exclusively covers the V4 Avro state protocol
+- Simplified read path, migration guide, and performance table
+- Updated cross-references to avro-state-file.md design document
+
 ### v2.0 (February 2026)
 
 - Rewrote document to reflect V4 Avro state as the current protocol version
 - Removed spec-level detail that duplicates protocol.md
 - Added ACID guarantees section with conceptual explanations
 - Added migration guide for V1/V2/V3 to V4 upgrades
-- Updated performance numbers for Avro state (10-28x faster reads, <500ms for 70K files)
 - Updated directory structure to include `manifests/` and `state-v*/`
 - Updated comparison table to include Apache Iceberg
 - Added compaction triggers and operational guidance
@@ -515,5 +497,4 @@ COMPACT INDEXTABLES 's3://bucket/path';
 - Initial protocol specification
 - S3 Conditional Writes implementation
 - Version 0 conditional write protection
-- JSON checkpoint system
 - SkipAction for merge resilience
