@@ -323,7 +323,7 @@ class SplitSearchEngine private (
       // Use docBatchProjected for all splits (standard and companion).
       // Returns List<Document> with native-side field projection for both split types.
       val fieldNames = sparkSchema.fields.map(_.name)
-      logger.debug(s"Using docBatchProjected for ${docAddresses.length} addresses, ${fieldNames.length} fields")
+      logger.info(s"docBatchProjected: ${docAddresses.length} docs, projected fields: [${fieldNames.mkString(", ")}]")
 
       val documents: Array[io.indextables.tantivy4java.core.Document] = {
         val javaDocuments = splitSearcher.docBatchProjected(docAddresses, fieldNames: _*)
