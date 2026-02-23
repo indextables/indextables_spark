@@ -163,6 +163,40 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 - [ ] Priority assigned
 - [ ] Follow-up posted to GitHub issue #10
 
+### IT-044: Testing excellence — fix exception-swallowing tests (Phase 0A)
+**Type**: Tech Debt / Test Quality
+**Priority**: Medium
+**Analysis**: [.claude/artifacts/testing-excellence-review.md](artifacts/testing-excellence-review.md)
+**Description**: StorageErrorHandlingTest had 7 tests using try/catch patterns that passed regardless of behavior. Root cause: `count()` bypasses split files via TransactionLogCountScan aggregate pushdown, and JVM-wide caches retain stale data from writes. Tests appeared to "handle errors gracefully" but tested nothing. SizeParsingTest had 1 edge-case test with weak assertions.
+**Acceptance Criteria**:
+- [x] Root cause identified (aggregate pushdown + cache masking)
+- [x] Actual runtime behavior verified (all corruption scenarios throw exceptions, no partial results)
+- [x] Tests rewritten with `select().collect()`, cache clearing, and `intercept[]` assertions
+- [x] Peer review completed (2 iterations)
+- [x] All 14 tests pass (12 StorageErrorHandlingTest + 2 SizeParsingTest)
+
+### IT-045: setup.sh builds tantivy at wrong revision
+**Type**: Bug
+**Priority**: Medium
+**Description**: `scripts/setup.sh` advances tantivy one commit past pinned rev (4b6d7d49 → 696b8477), which introduces a `BucketResult::Filter` variant that quickwit-query doesn't handle. Causes 3 Rust compilation errors (E0605, E0308, E0004). Workaround: build manually with exact pinned rev.
+**Acceptance Criteria**:
+- [x] setup.sh uses exact pinned rev without +1 advancement
+- [ ] Build succeeds on clean checkout (needs verification on clean machine)
+
+### IT-046: SyncToExternalCommand compile error on main
+**Type**: Bug
+**Priority**: High
+**Description**: `SyncToExternalCommand.scala:426` passes `sourceSchema` (StructType) where `applyWhereFilter` expects `Option[StructType]`. Pre-existing on main, blocks compilation.
+**Acceptance Criteria**:
+- [x] Fixed: wrapped in `Some(sourceSchema)`
+
+### IT-047: Avro state format corruption tests (coverage gap)
+**Type**: Tech Debt / Test Quality
+**Priority**: Low
+**Description**: StorageErrorHandlingTest only tests JSON format transaction log corruption. Avro is the default since Protocol V4 and is more representative of production. Discovered during adversarial review of IT-044.
+**Acceptance Criteria**:
+- [ ] Equivalent corruption tests for Avro state format
+
 ---
 
 ## Low
@@ -207,3 +241,6 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 | IT-008 | Document missing SQL commands | 2026-02 |
 | IT-042 | Fix broken README.md links ([#176](https://github.com/indextables/indextables_spark/issues/176)) | 2026-02 |
 | IT-043 | Rewrite table-protocol.md for V4 Avro state ([#175](https://github.com/indextables/indextables_spark/issues/175)) | 2026-02 |
+| IT-044 | Fix exception-swallowing tests — Phase 0A testing excellence | 2026-02 |
+| IT-045 | Fix setup.sh tantivy pinned rev +1 bug | 2026-02 |
+| IT-046 | Fix SyncToExternalCommand compile error on main | 2026-02 |
