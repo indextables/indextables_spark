@@ -31,6 +31,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.filters.MixedBooleanFilter
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
@@ -425,7 +426,19 @@ class IndexTables4SparkPartitionReader(
           nonPartitionFilters
         }
 
-        val allFilters: Array[Any] = optimizedFilters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+        // Strip partition-only filters from indexQueryFilters (MixedBooleanFilter trees)
+        // These are already handled by partition pruning and not indexed in Tantivy
+        val cleanedIndexQueryFilters = if (partitionColumnNames.nonEmpty && indexQueryFilters.nonEmpty) {
+          val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(indexQueryFilters, partitionColumnNames)
+          if (cleaned.length != indexQueryFilters.length) {
+            logger.info(s"Stripped ${indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s) from Tantivy query")
+          }
+          cleaned
+        } else {
+          indexQueryFilters
+        }
+
+        val allFilters: Array[Any] = optimizedFilters.asInstanceOf[Array[Any]] ++ cleanedIndexQueryFilters
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {
@@ -571,44 +584,9 @@ class IndexTables4SparkPartitionReader(
     java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
   }
 
-  /**
-   * Check if a filter only references partition columns. These filters are already handled by partition pruning and
-   * don't need to be sent to Tantivy.
-   *
-   * @param filter
-   *   The Spark filter to check
-   * @param partitionColumns
-   *   Set of partition column names
-   * @return
-   *   true if the filter only references partition columns
-   */
-  private def isPartitionOnlyFilter(filter: Filter, partitionColumns: Set[String]): Boolean = {
-    import org.apache.spark.sql.sources._
-
-    def getFilterFieldNames(f: Filter): Set[String] = f match {
-      case EqualTo(attribute, _)            => Set(attribute)
-      case EqualNullSafe(attribute, _)      => Set(attribute)
-      case GreaterThan(attribute, _)        => Set(attribute)
-      case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _)           => Set(attribute)
-      case LessThanOrEqual(attribute, _)    => Set(attribute)
-      case In(attribute, _)                 => Set(attribute)
-      case IsNull(attribute)                => Set(attribute)
-      case IsNotNull(attribute)             => Set(attribute)
-      case StringStartsWith(attribute, _)   => Set(attribute)
-      case StringEndsWith(attribute, _)     => Set(attribute)
-      case StringContains(attribute, _)     => Set(attribute)
-      case And(left, right)                 => getFilterFieldNames(left) ++ getFilterFieldNames(right)
-      case Or(left, right)                  => getFilterFieldNames(left) ++ getFilterFieldNames(right)
-      case Not(child)                       => getFilterFieldNames(child)
-      case _                                => Set.empty
-    }
-
-    val fieldNames = getFilterFieldNames(filter)
-    // A filter is partition-only if ALL its fields are partition columns
-    // Empty field set means unknown filter type - don't exclude it
-    fieldNames.nonEmpty && fieldNames.forall(partitionColumns.contains)
-  }
+  /** Delegates to shared utility in MixedBooleanFilter. */
+  private def isPartitionOnlyFilter(filter: Filter, partitionColumns: Set[String]): Boolean =
+    MixedBooleanFilter.isPartitionOnlyFilter(filter, partitionColumns)
 
   /**
    * Check if a range filter is redundant based on min/max statistics. A filter is redundant if the split's entire data

@@ -145,4 +145,71 @@ object MixedBooleanFilter {
     case MixedAndFilter(left, right) => extractIndexQueryAllFilters(left) ++ extractIndexQueryAllFilters(right)
     case MixedNotFilter(child)       => extractIndexQueryAllFilters(child)
   }
+
+  /**
+   * Recursively strip partition-only MixedSparkFilter nodes from a MixedBooleanFilter tree.
+   * Partition columns are handled by Spark's partition pruning and are not indexed in Tantivy,
+   * so sending them to the executor causes "non-existent field" warnings and broken queries.
+   *
+   * @return Some(stripped filter) or None if the entire filter was partition-only
+   */
+  def stripPartitionFilters(filter: MixedBooleanFilter, partitionColumns: Set[String]): Option[MixedBooleanFilter] =
+    filter match {
+      case MixedSparkFilter(f) =>
+        val refs = MixedSparkFilter.extractReferences(f).toSet
+        if (refs.nonEmpty && refs.forall(partitionColumns.contains)) None
+        else Some(filter)
+
+      case _: MixedIndexQuery | _: MixedIndexQueryAll =>
+        Some(filter)
+
+      case MixedAndFilter(left, right) =>
+        (stripPartitionFilters(left, partitionColumns), stripPartitionFilters(right, partitionColumns)) match {
+          case (Some(l), Some(r)) => Some(MixedAndFilter(l, r))
+          case (Some(l), None)    => Some(l)
+          case (None, Some(r))    => Some(r)
+          case (None, None)       => None
+        }
+
+      case MixedOrFilter(left, right) =>
+        (stripPartitionFilters(left, partitionColumns), stripPartitionFilters(right, partitionColumns)) match {
+          case (Some(l), Some(r)) => Some(MixedOrFilter(l, r))
+          case _                  => None // Can't safely evaluate a partial OR — fall back to match-all
+        }
+
+      case MixedNotFilter(child) =>
+        // If the child is partition-only, dropping the NOT is correct: partition pruning
+        // already handles NOT(partition_col = 'X') by only selecting matching partitions.
+        stripPartitionFilters(child, partitionColumns).map(MixedNotFilter)
+    }
+
+  /**
+   * Strip partition-only filters from an array of indexQueryFilters (which may contain
+   * MixedBooleanFilter instances or other filter types).
+   */
+  def stripPartitionFiltersFromArray(filters: Array[Any], partitionColumns: Set[String]): Array[Any] =
+    filters.flatMap {
+      case mbf: MixedBooleanFilter => stripPartitionFilters(mbf, partitionColumns).toSeq
+      case other                   => Seq(other)
+    }
+
+  /**
+   * Check if a Spark Filter only references partition columns. These filters are already handled
+   * by partition pruning and don't need to be sent to Tantivy.
+   *
+   * @return true if all referenced columns are partition columns
+   */
+  def isPartitionOnlyFilter(filter: org.apache.spark.sql.sources.Filter, partitionColumns: Set[String]): Boolean = {
+    val refs = MixedSparkFilter.extractReferences(filter).toSet
+    refs.nonEmpty && refs.forall(partitionColumns.contains)
+  }
+
+  /**
+   * Strip partition-only filters from an array of Spark Filters.
+   */
+  def stripPartitionOnlyFilters(
+    filters: Array[org.apache.spark.sql.sources.Filter],
+    partitionColumns: Set[String]
+  ): Array[org.apache.spark.sql.sources.Filter] =
+    filters.filterNot(isPartitionOnlyFilter(_, partitionColumns))
 }

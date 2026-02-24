@@ -39,6 +39,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
 
+import io.indextables.spark.filters.MixedBooleanFilter
 import io.indextables.spark.expressions.{
   BucketAggregationConfig,
   DateHistogramConfig,
@@ -825,8 +826,29 @@ class IndexTables4SparkGroupByAggregateReader(
       partition.pushedFilters.foreach(f => logger.debug(s"GROUP BY EXECUTION: Pushed Filter: $f"))
       partition.indexQueryFilters.foreach(f => logger.debug(s"GROUP BY EXECUTION: IndexQuery Filter: $f"))
 
+      // Strip partition-only filters - these are already handled by partition pruning and not indexed in Tantivy
+      val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
+        val cleaned = MixedBooleanFilter.stripPartitionOnlyFilters(partition.pushedFilters, partition.partitionColumns)
+        if (cleaned.length != partition.pushedFilters.length) {
+          logger.info(s"GROUP BY EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)")
+        }
+        cleaned
+      } else {
+        partition.pushedFilters
+      }
+
+      val cleanedIndexQueryFilters = if (partition.partitionColumns.nonEmpty && partition.indexQueryFilters.nonEmpty) {
+        val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
+        if (cleaned.length != partition.indexQueryFilters.length) {
+          logger.info(s"GROUP BY EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)")
+        }
+        cleaned
+      } else {
+        partition.indexQueryFilters
+      }
+
       // Combine pushed filters and IndexQuery filters
-      val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+      val allFilters = nonPartitionPushedFilters ++ cleanedIndexQueryFilters
 
       val query = if (allFilters.nonEmpty) {
         logger.debug(s"GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
@@ -1331,7 +1353,26 @@ class IndexTables4SparkGroupByAggregateReader(
   /** Build filter query for bucket aggregation. */
   private def buildFilterQuery(splitSearchEngine: io.indextables.spark.search.SplitSearchEngine)
     : io.indextables.tantivy4java.split.SplitQuery = {
-    val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+    // Strip partition-only filters - already handled by partition pruning, not indexed in Tantivy
+    val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
+      val cleaned = MixedBooleanFilter.stripPartitionOnlyFilters(partition.pushedFilters, partition.partitionColumns)
+      if (cleaned.length != partition.pushedFilters.length) {
+        logger.info(s"BUCKET EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)")
+      }
+      cleaned
+    } else {
+      partition.pushedFilters
+    }
+    val cleanedIndexQueryFilters = if (partition.partitionColumns.nonEmpty && partition.indexQueryFilters.nonEmpty) {
+      val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
+      if (cleaned.length != partition.indexQueryFilters.length) {
+        logger.info(s"BUCKET EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)")
+      }
+      cleaned
+    } else {
+      partition.indexQueryFilters
+    }
+    val allFilters = nonPartitionPushedFilters ++ cleanedIndexQueryFilters
     if (allFilters.nonEmpty) {
       logger.debug(s"BUCKET EXECUTION: Converting ${allFilters.length} filters to query")
       val splitFieldNames = getSplitFieldNames(splitSearchEngine)

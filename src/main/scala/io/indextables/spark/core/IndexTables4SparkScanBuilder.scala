@@ -654,6 +654,7 @@ class IndexTables4SparkScanBuilder(
   private def createSimpleAggregateScan(aggregation: Aggregation, effectiveFilters: Array[Filter]): Scan = {
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    val partitionCols = getPartitionColumns()
     new IndexTables4SparkSimpleAggregateScan(
       sparkSession,
       transactionLog,
@@ -662,7 +663,8 @@ class IndexTables4SparkScanBuilder(
       options,
       effectiveConfig,
       aggregation,
-      extractedIndexQueryFilters
+      extractedIndexQueryFilters,
+      partitionCols
     )
   }
 
