@@ -36,6 +36,7 @@ import org.apache.spark.sql.types.{
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
+import io.indextables.spark.filters.MixedBooleanFilter
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
@@ -53,7 +54,8 @@ class IndexTables4SparkSimpleAggregateScan(
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
   aggregation: Aggregation,
-  indexQueryFilters: Array[Any] = Array.empty)
+  indexQueryFilters: Array[Any] = Array.empty,
+  partitionColumns: Set[String] = Set.empty)
     extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateScan])
@@ -87,7 +89,8 @@ class IndexTables4SparkSimpleAggregateScan(
       options,
       resolvedConfig, // Use resolved config with driver-side credentials
       aggregation,
-      indexQueryFilters
+      indexQueryFilters,
+      partitionColumns
     )
   }
 
@@ -183,7 +186,8 @@ class IndexTables4SparkSimpleAggregateBatch(
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
   aggregation: Aggregation,
-  indexQueryFilters: Array[Any] = Array.empty)
+  indexQueryFilters: Array[Any] = Array.empty,
+  partitionColumns: Set[String] = Set.empty)
     extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateBatch])
@@ -265,7 +269,8 @@ class IndexTables4SparkSimpleAggregateBatch(
               aggregation,
               transactionLog.getTablePath(),
               indexQueryFilters,
-              if (host == "unknown") None else Some(host)
+              if (host == "unknown") None else Some(host),
+              partitionColumns
             )
           }
       }
@@ -285,7 +290,8 @@ class IndexTables4SparkSimpleAggregateBatch(
                 aggregation = aggregation,
                 tablePath = transactionLog.getTablePath(),
                 indexQueryFilters = indexQueryFilters,
-                preferredHost = if (host == "unknown") None else Some(host)
+                preferredHost = if (host == "unknown") None else Some(host),
+                partitionColumns = partitionColumns
               )
             }
             .toSeq
@@ -320,7 +326,8 @@ class IndexTables4SparkSimpleAggregatePartition(
   val aggregation: Aggregation,
   val tablePath: org.apache.hadoop.fs.Path,
   val indexQueryFilters: Array[Any] = Array.empty,
-  val preferredHost: Option[String] = None)
+  val preferredHost: Option[String] = None,
+  val partitionColumns: Set[String] = Set.empty)
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregatePartition])
@@ -353,7 +360,8 @@ class IndexTables4SparkMultiSplitSimpleAggregatePartition(
   val aggregation: Aggregation,
   val tablePath: org.apache.hadoop.fs.Path,
   val indexQueryFilters: Array[Any] = Array.empty,
-  val preferredHost: Option[String] = None)
+  val preferredHost: Option[String] = None,
+  val partitionColumns: Set[String] = Set.empty)
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitSimpleAggregatePartition])
@@ -556,8 +564,29 @@ class IndexTables4SparkSimpleAggregateReader(
       partition.pushedFilters.foreach(f => logger.debug(s"SIMPLE AGGREGATE EXECUTION: Pushed Filter: $f"))
       partition.indexQueryFilters.foreach(f => logger.debug(s"SIMPLE AGGREGATE EXECUTION: IndexQuery Filter: $f"))
 
+      // Strip partition-only filters - these are already handled by partition pruning and not indexed in Tantivy
+      val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
+        val cleaned = MixedBooleanFilter.stripPartitionOnlyFilters(partition.pushedFilters, partition.partitionColumns)
+        if (cleaned.length != partition.pushedFilters.length) {
+          logger.info(s"SIMPLE AGGREGATE EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)")
+        }
+        cleaned
+      } else {
+        partition.pushedFilters
+      }
+
+      val cleanedIndexQueryFilters = if (partition.partitionColumns.nonEmpty && partition.indexQueryFilters.nonEmpty) {
+        val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
+        if (cleaned.length != partition.indexQueryFilters.length) {
+          logger.info(s"SIMPLE AGGREGATE EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)")
+        }
+        cleaned
+      } else {
+        partition.indexQueryFilters
+      }
+
       // Combine pushed filters and IndexQuery filters
-      val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+      val allFilters = nonPartitionPushedFilters ++ cleanedIndexQueryFilters
 
       val splitQuery = if (allFilters.nonEmpty) {
         // Create options map from config for field configuration
@@ -1075,7 +1104,8 @@ class IndexTables4SparkMultiSplitSimpleAggregateReader(
           partition.aggregation,
           partition.tablePath,
           partition.indexQueryFilters,
-          None
+          None,
+          partition.partitionColumns
         )
 
         // Create a reader for this single split

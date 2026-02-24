@@ -40,7 +40,9 @@ case class SyncConfig(
   readerBatchSize: Int = 8192,
   schemaSourceParquetFile: Option[String] = None,
   columnNameMapping: Map[String, String] = Map.empty,
-  autoDetectNameMapping: Boolean = false)
+  autoDetectNameMapping: Boolean = false,
+  hashedFastfieldsInclude: Seq[String] = Seq.empty,
+  hashedFastfieldsExclude: Seq[String] = Seq.empty)
     extends Serializable
 
 /**
@@ -169,6 +171,15 @@ object SyncTaskExecutor {
       }
       if (config.autoDetectNameMapping) {
         companionConfig.withAutoDetectNameMapping(true)
+      }
+
+      // Apply hashed fastfields include/exclude configuration
+      if (config.hashedFastfieldsInclude.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying hashed fastfields include: ${config.hashedFastfieldsInclude.mkString(", ")}")
+        companionConfig.withStringFingerprints(config.hashedFastfieldsInclude: _*)
+      } else if (config.hashedFastfieldsExclude.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: applying hashed fastfields exclude: ${config.hashedFastfieldsExclude.mkString(", ")}")
+        companionConfig.withoutStringFingerprints(config.hashedFastfieldsExclude: _*)
       }
 
       // 3. Call QuickwitSplit.createFromParquet()

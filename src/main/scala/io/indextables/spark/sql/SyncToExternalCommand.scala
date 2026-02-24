@@ -76,6 +76,8 @@ case class SyncToExternalCommand(
   catalogName: Option[String] = None,
   catalogType: Option[String] = None,
   warehouse: Option[String] = None,
+  hashedFastfieldsInclude: Seq[String] = Seq.empty,
+  hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
@@ -415,6 +417,28 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
+      // Resolve effective hashed fastfields include/exclude: use stored config from metadata if not specified
+      val (effectiveHfInclude, effectiveHfExclude) = if (hashedFastfieldsInclude.nonEmpty || hashedFastfieldsExclude.nonEmpty) {
+        (hashedFastfieldsInclude, hashedFastfieldsExclude)
+      } else if (!isInitialSync) {
+        try {
+          val existingMeta = transactionLog.getMetadata()
+          val inc = existingMeta.configuration
+            .get("indextables.companion.hashedFastfieldsInclude")
+            .map(_.split(",").filter(_.nonEmpty).toSeq)
+            .getOrElse(Seq.empty)
+          val exc = existingMeta.configuration
+            .get("indextables.companion.hashedFastfieldsExclude")
+            .map(_.split(",").filter(_.nonEmpty).toSeq)
+            .getOrElse(Seq.empty)
+          (inc, exc)
+        } catch {
+          case _: Exception => (Seq.empty[String], Seq.empty[String])
+        }
+      } else {
+        (Seq.empty[String], Seq.empty[String])
+      }
+
       // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
       // All source readers return relative paths, so the anti-join is bucket-independent
       // and works across cross-region failover (different S3 buckets, same relative paths).
@@ -484,7 +508,9 @@ case class SyncToExternalCommand(
         readerBatchSize = readerBatchSize,
         schemaSourceParquetFile = reader.schemaSourceParquetFile(),
         columnNameMapping = reader.columnNameMapping(),
-        autoDetectNameMapping = sourceFormat == "iceberg"
+        autoDetectNameMapping = sourceFormat == "iceberg",
+        hashedFastfieldsInclude = effectiveHfInclude,
+        hashedFastfieldsExclude = effectiveHfExclude
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
@@ -499,6 +525,8 @@ case class SyncToExternalCommand(
         splitsToInvalidate,
         effectiveIndexingModes,
         effectiveWherePredicates,
+        effectiveHfInclude,
+        effectiveHfExclude,
         sourceVersion,
         batchSize,
         maxConcurrentBatches,
@@ -523,6 +551,8 @@ case class SyncToExternalCommand(
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
+    effectiveHfInclude: Seq[String],
+    effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
@@ -664,6 +694,8 @@ case class SyncToExternalCommand(
                     transactionLog,
                     effectiveIndexingModes,
                     effectiveWherePredicates,
+                    effectiveHfInclude,
+                    effectiveHfExclude,
                     sourceVersion,
                     externalStorageRoot
                   )
@@ -737,6 +769,8 @@ case class SyncToExternalCommand(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
+    effectiveHfInclude: Seq[String],
+    effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     externalStorageRoot: Option[String]
   ): MetadataAction = {
@@ -774,7 +808,11 @@ case class SyncToExternalCommand(
                                                         )
                                                       } else Map.empty) ++ fromVersion.map(v =>
       "indextables.companion.fromVersion" -> v.toString
-    )
+    ) ++ (if (effectiveHfInclude.nonEmpty)
+            Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
+          else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
+                                Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
+                              else Map.empty)
     existingMetadata.copy(configuration = companionConfig)
   }
 

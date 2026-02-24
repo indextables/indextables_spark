@@ -100,6 +100,139 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
     assert(MixedSparkFilter.extractReferences(nestedFilter).toSet == Set("a", "b", "c"))
   }
 
+  test("stripPartitionFilters should remove partition-only MixedSparkFilter") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month", "year")
+
+    val partFilter = MixedSparkFilter(EqualTo("month", "11"))
+    assert(MixedBooleanFilter.stripPartitionFilters(partFilter, partCols).isEmpty)
+  }
+
+  test("stripPartitionFilters should keep non-partition MixedSparkFilter") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month", "year")
+
+    val dataFilter = MixedSparkFilter(EqualTo("status", "active"))
+    assert(MixedBooleanFilter.stripPartitionFilters(dataFilter, partCols).contains(dataFilter))
+  }
+
+  test("stripPartitionFilters should keep mixed-reference MixedSparkFilter") {
+    import org.apache.spark.sql.sources.{And, EqualTo}
+    val partCols = Set("month")
+
+    // Spark AND filter referencing both partition and data columns
+    val mixedFilter = MixedSparkFilter(And(EqualTo("month", "11"), EqualTo("status", "active")))
+    assert(MixedBooleanFilter.stripPartitionFilters(mixedFilter, partCols).contains(mixedFilter))
+  }
+
+  test("stripPartitionFilters should always keep MixedIndexQuery and MixedIndexQueryAll") {
+    val partCols = Set("month")
+
+    val iq  = MixedIndexQuery(IndexQueryFilter("content", "neural"))
+    val iqa = MixedIndexQueryAll(IndexQueryAllFilter("test"))
+    assert(MixedBooleanFilter.stripPartitionFilters(iq, partCols).contains(iq))
+    assert(MixedBooleanFilter.stripPartitionFilters(iqa, partCols).contains(iqa))
+  }
+
+  test("stripPartitionFilters AND: one child partition-only returns the other") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month")
+
+    val partChild = MixedSparkFilter(EqualTo("month", "11"))
+    val dataChild = MixedIndexQuery(IndexQueryFilter("content", "neural"))
+    val andFilter = MixedAndFilter(partChild, dataChild)
+
+    val result = MixedBooleanFilter.stripPartitionFilters(andFilter, partCols)
+    assert(result.contains(dataChild))
+  }
+
+  test("stripPartitionFilters AND: both children partition-only returns None") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month", "year")
+
+    val andFilter = MixedAndFilter(
+      MixedSparkFilter(EqualTo("month", "11")),
+      MixedSparkFilter(EqualTo("year", "2024"))
+    )
+    assert(MixedBooleanFilter.stripPartitionFilters(andFilter, partCols).isEmpty)
+  }
+
+  test("stripPartitionFilters OR: one child partition-only returns None (conservative)") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month")
+
+    val orFilter = MixedOrFilter(
+      MixedSparkFilter(EqualTo("month", "11")),
+      MixedIndexQuery(IndexQueryFilter("content", "neural"))
+    )
+    // Can't safely evaluate partial OR, so returns None (match-all fallback)
+    assert(MixedBooleanFilter.stripPartitionFilters(orFilter, partCols).isEmpty)
+  }
+
+  test("stripPartitionFilters OR: both children non-partition returns both") {
+    val partCols = Set("month")
+
+    val left  = MixedIndexQuery(IndexQueryFilter("content", "neural"))
+    val right = MixedSparkFilter(org.apache.spark.sql.sources.EqualTo("status", "active"))
+    val orFilter = MixedOrFilter(left, right)
+
+    val result = MixedBooleanFilter.stripPartitionFilters(orFilter, partCols)
+    assert(result.contains(orFilter))
+  }
+
+  test("stripPartitionFilters NOT: partition-only child returns None") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month")
+
+    val notFilter = MixedNotFilter(MixedSparkFilter(EqualTo("month", "11")))
+    assert(MixedBooleanFilter.stripPartitionFilters(notFilter, partCols).isEmpty)
+  }
+
+  test("stripPartitionFilters: deeply nested tree with mixed partition/non-partition") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month")
+
+    // AND(AND(partition, indexquery), dataFilter) → AND(indexquery, dataFilter)
+    val tree = MixedAndFilter(
+      MixedAndFilter(
+        MixedSparkFilter(EqualTo("month", "11")),
+        MixedIndexQuery(IndexQueryFilter("content", "neural"))
+      ),
+      MixedSparkFilter(EqualTo("status", "active"))
+    )
+    val result = MixedBooleanFilter.stripPartitionFilters(tree, partCols)
+    assert(result.isDefined)
+    result.get match {
+      case MixedAndFilter(MixedIndexQuery(_), MixedSparkFilter(_)) => // expected
+      case other => fail(s"Unexpected tree shape: $other")
+    }
+  }
+
+  test("stripPartitionFilters: empty partitionColumns set strips nothing") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set.empty[String]
+
+    val filter = MixedSparkFilter(EqualTo("month", "11"))
+    assert(MixedBooleanFilter.stripPartitionFilters(filter, partCols).contains(filter))
+  }
+
+  test("stripPartitionFiltersFromArray: mixed types preserved correctly") {
+    import org.apache.spark.sql.sources.EqualTo
+    val partCols = Set("month")
+
+    val partFilter = MixedAndFilter(
+      MixedSparkFilter(EqualTo("month", "11")),
+      MixedIndexQuery(IndexQueryFilter("content", "neural"))
+    )
+    val plainFilter = IndexQueryFilter("title", "test")
+    val filters: Array[Any] = Array(partFilter, plainFilter)
+
+    val result = MixedBooleanFilter.stripPartitionFiltersFromArray(filters, partCols)
+    assert(result.length == 2) // MixedAndFilter stripped to just the IndexQuery child, plain filter kept
+    assert(result(0).isInstanceOf[MixedIndexQuery])
+    assert(result(1).isInstanceOf[IndexQueryFilter])
+  }
+
   test("OR combining multiple indexquery expressions should work") {
     withTempPath { tempPath =>
       val spark = this.spark

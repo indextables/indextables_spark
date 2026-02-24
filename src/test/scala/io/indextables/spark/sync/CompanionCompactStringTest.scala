@@ -892,4 +892,176 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         txLog.close()
     }
   }
+
+  // -------------------------------------------------------
+  //  HASHED FASTFIELDS INCLUDE / EXCLUDE tests
+  // -------------------------------------------------------
+
+  test("HASHED FASTFIELDS INCLUDE should build companion successfully") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_fp_include").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_fp_include").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS INCLUDE ('name', 'trace_id') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 10
+    }
+  }
+
+  test("HASHED FASTFIELDS EXCLUDE should build companion successfully") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_fp_exclude").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_fp_exclude").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS EXCLUDE ('message') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 10
+    }
+  }
+
+  test("incremental sync should preserve hashed fastfields config from metadata") {
+    withTempPath { tempDir =>
+      val parquetPath  = new File(tempDir, "parquet_fp_inc").getAbsolutePath
+      val parquetPath2 = new File(tempDir, "parquet_fp_inc2").getAbsolutePath
+      val indexPath    = new File(tempDir, "companion_fp_inc").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data1 = (0 until 5).map(i => (i.toLong, UUID.randomUUID().toString, s"name_$i", i * 1.5))
+      data1.toDF("id", "trace_id", "name", "score").repartition(1).write.parquet(parquetPath)
+
+      // Initial sync with HASHED FASTFIELDS INCLUDE
+      val result1 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS INCLUDE ('name', 'trace_id') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result1.collect()(0).getString(2) shouldBe "success"
+
+      // Verify hashed fastfields config is stored in metadata
+      val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+      try {
+        val metadata = txLog.getMetadata()
+        val hfInclude = metadata.configuration("indextables.companion.hashedFastfieldsInclude")
+        hfInclude should include("name")
+        hfInclude should include("trace_id")
+      } finally
+        txLog.close()
+
+      // Add more data and re-sync WITHOUT specifying hashed fastfields config
+      val data2 = (5 until 10).map(i => (i.toLong, UUID.randomUUID().toString, s"name_$i", i * 1.5))
+      data2.toDF("id", "trace_id", "name", "score").repartition(1).write.parquet(parquetPath2)
+
+      val combinedPath = new File(tempDir, "parquet_fp_combined").getAbsolutePath
+      new File(combinedPath).mkdirs()
+      new File(parquetPath).listFiles().filter(_.getName.endsWith(".parquet")).foreach { f =>
+        java.nio.file.Files.copy(f.toPath, new File(combinedPath, f.getName).toPath)
+      }
+      new File(parquetPath2).listFiles().filter(_.getName.endsWith(".parquet")).foreach { f =>
+        java.nio.file.Files.copy(f.toPath, new File(combinedPath, "batch2_" + f.getName).toPath)
+      }
+
+      // Re-sync from combined path — hashed fastfields config should be inherited from metadata
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$combinedPath' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result2.collect()(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("text field should support COUNT aggregation with HYBRID fast fields") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_text_count").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_text_count").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 15).map(i => (i.toLong, s"Document content number $i", s"category_${i % 3}"))
+      data.toDF("id", "content", "category").repartition(1).write.parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('content':'text') " +
+          s"FASTFIELDS MODE HYBRID " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 15
+      companionDf.agg(count("content")).collect()(0).getLong(0) shouldBe 15L
+    }
+  }
+
+  test("text field with hashed fastfield should support GROUP BY aggregation") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_text_groupby").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_text_groupby").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      // Create data with a string category column that will have hashed fastfields
+      val data = Seq(
+        (1L, "First document about cats", "animals"),
+        (2L, "Second document about cats", "animals"),
+        (3L, "Third document about dogs", "animals"),
+        (4L, "Document about python", "tech"),
+        (5L, "Document about scala", "tech")
+      )
+      data.toDF("id", "content", "category").repartition(1).write.parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('content':'text') " +
+          s"FASTFIELDS MODE HYBRID " +
+          s"HASHED FASTFIELDS INCLUDE ('category') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Total count should be correct
+      companionDf.count() shouldBe 5
+
+      // GROUP BY on the hashed category field should work
+      val grouped = companionDf.groupBy("category").agg(count("*").as("cnt")).collect()
+      grouped.length shouldBe 2
+      val groupMap = grouped.map(r => r.getString(0) -> r.getLong(1)).toMap
+      groupMap("animals") shouldBe 3L
+      groupMap("tech") shouldBe 2L
+    }
+  }
 }
