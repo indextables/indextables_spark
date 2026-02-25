@@ -28,7 +28,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.prewarm.{AsyncPrewarmJobManager, AsyncPrewarmJobResult, IndexComponentMapping}
-import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
+import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager, SplitCacheConfig}
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, PartitionPredicateUtils, TransactionLogFactory}
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils, ProtocolNormalizer, SplitMetadataFactory}
 import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
@@ -89,6 +89,91 @@ case class PrewarmCacheCommand(
 
   // Credential resolution centralized in CredentialProviderFactory.resolveCredentialsOnDriver()
 
+  private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+
+  /**
+   * Enrich a config map with companion metadata from the transaction log, mirroring
+   * ScanBuilder.effectiveConfig logic. Injects parquetTableRoot, resolves parquet
+   * credentials, propagates indexing modes, and strips icebergTableId.
+   * Returns the enriched config (or the original if not a companion table).
+   */
+  private def enrichConfigWithCompanionMetadata(
+    config: Map[String, String],
+    metadata: io.indextables.spark.transaction.MetadataAction
+  ): Map[String, String] = {
+    val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
+    if (!isCompanion) return config
+
+    metadata.configuration.get("indextables.companion.sourceTablePath") match {
+      case None =>
+        logger.warn("Companion mode enabled but no sourceTablePath in metadata")
+        config
+      case Some(sourceTablePath) =>
+        val sourceFormat = metadata.configuration.getOrElse("indextables.companion.sourceFormat", "delta")
+
+        // Determine effective parquet table root (same logic as ScanBuilder.effectiveConfig)
+        val effectivePath = if (sourceFormat == "iceberg" ||
+            (sourceFormat == "delta" && metadata.configuration.contains("indextables.companion.deltaTableName"))) {
+          metadata.configuration.getOrElse("indextables.companion.parquetStorageRoot", sourceTablePath)
+        } else {
+          sourceTablePath
+        }
+
+        logger.info(s"Companion mode detected during prewarm: injecting parquetTableRoot=$effectivePath")
+        var enriched = config + ("spark.indextables.companion.parquetTableRoot" -> effectivePath)
+
+        // Resolve parquet credentials (separate from index credentials)
+        try {
+          io.indextables.spark.utils.CredentialProviderFactory
+            .resolveAWSCredentialsFromConfig(enriched, effectivePath)
+            .foreach { creds =>
+              logger.info(s"Companion prewarm: resolved parquet credentials for $effectivePath (accessKey=${creds.accessKey.take(4)}...)")
+              enriched = enriched +
+                ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
+                ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
+              creds.sessionToken.foreach { token =>
+                enriched = enriched + ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
+              }
+            }
+          // Propagate region and endpoint from main config
+          enriched.get("spark.indextables.aws.region").foreach { region =>
+            enriched = enriched + ("spark.indextables.companion.parquet.aws.region" -> region)
+          }
+          enriched.get("spark.indextables.s3.endpoint").foreach { endpoint =>
+            enriched = enriched + ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+          }
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to resolve parquet credentials for companion prewarm: ${e.getMessage}")
+        }
+
+        // Propagate stored indexing modes as typemap entries so that field type
+        // validation works correctly during prewarm (mirrors ScanBuilder.effectiveConfig)
+        metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
+          try {
+            import scala.jdk.CollectionConverters._
+            val modes: java.util.Map[String, String] =
+              objectMapper.readValue(json, classOf[java.util.HashMap[String, String]])
+            modes.asScala.foreach {
+              case (field, mode) =>
+                val key = s"spark.indextables.indexing.typemap.$field"
+                if (!enriched.contains(key)) {
+                  logger.info(s"Companion prewarm: propagating indexingMode $field -> $mode as typemap entry")
+                  enriched = enriched + (key -> mode)
+                }
+            }
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to parse companion indexingModes during prewarm: ${e.getMessage}")
+          }
+        }
+
+        // Strip tableId so split credential resolution uses path-based credentials,
+        // not table-scoped credentials (mirrors ScanBuilder.effectiveConfig)
+        enriched - "spark.indextables.iceberg.uc.tableId"
+    }
+  }
+
   override val output: Seq[Attribute] = Seq(
     AttributeReference("host", StringType, nullable = false)(),
     AttributeReference("assigned_host", StringType, nullable = false)(),
@@ -143,7 +228,7 @@ case class PrewarmCacheCommand(
     // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
     // Prewarm is read-only, request PATH_READ credentials
     val readConfig   = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-    val mergedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath)
+    var mergedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath)
 
     // Create transaction log - CloudStorageProvider will handle credential resolution
     // with proper refresh logic via V1ToV2CredentialsProviderAdapter
@@ -161,6 +246,9 @@ case class PrewarmCacheCommand(
         metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
       )
       val partitionColumnSet = metadata.partitionColumns.map(_.toLowerCase).toSet
+
+      // Inject companion metadata (parquetTableRoot, credentials, indexing modes)
+      mergedConfig = enrichConfigWithCompanionMetadata(mergedConfig, metadata)
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
@@ -441,7 +529,7 @@ case class PrewarmCacheCommand(
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs =
       ConfigNormalization.extractTantivyConfigsFromHadoop(sparkSession.sparkContext.hadoopConfiguration)
-    val mergedConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    var mergedConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
     // Create transaction log
     import scala.jdk.CollectionConverters._
@@ -457,6 +545,9 @@ case class PrewarmCacheCommand(
       val partitionSchema = StructType(
         metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
       )
+
+      // Inject companion metadata (parquetTableRoot, credentials, indexing modes)
+      mergedConfig = enrichConfigWithCompanionMetadata(mergedConfig, metadata)
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
@@ -709,6 +800,7 @@ case class PrewarmCacheCommand(
     val prewarmWork: () => AsyncPrewarmJobResult = () => {
       val startTime                    = System.currentTimeMillis()
       var splitsPrewarmed              = 0
+      var parquetPreloadFailureCount   = 0
       var errorMessage: Option[String] = None
 
       try {
@@ -733,9 +825,9 @@ case class PrewarmCacheCommand(
               }
             val actualPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
 
-            // Create split metadata and searcher
+            // Create split metadata and searcher (companion-aware: uses 4-arg overload when parquetTableRoot is set)
             val splitMetadata = SplitMetadataFactory.fromAddAction(addAction, task.tablePath)
-            val splitSearcher = cacheManager.createSplitSearcher(actualPath, splitMetadata)
+            val splitSearcher = createSplitSearcherWithCompanionSupport(cacheManager, cacheConfig, actualPath, splitMetadata)
 
             try {
               // Prewarm based on field selection
@@ -788,10 +880,13 @@ case class PrewarmCacheCommand(
                       taskLogger.debug(s"Preloading parquet columns for ${addAction.path}")
                       splitSearcher.preloadParquetColumns(fieldArgs: _*).join()
                     }
+                  } else if (asyncShouldPreloadCols || asyncShouldPreloadFast) {
+                    taskLogger.warn(s"Parquet preload requested but split has no parquet companion: ${addAction.path}")
                   }
                 catch {
                   case e: Exception =>
                     taskLogger.warn(s"Parquet preload failed for ${addAction.path}: ${e.getMessage}")
+                    parquetPreloadFailureCount += 1
                 }
               }
 
@@ -823,9 +918,15 @@ case class PrewarmCacheCommand(
           errorMessage = Some(e.getMessage)
       }
 
+      // Propagate parquet preload failures into the error message
+      if (parquetPreloadFailureCount > 0 && errorMessage.isEmpty) {
+        errorMessage = Some(s"parquet preload failed for $parquetPreloadFailureCount splits")
+      }
+
       val durationMs = System.currentTimeMillis() - startTime
       taskLogger.info(
-        s"Async prewarm job ${task.jobId} completed: $splitsPrewarmed/${task.addActions.size} splits in ${durationMs}ms"
+        s"Async prewarm job ${task.jobId} completed: $splitsPrewarmed/${task.addActions.size} splits in ${durationMs}ms" +
+          (if (parquetPreloadFailureCount > 0) s" ($parquetPreloadFailureCount parquet preload failures)" else "")
       )
 
       AsyncPrewarmJobResult(
@@ -944,8 +1045,8 @@ case class PrewarmCacheCommand(
           // Create split metadata from AddAction
           val splitMetadata = SplitMetadataFactory.fromAddAction(addAction, task.tablePath)
 
-          // Create split searcher
-          val splitSearcher = cacheManager.createSplitSearcher(actualPath, splitMetadata)
+          // Create split searcher (companion-aware: uses 4-arg overload when parquetTableRoot is set)
+          val splitSearcher = createSplitSearcherWithCompanionSupport(cacheManager, cacheConfig, actualPath, splitMetadata)
 
           val (futures, invalidFields): (Seq[java.util.concurrent.CompletableFuture[Void]], Seq[String]) =
             task.fields match {
@@ -1018,6 +1119,7 @@ case class PrewarmCacheCommand(
       // Phase 2: Wait for all futures to complete (parallel execution happening now)
       var prewarmedCount = 0
       val failedSplits   = scala.collection.mutable.ArrayBuffer.empty[String]
+      val parquetPreloadFailures = scala.collection.mutable.ArrayBuffer.empty[String]
 
       preparedWork.foreach { work =>
         try {
@@ -1064,10 +1166,16 @@ case class PrewarmCacheCommand(
                   taskLogger.debug(s"Preloading parquet columns for ${work.addAction.path}")
                   work.splitSearcher.preloadParquetColumns(fieldArgs: _*).join()
                 }
+              } else if (shouldPreloadParquetCols || shouldPreloadParquetFast) {
+                // Parquet segments were explicitly requested but this split has no parquet companion.
+                // This is not an error for non-companion tables, but for companion tables it indicates
+                // a configuration issue (parquetTableRoot not set).
+                taskLogger.warn(s"Parquet preload requested but split has no parquet companion: ${work.addAction.path}")
               }
             catch {
               case e: Exception =>
                 taskLogger.warn(s"Parquet preload failed for ${work.addAction.path}: ${e.getMessage}")
+                parquetPreloadFailures += work.addAction.path
             }
           }
 
@@ -1104,8 +1212,14 @@ case class PrewarmCacheCommand(
       }
 
       val duration = System.currentTimeMillis() - taskStartTime
-      val status   = if (failedSplits.nonEmpty) "partial" else if (skippedFields.nonEmpty) "partial" else "success"
+      val status = if (failedSplits.nonEmpty) "partial"
+        else if (parquetPreloadFailures.nonEmpty) s"partial (parquet preload failed: ${parquetPreloadFailures.size} splits)"
+        else if (skippedFields.nonEmpty) "partial"
+        else "success"
 
+      if (parquetPreloadFailures.nonEmpty) {
+        taskLogger.warn(s"Parquet preload failed for ${parquetPreloadFailures.size} splits: ${parquetPreloadFailures.mkString(", ")}")
+      }
       taskLogger.info(s"Prewarm completed: $prewarmedCount/${preparedWork.size} splits in ${duration}ms")
 
       PrewarmTaskResult(
@@ -1138,6 +1252,52 @@ case class PrewarmCacheCommand(
         )
     }
   }
+
+  /**
+   * Create a SplitSearcher with companion support. If the cacheConfig has a companionSourceTableRoot,
+   * builds a ParquetStorageConfig and calls the 4-arg createSplitSearcher so the native layer
+   * receives the parquet table root. Otherwise falls back to the 2-arg version.
+   * Mirrors the pattern in SplitSearchEngine (lines 125-145).
+   */
+  private def createSplitSearcherWithCompanionSupport(
+    cacheManager: io.indextables.tantivy4java.split.SplitCacheManager,
+    cacheConfig: SplitCacheConfig,
+    actualPath: String,
+    splitMetadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata
+  ): io.indextables.tantivy4java.split.SplitSearcher =
+    cacheConfig.companionSourceTableRoot match {
+      case Some(tableRoot) =>
+        val pqStorageConfig = buildParquetStorageConfig(cacheConfig)
+        logger.info(
+          s"Companion prewarm: per-split parquetTableRoot=$tableRoot, " +
+            s"parquetStorageConfig=${if (pqStorageConfig.isDefined) "present" else "none"} for $actualPath"
+        )
+        cacheManager.createSplitSearcher(actualPath, splitMetadata, tableRoot, pqStorageConfig.orNull)
+      case None =>
+        cacheManager.createSplitSearcher(actualPath, splitMetadata)
+    }
+
+  /**
+   * Build a ParquetStorageConfig from cacheConfig's parquet credential fields.
+   * Returns None if no separate parquet credentials are configured.
+   * Mirrors SplitSearchEngine.buildParquetStorageConfig().
+   */
+  private def buildParquetStorageConfig(
+    cacheConfig: SplitCacheConfig
+  ): Option[io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig] =
+    (cacheConfig.parquetAwsAccessKey, cacheConfig.parquetAwsSecretKey) match {
+      case (Some(key), Some(secret)) =>
+        val pqStorage = new io.indextables.tantivy4java.split.ParquetCompanionConfig.ParquetStorageConfig()
+        cacheConfig.parquetAwsSessionToken match {
+          case Some(token) => pqStorage.withAwsCredentials(key, secret, token)
+          case None        => pqStorage.withAwsCredentials(key, secret)
+        }
+        cacheConfig.parquetAwsRegion.foreach(pqStorage.withAwsRegion)
+        cacheConfig.parquetAwsEndpoint.foreach(pqStorage.withAwsEndpoint)
+        Some(pqStorage)
+      case _ =>
+        None
+    }
 
   /**
    * Extract field names from AddAction metadata (docMappingJson). Uses cached DocMappingMetadata to avoid repeated JSON
