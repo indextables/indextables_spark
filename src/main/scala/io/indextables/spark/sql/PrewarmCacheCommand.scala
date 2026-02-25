@@ -96,10 +96,20 @@ case class PrewarmCacheCommand(
    * ScanBuilder.effectiveConfig logic. Injects parquetTableRoot, resolves parquet
    * credentials, propagates indexing modes, and strips icebergTableId.
    * Returns the enriched config (or the original if not a companion table).
+   *
+   * @param config           The current merged config (may already have explicit split credentials
+   *                         if resolveCredentialsOnDriver was called — runSync path)
+   * @param metadata         Transaction log metadata containing companion configuration
+   * @param credentialConfig Config with the credential provider class still present, used
+   *                         to resolve parquet-specific credentials. On the runSync path,
+   *                         resolveCredentialsOnDriver strips the provider class and injects
+   *                         explicit credentials scoped to the index table — those MUST NOT
+   *                         be used for parquet access since UC credentials are path-scoped.
    */
   private def enrichConfigWithCompanionMetadata(
     config: Map[String, String],
-    metadata: io.indextables.spark.transaction.MetadataAction
+    metadata: io.indextables.spark.transaction.MetadataAction,
+    credentialConfig: Map[String, String]
   ): Map[String, String] = {
     val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
     if (!isCompanion) return config
@@ -110,22 +120,54 @@ case class PrewarmCacheCommand(
         config
       case Some(sourceTablePath) =>
         val sourceFormat = metadata.configuration.getOrElse("indextables.companion.sourceFormat", "delta")
+        val preferPathCreds = config
+          .getOrElse("spark.indextables.companion.credential.preferPathCredentials", "false")
+          .toLowerCase == "true"
 
-        // Determine effective parquet table root (same logic as ScanBuilder.effectiveConfig)
-        val effectivePath = if (sourceFormat == "iceberg" ||
-            (sourceFormat == "delta" && metadata.configuration.contains("indextables.companion.deltaTableName"))) {
-          metadata.configuration.getOrElse("indextables.companion.parquetStorageRoot", sourceTablePath)
+        // Determine effective parquet table root and resolve table-based credentials
+        // for Iceberg/Delta+UC (mirrors ScanBuilder.effectiveConfig)
+        val (effectivePath, credBaseConfig) = if (sourceFormat == "iceberg") {
+          val root = metadata.configuration.get("indextables.companion.parquetStorageRoot").getOrElse {
+            logger.warn(
+              s"Iceberg companion prewarm: no parquetStorageRoot in metadata, " +
+                s"falling back to sourceTablePath=$sourceTablePath"
+            )
+            sourceTablePath
+          }
+          if (preferPathCreds) {
+            logger.info(s"Iceberg companion prewarm: preferPathCredentials=true, using path-based credentials for $root")
+            (root, credentialConfig)
+          } else {
+            logger.info(s"Iceberg companion prewarm: parquetTableRoot=$root (sourceTablePath=$sourceTablePath)")
+            (root, tryResolveIcebergTableCredentials(metadata.configuration, credentialConfig))
+          }
+        } else if (sourceFormat == "delta" && metadata.configuration.contains("indextables.companion.deltaTableName")) {
+          val storedPath = metadata.configuration.getOrElse("indextables.companion.parquetStorageRoot", sourceTablePath)
+          if (preferPathCreds) {
+            logger.info(s"Delta UC companion prewarm: preferPathCredentials=true, using path-based credentials for $storedPath")
+            (storedPath, credentialConfig)
+          } else {
+            logger.info(
+              s"Delta UC companion prewarm: parquetTableRoot=$storedPath " +
+                s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})"
+            )
+            (storedPath, tryResolveDeltaTableCredentials(metadata.configuration, credentialConfig))
+          }
         } else {
-          sourceTablePath
+          logger.info(s"Companion mode detected during prewarm: injecting parquetTableRoot=$sourceTablePath")
+          (sourceTablePath, credentialConfig)
         }
 
-        logger.info(s"Companion mode detected during prewarm: injecting parquetTableRoot=$effectivePath")
         var enriched = config + ("spark.indextables.companion.parquetTableRoot" -> effectivePath)
 
-        // Resolve parquet credentials (separate from index credentials)
+        // Resolve parquet credentials using credBaseConfig (has provider class + possibly tableId).
+        // This is separate from split credentials — on UC, the index table and Delta table
+        // may be in different external locations with different vended tokens.
+        val parquetCredConfig = credBaseConfig +
+          ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
         try {
           io.indextables.spark.utils.CredentialProviderFactory
-            .resolveAWSCredentialsFromConfig(enriched, effectivePath)
+            .resolveAWSCredentialsFromConfig(parquetCredConfig, effectivePath)
             .foreach { creds =>
               logger.info(s"Companion prewarm: resolved parquet credentials for $effectivePath (accessKey=${creds.accessKey.take(4)}...)")
               enriched = enriched +
@@ -135,13 +177,17 @@ case class PrewarmCacheCommand(
                 enriched = enriched + ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
               }
             }
-          // Propagate region and endpoint from main config
-          enriched.get("spark.indextables.aws.region").foreach { region =>
-            enriched = enriched + ("spark.indextables.companion.parquet.aws.region" -> region)
-          }
-          enriched.get("spark.indextables.s3.endpoint").foreach { endpoint =>
-            enriched = enriched + ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
-          }
+          // Propagate region and endpoint from main config (case-insensitive fallback)
+          enriched.get("spark.indextables.aws.region")
+            .orElse(enriched.get("spark.indextables.aws.region".toLowerCase))
+            .foreach { region =>
+              enriched = enriched + ("spark.indextables.companion.parquet.aws.region" -> region)
+            }
+          enriched.get("spark.indextables.s3.endpoint")
+            .orElse(enriched.get("spark.indextables.s3.endpoint".toLowerCase))
+            .foreach { endpoint =>
+              enriched = enriched + ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+            }
         } catch {
           case e: Exception =>
             logger.warn(s"Failed to resolve parquet credentials for companion prewarm: ${e.getMessage}")
@@ -171,6 +217,88 @@ case class PrewarmCacheCommand(
         // Strip tableId so split credential resolution uses path-based credentials,
         // not table-scoped credentials (mirrors ScanBuilder.effectiveConfig)
         enriched - "spark.indextables.iceberg.uc.tableId"
+    }
+  }
+
+  /**
+   * For Iceberg companions: resolve table credentials by reconstructing the full table name
+   * from stored catalog coordinates and calling the TableCredentialProvider to get a fresh
+   * table ID. This enables the Priority 1.5 path in CredentialProviderFactory.
+   * Mirrors ScanBuilder.tryResolveIcebergTableCredentials.
+   */
+  private def tryResolveIcebergTableCredentials(
+    companionConfig: Map[String, String],
+    baseConfig: Map[String, String]
+  ): Map[String, String] = {
+    val providerOpt = baseConfig
+      .get("spark.indextables.aws.credentialsProviderClass")
+      .filter(_.nonEmpty)
+      .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
+
+    providerOpt match {
+      case Some(provider) =>
+        try {
+          val catalog       = companionConfig.getOrElse("indextables.companion.icebergCatalog", "default")
+          val tablePath     = companionConfig.getOrElse("indextables.companion.sourceTablePath", "")
+          val fullTableName = s"$catalog.$tablePath"
+
+          val withDefaults = provider.icebergCatalogDefaults(baseConfig).foldLeft(baseConfig) {
+            case (acc, (key, value)) => if (acc.contains(key)) acc else acc + (key -> value)
+          }
+
+          val tableId = provider.resolveTableId(fullTableName, withDefaults)
+          logger.info(s"Prewarm: Resolved Iceberg table ID for '$fullTableName': $tableId")
+
+          withDefaults + ("spark.indextables.iceberg.uc.tableId" -> tableId)
+        } catch {
+          case e: Exception =>
+            logger.warn(
+              s"Failed to resolve Iceberg table credentials during prewarm: ${e.getMessage}. " +
+                s"Falling back to path-based credential resolution."
+            )
+            baseConfig
+        }
+      case None =>
+        baseConfig
+    }
+  }
+
+  /**
+   * For Delta UC companions: resolve table credentials by reconstructing the full table name
+   * from stored catalog coordinates and calling the TableCredentialProvider to get a fresh
+   * table ID. This enables the Priority 1.5 path in CredentialProviderFactory.
+   * Mirrors ScanBuilder.tryResolveDeltaTableCredentials.
+   */
+  private def tryResolveDeltaTableCredentials(
+    companionConfig: Map[String, String],
+    baseConfig: Map[String, String]
+  ): Map[String, String] = {
+    val providerOpt = baseConfig
+      .get("spark.indextables.aws.credentialsProviderClass")
+      .filter(_.nonEmpty)
+      .flatMap(io.indextables.spark.utils.CredentialProviderFactory.resolveTableCredentialProvider)
+
+    providerOpt match {
+      case Some(provider) =>
+        try {
+          val catalog       = companionConfig.getOrElse("indextables.companion.deltaCatalog", "")
+          val tableName     = companionConfig.getOrElse("indextables.companion.deltaTableName", "")
+          val fullTableName = if (catalog.nonEmpty) s"$catalog.$tableName" else tableName
+
+          val tableInfo = provider.resolveTableInfo(fullTableName, baseConfig)
+          logger.info(s"Prewarm: Resolved Delta table ID for '$fullTableName': ${tableInfo.tableId}")
+
+          baseConfig + ("spark.indextables.iceberg.uc.tableId" -> tableInfo.tableId)
+        } catch {
+          case e: Exception =>
+            logger.warn(
+              s"Failed to resolve Delta table credentials during prewarm: ${e.getMessage}. " +
+                s"Falling back to path-based credential resolution."
+            )
+            baseConfig
+        }
+      case None =>
+        baseConfig
     }
   }
 
@@ -247,8 +375,10 @@ case class PrewarmCacheCommand(
       )
       val partitionColumnSet = metadata.partitionColumns.map(_.toLowerCase).toSet
 
-      // Inject companion metadata (parquetTableRoot, credentials, indexing modes)
-      mergedConfig = enrichConfigWithCompanionMetadata(mergedConfig, metadata)
+      // Inject companion metadata (parquetTableRoot, credentials, indexing modes).
+      // Pass readConfig (still has provider class) so parquet credentials are resolved
+      // independently from split credentials — UC vends path-scoped tokens.
+      mergedConfig = enrichConfigWithCompanionMetadata(mergedConfig, metadata, readConfig)
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
@@ -546,8 +676,10 @@ case class PrewarmCacheCommand(
         metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
       )
 
-      // Inject companion metadata (parquetTableRoot, credentials, indexing modes)
-      mergedConfig = enrichConfigWithCompanionMetadata(mergedConfig, metadata)
+      // Inject companion metadata (parquetTableRoot, credentials, indexing modes).
+      // In the async path, mergedConfig still has the provider class (no resolveCredentialsOnDriver
+      // call), so it can be used directly as the credential base config.
+      mergedConfig = enrichConfigWithCompanionMetadata(mergedConfig, metadata, mergedConfig)
 
       // Parse predicates and convert to Spark Filters for Avro manifest pruning
       val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
