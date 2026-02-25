@@ -349,6 +349,10 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def diskCacheManifestSyncInterval: Option[Int] =
     Option(options.get("spark.indextables.cache.disk.manifestSyncInterval")).map(_.toInt)
 
+  /** Max gap between byte ranges to coalesce into a single request. Supports "64K", "512K", "1M" formats. Default: 512KB. */
+  def coalesceMaxGap: Option[String] =
+    Option(options.get("spark.indextables.cache.coalesceMaxGap"))
+
   /** Get indexing configuration for a specific field. */
   def getFieldIndexingConfig(fieldName: String): FieldIndexingConfig = {
     val fieldTypeMapping         = getFieldTypeMapping

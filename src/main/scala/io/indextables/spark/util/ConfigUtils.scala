@@ -183,6 +183,9 @@ object ConfigUtils {
       diskCacheMinCompressSize = getConfigOption("spark.indextables.cache.disk.minCompressSize")
         .map(SplitCacheConfig.parseSizeString),
       diskCacheManifestSyncInterval = getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt),
+      // Parquet coalesce configuration
+      coalesceMaxGap = getConfigOption("spark.indextables.cache.coalesceMaxGap")
+        .map(SplitCacheConfig.parseSizeString),
       // Companion mode (parquet companion splits)
       companionSourceTableRoot = companionTableRoot,
       // Parquet-specific credentials (resolved on driver for the Delta table path)

@@ -449,6 +449,8 @@ case class SplitCacheConfig(
   diskCacheCompression: Option[String] = None,       // "lz4" (default), "zstd", "none"
   diskCacheMinCompressSize: Option[Long] = None,     // Skip compression below threshold (default: 4096)
   diskCacheManifestSyncInterval: Option[Int] = None, // Seconds between manifest writes (default: 30)
+  // Parquet coalesce configuration
+  coalesceMaxGap: Option[Long] = None,               // Max gap between byte ranges to coalesce (default: 512KB)
   // Companion mode (parquet companion splits)
   companionSourceTableRoot: Option[String] = None, // Root path of parquet table for companion splits
   // Parquet-specific credentials (resolved for the Delta table path, may differ from split credentials)
@@ -606,6 +608,12 @@ case class SplitCacheConfig(
     createTieredCacheConfig().foreach { tieredConfig =>
       logger.info(s"L2 Disk cache configured")
       config = config.withTieredCache(tieredConfig)
+    }
+
+    // Configure parquet coalesce max gap
+    coalesceMaxGap.foreach { gap =>
+      logger.debug(s"Parquet coalesce max gap: $gap bytes")
+      config = config.withCoalesceMaxGap(gap)
     }
 
     // Note: Companion mode parquet config (parquetTableRoot and parquetStorageConfig)
