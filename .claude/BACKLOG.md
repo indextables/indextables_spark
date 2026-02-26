@@ -83,12 +83,8 @@ Moved to Completed.
 
 ## Medium
 
-### IT-011: Document companion/sync feature
-**Description**: 7 source files in `src/main/scala/io/indextables/spark/sync/`, 14+ test files, `BUILD INDEXTABLES COMPANION` SQL command — entirely undocumented.
-**Acceptance Criteria**:
-- [ ] Feature documented in CLAUDE.md
-- [ ] SQL command documented in `docs/reference/sql-commands.md`
-- [ ] Usage examples in `docs/reference/features.md`
+### ~~IT-011: Document companion/sync feature~~ **DONE**
+Moved to Completed.
 
 ### IT-012: Fix deprecated config in features.md
 **Description**: `docs/reference/features.md` line 185 uses `mergeOnWrite.mergeGroupMultiplier` which is deprecated.
@@ -207,3 +203,7 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 | IT-008 | Document missing SQL commands | 2026-02 |
 | IT-042 | Fix broken README.md links ([#176](https://github.com/indextables/indextables_spark/issues/176)) | 2026-02 |
 | IT-043 | Rewrite table-protocol.md for V4 Avro state ([#175](https://github.com/indextables/indextables_spark/issues/175)) | 2026-02 |
+| IT-044 | Fix exception-swallowing tests — Phase 0A testing excellence | 2026-02 |
+| IT-045 | Fix setup.sh tantivy pinned rev +1 bug | 2026-02 |
+| IT-046 | Fix SyncToExternalCommand compile error on main | 2026-02 |
+| IT-011 | Document companion/sync feature | 2026-02 |
