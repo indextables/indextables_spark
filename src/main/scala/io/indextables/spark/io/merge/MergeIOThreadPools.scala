@@ -39,11 +39,11 @@ object MergeIOThreadPools {
   private val SCHEDULER_POOL_SIZE             = 2  // Handles retry delays and timeouts
 
   // Mutable pool references with double-checked locking for recoverability after shutdown
-  @volatile private var _downloadPool: ThreadPoolExecutor            = _
-  @volatile private var _uploadPool: ThreadPoolExecutor              = _
-  @volatile private var _scheduledPool: ScheduledThreadPoolExecutor  = _
+  @volatile private var _downloadPool: ThreadPoolExecutor                   = _
+  @volatile private var _uploadPool: ThreadPoolExecutor                     = _
+  @volatile private var _scheduledPool: ScheduledThreadPoolExecutor         = _
   @volatile private var _downloadExecCtx: scala.concurrent.ExecutionContext = _
-  private val poolLock = new Object
+  private val poolLock                                                      = new Object
 
   /**
    * Thread pool for coordinating async download operations. This pool handles CompletableFuture callbacks and
@@ -118,7 +118,7 @@ object MergeIOThreadPools {
       size, // core pool size
       size, // maximum pool size
       60L,
-      TimeUnit.SECONDS, // keep-alive time for idle threads
+      TimeUnit.SECONDS,                        // keep-alive time for idle threads
       new LinkedBlockingQueue[Runnable](1000), // bounded to prevent unbounded growth on stalled downloads
       new ThreadFactory {
         override def newThread(r: Runnable): Thread = {

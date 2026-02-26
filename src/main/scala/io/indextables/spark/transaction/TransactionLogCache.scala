@@ -45,15 +45,15 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCache])
 
   // Cache entries with expiration timestamps
-  private val versionCache                            = new ConcurrentHashMap[Long, CacheEntry[Seq[Action]]]()
-  private val versionsListCache                       = new AtomicLong(0L) // timestamp when versions list was cached
-  @volatile private var cachedVersionsList: Option[Seq[Long]]   = None
-  private val filesCache                                        = new AtomicLong(0L) // timestamp when files list was cached
+  private val versionCache      = new ConcurrentHashMap[Long, CacheEntry[Seq[Action]]]()
+  private val versionsListCache = new AtomicLong(0L) // timestamp when versions list was cached
+  @volatile private var cachedVersionsList: Option[Seq[Long]] = None
+  private val filesCache = new AtomicLong(0L) // timestamp when files list was cached
   @volatile private var cachedFilesList: Option[Seq[AddAction]] = None
-  private val metadataCache                                     = new AtomicLong(0L) // timestamp when metadata was cached
-  @volatile private var cachedMetadata: Option[MetadataAction]  = None
-  private val protocolCache                                     = new AtomicLong(0L) // timestamp when protocol was cached
-  @volatile private var cachedProtocol: Option[ProtocolAction]  = None
+  private val metadataCache = new AtomicLong(0L) // timestamp when metadata was cached
+  @volatile private var cachedMetadata: Option[MetadataAction] = None
+  private val protocolCache = new AtomicLong(0L) // timestamp when protocol was cached
+  @volatile private var cachedProtocol: Option[ProtocolAction] = None
 
   // Partition index cache for optimized partition pruning
   private val partitionIndexCache = new AtomicLong(0L) // timestamp when partition index was cached
@@ -65,7 +65,10 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
 
   // Background cleanup task - use shared static executor to avoid per-instance thread leak
   private val cleanupFuture = TransactionLogCache.sharedCleanupExecutor.scheduleAtFixedRate(
-    () => cleanup(), 1, 1, TimeUnit.MINUTES
+    () => cleanup(),
+    1,
+    1,
+    TimeUnit.MINUTES
   )
 
   /** Cache entry with expiration timestamp */

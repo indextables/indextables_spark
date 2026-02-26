@@ -39,15 +39,15 @@ object PartitionPruner {
   private val log = LoggerFactory.getLogger(getClass)
 
   /**
-   * Numeric-aware string comparison. When both values are parseable as numbers (Long or Double),
-   * compares them numerically. Otherwise falls back to lexicographic string comparison.
+   * Numeric-aware string comparison. When both values are parseable as numbers (Long or Double), compares them
+   * numerically. Otherwise falls back to lexicographic string comparison.
    *
-   * This is critical for partition bounds pruning where partition values like "1", "9", "10", "12"
-   * are stored as strings but represent numeric values. Without numeric-aware comparison,
-   * "9" > "10" lexicographically, which would incorrectly prune manifests containing months 10-12
-   * when filtering for month > 9.
+   * This is critical for partition bounds pruning where partition values like "1", "9", "10", "12" are stored as
+   * strings but represent numeric values. Without numeric-aware comparison, "9" > "10" lexicographically, which would
+   * incorrectly prune manifests containing months 10-12 when filtering for month > 9.
    *
-   * @return negative if a < b, zero if a == b, positive if a > b
+   * @return
+   *   negative if a < b, zero if a == b, positive if a > b
    */
   private[avro] def numericAwareCompare(a: String, b: String): Int =
     try {

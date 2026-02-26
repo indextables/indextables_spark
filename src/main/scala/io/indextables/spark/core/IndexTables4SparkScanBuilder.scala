@@ -465,7 +465,8 @@ class IndexTables4SparkScanBuilder(
             val hasStringEndsWith      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
             val hasStringContains      = blockingUnsupportedFilters.exists(_.isInstanceOf[StringContains])
             val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
-            val hasNullFilter          = blockingUnsupportedFilters.exists(f => f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull])
+            val hasNullFilter =
+              blockingUnsupportedFilters.exists(f => f.isInstanceOf[IsNull] || f.isInstanceOf[IsNotNull])
 
             val stringPatternHint = if (hasStringPatternFilter) {
               val patternTypes = Seq(
@@ -654,7 +655,7 @@ class IndexTables4SparkScanBuilder(
   private def createSimpleAggregateScan(aggregation: Aggregation, effectiveFilters: Array[Filter]): Scan = {
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    val partitionCols = getPartitionColumns()
+    val partitionCols              = getPartitionColumns()
     new IndexTables4SparkSimpleAggregateScan(
       sparkSession,
       transactionLog,
@@ -848,7 +849,9 @@ class IndexTables4SparkScanBuilder(
     val effectiveInputFilters = if (isCompanionMode) {
       val stripped = FiltersToQueryConverter.removeRedundantIsNotNull(filters)
       if (stripped.length != filters.length) {
-        logger.info(s"PUSHFILTERS: Companion mode - stripped ${filters.length - stripped.length} redundant IsNotNull filter(s)")
+        logger.info(
+          s"PUSHFILTERS: Companion mode - stripped ${filters.length - stripped.length} redundant IsNotNull filter(s)"
+        )
       }
       stripped
     } else {
@@ -1205,8 +1208,10 @@ class IndexTables4SparkScanBuilder(
     true // Accept all for now to see what comes through
   }
 
-  /** Check if a field supports range query pushdown. exact_only fields store
-    * U64 hashes — range comparison would compare hashes, not original values. */
+  /**
+   * Check if a field supports range query pushdown. exact_only fields store U64 hashes — range comparison would compare
+   * hashes, not original values.
+   */
   private def isFieldSuitableForRangeQuery(attribute: String): Boolean = {
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     effectiveConfig.get(fieldTypeKey) match {
@@ -1232,7 +1237,7 @@ class IndexTables4SparkScanBuilder(
     // Use lowercase attribute: CaseInsensitiveStringMap lowercases keys, so config has
     // "spark.indextables.indexing.typemap.myfield" even if user wrote "typemap.myField".
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
-    val fieldType = effectiveConfig.get(fieldTypeKey)
+    val fieldType    = effectiveConfig.get(fieldTypeKey)
 
     fieldType match {
       case Some(mode) =>

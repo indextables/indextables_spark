@@ -49,9 +49,8 @@ object SchemaDeduplication {
   private val HASH_LENGTH = 16
 
   /** ThreadLocal MessageDigest to avoid provider lookup on each call */
-  private val digestThreadLocal: ThreadLocal[MessageDigest] = ThreadLocal.withInitial(
-    () => MessageDigest.getInstance("SHA-256")
-  )
+  private val digestThreadLocal: ThreadLocal[MessageDigest] =
+    ThreadLocal.withInitial(() => MessageDigest.getInstance("SHA-256"))
 
   /** ObjectMapper for parsing JSON */
   // Configure ObjectMapper to sort properties alphabetically for consistent hashing

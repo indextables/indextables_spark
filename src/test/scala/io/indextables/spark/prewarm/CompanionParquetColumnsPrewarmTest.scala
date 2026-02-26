@@ -22,14 +22,15 @@ import java.nio.file.Files
 
 import scala.jdk.CollectionConverters._
 
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
+
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.storage.{GlobalSplitCacheManager, DriverSplitLocalityManager}
-import io.indextables.tantivy4java.split.{SplitCacheManager => NativeSplitCacheManager}
+import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
 import io.indextables.spark.transaction.TransactionLogFactory
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils, ProtocolNormalizer, SplitMetadataFactory}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import io.indextables.tantivy4java.split.{SplitCacheManager => NativeSplitCacheManager}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -38,17 +39,14 @@ import org.slf4j.LoggerFactory
 /**
  * Local filesystem tests for PARQUET_COLUMNS prewarm on companion indexes.
  *
- * Validates that the prewarm path correctly injects companion metadata (parquetTableRoot)
- * so that PARQUET_COLUMNS preloading works. Before the fix, prewarm silently failed
- * with "parquet_table_root was not set" because PrewarmCacheCommand never read companion
- * metadata from the transaction log.
+ * Validates that the prewarm path correctly injects companion metadata (parquetTableRoot) so that PARQUET_COLUMNS
+ * preloading works. Before the fix, prewarm silently failed with "parquet_table_root was not set" because
+ * PrewarmCacheCommand never read companion metadata from the transaction log.
  *
  * Test approach:
- *   1. Build a companion index from a local Delta table
- *   2. Flush all caches
- *   3. PREWARM with PARQUET_COLUMNS segment
- *   4. Verify the SplitSearcher has a parquet companion (parquetTableRoot was injected)
- *   5. Read back data through the companion and verify correct results
+ *   1. Build a companion index from a local Delta table 2. Flush all caches 3. PREWARM with PARQUET_COLUMNS segment 4.
+ *      Verify the SplitSearcher has a parquet companion (parquetTableRoot was injected) 5. Read back data through the
+ *      companion and verify correct results
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
@@ -127,9 +125,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
     val ss = spark
     import ss.implicits._
 
-    val data = (0 until numRows).map(i =>
-      (i.toLong, s"name_$i", i * 2.5, s"category_${i % 5}", i % 100)
-    )
+    val data = (0 until numRows).map(i => (i.toLong, s"name_$i", i * 2.5, s"category_${i % 5}", i % 100))
     data
       .toDF("id", "name", "score", "category", "priority")
       .repartition(1)
@@ -169,7 +165,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
       val prewarmRows = prewarmResult.collect()
       prewarmRows.length should be > 0
 
-      val prewarmStatus = prewarmRows.head.getAs[String]("status")
+      val prewarmStatus   = prewarmRows.head.getAs[String]("status")
       val splitsPrewarmed = prewarmRows.map(_.getAs[Int]("splits_prewarmed")).sum
       logger.info(s"Prewarm status: $prewarmStatus, splits: $splitsPrewarmed")
 
@@ -220,14 +216,17 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
         val addActions = txLog.listFiles()
         addActions.length should be > 0
 
-        val firstAction = addActions.head
-        val fullPath = s"$indexPath/${firstAction.path}"
-        val actualPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
+        val firstAction   = addActions.head
+        val fullPath      = s"$indexPath/${firstAction.path}"
+        val actualPath    = ProtocolNormalizer.normalizeAllProtocols(fullPath)
         val splitMetadata = SplitMetadataFactory.fromAddAction(firstAction, indexPath)
 
         val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
         val splitSearcher = cacheManager.createSplitSearcher(
-          actualPath, splitMetadata, sourceTablePath, null
+          actualPath,
+          splitMetadata,
+          sourceTablePath,
+          null
         )
         try {
           splitSearcher.hasParquetCompanion() shouldBe true
@@ -238,7 +237,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
 
           // Parse and verify the stats JSON
           val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
-          val statsTree = objectMapper.readTree(statsJson)
+          val statsTree    = objectMapper.readTree(statsJson)
           statsTree.get("hasParquetManifest").asBoolean() shouldBe true
           statsTree.get("totalFiles").asInt() should be > 0
           statsTree.get("totalRows").asInt() should be > 0
@@ -258,14 +257,17 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta_table").getAbsolutePath
       val indexPath = new File(tempDir, "companion_index").getAbsolutePath
-      val numRows = 50
+      val numRows   = 50
 
       // Step 1: Create Delta table and build companion
       createLocalDeltaTable(deltaPath, numRows)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       // Step 2: Flush and prewarm
       flushCaches()
@@ -288,7 +290,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
       scoreRows.length shouldBe numRows
 
       // Verify score values are correct
-      val actualScores = scoreRows.map(_.getDouble(0)).sorted
+      val actualScores   = scoreRows.map(_.getDouble(0)).sorted
       val expectedScores = (0 until numRows).map(_ * 2.5).sorted
       actualScores shouldBe expectedScores
 
@@ -336,9 +338,12 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
 
       createLocalDeltaTable(deltaPath, numRows = 30)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       flushCaches()
 
@@ -350,7 +355,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
       prewarmRows.length should be > 0
 
       val prewarmStatus = prewarmRows.head.getAs[String]("status")
-      val isAsync = prewarmRows.head.getAs[Boolean]("async_mode")
+      val isAsync       = prewarmRows.head.getAs[Boolean]("async_mode")
       isAsync shouldBe true
 
       // Wait for async job to complete
@@ -365,7 +370,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
       val rows = companionDf.select("score").collect()
       rows.length shouldBe 30
 
-      val actualScores = rows.map(_.getDouble(0)).sorted
+      val actualScores   = rows.map(_.getDouble(0)).sorted
       val expectedScores = (0 until 30).map(_ * 2.5).sorted
       actualScores shouldBe expectedScores
 
@@ -377,14 +382,17 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta_table").getAbsolutePath
       val indexPath = new File(tempDir, "companion_index").getAbsolutePath
-      val numRows = 50
+      val numRows   = 50
 
       // Step 1: Create Delta table and build companion
       createLocalDeltaTable(deltaPath, numRows)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       // Step 2: Flush all caches to start from a clean slate
       flushCaches()
@@ -417,7 +425,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
       scoreRows.length shouldBe numRows
 
       // Verify the scores are correct
-      val actualScores = scoreRows.map(_.getDouble(0)).sorted
+      val actualScores   = scoreRows.map(_.getDouble(0)).sorted
       val expectedScores = (0 until numRows).map(_ * 2.5).sorted
       actualScores shouldBe expectedScores
 

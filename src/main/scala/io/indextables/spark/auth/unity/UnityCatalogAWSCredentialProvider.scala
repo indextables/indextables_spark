@@ -392,11 +392,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   /**
    * Build a cache key that includes token identity and credential operation for multi-user support.
    *
-   * Format: tokenHash:credentialOperation:path This ensures different API tokens AND different
-   * credential operations (PATH_READ vs PATH_READ_WRITE) get separate cached credentials,
-   * preventing read queries from poisoning the write credential cache.
+   * Format: tokenHash:credentialOperation:path This ensures different API tokens AND different credential operations
+   * (PATH_READ vs PATH_READ_WRITE) get separate cached credentials, preventing read queries from poisoning the write
+   * credential cache.
    */
-  private def buildCacheKey(token: String, credentialOperation: String, path: String): String = {
+  private def buildCacheKey(
+    token: String,
+    credentialOperation: String,
+    path: String
+  ): String = {
     // Use hash of token to avoid storing the full token in memory
     val tokenHash = Integer.toHexString(token.hashCode)
     s"$tokenHash:$credentialOperation:$path"

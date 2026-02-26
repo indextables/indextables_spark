@@ -23,29 +23,28 @@ import java.util.{Properties, UUID}
 
 import scala.util.Using
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.{FileSystem, Path}
 
-import io.indextables.spark.CloudS3TestBase
 import io.indextables.spark.storage.GlobalSplitCacheManager
+import io.indextables.spark.CloudS3TestBase
 
 /**
  * End-to-end test for PARQUET_COLUMNS prewarm on a companion index built from a real Delta table on S3.
  *
  * Test flow:
- *   1. Write a Delta table to S3 with at least 10 parquet files
- *   2. BUILD INDEXTABLES COMPANION on that Delta table to create an index in S3
- *   3. PREWARM INDEXTABLES CACHE ... FOR SEGMENTS (PARQUET_COLUMNS) ON FIELDS (score)
- *   4. Read back the companion index selecting only the prewarmed column (score)
- *   5. Print debug output (run with TANTIVY4JAVA_PERFLOG=1 for full detail)
+ *   1. Write a Delta table to S3 with at least 10 parquet files 2. BUILD INDEXTABLES COMPANION on that Delta table to
+ *      create an index in S3 3. PREWARM INDEXTABLES CACHE ... FOR SEGMENTS (PARQUET_COLUMNS) ON FIELDS (score) 4. Read
+ *      back the companion index selecting only the prewarmed column (score) 5. Print debug output (run with
+ *      TANTIVY4JAVA_PERFLOG=1 for full detail)
  *
  * Prerequisites:
  *   - AWS credentials in ~/.aws/credentials
  *   - Delta Lake Spark extension on classpath
  *   - Run with: TANTIVY4JAVA_PERFLOG=1 mvn test-compile scalatest:test \
- *       -DwildcardSuites='io.indextables.spark.prewarm.CloudS3CompanionParquetColumnsPrewarmTest'
+ *     -DwildcardSuites='io.indextables.spark.prewarm.CloudS3CompanionParquetColumnsPrewarmTest'
  */
 class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
 
@@ -179,7 +178,7 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
 
     val (accessKey, secretKey) = awsCredentials.get
     val deltaPath              = s"$testBasePath/delta_source"
-    val indexPath               = s"$testBasePath/companion_index"
+    val indexPath              = s"$testBasePath/companion_index"
 
     // Enable disk cache
     spark.conf.set("spark.indextables.cache.disk.enabled", "true")
@@ -197,17 +196,19 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     println("=" * 80)
 
     val numRows = 1000
-    val testData = (1 to numRows).map { i =>
-      (
-        i.toLong,                                                          // id
-        s"document_title_$i",                                              // title
-        s"This is the full text body for document number $i with words",   // body
-        s"category_${i % 5}",                                             // category
-        i * 2.5,                                                           // score
-        i % 100,                                                           // priority
-        s"2025-${"%02d".format((i % 12) + 1)}-${"%02d".format((i % 28) + 1)}" // date_str
-      )
-    }.toDF("id", "title", "body", "category", "score", "priority", "date_str")
+    val testData = (1 to numRows)
+      .map { i =>
+        (
+          i.toLong,                                                        // id
+          s"document_title_$i",                                            // title
+          s"This is the full text body for document number $i with words", // body
+          s"category_${i % 5}", // category
+          i * 2.5, // score
+          i % 100, // priority
+          s"2025-${"%02d".format((i % 12) + 1)}-${"%02d".format((i % 28) + 1)}" // date_str
+        )
+      }
+      .toDF("id", "title", "body", "category", "score", "priority", "date_str")
 
     // Repartition to 12 to guarantee at least 10 parquet files
     testData
@@ -224,7 +225,7 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     assert(deltaFiles.length >= 10, s"Expected at least 10 parquet files, got ${deltaFiles.length}")
 
     // Verify row count via Delta read
-    val deltaReadDf = spark.read.format("delta").load(deltaPath)
+    val deltaReadDf   = spark.read.format("delta").load(deltaPath)
     val deltaRowCount = deltaReadDf.count()
     println(s"Delta table row count: $deltaRowCount")
     assert(deltaRowCount == numRows, s"Expected $numRows rows, got $deltaRowCount")
@@ -243,11 +244,11 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     buildRows.foreach(row => println(s"  BUILD result: $row"))
 
     assert(buildRows.length == 1, "BUILD should return exactly 1 row")
-    val buildRow = buildRows(0)
+    val buildRow    = buildRows(0)
     val buildStatus = buildRow.getString(buildRow.fieldIndex("status"))
     assert(buildStatus == "success", s"BUILD should succeed, got: $buildStatus")
 
-    val splitsCreated = buildRow.getInt(buildRow.fieldIndex("splits_created"))
+    val splitsCreated       = buildRow.getInt(buildRow.fieldIndex("splits_created"))
     val parquetFilesIndexed = buildRow.getInt(buildRow.fieldIndex("parquet_files_indexed"))
     println(s"Companion index created at: $indexPath")
     println(s"Splits created: $splitsCreated")
@@ -270,9 +271,9 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     val prewarmSql = s"PREWARM INDEXTABLES CACHE '$indexPath' FOR SEGMENTS (PARQUET_COLUMNS) ON FIELDS (score)"
     println(s"Executing: $prewarmSql")
 
-    val prewarmStart = System.currentTimeMillis()
-    val prewarmResult = spark.sql(prewarmSql)
-    val prewarmRows = prewarmResult.collect()
+    val prewarmStart    = System.currentTimeMillis()
+    val prewarmResult   = spark.sql(prewarmSql)
+    val prewarmRows     = prewarmResult.collect()
     val prewarmDuration = System.currentTimeMillis() - prewarmStart
 
     println(s"\nPrewarm results ({prewarmRows.length} rows):")
@@ -280,8 +281,9 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     prewarmRows.foreach { row =>
       println(s"  Row: $row")
       // Print all columns individually for debug
-      row.schema.fieldNames.zipWithIndex.foreach { case (name, idx) =>
-        println(s"    $name = ${if (row.isNullAt(idx)) "NULL" else row.get(idx)}")
+      row.schema.fieldNames.zipWithIndex.foreach {
+        case (name, idx) =>
+          println(s"    $name = ${if (row.isNullAt(idx)) "NULL" else row.get(idx)}")
       }
     }
     println(s"Prewarm wall-clock duration: ${prewarmDuration}ms")
@@ -309,14 +311,14 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
 
     println(s"Companion schema:\n${companionDf.schema.treeString}")
 
-    val allColsStart = System.currentTimeMillis()
-    val allCols = companionDf.collect()
+    val allColsStart    = System.currentTimeMillis()
+    val allCols         = companionDf.collect()
     val allColsDuration = System.currentTimeMillis() - allColsStart
     println(s"CONTROL: All columns returned {allCols.length} rows in {allColsDuration}ms")
 
     // Also check count() which uses aggregate pushdown
-    val countStart = System.currentTimeMillis()
-    val aggCount = companionDf.count()
+    val countStart    = System.currentTimeMillis()
+    val aggCount      = companionDf.count()
     val countDuration = System.currentTimeMillis() - countStart
     println(s"CONTROL: count() = $aggCount in ${countDuration}ms (aggregate pushdown)")
 
@@ -346,8 +348,8 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
       .option("spark.indextables.aws.region", S3_REGION)
       .load(indexPath)
 
-    val readStart = System.currentTimeMillis()
-    val scoreOnly = companionDf2.select("score").collect()
+    val readStart    = System.currentTimeMillis()
+    val scoreOnly    = companionDf2.select("score").collect()
     val readDuration = System.currentTimeMillis() - readStart
 
     println(s"Rows returned (score only): ${scoreOnly.length}")
@@ -389,8 +391,8 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
       .option("spark.indextables.aws.region", S3_REGION)
       .load(indexPath)
 
-    val noPrewarmStart = System.currentTimeMillis()
-    val noPrewarmScore = companionDf3.select("score").collect()
+    val noPrewarmStart    = System.currentTimeMillis()
+    val noPrewarmScore    = companionDf3.select("score").collect()
     val noPrewarmDuration = System.currentTimeMillis() - noPrewarmStart
 
     println(s"Rows returned (score only, NO prewarm): ${noPrewarmScore.length}")
@@ -409,8 +411,8 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     println("STEP 6: Filtered read - score > 1000")
     println("=" * 80)
 
-    val filteredStart = System.currentTimeMillis()
-    val filteredScores = companionDf3.select("score").filter(col("score") > 1000.0).collect()
+    val filteredStart    = System.currentTimeMillis()
+    val filteredScores   = companionDf3.select("score").filter(col("score") > 1000.0).collect()
     val filteredDuration = System.currentTimeMillis() - filteredStart
 
     println(s"Filtered rows (score > 1000): ${filteredScores.length}")

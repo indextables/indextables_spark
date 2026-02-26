@@ -783,7 +783,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       logger.debug(s"Fast field mode: $fastFieldMode")
 
       // Hashed fastfields include/exclude
-      val (hashedFastfieldsInclude, hashedFastfieldsExclude): (Seq[String], Seq[String]) = {
+      val (hashedFastfieldsInclude, hashedFastfieldsExclude): (Seq[String], Seq[String]) =
         if (ctx.hashedFastfieldsList != null) {
           val fields = ctx.hashedFastfieldsList.STRING().asScala.map(ParserUtils.string(_)).toSeq
           ctx.hashedFastfieldsMode.getText.toUpperCase match {
@@ -791,7 +791,6 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
             case "EXCLUDE" => (Seq.empty, fields)
           }
         } else (Seq.empty, Seq.empty)
-      }
       logger.debug(s"Hashed fastfields include: $hashedFastfieldsInclude, exclude: $hashedFastfieldsExclude")
 
       // Target input size

@@ -39,7 +39,6 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
 
-import io.indextables.spark.filters.MixedBooleanFilter
 import io.indextables.spark.expressions.{
   BucketAggregationConfig,
   DateHistogramConfig,
@@ -47,6 +46,7 @@ import io.indextables.spark.expressions.{
   RangeBucket,
   RangeConfig
 }
+import io.indextables.spark.filters.MixedBooleanFilter
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
@@ -830,7 +830,9 @@ class IndexTables4SparkGroupByAggregateReader(
       val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
         val cleaned = MixedBooleanFilter.stripPartitionOnlyFilters(partition.pushedFilters, partition.partitionColumns)
         if (cleaned.length != partition.pushedFilters.length) {
-          logger.info(s"GROUP BY EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)")
+          logger.info(
+            s"GROUP BY EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)"
+          )
         }
         cleaned
       } else {
@@ -838,9 +840,12 @@ class IndexTables4SparkGroupByAggregateReader(
       }
 
       val cleanedIndexQueryFilters = if (partition.partitionColumns.nonEmpty && partition.indexQueryFilters.nonEmpty) {
-        val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
+        val cleaned =
+          MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
         if (cleaned.length != partition.indexQueryFilters.length) {
-          logger.info(s"GROUP BY EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)")
+          logger.info(
+            s"GROUP BY EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)"
+          )
         }
         cleaned
       } else {
@@ -1357,16 +1362,21 @@ class IndexTables4SparkGroupByAggregateReader(
     val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
       val cleaned = MixedBooleanFilter.stripPartitionOnlyFilters(partition.pushedFilters, partition.partitionColumns)
       if (cleaned.length != partition.pushedFilters.length) {
-        logger.info(s"BUCKET EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)")
+        logger.info(
+          s"BUCKET EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)"
+        )
       }
       cleaned
     } else {
       partition.pushedFilters
     }
     val cleanedIndexQueryFilters = if (partition.partitionColumns.nonEmpty && partition.indexQueryFilters.nonEmpty) {
-      val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
+      val cleaned =
+        MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
       if (cleaned.length != partition.indexQueryFilters.length) {
-        logger.info(s"BUCKET EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)")
+        logger.info(
+          s"BUCKET EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)"
+        )
       }
       cleaned
     } else {

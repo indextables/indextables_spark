@@ -147,11 +147,12 @@ object MixedBooleanFilter {
   }
 
   /**
-   * Recursively strip partition-only MixedSparkFilter nodes from a MixedBooleanFilter tree.
-   * Partition columns are handled by Spark's partition pruning and are not indexed in Tantivy,
-   * so sending them to the executor causes "non-existent field" warnings and broken queries.
+   * Recursively strip partition-only MixedSparkFilter nodes from a MixedBooleanFilter tree. Partition columns are
+   * handled by Spark's partition pruning and are not indexed in Tantivy, so sending them to the executor causes
+   * "non-existent field" warnings and broken queries.
    *
-   * @return Some(stripped filter) or None if the entire filter was partition-only
+   * @return
+   *   Some(stripped filter) or None if the entire filter was partition-only
    */
   def stripPartitionFilters(filter: MixedBooleanFilter, partitionColumns: Set[String]): Option[MixedBooleanFilter] =
     filter match {
@@ -184,8 +185,8 @@ object MixedBooleanFilter {
     }
 
   /**
-   * Strip partition-only filters from an array of indexQueryFilters (which may contain
-   * MixedBooleanFilter instances or other filter types).
+   * Strip partition-only filters from an array of indexQueryFilters (which may contain MixedBooleanFilter instances or
+   * other filter types).
    */
   def stripPartitionFiltersFromArray(filters: Array[Any], partitionColumns: Set[String]): Array[Any] =
     filters.flatMap {
@@ -194,19 +195,18 @@ object MixedBooleanFilter {
     }
 
   /**
-   * Check if a Spark Filter only references partition columns. These filters are already handled
-   * by partition pruning and don't need to be sent to Tantivy.
+   * Check if a Spark Filter only references partition columns. These filters are already handled by partition pruning
+   * and don't need to be sent to Tantivy.
    *
-   * @return true if all referenced columns are partition columns
+   * @return
+   *   true if all referenced columns are partition columns
    */
   def isPartitionOnlyFilter(filter: org.apache.spark.sql.sources.Filter, partitionColumns: Set[String]): Boolean = {
     val refs = MixedSparkFilter.extractReferences(filter).toSet
     refs.nonEmpty && refs.forall(partitionColumns.contains)
   }
 
-  /**
-   * Strip partition-only filters from an array of Spark Filters.
-   */
+  /** Strip partition-only filters from an array of Spark Filters. */
   def stripPartitionOnlyFilters(
     filters: Array[org.apache.spark.sql.sources.Filter],
     partitionColumns: Set[String]

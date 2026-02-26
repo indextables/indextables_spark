@@ -172,8 +172,8 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
   test("stripPartitionFilters OR: both children non-partition returns both") {
     val partCols = Set("month")
 
-    val left  = MixedIndexQuery(IndexQueryFilter("content", "neural"))
-    val right = MixedSparkFilter(org.apache.spark.sql.sources.EqualTo("status", "active"))
+    val left     = MixedIndexQuery(IndexQueryFilter("content", "neural"))
+    val right    = MixedSparkFilter(org.apache.spark.sql.sources.EqualTo("status", "active"))
     val orFilter = MixedOrFilter(left, right)
 
     val result = MixedBooleanFilter.stripPartitionFilters(orFilter, partCols)
@@ -204,7 +204,7 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
     assert(result.isDefined)
     result.get match {
       case MixedAndFilter(MixedIndexQuery(_), MixedSparkFilter(_)) => // expected
-      case other => fail(s"Unexpected tree shape: $other")
+      case other                                                   => fail(s"Unexpected tree shape: $other")
     }
   }
 
@@ -224,7 +224,7 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       MixedSparkFilter(EqualTo("month", "11")),
       MixedIndexQuery(IndexQueryFilter("content", "neural"))
     )
-    val plainFilter = IndexQueryFilter("title", "test")
+    val plainFilter         = IndexQueryFilter("title", "test")
     val filters: Array[Any] = Array(partFilter, plainFilter)
 
     val result = MixedBooleanFilter.stripPartitionFiltersFromArray(filters, partCols)

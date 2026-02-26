@@ -141,7 +141,9 @@ object SyncTaskExecutor {
             field -> io.indextables.spark.util.IndexingModes.normalizeForNative(mode)
         }
         if (tokenizerOverrides.nonEmpty) {
-          logger.info(s"Sync task ${group.groupIndex}: applying tokenizer overrides: ${tokenizerOverrides.map { case (f, m) => s"$f=$m" }.mkString(", ")}")
+          logger.info(s"Sync task ${group.groupIndex}: applying tokenizer overrides: ${tokenizerOverrides
+              .map { case (f, m) => s"$f=$m" }
+              .mkString(", ")}")
           companionConfig.withTokenizerOverrides(tokenizerOverrides.asJava)
         }
 

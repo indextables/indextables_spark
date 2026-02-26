@@ -30,10 +30,10 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Regression test: partition column filters must be excluded from Tantivy queries in companion splits.
  *
- * Partition columns only exist in directory paths and AddAction metadata — they are NOT indexed in
- * Tantivy. When Spark pushes down a partition filter (e.g., `category = 'animals'`), the regular
- * read path, simple aggregate path, and group-by aggregate path must all exclude it before
- * converting to a Tantivy query. Otherwise the query returns incorrect results (zero or wrong).
+ * Partition columns only exist in directory paths and AddAction metadata — they are NOT indexed in Tantivy. When Spark
+ * pushes down a partition filter (e.g., `category = 'animals'`), the regular read path, simple aggregate path, and
+ * group-by aggregate path must all exclude it before converting to a Tantivy query. Otherwise the query returns
+ * incorrect results (zero or wrong).
  */
 class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -93,9 +93,8 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
    *
    * Schema: id: Long, name: String, score: Double, category: String (partition column)
    *
-   * Data:
-   *   category=animals: (1, "dog", 10.0), (2, "cat", 20.0), (3, "bird", 30.0)
-   *   category=tech:    (4, "laptop", 40.0), (5, "phone", 50.0)
+   * Data: category=animals: (1, "dog", 10.0), (2, "cat", 20.0), (3, "bird", 30.0) category=tech: (4, "laptop", 40.0),
+   * (5, "phone", 50.0)
    *
    * Total: 5 rows, animals=3, tech=2
    */
@@ -178,9 +177,11 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
     withPartitionedCompanion { (df, _) =>
       df.createOrReplaceTempView("partition_bug_test")
 
-      val result = spark.sql(
-        "SELECT count(*) as cnt FROM partition_bug_test WHERE category = 'animals'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT count(*) as cnt FROM partition_bug_test WHERE category = 'animals'"
+        )
+        .collect()
       result.length shouldBe 1
       result(0).getLong(0) shouldBe 3L
     }
@@ -190,9 +191,11 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
     withPartitionedCompanion { (df, _) =>
       df.createOrReplaceTempView("partition_bug_test_sum")
 
-      val result = spark.sql(
-        "SELECT sum(score) as total FROM partition_bug_test_sum WHERE category = 'animals'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT sum(score) as total FROM partition_bug_test_sum WHERE category = 'animals'"
+        )
+        .collect()
       result.length shouldBe 1
       result(0).getDouble(0) shouldBe 60.0
     }
@@ -206,9 +209,11 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
     withPartitionedCompanion { (df, _) =>
       df.createOrReplaceTempView("partition_bug_test_groupby")
 
-      val result = spark.sql(
-        "SELECT name, count(*) as cnt FROM partition_bug_test_groupby WHERE category = 'animals' GROUP BY name"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT name, count(*) as cnt FROM partition_bug_test_groupby WHERE category = 'animals' GROUP BY name"
+        )
+        .collect()
       result.length shouldBe 3
 
       val nameCountMap = result.map(r => (r.getString(0), r.getLong(1))).toMap
@@ -222,9 +227,11 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
     withPartitionedCompanion { (df, _) =>
       df.createOrReplaceTempView("partition_bug_test_groupby_part")
 
-      val result = spark.sql(
-        "SELECT category, count(*) as cnt FROM partition_bug_test_groupby_part GROUP BY category"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT category, count(*) as cnt FROM partition_bug_test_groupby_part GROUP BY category"
+        )
+        .collect()
       result.length shouldBe 2
 
       val catCountMap = result.map(r => (r.getString(0), r.getLong(1))).toMap
@@ -241,9 +248,11 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
     withPartitionedCompanion { (df, _) =>
       df.createOrReplaceTempView("partition_bug_test_combined")
 
-      val result = spark.sql(
-        "SELECT count(*) as cnt FROM partition_bug_test_combined WHERE category = 'animals' AND name = 'dog'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT count(*) as cnt FROM partition_bug_test_combined WHERE category = 'animals' AND name = 'dog'"
+        )
+        .collect()
       result.length shouldBe 1
       result(0).getLong(0) shouldBe 1L
     }
