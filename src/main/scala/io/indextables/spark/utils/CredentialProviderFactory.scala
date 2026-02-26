@@ -543,16 +543,19 @@ object CredentialProviderFactory {
   /**
    * Resolve AWS credentials on the driver and return a modified config.
    *
-   * Eliminates executor-side HTTP calls by resolving credentials once on the driver
-   * and injecting them as static config values. For credential providers like
-   * UnityCatalogAWSCredentialProvider, this reduces HTTP calls from O(executors) to O(1).
+   * Eliminates executor-side HTTP calls by resolving credentials once on the driver and injecting them as static config
+   * values. For credential providers like UnityCatalogAWSCredentialProvider, this reduces HTTP calls from O(executors)
+   * to O(1).
    *
-   * If resolution fails, the original config is returned unchanged so that executors
-   * can attempt their own resolution (preserves backward compatibility).
+   * If resolution fails, the original config is returned unchanged so that executors can attempt their own resolution
+   * (preserves backward compatibility).
    *
-   * @param config    Original configuration map
-   * @param tablePath Table path for credential resolution (String form)
-   * @return Modified config with explicit credentials, or original config if resolution fails
+   * @param config
+   *   Original configuration map
+   * @param tablePath
+   *   Table path for credential resolution (String form)
+   * @return
+   *   Modified config with explicit credentials, or original config if resolution fails
    */
   def resolveCredentialsOnDriver(config: Map[String, String], tablePath: String): Map[String, String] = {
     val providerClass = config
@@ -563,7 +566,7 @@ object CredentialProviderFactory {
       case Some(className) if className.nonEmpty =>
         try {
           val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
-          val credentials = resolveAWSCredentialsFromConfig(config, normalizedPath)
+          val credentials    = resolveAWSCredentialsFromConfig(config, normalizedPath)
 
           credentials match {
             case Some(creds) =>

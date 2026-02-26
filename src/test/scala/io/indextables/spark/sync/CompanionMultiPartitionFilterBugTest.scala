@@ -28,11 +28,10 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * Reproduction test: when a companion table has two partition columns (year, month)
- * and the user pre-filters on the first partition column via the DataFrame API,
- * creates a temp view, then queries the view with the second partition column +
- * an indexquery condition on a text field, all rows in the first partition are
- * returned instead of only the matching rows.
+ * Reproduction test: when a companion table has two partition columns (year, month) and the user pre-filters on the
+ * first partition column via the DataFrame API, creates a temp view, then queries the view with the second partition
+ * column + an indexquery condition on a text field, all rows in the first partition are returned instead of only the
+ * matching rows.
  */
 class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -93,18 +92,16 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
   }
 
   /**
-   * Creates a Delta table with two partition columns (year, month), a text content field,
-   * and several other data fields. Builds a companion index with text indexing mode on
-   * the content field.
+   * Creates a Delta table with two partition columns (year, month), a text content field, and several other data
+   * fields. Builds a companion index with text indexing mode on the content field.
    *
-   * Schema: id INT, title STRING, content STRING, score DOUBLE, year STRING, month STRING
-   * Partitioned by: (year, month)
+   * Schema: id INT, title STRING, content STRING, score DOUBLE, year STRING, month STRING Partitioned by: (year, month)
    *
-   * Data (12 rows across 4 partition combos):
-   *   year=2024, month=10: rows 1-3  (content: "machine learning ...", "deep learning ...", "natural language ...")
-   *   year=2024, month=11: rows 4-6  (content: "computer vision ...",  "reinforcement ...",  "neural network ...")
-   *   year=2025, month=01: rows 7-9  (content: "data engineering ...", "cloud computing ...", "machine learning ...")
-   *   year=2025, month=02: rows 10-12 (content: "quantum computing ...", "edge computing ...", "machine learning ...")
+   * Data (12 rows across 4 partition combos): year=2024, month=10: rows 1-3 (content: "machine learning ...", "deep
+   * learning ...", "natural language ...") year=2024, month=11: rows 4-6 (content: "computer vision ...",
+   * "reinforcement ...", "neural network ...") year=2025, month=01: rows 7-9 (content: "data engineering ...", "cloud
+   * computing ...", "machine learning ...") year=2025, month=02: rows 10-12 (content: "quantum computing ...", "edge
+   * computing ...", "machine learning ...")
    */
   private def withMultiPartitionCompanion(f: (DataFrame, String) => Unit): Unit = {
     val tempDir = Files.createTempDirectory("tantivy4spark-multi-partition-bug").toString
@@ -174,13 +171,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       // Expected: rows from year=2024, month=11 where content matches "neural"
       //   -> id=6 "neural network architecture design patterns"
       // Bug: returns ALL rows where year=2024 (6 rows)
-      val results = spark.sql(
-        "SELECT * FROM year_2024 WHERE month = '11' AND content indexquery 'neural'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2024 WHERE month = '11' AND content indexquery 'neural'"
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=6, NN Architecture) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=6, NN Architecture) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 6
@@ -196,13 +201,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       // Filtering to month=11 should give only rows 4 (no), 5 (yes - reinforcement learning), 6 (no - neural network)
       // Actually: row 5 has "reinforcement learning reward optimization" -> matches "learning"
       // Expected: 1 row (id=5)
-      val results = spark.sql(
-        "SELECT * FROM year_2024_v2 WHERE month = '11' AND content indexquery 'learning'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2024_v2 WHERE month = '11' AND content indexquery 'learning'"
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=5, RL Paper) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=5, RL Paper) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 5
@@ -215,13 +228,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // Filter on second partition + data field (title) without indexquery
       // Expected: 1 row (id=4, CV Tutorial, year=2024, month=11)
-      val results = spark.sql(
-        "SELECT * FROM year_2024_v3 WHERE month = '11' AND title = 'CV Tutorial'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2024_v3 WHERE month = '11' AND title = 'CV Tutorial'"
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=4, CV Tutorial) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=4, CV Tutorial) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 4
@@ -234,13 +255,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // Only second partition filter on the temp view
       // Expected: 3 rows (ids 4,5,6 - year=2024, month=11)
-      val results = spark.sql(
-        "SELECT * FROM year_2024_v4 WHERE month = '11'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2024_v4 WHERE month = '11'"
+        )
+        .collect()
 
-      withClue(s"Expected 3 rows (month=11) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 3 rows (month=11) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 3
       }
       val ids = results.map(_.getAs[Int]("id")).sorted
@@ -255,13 +284,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       // indexquery on temp view without second partition filter
       // "machine" appears in year=2024 month=10 row 1 only
       // Expected: 1 row (id=1, ML Intro)
-      val results = spark.sql(
-        "SELECT * FROM year_2024_v5 WHERE content indexquery 'machine'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2024_v5 WHERE content indexquery 'machine'"
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=1, ML Intro) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=1, ML Intro) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 1
@@ -274,13 +311,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // Multiple conditions AND'ed together, second partition key as the FINAL condition
       // Expected: id=6 "neural network architecture design patterns" (year=2024, month=11, score > 60)
-      val results = spark.sql(
-        "SELECT * FROM year_2024_v6 WHERE content indexquery 'neural' AND score > 60.0 AND month = '11'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2024_v6 WHERE content indexquery 'neural' AND score > 60.0 AND month = '11'"
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=6, NN Architecture) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")}, score=${r.getAs[Double]("score")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=6, NN Architecture) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")}, score=${r.getAs[Double]("score")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 6
@@ -294,13 +339,21 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       // indexquery + string equality + second partition key last
       // "machine" in year=2025: id=9 (month=01), id=12 (month=02)
       // Filtering to month='02' should give only id=12
-      val results = spark.sql(
-        "SELECT * FROM year_2025 WHERE content indexquery 'machine' AND month = '02'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT * FROM year_2025 WHERE content indexquery 'machine' AND month = '02'"
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=12, ML Ops) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=12, ML Ops) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 12
@@ -313,17 +366,25 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // Several data conditions AND'ed, with the partition key at the very end
       // Expected: id=5 (RL Paper, score=88.8, year=2024, month=11)
-      val results = spark.sql(
-        """SELECT * FROM year_2024_v7
-          |WHERE content indexquery 'learning'
-          |  AND score > 80.0
-          |  AND score < 95.0
-          |  AND month = '11'""".stripMargin
-      ).collect()
+      val results = spark
+        .sql(
+          """SELECT * FROM year_2024_v7
+            |WHERE content indexquery 'learning'
+            |  AND score > 80.0
+            |  AND score < 95.0
+            |  AND month = '11'""".stripMargin
+        )
+        .collect()
 
-      withClue(s"Expected 1 row (id=5, RL Paper) but got ${results.length} rows: " +
-        s"${results.map(r => s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
-          s"month=${r.getAs[String]("month")}, score=${r.getAs[Double]("score")})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 row (id=5, RL Paper) but got ${results.length} rows: " +
+          s"${results
+              .map(r =>
+                s"(id=${r.getAs[Int]("id")}, title=${r.getAs[String]("title")}, " +
+                  s"month=${r.getAs[String]("month")}, score=${r.getAs[Double]("score")})"
+              )
+              .mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getAs[Int]("id") shouldBe 5
@@ -340,9 +401,11 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // "neural" matches only id=6 in month=11. Expected count=1
       // If bug hits aggregation path, count will be 3 (all month=11 rows)
-      val results = spark.sql(
-        "SELECT count(*) as cnt FROM year_2024_agg1 WHERE month = '11' AND content indexquery 'neural'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT count(*) as cnt FROM year_2024_agg1 WHERE month = '11' AND content indexquery 'neural'"
+        )
+        .collect()
 
       withClue(s"Expected count=1 but got ${results(0).getLong(0)}: ") {
         results(0).getLong(0) shouldBe 1L
@@ -355,9 +418,11 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       df.filter(col("year") === "2024").createOrReplaceTempView("year_2024_agg2")
 
       // month=11 in year=2024 has 3 rows (ids 4,5,6). Expected count=3
-      val results = spark.sql(
-        "SELECT count(*) as cnt FROM year_2024_agg2 WHERE month = '11'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT count(*) as cnt FROM year_2024_agg2 WHERE month = '11'"
+        )
+        .collect()
 
       withClue(s"Expected count=3 but got ${results(0).getLong(0)}: ") {
         results(0).getLong(0) shouldBe 3L
@@ -370,9 +435,11 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       df.filter(col("year") === "2024").createOrReplaceTempView("year_2024_agg3")
 
       // "neural" matches only id=6 (score=70.0) in month=11. Expected sum=70.0
-      val results = spark.sql(
-        "SELECT sum(score) as total FROM year_2024_agg3 WHERE month = '11' AND content indexquery 'neural'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT sum(score) as total FROM year_2024_agg3 WHERE month = '11' AND content indexquery 'neural'"
+        )
+        .collect()
 
       withClue(s"Expected sum=70.0 but got ${results(0).getDouble(0)}: ") {
         results(0).getDouble(0) shouldBe 70.0 +- 0.01
@@ -385,9 +452,11 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       df.filter(col("year") === "2025").createOrReplaceTempView("year_2025_agg4")
 
       // "machine" in year=2025, month=02: only id=12 (score=81.0). Expected avg=81.0
-      val results = spark.sql(
-        "SELECT avg(score) as avg_score FROM year_2025_agg4 WHERE month = '02' AND content indexquery 'machine'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT avg(score) as avg_score FROM year_2025_agg4 WHERE month = '02' AND content indexquery 'machine'"
+        )
+        .collect()
 
       withClue(s"Expected avg=81.0 but got ${results(0).getDouble(0)}: ") {
         results(0).getDouble(0) shouldBe 81.0 +- 0.01
@@ -401,15 +470,19 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // "learning" in year=2024: id=1 (month=10), id=2 (month=10 deep learning), id=5 (month=11)
       // With month='11': only id=5. GROUP BY title should yield 1 group.
-      val results = spark.sql(
-        """SELECT title, count(*) as cnt
-          |FROM year_2024_agg5
-          |WHERE month = '11' AND content indexquery 'learning'
-          |GROUP BY title""".stripMargin
-      ).collect()
+      val results = spark
+        .sql(
+          """SELECT title, count(*) as cnt
+            |FROM year_2024_agg5
+            |WHERE month = '11' AND content indexquery 'learning'
+            |GROUP BY title""".stripMargin
+        )
+        .collect()
 
-      withClue(s"Expected 1 group but got ${results.length} groups: " +
-        s"${results.map(r => s"(title=${r.getString(0)}, cnt=${r.getLong(1)})").mkString(", ")}: ") {
+      withClue(
+        s"Expected 1 group but got ${results.length} groups: " +
+          s"${results.map(r => s"(title=${r.getString(0)}, cnt=${r.getLong(1)})").mkString(", ")}: "
+      ) {
         results.length shouldBe 1
       }
       results(0).getString(0) shouldBe "RL Paper"
@@ -423,9 +496,11 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // indexquery + score filter + partition last, with COUNT
       // "neural" in month=11: id=6 (score=70.0). score > 60 -> matches. Expected count=1
-      val results = spark.sql(
-        "SELECT count(*) as cnt FROM year_2024_agg6 WHERE content indexquery 'neural' AND score > 60.0 AND month = '11'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT count(*) as cnt FROM year_2024_agg6 WHERE content indexquery 'neural' AND score > 60.0 AND month = '11'"
+        )
+        .collect()
 
       withClue(s"Expected count=1 but got ${results(0).getLong(0)}: ") {
         results(0).getLong(0) shouldBe 1L

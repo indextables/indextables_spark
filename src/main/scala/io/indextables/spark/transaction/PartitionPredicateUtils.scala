@@ -149,8 +149,8 @@ object PartitionPredicateUtils {
 
   /**
    * Convert a partition value string to a typed value for InternalRow storage. This is the inverse of Spark's partition
-   * value serialization: partition values are stored as strings in the transaction log but need to be converted to their
-   * actual types for correct comparison semantics.
+   * value serialization: partition values are stored as strings in the transaction log but need to be converted to
+   * their actual types for correct comparison semantics.
    *
    * @param value
    *   String representation of the partition value
@@ -161,16 +161,16 @@ object PartitionPredicateUtils {
    */
   private def convertPartitionValue(value: String, dataType: DataType): Any = {
     if (value == null) return null
-    try {
+    try
       dataType match {
-        case StringType    => UTF8String.fromString(value)
-        case IntegerType   => value.toInt
-        case LongType      => value.toLong
-        case FloatType     => value.toFloat
-        case DoubleType    => value.toDouble
-        case BooleanType   => value.toBoolean
-        case ShortType     => value.toShort
-        case ByteType      => value.toByte
+        case StringType  => UTF8String.fromString(value)
+        case IntegerType => value.toInt
+        case LongType    => value.toLong
+        case FloatType   => value.toFloat
+        case DoubleType  => value.toDouble
+        case BooleanType => value.toBoolean
+        case ShortType   => value.toShort
+        case ByteType    => value.toByte
         case _: DecimalType =>
           Decimal(new java.math.BigDecimal(value))
         case DateType =>
@@ -193,7 +193,7 @@ object PartitionPredicateUtils {
           logger.debug(s"Unknown partition column type ${dataType.simpleString}, using string representation")
           UTF8String.fromString(value)
       }
-    } catch {
+    catch {
       case e: Exception =>
         logger.warn(s"Failed to convert partition value '$value' to ${dataType.simpleString}: ${e.getMessage}, falling back to string")
         UTF8String.fromString(value)
@@ -260,17 +260,20 @@ object PartitionPredicateUtils {
       case CatalystEqualTo(lit: Literal, ref: org.apache.spark.sql.catalyst.expressions.BoundReference) =>
         CatalystEqualTo(coerceLiteralToType(lit, ref.dataType), ref)
       case CatalystIn(ref: org.apache.spark.sql.catalyst.expressions.BoundReference, values) =>
-        CatalystIn(ref, values.map {
-          case lit: Literal => coerceLiteralToType(lit, ref.dataType)
-          case other        => other
-        })
+        CatalystIn(
+          ref,
+          values.map {
+            case lit: Literal => coerceLiteralToType(lit, ref.dataType)
+            case other        => other
+          }
+        )
     }
   }
 
   /**
-   * Coerce a literal to match a target data type. If the literal already matches or no safe
-   * conversion exists, the literal is returned unchanged. For StringType targets, non-string
-   * literals are converted to their string representation as UTF8String.
+   * Coerce a literal to match a target data type. If the literal already matches or no safe conversion exists, the
+   * literal is returned unchanged. For StringType targets, non-string literals are converted to their string
+   * representation as UTF8String.
    *
    * @param literal
    *   The literal to coerce
@@ -388,15 +391,16 @@ object PartitionPredicateUtils {
               case u: UTF8String => u.toString
               case other         => other.toString
             }
-            val micros = try {
-              val instant = java.time.Instant.parse(strVal)
-              java.time.Duration.between(java.time.Instant.EPOCH, instant).getSeconds * 1000000L +
-                instant.getNano / 1000L
-            } catch {
-              case _: Exception =>
-                val ts = java.sql.Timestamp.valueOf(strVal)
-                ts.getTime * 1000L + (ts.getNanos % 1000000) / 1000L
-            }
+            val micros =
+              try {
+                val instant = java.time.Instant.parse(strVal)
+                java.time.Duration.between(java.time.Instant.EPOCH, instant).getSeconds * 1000000L +
+                  instant.getNano / 1000L
+              } catch {
+                case _: Exception =>
+                  val ts = java.sql.Timestamp.valueOf(strVal)
+                  ts.getTime * 1000L + (ts.getNanos % 1000000) / 1000L
+              }
             Literal(micros, TimestampType)
           } catch {
             case _: Exception => literal

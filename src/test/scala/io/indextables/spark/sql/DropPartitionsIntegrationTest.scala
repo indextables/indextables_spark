@@ -662,12 +662,10 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(afterDrop.count() == 9, s"Expected 9 records after drop, got ${afterDrop.count()}")
 
     // Verify each remaining month
-    for (m <- 1 to 9) {
+    for (m <- 1 to 9)
       assert(afterDrop.filter($"month" === m).count() == 1, s"Month $m should still exist")
-    }
-    for (m <- 10 to 12) {
+    for (m <- 10 to 12)
       assert(afterDrop.filter($"month" === m).count() == 0, s"Month $m should be dropped")
-    }
   }
 
   test("IT-036 REGRESSION: DROP PARTITIONS with numeric BETWEEN 2 AND 11 should correctly match months 2-11") {
@@ -725,9 +723,8 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     // Verify data after drop - should only see months 10, 11, 12
     val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     assert(afterDrop.count() == 3, s"Expected 3 records after drop, got ${afterDrop.count()}")
-    for (m <- 10 to 12) {
+    for (m <- 10 to 12)
       assert(afterDrop.filter($"month" === m).count() == 1, s"Month $m should still exist")
-    }
   }
 
   test("Multiple DROP INDEXTABLES PARTITIONS operations should be cumulative") {

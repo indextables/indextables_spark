@@ -253,7 +253,7 @@ class WorkerLocalSplitMerger(
   private val statsValueOrdering: Ordering[String] = (a: String, b: String) =>
     (scala.util.Try(BigDecimal(a)), scala.util.Try(BigDecimal(b))) match {
       case (scala.util.Success(na), scala.util.Success(nb)) => na.compare(nb)
-      case _                                                 => a.compare(b)
+      case _                                                => a.compare(b)
     }
 
   /** Compute union of min values across multiple splits (min of mins) */

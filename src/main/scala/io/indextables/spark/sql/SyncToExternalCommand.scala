@@ -146,9 +146,9 @@ case class SyncToExternalCommand(
 
   private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
     // 1. Extract merged configuration and resolve credentials for source table access
-    val hadoopConf        = sparkSession.sparkContext.hadoopConfiguration
-    val sparkConfigs      = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-    val hadoopConfigs     = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
       ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
@@ -345,7 +345,7 @@ case class SyncToExternalCommand(
 
     try {
       // 5. Determine sync mode: initial vs incremental
-      val sourceSchema = reader.schema()
+      val sourceSchema                   = reader.schema()
       val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, sourceSchema, partitionColumns)
 
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
@@ -372,31 +372,36 @@ case class SyncToExternalCommand(
 
       // Validate indexing mode values
       import io.indextables.spark.util.IndexingModes
-      effectiveIndexingModes.foreach { case (field, mode) =>
-        if (!IndexingModes.isRecognized(mode)) {
-          throw new IllegalArgumentException(
-            s"Unrecognized indexing mode '$mode' for field '$field'. " +
-            s"Valid modes: ${IndexingModes.validModesDescription}")
-        }
-        // Validate non-empty regex for custom modes
-        IndexingModes.extractCustomRegex(mode).foreach { regex =>
-          if (regex.isEmpty) {
+      effectiveIndexingModes.foreach {
+        case (field, mode) =>
+          if (!IndexingModes.isRecognized(mode)) {
             throw new IllegalArgumentException(
-              s"Custom regex mode '$mode' for field '$field' requires a non-empty regex pattern after ':'")
+              s"Unrecognized indexing mode '$mode' for field '$field'. " +
+                s"Valid modes: ${IndexingModes.validModesDescription}"
+            )
           }
-        }
+          // Validate non-empty regex for custom modes
+          IndexingModes.extractCustomRegex(mode).foreach { regex =>
+            if (regex.isEmpty) {
+              throw new IllegalArgumentException(
+                s"Custom regex mode '$mode' for field '$field' requires a non-empty regex pattern after ':'"
+              )
+            }
+          }
       }
 
       // Validate field names exist in source schema
       if (effectiveIndexingModes.nonEmpty) {
         val schemaFieldNames = sourceSchema.fieldNames.map(_.toLowerCase).toSet ++
           partitionColumns.map(_.toLowerCase).toSet
-        effectiveIndexingModes.foreach { case (field, mode) =>
-          if (!schemaFieldNames.contains(field.toLowerCase)) {
-            throw new IllegalArgumentException(
-              s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
-              s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}")
-          }
+        effectiveIndexingModes.foreach {
+          case (field, mode) =>
+            if (!schemaFieldNames.contains(field.toLowerCase)) {
+              throw new IllegalArgumentException(
+                s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
+                  s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}"
+              )
+            }
         }
       }
 
@@ -418,26 +423,27 @@ case class SyncToExternalCommand(
       }
 
       // Resolve effective hashed fastfields include/exclude: use stored config from metadata if not specified
-      val (effectiveHfInclude, effectiveHfExclude) = if (hashedFastfieldsInclude.nonEmpty || hashedFastfieldsExclude.nonEmpty) {
-        (hashedFastfieldsInclude, hashedFastfieldsExclude)
-      } else if (!isInitialSync) {
-        try {
-          val existingMeta = transactionLog.getMetadata()
-          val inc = existingMeta.configuration
-            .get("indextables.companion.hashedFastfieldsInclude")
-            .map(_.split(",").filter(_.nonEmpty).toSeq)
-            .getOrElse(Seq.empty)
-          val exc = existingMeta.configuration
-            .get("indextables.companion.hashedFastfieldsExclude")
-            .map(_.split(",").filter(_.nonEmpty).toSeq)
-            .getOrElse(Seq.empty)
-          (inc, exc)
-        } catch {
-          case _: Exception => (Seq.empty[String], Seq.empty[String])
+      val (effectiveHfInclude, effectiveHfExclude) =
+        if (hashedFastfieldsInclude.nonEmpty || hashedFastfieldsExclude.nonEmpty) {
+          (hashedFastfieldsInclude, hashedFastfieldsExclude)
+        } else if (!isInitialSync) {
+          try {
+            val existingMeta = transactionLog.getMetadata()
+            val inc = existingMeta.configuration
+              .get("indextables.companion.hashedFastfieldsInclude")
+              .map(_.split(",").filter(_.nonEmpty).toSeq)
+              .getOrElse(Seq.empty)
+            val exc = existingMeta.configuration
+              .get("indextables.companion.hashedFastfieldsExclude")
+              .map(_.split(",").filter(_.nonEmpty).toSeq)
+              .getOrElse(Seq.empty)
+            (inc, exc)
+          } catch {
+            case _: Exception => (Seq.empty[String], Seq.empty[String])
+          }
+        } else {
+          (Seq.empty[String], Seq.empty[String])
         }
-      } else {
-        (Seq.empty[String], Seq.empty[String])
-      }
 
       // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
       // All source readers return relative paths, so the anti-join is bucket-independent

@@ -95,12 +95,12 @@ object TransactionLogThreadPools {
     )
 
   // Track which pools have been initialized
-  @volatile private var checkpointPoolInitialized    = false
-  @volatile private var commitPoolInitialized        = false
-  @volatile private var asyncUpdatePoolInitialized   = false
-  @volatile private var statsPoolInitialized         = false
-  @volatile private var fileListingPoolInitialized   = false
-  @volatile private var parallelReadPoolInitialized  = false
+  @volatile private var checkpointPoolInitialized   = false
+  @volatile private var commitPoolInitialized       = false
+  @volatile private var asyncUpdatePoolInitialized  = false
+  @volatile private var statsPoolInitialized        = false
+  @volatile private var fileListingPoolInitialized  = false
+  @volatile private var parallelReadPoolInitialized = false
 
   /** Shutdown all thread pools gracefully (only those that have been initialized) */
   def shutdown(): Unit = {

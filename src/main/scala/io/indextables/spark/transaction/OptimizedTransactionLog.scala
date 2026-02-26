@@ -1017,33 +1017,36 @@ class OptimizedTransactionLog(
           val versionMetadata: Option[MetadataAction] = (latestVersion to startVersion by -1).view
             .flatMap(v => readVersionOptimized(v).collectFirst { case m: MetadataAction => (v, m) })
             .headOption
-            .map { case (version, metadata) =>
-              baseMetadata match {
-                case Some(base) =>
-                  val mergedConfig = base.configuration ++ metadata.configuration
-                  logger.info(s"Merging metadata from version $version with checkpoint (${metadata.configuration.size} + ${base.configuration.size} = ${mergedConfig.size} config entries)")
-                  metadata.copy(configuration = mergedConfig)
-                case None =>
-                  logger.info(s"Found metadata in version $version")
-                  metadata
-              }
+            .map {
+              case (version, metadata) =>
+                baseMetadata match {
+                  case Some(base) =>
+                    val mergedConfig = base.configuration ++ metadata.configuration
+                    logger.info(s"Merging metadata from version $version with checkpoint (${metadata.configuration.size} + ${base.configuration.size} = ${mergedConfig.size} config entries)")
+                    metadata.copy(configuration = mergedConfig)
+                  case None =>
+                    logger.info(s"Found metadata in version $version")
+                    metadata
+                }
             }
 
           versionMetadata.getOrElse {
             // No newer metadata in version files - try checkpoint metadata
-            baseMetadata.map { m =>
-              logger.info("Using checkpoint metadata (no newer updates found)")
-              m
-            }.getOrElse {
-              // No checkpoint either - search all versions from latest to 0
-              val fallback = (latestVersion to 0L by -1).view
-                .flatMap(v => readVersionOptimized(v).collectFirst { case m: MetadataAction => m })
-                .headOption
+            baseMetadata
+              .map { m =>
+                logger.info("Using checkpoint metadata (no newer updates found)")
+                m
+              }
+              .getOrElse {
+                // No checkpoint either - search all versions from latest to 0
+                val fallback = (latestVersion to 0L by -1).view
+                  .flatMap(v => readVersionOptimized(v).collectFirst { case m: MetadataAction => m })
+                  .headOption
 
-              fallback.getOrElse(
-                throw new RuntimeException("No metadata found in transaction log")
-              )
-            }
+                fallback.getOrElse(
+                  throw new RuntimeException("No metadata found in transaction log")
+                )
+              }
           }
         }
       }
@@ -1148,7 +1151,9 @@ class OptimizedTransactionLog(
 
           versionProtocol.orElse(baseProtocol).getOrElse {
             // No protocol found - default to version 1 for legacy tables
-            logger.warn(s"No protocol action found in transaction log at $tablePath, defaulting to version 1 (legacy table)")
+            logger.warn(
+              s"No protocol action found in transaction log at $tablePath, defaulting to version 1 (legacy table)"
+            )
             ProtocolVersion.legacyProtocol()
           }
         }
@@ -1305,16 +1310,17 @@ class OptimizedTransactionLog(
   /**
    * Cached full Spark schema parsed from MetadataAction.schemaString.
    *
-   * Parsing schemaString JSON (via DataType.fromJson) costs 20-30ms for wide tables. This method
-   * caches the result so the parse is performed at most once per TransactionLog instance, avoiding
-   * repeated parsing on the hot path (e.g., partition predicate evaluation in SQL commands).
+   * Parsing schemaString JSON (via DataType.fromJson) costs 20-30ms for wide tables. This method caches the result so
+   * the parse is performed at most once per TransactionLog instance, avoiding repeated parsing on the hot path (e.g.,
+   * partition predicate evaluation in SQL commands).
    *
    * Thread-safe via @volatile + synchronization on first computation.
    *
-   * @return Some(StructType) if the schema can be parsed, None if parsing fails
+   * @return
+   *   Some(StructType) if the schema can be parsed, None if parsing fails
    */
   @volatile private var cachedSparkSchema: Option[Option[StructType]] = None
-  private val sparkSchemaLock = new Object()
+  private val sparkSchemaLock                                         = new Object()
 
   def getSparkSchema(): Option[StructType] =
     cachedSparkSchema match {
@@ -1324,15 +1330,16 @@ class OptimizedTransactionLog(
           cachedSparkSchema match {
             case Some(schema) => schema
             case None =>
-              val schema = try {
-                val metadata = getMetadata()
-                import org.apache.spark.sql.types.DataType
-                Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
-              } catch {
-                case e: Exception =>
-                  logger.warn(s"Failed to parse schema from MetadataAction: ${e.getMessage}")
-                  None
-              }
+              val schema =
+                try {
+                  val metadata = getMetadata()
+                  import org.apache.spark.sql.types.DataType
+                  Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
+                } catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to parse schema from MetadataAction: ${e.getMessage}")
+                    None
+                }
               cachedSparkSchema = Some(schema)
               schema
           }
@@ -1342,16 +1349,17 @@ class OptimizedTransactionLog(
   /**
    * Cached partition schema with real column types derived from the full table schema.
    *
-   * Combines getSparkSchema() (cached) and getPartitionColumns() (cached via getMetadata()) to
-   * build a StructType containing only partition columns with their real types from the full schema.
-   * Falls back to StringType if the full schema is unavailable.
+   * Combines getSparkSchema() (cached) and getPartitionColumns() (cached via getMetadata()) to build a StructType
+   * containing only partition columns with their real types from the full schema. Falls back to StringType if the full
+   * schema is unavailable.
    *
    * Thread-safe via @volatile + synchronization on first computation.
    *
-   * @return StructType with partition columns using their real types
+   * @return
+   *   StructType with partition columns using their real types
    */
   @volatile private var cachedPartitionSchema: Option[StructType] = None
-  private val partitionSchemaLock = new Object()
+  private val partitionSchemaLock                                 = new Object()
 
   def getPartitionSchema(): StructType =
     cachedPartitionSchema match {
@@ -1361,9 +1369,9 @@ class OptimizedTransactionLog(
           cachedPartitionSchema match {
             case Some(schema) => schema
             case None =>
-              val fullSchema = getSparkSchema()
+              val fullSchema       = getSparkSchema()
               val partitionColumns = getPartitionColumns()
-              val schema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
+              val schema           = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
               cachedPartitionSchema = Some(schema)
               schema
           }

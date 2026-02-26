@@ -1178,8 +1178,10 @@ class MergeSplitsExecutor(
             }.toList
           } finally {
             customTaskSupport.environment.shutdown()
-            try { broadcastAzureConfig.destroy() } catch { case _: Exception => }
-            try { broadcastTablePath.destroy() } catch { case _: Exception => }
+            try broadcastAzureConfig.destroy()
+            catch { case _: Exception => }
+            try broadcastTablePath.destroy()
+            catch { case _: Exception => }
           }
 
         // Aggregate results from this generation's batches into accumulators

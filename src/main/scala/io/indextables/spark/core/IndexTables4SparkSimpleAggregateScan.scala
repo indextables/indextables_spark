@@ -568,7 +568,9 @@ class IndexTables4SparkSimpleAggregateReader(
       val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
         val cleaned = MixedBooleanFilter.stripPartitionOnlyFilters(partition.pushedFilters, partition.partitionColumns)
         if (cleaned.length != partition.pushedFilters.length) {
-          logger.info(s"SIMPLE AGGREGATE EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)")
+          logger.info(
+            s"SIMPLE AGGREGATE EXECUTION: Stripped ${partition.pushedFilters.length - cleaned.length} partition-only pushed filter(s)"
+          )
         }
         cleaned
       } else {
@@ -576,9 +578,12 @@ class IndexTables4SparkSimpleAggregateReader(
       }
 
       val cleanedIndexQueryFilters = if (partition.partitionColumns.nonEmpty && partition.indexQueryFilters.nonEmpty) {
-        val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
+        val cleaned =
+          MixedBooleanFilter.stripPartitionFiltersFromArray(partition.indexQueryFilters, partition.partitionColumns)
         if (cleaned.length != partition.indexQueryFilters.length) {
-          logger.info(s"SIMPLE AGGREGATE EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)")
+          logger.info(
+            s"SIMPLE AGGREGATE EXECUTION: Stripped ${partition.indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s)"
+          )
         }
         cleaned
       } else {
@@ -660,7 +665,9 @@ class IndexTables4SparkSimpleAggregateReader(
                 else None
 
               companionTrackingField.foreach(f =>
-                logger.debug(s"COUNT(*) FIELD SELECTION: Companion split — using tracking field '$f' (guaranteed non-null)")
+                logger.debug(
+                  s"COUNT(*) FIELD SELECTION: Companion split — using tracking field '$f' (guaranteed non-null)"
+                )
               )
 
               // Try to find a numeric field from other aggregations first (guaranteed to be fast)

@@ -92,19 +92,19 @@ case class PrewarmCacheCommand(
   private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
 
   /**
-   * Enrich a config map with companion metadata from the transaction log, mirroring
-   * ScanBuilder.effectiveConfig logic. Injects parquetTableRoot, resolves parquet
-   * credentials, propagates indexing modes, and strips icebergTableId.
+   * Enrich a config map with companion metadata from the transaction log, mirroring ScanBuilder.effectiveConfig logic.
+   * Injects parquetTableRoot, resolves parquet credentials, propagates indexing modes, and strips icebergTableId.
    * Returns the enriched config (or the original if not a companion table).
    *
-   * @param config           The current merged config (may already have explicit split credentials
-   *                         if resolveCredentialsOnDriver was called — runSync path)
-   * @param metadata         Transaction log metadata containing companion configuration
-   * @param credentialConfig Config with the credential provider class still present, used
-   *                         to resolve parquet-specific credentials. On the runSync path,
-   *                         resolveCredentialsOnDriver strips the provider class and injects
-   *                         explicit credentials scoped to the index table — those MUST NOT
-   *                         be used for parquet access since UC credentials are path-scoped.
+   * @param config
+   *   The current merged config (may already have explicit split credentials if resolveCredentialsOnDriver was called —
+   *   runSync path)
+   * @param metadata
+   *   Transaction log metadata containing companion configuration
+   * @param credentialConfig
+   *   Config with the credential provider class still present, used to resolve parquet-specific credentials. On the
+   *   runSync path, resolveCredentialsOnDriver strips the provider class and injects explicit credentials scoped to the
+   *   index table — those MUST NOT be used for parquet access since UC credentials are path-scoped.
    */
   private def enrichConfigWithCompanionMetadata(
     config: Map[String, String],
@@ -144,7 +144,9 @@ case class PrewarmCacheCommand(
         } else if (sourceFormat == "delta" && metadata.configuration.contains("indextables.companion.deltaTableName")) {
           val storedPath = metadata.configuration.getOrElse("indextables.companion.parquetStorageRoot", sourceTablePath)
           if (preferPathCreds) {
-            logger.info(s"Delta UC companion prewarm: preferPathCredentials=true, using path-based credentials for $storedPath")
+            logger.info(
+              s"Delta UC companion prewarm: preferPathCredentials=true, using path-based credentials for $storedPath"
+            )
             (storedPath, credentialConfig)
           } else {
             logger.info(
@@ -178,12 +180,12 @@ case class PrewarmCacheCommand(
               }
             }
           // Propagate region and endpoint from main config (case-insensitive fallback)
-          enriched.get("spark.indextables.aws.region")
+          enriched
+            .get("spark.indextables.aws.region")
             .orElse(enriched.get("spark.indextables.aws.region".toLowerCase))
-            .foreach { region =>
-              enriched = enriched + ("spark.indextables.companion.parquet.aws.region" -> region)
-            }
-          enriched.get("spark.indextables.s3.endpoint")
+            .foreach(region => enriched = enriched + ("spark.indextables.companion.parquet.aws.region" -> region))
+          enriched
+            .get("spark.indextables.s3.endpoint")
             .orElse(enriched.get("spark.indextables.s3.endpoint".toLowerCase))
             .foreach { endpoint =>
               enriched = enriched + ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
@@ -221,10 +223,9 @@ case class PrewarmCacheCommand(
   }
 
   /**
-   * For Iceberg companions: resolve table credentials by reconstructing the full table name
-   * from stored catalog coordinates and calling the TableCredentialProvider to get a fresh
-   * table ID. This enables the Priority 1.5 path in CredentialProviderFactory.
-   * Mirrors ScanBuilder.tryResolveIcebergTableCredentials.
+   * For Iceberg companions: resolve table credentials by reconstructing the full table name from stored catalog
+   * coordinates and calling the TableCredentialProvider to get a fresh table ID. This enables the Priority 1.5 path in
+   * CredentialProviderFactory. Mirrors ScanBuilder.tryResolveIcebergTableCredentials.
    */
   private def tryResolveIcebergTableCredentials(
     companionConfig: Map[String, String],
@@ -264,10 +265,9 @@ case class PrewarmCacheCommand(
   }
 
   /**
-   * For Delta UC companions: resolve table credentials by reconstructing the full table name
-   * from stored catalog coordinates and calling the TableCredentialProvider to get a fresh
-   * table ID. This enables the Priority 1.5 path in CredentialProviderFactory.
-   * Mirrors ScanBuilder.tryResolveDeltaTableCredentials.
+   * For Delta UC companions: resolve table credentials by reconstructing the full table name from stored catalog
+   * coordinates and calling the TableCredentialProvider to get a fresh table ID. This enables the Priority 1.5 path in
+   * CredentialProviderFactory. Mirrors ScanBuilder.tryResolveDeltaTableCredentials.
    */
   private def tryResolveDeltaTableCredentials(
     companionConfig: Map[String, String],
@@ -355,8 +355,9 @@ case class PrewarmCacheCommand(
 
     // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
     // Prewarm is read-only, request PATH_READ credentials
-    val readConfig   = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-    var mergedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath)
+    val readConfig = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    var mergedConfig =
+      io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath)
 
     // Create transaction log - CloudStorageProvider will handle credential resolution
     // with proper refresh logic via V1ToV2CredentialsProviderAdapter
@@ -955,7 +956,8 @@ case class PrewarmCacheCommand(
 
             // Create split metadata and searcher (companion-aware: uses 4-arg overload when parquetTableRoot is set)
             val splitMetadata = SplitMetadataFactory.fromAddAction(addAction, task.tablePath)
-            val splitSearcher = createSplitSearcherWithCompanionSupport(cacheManager, cacheConfig, actualPath, splitMetadata)
+            val splitSearcher =
+              createSplitSearcherWithCompanionSupport(cacheManager, cacheConfig, actualPath, splitMetadata)
 
             try {
               // Prewarm based on field selection
@@ -1174,7 +1176,8 @@ case class PrewarmCacheCommand(
           val splitMetadata = SplitMetadataFactory.fromAddAction(addAction, task.tablePath)
 
           // Create split searcher (companion-aware: uses 4-arg overload when parquetTableRoot is set)
-          val splitSearcher = createSplitSearcherWithCompanionSupport(cacheManager, cacheConfig, actualPath, splitMetadata)
+          val splitSearcher =
+            createSplitSearcherWithCompanionSupport(cacheManager, cacheConfig, actualPath, splitMetadata)
 
           val (futures, invalidFields): (Seq[java.util.concurrent.CompletableFuture[Void]], Seq[String]) =
             task.fields match {
@@ -1245,8 +1248,8 @@ case class PrewarmCacheCommand(
       )
 
       // Phase 2: Wait for all futures to complete (parallel execution happening now)
-      var prewarmedCount = 0
-      val failedSplits   = scala.collection.mutable.ArrayBuffer.empty[String]
+      var prewarmedCount         = 0
+      val failedSplits           = scala.collection.mutable.ArrayBuffer.empty[String]
       val parquetPreloadFailures = scala.collection.mutable.ArrayBuffer.empty[String]
 
       preparedWork.foreach { work =>
@@ -1340,13 +1343,17 @@ case class PrewarmCacheCommand(
       }
 
       val duration = System.currentTimeMillis() - taskStartTime
-      val status = if (failedSplits.nonEmpty) "partial"
-        else if (parquetPreloadFailures.nonEmpty) s"partial (parquet preload failed: ${parquetPreloadFailures.size} splits)"
+      val status =
+        if (failedSplits.nonEmpty) "partial"
+        else if (parquetPreloadFailures.nonEmpty)
+          s"partial (parquet preload failed: ${parquetPreloadFailures.size} splits)"
         else if (skippedFields.nonEmpty) "partial"
         else "success"
 
       if (parquetPreloadFailures.nonEmpty) {
-        taskLogger.warn(s"Parquet preload failed for ${parquetPreloadFailures.size} splits: ${parquetPreloadFailures.mkString(", ")}")
+        taskLogger.warn(
+          s"Parquet preload failed for ${parquetPreloadFailures.size} splits: ${parquetPreloadFailures.mkString(", ")}"
+        )
       }
       taskLogger.info(s"Prewarm completed: $prewarmedCount/${preparedWork.size} splits in ${duration}ms")
 
@@ -1382,10 +1389,9 @@ case class PrewarmCacheCommand(
   }
 
   /**
-   * Create a SplitSearcher with companion support. If the cacheConfig has a companionSourceTableRoot,
-   * builds a ParquetStorageConfig and calls the 4-arg createSplitSearcher so the native layer
-   * receives the parquet table root. Otherwise falls back to the 2-arg version.
-   * Mirrors the pattern in SplitSearchEngine (lines 125-145).
+   * Create a SplitSearcher with companion support. If the cacheConfig has a companionSourceTableRoot, builds a
+   * ParquetStorageConfig and calls the 4-arg createSplitSearcher so the native layer receives the parquet table root.
+   * Otherwise falls back to the 2-arg version. Mirrors the pattern in SplitSearchEngine (lines 125-145).
    */
   private def createSplitSearcherWithCompanionSupport(
     cacheManager: io.indextables.tantivy4java.split.SplitCacheManager,
@@ -1406,9 +1412,8 @@ case class PrewarmCacheCommand(
     }
 
   /**
-   * Build a ParquetStorageConfig from cacheConfig's parquet credential fields.
-   * Returns None if no separate parquet credentials are configured.
-   * Mirrors SplitSearchEngine.buildParquetStorageConfig().
+   * Build a ParquetStorageConfig from cacheConfig's parquet credential fields. Returns None if no separate parquet
+   * credentials are configured. Mirrors SplitSearchEngine.buildParquetStorageConfig().
    */
   private def buildParquetStorageConfig(
     cacheConfig: SplitCacheConfig

@@ -106,7 +106,7 @@ case class RepairIndexFilesTransactionLogCommand(
       logger.info(s"Reading source transaction log from: $sourcePath")
       val sourceOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.transaction.allowDirectUsage" -> "true",
+          "spark.indextables.transaction.allowDirectUsage"    -> "true",
           "spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE"
         ).asJava
       )

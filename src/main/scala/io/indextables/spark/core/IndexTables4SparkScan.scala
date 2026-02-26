@@ -377,8 +377,9 @@ class IndexTables4SparkScan(
     // instead of N calls from N executors
     // Note: companion mode config (parquetTableRoot) is already injected by ScanBuilder.effectiveConfig
     // Read path only needs PATH_READ credentials (no write operations via table credentials)
-    val readConfig     = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-    val resolvedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath.toString)
+    val readConfig = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    val resolvedConfig =
+      io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath.toString)
 
     // Diagnostic: log companion config state on driver before serialization to executors
     val hasCompanionKey = resolvedConfig.contains("spark.indextables.companion.parquetTableRoot")

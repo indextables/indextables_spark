@@ -18,20 +18,27 @@
 package io.indextables.spark.util
 
 /**
- * Canonical definitions for companion split indexing modes. All mode classification
- * logic should go through this object to prevent drift across the codebase.
+ * Canonical definitions for companion split indexing modes. All mode classification logic should go through this object
+ * to prevent drift across the codebase.
  */
 object IndexingModes {
 
   /** Modes that are recognized as exact string values (case-insensitive). */
   val recognizedModes: Set[String] = Set(
-    "string", "text", "ip", "ipaddress", "json",
-    "exact_only", "text_uuid_exactonly", "text_uuid_strip"
+    "string",
+    "text",
+    "ip",
+    "ipaddress",
+    "json",
+    "exact_only",
+    "text_uuid_exactonly",
+    "text_uuid_strip"
   )
 
   /** Mode prefixes that require a regex suffix after the colon. */
   val regexPrefixes: Seq[String] = Seq(
-    "text_custom_exactonly:", "text_custom_strip:"
+    "text_custom_exactonly:",
+    "text_custom_strip:"
   )
 
   /** Human-readable list of valid modes for error messages. */
@@ -55,8 +62,10 @@ object IndexingModes {
     lower.startsWith("text_custom_strip:")
   }
 
-  /** Check if a mode supports range filter pushdown (>, <, >=, <=).
-    * exact_only stores U64 hashes — range comparison is meaningless. */
+  /**
+   * Check if a mode supports range filter pushdown (>, <, >=, <=). exact_only stores U64 hashes — range comparison is
+   * meaningless.
+   */
   def supportsRangeQuery(mode: String): Boolean = {
     val lower = mode.toLowerCase
     lower != "exact_only"
@@ -66,10 +75,10 @@ object IndexingModes {
   def supportsExactMatchPushdown(mode: String): Boolean = {
     val lower = mode.toLowerCase
     lower match {
-      case "text"                             => false
-      case "exact_only"                       => true
-      case m if m.startsWith("text_")         => false
-      case _                                  => true // string, ip, ipaddress, json, etc.
+      case "text"                     => false
+      case "exact_only"               => true
+      case m if m.startsWith("text_") => false
+      case _                          => true // string, ip, ipaddress, json, etc.
     }
   }
 
@@ -81,14 +90,14 @@ object IndexingModes {
     }
   }
 
-  /** Normalize a mode value for the native tantivy4java layer.
-    *
-    * Lowercases the mode prefix (e.g., "EXACT_ONLY" → "exact_only") while
-    * preserving the case of any regex suffix (e.g., "TEXT_CUSTOM_STRIP:ORD-\d{8}"
-    * → "text_custom_strip:ORD-\d{8}"). This is necessary because:
-    * - The Rust parser (`parse_tokenizer_override`) matches mode prefixes case-sensitively
-    * - Regex patterns may be case-sensitive (e.g., "ORD" ≠ "ord")
-    */
+  /**
+   * Normalize a mode value for the native tantivy4java layer.
+   *
+   * Lowercases the mode prefix (e.g., "EXACT_ONLY" → "exact_only") while preserving the case of any regex suffix (e.g.,
+   * "TEXT_CUSTOM_STRIP:ORD-\d{8}" → "text_custom_strip:ORD-\d{8}"). This is necessary because:
+   *   - The Rust parser (`parse_tokenizer_override`) matches mode prefixes case-sensitively
+   *   - Regex patterns may be case-sensitive (e.g., "ORD" ≠ "ord")
+   */
   def normalizeForNative(mode: String): String = {
     val colonIdx = mode.indexOf(':')
     if (colonIdx >= 0) {

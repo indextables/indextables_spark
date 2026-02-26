@@ -33,13 +33,12 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Regression test: comprehensive query battery on companion splits after MERGE SPLITS.
  *
- * With tantivy4java 0.30.4, aggregations worked on companion splits but broke after merge
- * because the merge path dropped string fast fields. Fixed in tantivy4java 0.30.5.
+ * With tantivy4java 0.30.4, aggregations worked on companion splits but broke after merge because the merge path
+ * dropped string fast fields. Fixed in tantivy4java 0.30.5.
  *
- * This suite exercises every supported query type against a merged companion split to ensure
- * no regressions: filters (EqualTo, range, In, Not, And, Or, StringStartsWith, StringContains,
- * StringEndsWith), aggregations (COUNT, SUM, AVG, MIN, MAX), GROUP BY, and combined
- * filter + aggregation patterns.
+ * This suite exercises every supported query type against a merged companion split to ensure no regressions: filters
+ * (EqualTo, range, In, Not, And, Or, StringStartsWith, StringContains, StringEndsWith), aggregations (COUNT, SUM, AVG,
+ * MIN, MAX), GROUP BY, and combined filter + aggregation patterns.
  */
 class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -95,19 +94,16 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   }
 
   /**
-   * Builds a companion index from two parquet batches, merges the resulting splits,
-   * and runs the provided test function against the merged DataFrame.
+   * Builds a companion index from two parquet batches, merges the resulting splits, and runs the provided test function
+   * against the merged DataFrame.
    *
-   * Schema:
-   *   id: Long, name: String, department: String, score: Double, content: String
+   * Schema: id: Long, name: String, department: String, score: Double, content: String
    *
-   * Data (8 rows across 2 batches):
-   *   Batch 1: alice/engineering/100, alice/engineering/200, bob/marketing/150, dave/engineering/50
-   *   Batch 2: alice/engineering/300, bob/sales/250, carol/engineering/175, carol/sales/125
+   * Data (8 rows across 2 batches): Batch 1: alice/engineering/100, alice/engineering/200, bob/marketing/150,
+   * dave/engineering/50 Batch 2: alice/engineering/300, bob/sales/250, carol/engineering/175, carol/sales/125
    *
-   * Expected: name counts: alice=3, bob=2, carol=2, dave=1
-   *           department counts: engineering=5, marketing=1, sales=2
-   *           total score: 1350
+   * Expected: name counts: alice=3, bob=2, carol=2, dave=1 department counts: engineering=5, marketing=1, sales=2 total
+   * score: 1350
    */
   private def withMergedCompanion(indexingModes: String = "")(f: DataFrame => Unit): Unit = {
     val tempDir = Files.createTempDirectory("tantivy4spark-merge-agg-bug").toString
@@ -144,9 +140,12 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
 
       // Build companion from batch1 (creates first split)
       val modesClause = if (indexingModes.nonEmpty) s"INDEXING MODES ($indexingModes) " else ""
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$batch1Path' ${modesClause}AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$batch1Path' ${modesClause}AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       // Combine and re-sync to get a second split
       new File(combinedPath).mkdirs()
@@ -157,9 +156,12 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
         java.nio.file.Files.copy(f.toPath, new File(combinedPath, "batch2_" + f.getName).toPath)
       }
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$combinedPath' ${modesClause}AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$combinedPath' ${modesClause}AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       // Verify multiple splits before merge
       val txLogBefore = TransactionLogFactory.create(new Path(indexPath), spark)
@@ -175,9 +177,9 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
 
       // Verify merge reduced split count
       val txLogAfter = TransactionLogFactory.create(new Path(indexPath), spark)
-      try {
+      try
         txLogAfter.listFiles().size should be < splitCountBefore
-      } finally
+      finally
         txLogAfter.close()
 
       flushCaches()
@@ -196,9 +198,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   // ==========================================================================
 
   test("COUNT(*) after merge") {
-    withMergedCompanion() { df =>
-      df.count() shouldBe 8
-    }
+    withMergedCompanion()(df => df.count() shouldBe 8)
   }
 
   test("COUNT(string_field) after merge") {
@@ -223,9 +223,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   }
 
   test("AVG after merge") {
-    withMergedCompanion() { df =>
-      df.agg(avg("score")).collect()(0).getDouble(0) shouldBe (1350.0 / 8.0) +- 0.01
-    }
+    withMergedCompanion()(df => df.agg(avg("score")).collect()(0).getDouble(0) shouldBe (1350.0 / 8.0) +- 0.01)
   }
 
   test("MIN and MAX on numeric field after merge") {
@@ -244,13 +242,15 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
 
   test("multiple aggregations in single query after merge") {
     withMergedCompanion() { df =>
-      val row = df.agg(
-        count("*"),
-        sum("score"),
-        avg("score"),
-        min("score"),
-        max("score")
-      ).collect()(0)
+      val row = df
+        .agg(
+          count("*"),
+          sum("score"),
+          avg("score"),
+          min("score"),
+          max("score")
+        )
+        .collect()(0)
 
       row.getLong(0) shouldBe 8L
       row.getDouble(1) shouldBe 1350.0
@@ -280,7 +280,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
     withMergedCompanion() { df =>
       // alice: 100+200+300=600, bob: 150+250=400, carol: 175+125=300, dave: 50
       val grouped = df.groupBy("name").agg(sum("score").as("total")).orderBy("name").collect()
-      val m = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
+      val m       = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
       m("alice") shouldBe 600.0
       m("bob") shouldBe 400.0
       m("carol") shouldBe 300.0
@@ -291,7 +291,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   test("GROUP BY string column + AVG after merge") {
     withMergedCompanion() { df =>
       val grouped = df.groupBy("name").agg(avg("score").as("average")).orderBy("name").collect()
-      val m = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
+      val m       = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
       m("alice") shouldBe 200.0 +- 0.01
       m("bob") shouldBe 200.0 +- 0.01
       m("carol") shouldBe 150.0 +- 0.01
@@ -301,10 +301,14 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
 
   test("GROUP BY string column + MIN/MAX after merge") {
     withMergedCompanion() { df =>
-      val grouped = df.groupBy("name").agg(
-        min("score").as("min_score"),
-        max("score").as("max_score")
-      ).orderBy("name").collect()
+      val grouped = df
+        .groupBy("name")
+        .agg(
+          min("score").as("min_score"),
+          max("score").as("max_score")
+        )
+        .orderBy("name")
+        .collect()
       val m = grouped.map(r => r.getString(0) -> (r.getDouble(1), r.getDouble(2))).toMap
       m("alice") shouldBe (100.0, 300.0)
       m("bob") shouldBe (150.0, 250.0)
@@ -315,13 +319,17 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
 
   test("GROUP BY string + multiple aggregations after merge") {
     withMergedCompanion() { df =>
-      val grouped = df.groupBy("name").agg(
-        count("*").as("cnt"),
-        sum("score").as("total"),
-        avg("score").as("average"),
-        min("score").as("lo"),
-        max("score").as("hi")
-      ).orderBy("name").collect()
+      val grouped = df
+        .groupBy("name")
+        .agg(
+          count("*").as("cnt"),
+          sum("score").as("total"),
+          avg("score").as("average"),
+          min("score").as("lo"),
+          max("score").as("hi")
+        )
+        .orderBy("name")
+        .collect()
 
       grouped.length shouldBe 4
 
@@ -351,7 +359,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
     withMergedCompanion() { df =>
       // engineering: 100+200+50+300+175=825, marketing: 150, sales: 250+125=375
       val grouped = df.groupBy("department").agg(sum("score").as("total")).orderBy("department").collect()
-      val m = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
+      val m       = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
       m("engineering") shouldBe 825.0
       m("marketing") shouldBe 150.0
       m("sales") shouldBe 375.0
@@ -371,9 +379,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   }
 
   test("EqualTo with no match after merge") {
-    withMergedCompanion() { df =>
-      df.filter(col("name") === "zzzz").collect().length shouldBe 0
-    }
+    withMergedCompanion()(df => df.filter(col("name") === "zzzz").collect().length shouldBe 0)
   }
 
   test("In filter on string field after merge") {
@@ -540,8 +546,12 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   test("filtered GROUP BY after merge") {
     withMergedCompanion() { df =>
       // engineering only: alice=3, dave=1, carol=1
-      val grouped = df.filter(col("department") === "engineering")
-        .groupBy("name").agg(count("*").as("cnt")).orderBy("name").collect()
+      val grouped = df
+        .filter(col("department") === "engineering")
+        .groupBy("name")
+        .agg(count("*").as("cnt"))
+        .orderBy("name")
+        .collect()
       grouped.length shouldBe 3
       val m = grouped.map(r => r.getString(0) -> r.getLong(1)).toMap
       m("alice") shouldBe 3L
@@ -553,8 +563,12 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
   test("numeric range filter + GROUP BY + SUM after merge") {
     withMergedCompanion() { df =>
       // score >= 150: alice(200,300), bob(150,250), carol(175), dave excluded
-      val grouped = df.filter(col("score") >= 150.0)
-        .groupBy("name").agg(sum("score").as("total")).orderBy("name").collect()
+      val grouped = df
+        .filter(col("score") >= 150.0)
+        .groupBy("name")
+        .agg(sum("score").as("total"))
+        .orderBy("name")
+        .collect()
       val m = grouped.map(r => r.getString(0) -> r.getDouble(1)).toMap
       m("alice") shouldBe 500.0 // 200+300
       m("bob") shouldBe 400.0   // 150+250
@@ -573,9 +587,11 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
 
       // "search" appears in: row 1 (search backend), row 2 (pull requests for search),
       // row 5 (search service), row 7 (tests for search) = 4 rows
-      val result = spark.sql(
-        "SELECT * FROM merged_companion_iq WHERE content indexquery 'search'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT * FROM merged_companion_iq WHERE content indexquery 'search'"
+        )
+        .collect()
       result.length shouldBe 4
     }
   }
@@ -584,9 +600,11 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
     withMergedCompanion("'content':'text'") { df =>
       df.createOrReplaceTempView("merged_companion_phrase")
 
-      val result = spark.sql(
-        "SELECT * FROM merged_companion_phrase WHERE content indexquery '\"pull requests\"'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT * FROM merged_companion_phrase WHERE content indexquery '\"pull requests\"'"
+        )
+        .collect()
       result.length shouldBe 1
     }
   }
@@ -595,9 +613,11 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
     withMergedCompanion("'content':'text'") { df =>
       df.createOrReplaceTempView("merged_companion_nomatch")
 
-      val result = spark.sql(
-        "SELECT * FROM merged_companion_nomatch WHERE content indexquery 'zzzznotfound'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT * FROM merged_companion_nomatch WHERE content indexquery 'zzzznotfound'"
+        )
+        .collect()
       result.length shouldBe 0
     }
   }
@@ -607,9 +627,11 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
       df.createOrReplaceTempView("merged_companion_combined_iq")
 
       // "search" in content AND name = alice: rows 1, 2, 5 (alice with search)
-      val result = spark.sql(
-        "SELECT * FROM merged_companion_combined_iq WHERE content indexquery 'search' AND name = 'alice'"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT * FROM merged_companion_combined_iq WHERE content indexquery 'search' AND name = 'alice'"
+        )
+        .collect()
       result.length shouldBe 3
     }
   }

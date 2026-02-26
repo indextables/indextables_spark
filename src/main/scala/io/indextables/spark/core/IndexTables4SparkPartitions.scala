@@ -431,7 +431,9 @@ class IndexTables4SparkPartitionReader(
         val cleanedIndexQueryFilters = if (partitionColumnNames.nonEmpty && indexQueryFilters.nonEmpty) {
           val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(indexQueryFilters, partitionColumnNames)
           if (cleaned.length != indexQueryFilters.length) {
-            logger.info(s"Stripped ${indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s) from Tantivy query")
+            logger.info(
+              s"Stripped ${indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s) from Tantivy query"
+            )
           }
           cleaned
         } else {
@@ -741,7 +743,7 @@ class IndexTables4SparkPartitionReader(
     import org.apache.spark.sql.types._
     import org.apache.spark.unsafe.types.UTF8String
     if (value == null) return null
-    try {
+    try
       dataType match {
         case StringType  => UTF8String.fromString(value)
         case IntegerType => value.toInt
@@ -764,10 +766,12 @@ class IndexTables4SparkPartitionReader(
           instant.getEpochSecond * 1000000L + instant.getNano / 1000L
         case _ => UTF8String.fromString(value) // fallback: treat as string
       }
-    } catch {
+    catch {
       case e: Exception =>
         throw new IllegalArgumentException(
-          s"Failed to convert partition value '$value' to $dataType: ${e.getMessage}", e)
+          s"Failed to convert partition value '$value' to $dataType: ${e.getMessage}",
+          e
+        )
     }
   }
 }

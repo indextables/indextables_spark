@@ -259,14 +259,17 @@ object EnhancedTransactionLogCache {
   private[transaction] def globalVersionCache: Cache[VersionCacheKey, Seq[Action]] = _globalVersionCache
 
   /**
-   * Atomic get-or-compute: uses Guava's `Cache.get(key, Callable)` to ensure only one thread
-   * computes a missing entry for a given key. Without this, concurrent cache misses on the same
-   * key would redundantly re-read from storage.
+   * Atomic get-or-compute: uses Guava's `Cache.get(key, Callable)` to ensure only one thread computes a missing entry
+   * for a given key. Without this, concurrent cache misses on the same key would redundantly re-read from storage.
    */
-  private def atomicGetOrCompute[K, V](cache: Cache[K, V], key: K, compute: => V): V =
-    try {
+  private def atomicGetOrCompute[K, V](
+    cache: Cache[K, V],
+    key: K,
+    compute: => V
+  ): V =
+    try
       cache.get(key, new Callable[V] { override def call(): V = compute })
-    } catch {
+    catch {
       case e: java.util.concurrent.ExecutionException => throw e.getCause
     }
 
@@ -275,17 +278,23 @@ object EnhancedTransactionLogCache {
    * re-parsing transaction log JSON when creating new DataFrames on the same table.
    */
   def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction =
-    atomicGetOrCompute(globalMetadataCache, tablePath, {
-      logger.debug(s"GLOBAL metadata cache MISS for $tablePath - computing")
-      compute
-    })
+    atomicGetOrCompute(
+      globalMetadataCache,
+      tablePath, {
+        logger.debug(s"GLOBAL metadata cache MISS for $tablePath - computing")
+        compute
+      }
+    )
 
   /** Get or compute ProtocolAction from global cache - shared across all TransactionLog instances. */
   def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction =
-    atomicGetOrCompute(globalProtocolCache, tablePath, {
-      logger.debug(s"GLOBAL protocol cache MISS for $tablePath - computing")
-      compute
-    })
+    atomicGetOrCompute(
+      globalProtocolCache,
+      tablePath, {
+        logger.debug(s"GLOBAL protocol cache MISS for $tablePath - computing")
+        compute
+      }
+    )
 
   /**
    * Get or compute version actions from global cache - shared across all TransactionLog instances. This avoids
@@ -297,10 +306,13 @@ object EnhancedTransactionLogCache {
     compute: => Seq[Action]
   ): Seq[Action] = {
     val key = VersionCacheKey(tablePath, version)
-    atomicGetOrCompute(globalVersionCache, key, {
-      logger.debug(s"GLOBAL version cache MISS for $tablePath version $version - computing")
-      compute
-    })
+    atomicGetOrCompute(
+      globalVersionCache,
+      key, {
+        logger.debug(s"GLOBAL version cache MISS for $tablePath version $version - computing")
+        compute
+      }
+    )
   }
 
   /**
@@ -317,10 +329,13 @@ object EnhancedTransactionLogCache {
    *   Filtered schema string
    */
   def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String =
-    atomicGetOrCompute(globalFilteredSchemaCache, schemaHash, {
-      logger.debug(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing (cache size=${globalFilteredSchemaCache.size()})")
-      compute
-    })
+    atomicGetOrCompute(
+      globalFilteredSchemaCache,
+      schemaHash, {
+        logger.debug(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing (cache size=${globalFilteredSchemaCache.size()})")
+        compute
+      }
+    )
 
   /**
    * Get or compute DocMappingMetadata - parses docMappingJson once and caches the extracted metadata.
@@ -366,10 +381,13 @@ object EnhancedTransactionLogCache {
     manifestPath: String,
     compute: => Seq[io.indextables.spark.transaction.avro.FileEntry]
   ): Seq[io.indextables.spark.transaction.avro.FileEntry] =
-    atomicGetOrCompute(globalAvroManifestFileCache, manifestPath, {
-      logger.debug(s"GLOBAL Avro manifest file cache MISS for $manifestPath - reading from storage")
-      compute
-    })
+    atomicGetOrCompute(
+      globalAvroManifestFileCache,
+      manifestPath, {
+        logger.debug(s"GLOBAL Avro manifest file cache MISS for $manifestPath - reading from storage")
+        compute
+      }
+    )
 
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {

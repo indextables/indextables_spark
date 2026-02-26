@@ -19,30 +19,28 @@ package io.indextables.spark.transaction
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.TestBase
 
 /**
  * Validates that cache-staleness bugs in the global transaction log caches are fixed.
  *
- * Bug 1 (FIXED) – global caches now use `expireAfterWrite` instead of `expireAfterAccess`
- *   Previously, under continuous query load the TTL clock reset on every read, so `_last_checkpoint`
- *   was never re-read from disk.  All version-keyed caches used the stale checkpoint version as
- *   their key, returning stale V1 data even after V2 was committed by another writer.
- *   Fix: all global caches now use `expireAfterWrite` so entries expire after a fixed TTL
- *   regardless of access frequency.
+ * Bug 1 (FIXED) – global caches now use `expireAfterWrite` instead of `expireAfterAccess` Previously, under continuous
+ * query load the TTL clock reset on every read, so `_last_checkpoint` was never re-read from disk. All version-keyed
+ * caches used the stale checkpoint version as their key, returning stale V1 data even after V2 was committed by another
+ * writer. Fix: all global caches now use `expireAfterWrite` so entries expire after a fixed TTL regardless of access
+ * frequency.
  *
- * Bug 2 (FIXED) – `getMetadata()` no longer uses non-local return
- *   Previously in Avro mode, `getMetadata()` used `return` inside the compute block, which was a
- *   non-local return that bypassed `globalMetadataCache.put()`. The global metadata cache was NEVER
- *   populated in Avro mode.  Fix: restructured to use if/else expressions instead of `return`.
+ * Bug 2 (FIXED) – `getMetadata()` no longer uses non-local return Previously in Avro mode, `getMetadata()` used
+ * `return` inside the compute block, which was a non-local return that bypassed `globalMetadataCache.put()`. The global
+ * metadata cache was NEVER populated in Avro mode. Fix: restructured to use if/else expressions instead of `return`.
  *
- * Test approach: we capture a complete snapshot of ALL global caches after a V1 read,
- * then inject that snapshot after a V2 write. Since `expireAfterWrite` is now used, the injected
- * entries will still be stale (simulating a reader JVM), but subsequent cache misses will
- * re-read fresh data from disk.
+ * Test approach: we capture a complete snapshot of ALL global caches after a V1 read, then inject that snapshot after a
+ * V2 write. Since `expireAfterWrite` is now used, the injected entries will still be stale (simulating a reader JVM),
+ * but subsequent cache misses will re-read fresh data from disk.
  */
 class TransactionLogCacheStalenessTest extends TestBase {
 
@@ -67,11 +65,11 @@ class TransactionLogCacheStalenessTest extends TestBase {
 
   test("stale cache snapshot causes listFiles to return stale file list") {
     withTempPath { tempPath =>
-
       // -----------------------------------------------------------------------
       // Step 1: Write V1 (2 rows → 2 splits in local[2] mode).
       // -----------------------------------------------------------------------
-      spark.range(2)
+      spark
+        .range(2)
         .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
@@ -89,14 +87,16 @@ class TransactionLogCacheStalenessTest extends TestBase {
       assert(filesV1.nonEmpty, "V1 should have files")
 
       // Capture ALL global cache entries before close() clears them.
-      val staleLastCkpt = EnhancedTransactionLogCache.globalLastCheckpointInfoCache.asMap().asScala.toMap
+      val staleLastCkpt          = EnhancedTransactionLogCache.globalLastCheckpointInfoCache.asMap().asScala.toMap
       val staleCheckpointActions = EnhancedTransactionLogCache.globalCheckpointActionsCache.asMap().asScala.toMap
-      val staleAvroFileList = EnhancedTransactionLogCache.globalAvroFileListCache.asMap().asScala.toMap
+      val staleAvroFileList      = EnhancedTransactionLogCache.globalAvroFileListCache.asMap().asScala.toMap
       val staleAvroStateManifest = EnhancedTransactionLogCache.globalAvroStateManifestCache.asMap().asScala.toMap
-      val staleProtocol = EnhancedTransactionLogCache.globalProtocolCache.asMap().asScala.toMap
+      val staleProtocol          = EnhancedTransactionLogCache.globalProtocolCache.asMap().asScala.toMap
 
-      println(s"V1 cache snapshot: lastCkpt=${staleLastCkpt.size}, ckptActions=${staleCheckpointActions.size}, " +
-        s"avroFileList=${staleAvroFileList.size}, avroManifest=${staleAvroStateManifest.size}, protocol=${staleProtocol.size}")
+      println(
+        s"V1 cache snapshot: lastCkpt=${staleLastCkpt.size}, ckptActions=${staleCheckpointActions.size}, " +
+          s"avroFileList=${staleAvroFileList.size}, avroManifest=${staleAvroStateManifest.size}, protocol=${staleProtocol.size}"
+      )
 
       // Sanity: confirm the key caches are populated.
       assert(staleLastCkpt.nonEmpty, "lastCheckpointInfo should be cached after V1 read")
@@ -110,7 +110,8 @@ class TransactionLogCacheStalenessTest extends TestBase {
       // -----------------------------------------------------------------------
       // Step 3: Append V2 (1 more row → 3 files total).
       // -----------------------------------------------------------------------
-      spark.range(1)
+      spark
+        .range(1)
         .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
@@ -132,20 +133,25 @@ class TransactionLogCacheStalenessTest extends TestBase {
       //         queries keep resetting the TTL so nothing ever expires.
       // -----------------------------------------------------------------------
       EnhancedTransactionLogCache.clearGlobalCaches() // Start clean.
-      staleLastCkpt.foreach { case (k, v) =>
-        EnhancedTransactionLogCache.globalLastCheckpointInfoCache.put(k, v)
+      staleLastCkpt.foreach {
+        case (k, v) =>
+          EnhancedTransactionLogCache.globalLastCheckpointInfoCache.put(k, v)
       }
-      staleCheckpointActions.foreach { case (k, v) =>
-        EnhancedTransactionLogCache.globalCheckpointActionsCache.put(k, v)
+      staleCheckpointActions.foreach {
+        case (k, v) =>
+          EnhancedTransactionLogCache.globalCheckpointActionsCache.put(k, v)
       }
-      staleAvroFileList.foreach { case (k, v) =>
-        EnhancedTransactionLogCache.globalAvroFileListCache.put(k, v)
+      staleAvroFileList.foreach {
+        case (k, v) =>
+          EnhancedTransactionLogCache.globalAvroFileListCache.put(k, v)
       }
-      staleAvroStateManifest.foreach { case (k, v) =>
-        EnhancedTransactionLogCache.globalAvroStateManifestCache.put(k, v)
+      staleAvroStateManifest.foreach {
+        case (k, v) =>
+          EnhancedTransactionLogCache.globalAvroStateManifestCache.put(k, v)
       }
-      staleProtocol.foreach { case (k, v) =>
-        EnhancedTransactionLogCache.globalProtocolCache.put(k, v)
+      staleProtocol.foreach {
+        case (k, v) =>
+          EnhancedTransactionLogCache.globalProtocolCache.put(k, v)
       }
       println(s"Re-injected full stale V1 cache snapshot")
 
@@ -189,11 +195,11 @@ class TransactionLogCacheStalenessTest extends TestBase {
 
   test("getMetadata populates globalMetadataCache in Avro mode") {
     withTempPath { tempPath =>
-
       // -----------------------------------------------------------------------
       // Step 1: Write a table and call getMetadata() via TransactionLog.
       // -----------------------------------------------------------------------
-      spark.range(5)
+      spark
+        .range(5)
         .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.fastfields", "id")
@@ -234,8 +240,8 @@ class TransactionLogCacheStalenessTest extends TestBase {
 
   test("getProtocol populates globalProtocolCache in Avro mode") {
     withTempPath { tempPath =>
-
-      spark.range(5)
+      spark
+        .range(5)
         .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
