@@ -453,7 +453,7 @@ case class SyncToExternalCommand(
 
       // 7b. Apply WHERE partition filter
       val parquetFilesToIndex =
-        applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession, effectiveWherePredicates, sourceSchema)
+        applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession, effectiveWherePredicates, Some(sourceSchema))
 
       // Source version for commits (Delta version, Iceberg snapshot ID, or -1 for Parquet)
       val sourceVersion = sourceVersionOpt.getOrElse(-1L)
