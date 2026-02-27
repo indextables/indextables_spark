@@ -172,11 +172,18 @@ class SplitReaderContext(
    */
   def buildSplitQuery(engine: SplitSearchEngine): SplitQuery = {
     // Get field names from split schema
+    // CRITICAL: Schema must be closed to prevent native memory leak
     val splitFieldNames = {
       val splitSchema = engine.getSchema()
-      try splitSchema.getFieldNames().asScala.toSet
-      catch { case _: Exception => Set.empty[String] }
-      finally splitSchema.close()
+      try {
+        val fieldNames = splitSchema.getFieldNames().asScala.toSet
+        logger.debug(s"Split schema contains fields: ${fieldNames.mkString(", ")}")
+        fieldNames
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
+          Set.empty[String]
+      } finally splitSchema.close()
     }
 
     // Filter out partition-only filters (already handled by partition pruning)
@@ -214,17 +221,22 @@ class SplitReaderContext(
 
     val allFilters: Array[Any] = optimizedFilters.asInstanceOf[Array[Any]] ++ cleanedIndexQueryFilters
 
-    if (allFilters.nonEmpty) {
+    val splitQuery = if (allFilters.nonEmpty) {
       if (splitFieldNames.nonEmpty) {
-        FiltersToQueryConverter.convertToSplitQuery(
+        val q = FiltersToQueryConverter.convertToSplitQuery(
           allFilters, engine, Some(splitFieldNames), Some(cachedOptionsMap)
         )
+        logger.debug(s"SplitQuery (with schema validation): ${q.getClass.getSimpleName}")
+        q
       } else {
-        FiltersToQueryConverter.convertToSplitQuery(allFilters, engine, None, Some(cachedOptionsMap))
+        val q = FiltersToQueryConverter.convertToSplitQuery(allFilters, engine, None, Some(cachedOptionsMap))
+        logger.debug(s"SplitQuery (no schema validation): ${q.getClass.getSimpleName}")
+        q
       }
     } else {
       new SplitMatchAllQuery()
     }
+    splitQuery
   }
 
   /** Collect batch optimization metrics delta and add to accumulator. */

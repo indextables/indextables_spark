@@ -1181,6 +1181,59 @@ class CompanionColumnarReadTest extends AnyFunSuite with Matchers with BeforeAnd
     }
   }
 
+  test("equivalence: columnar and row paths produce identical results for Timestamp columns") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  created_at TIMESTAMP
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   TIMESTAMP '2024-01-15 10:30:00'),
+                   |  (2, 'Bob',     TIMESTAMP '2024-06-15 14:00:00'),
+                   |  (3, 'Charlie', TIMESTAMP '2024-09-01 09:00:00'),
+                   |  (4, 'Dave',    TIMESTAMP '2024-12-25 23:59:59')
+                   |""".stripMargin)
+
+      val syncResult = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val columnarRows = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .load(indexPath)
+        .collect()
+
+      val rowRows = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "false")
+        .load(indexPath)
+        .collect()
+
+      columnarRows.length shouldBe rowRows.length
+      columnarRows.length shouldBe 4
+
+      val columnarById = columnarRows.map(r => r.getAs[Int]("id") -> r).toMap
+      val rowById      = rowRows.map(r => r.getAs[Int]("id") -> r).toMap
+
+      for ((id, rowRow) <- rowById) {
+        val colRow = columnarById(id)
+        withClue(s"id=$id: ") {
+          colRow.getAs[String]("name") shouldBe rowRow.getAs[String]("name")
+          colRow.getAs[Timestamp]("created_at") shouldBe rowRow.getAs[Timestamp]("created_at")
+        }
+      }
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   //  Mixed scenario: all types + partitioning + filter
   // ═══════════════════════════════════════════════════════════════════

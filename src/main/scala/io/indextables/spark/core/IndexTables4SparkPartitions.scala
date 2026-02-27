@@ -521,8 +521,8 @@ class IndexTables4SparkMultiSplitPartitionReader(
     // Close current reader before moving to next
     closeCurrentReader()
 
-    // Check if we've satisfied the limit
-    val remainingLimit = effectiveLimit - totalRowsReturned.toInt
+    // Check if we've satisfied the limit (safe Long subtraction avoids Int overflow)
+    val remainingLimit = math.max(0L, effectiveLimit.toLong - totalRowsReturned).toInt
     if (remainingLimit <= 0) {
       logger.debug(
         s"MultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), skipping remaining ${addActions.length - currentSplitIndex} splits"
@@ -539,7 +539,9 @@ class IndexTables4SparkMultiSplitPartitionReader(
         s"MultiSplitPartitionReader: initializing split $currentSplitIndex/${addActions.length}: ${addAction.path}"
       )
 
-      // Create a new single-split reader with the remaining limit
+      // Create a new single-split reader with the remaining limit.
+      // Pass None for metricsAccumulator to child readers — the multi-split reader
+      // reports cumulative metrics from its own baseline to avoid double-counting.
       val singleSplitReader = new IndexTables4SparkPartitionReader(
         addAction,
         readSchema,
@@ -549,7 +551,7 @@ class IndexTables4SparkMultiSplitPartitionReader(
         config,
         tablePath,
         indexQueryFilters,
-        metricsAccumulator
+        metricsAccumulator = None
       )
 
       currentReader = Some(singleSplitReader)
