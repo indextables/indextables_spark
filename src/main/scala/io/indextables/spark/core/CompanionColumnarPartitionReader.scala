@@ -27,7 +27,7 @@ import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.execution.vectorized.ConstantColumnVector
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatch, ColumnVector}
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.hadoop.fs.Path
@@ -210,22 +210,46 @@ class CompanionColumnarPartitionReader(
   /**
    * Assemble the final ColumnarBatch in readSchema column order by interleaving data columns (from FFI) with
    * partition columns (as ConstantColumnVector).
+   *
+   * Uses name-based mapping from actual FFI vector field names (not positional), since the native FFI export
+   * may return columns in parquet schema order rather than the requested dataFieldNames order.
    */
   private def assembleColumnarBatch(dataBatch: ColumnarBatch, numRows: Int): ColumnarBatch = {
-    if (partitionColumnNames.isEmpty) return dataBatch
+    // Build name→index map from actual FFI vector field names (not positional assumption)
+    val ffiColumnMap: Map[String, Int] = (0 until dataBatch.numCols()).map { i =>
+      val vector = dataBatch.column(i).asInstanceOf[ArrowColumnVector].getValueVector
+      val name = vector.getField.getName
+      logger.info(
+        s"FFI column $i: name=$name, sparkExpected=${if (i < dataFieldNames.length) dataFieldNames(i) else "N/A"}, " +
+          s"arrowType=${vector.getField.getType}, vectorClass=${vector.getClass.getSimpleName}"
+      )
+      name -> i
+    }.toMap
 
-    // Build index mapping: data field name -> column index in dataBatch
-    val dataFieldIndex = dataFieldNames.zipWithIndex.toMap
+    // Warn if FFI column order differs from requested order
+    val actualOrder = (0 until dataBatch.numCols()).map { i =>
+      dataBatch.column(i).asInstanceOf[ArrowColumnVector].getValueVector.getField.getName
+    }
+    if (actualOrder != dataFieldNames.toSeq) {
+      logger.warn(
+        s"FFI column order differs from requested order! " +
+          s"Requested: [${dataFieldNames.mkString(", ")}], " +
+          s"Actual: [${actualOrder.mkString(", ")}]. Using name-based mapping."
+      )
+    }
 
     val allVectors: Array[ColumnVector] = readSchema.fields.map { field =>
       if (partitionColumnNames.contains(field.name)) {
-        // Partition column: create constant vector
-        val strVal = addAction.partitionValues(field.name)
-        createConstantColumnVector(strVal, field.dataType, numRows)
+        createConstantColumnVector(addAction.partitionValues(field.name), field.dataType, numRows)
       } else {
-        // Data column: reference from FFI batch
-        val idx = dataFieldIndex(field.name)
-        dataBatch.column(idx)
+        ffiColumnMap.get(field.name) match {
+          case Some(idx) => dataBatch.column(idx)
+          case None =>
+            throw new IllegalStateException(
+              s"Column '${field.name}' not found in FFI batch. " +
+                s"Available columns: [${ffiColumnMap.keys.mkString(", ")}]"
+            )
+        }
       }
     }
 
