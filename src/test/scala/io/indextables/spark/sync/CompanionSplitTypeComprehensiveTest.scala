@@ -113,6 +113,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
     spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.read.defaultLimit", "1000")
+      .option("spark.indextables.read.columnar.enabled", "false") // Explicit row path (has Timestamp tests)
       .load(indexPath)
   }
 
@@ -1111,6 +1112,186 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       // Filter on another mixed-case column via SQL
       val deptResult = spark.sql("SELECT * FROM mixed_case_test WHERE deptName = 'Engineering'").collect()
       deptResult.length shouldBe 2
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  TEMPORAL RANGE QUERIES: Date and Timestamp range filters
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("Date column: range filter greater-than") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  event_date DATE
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   DATE '2024-01-15'),
+                   |  (2, 'Bob',     DATE '2024-06-15'),
+                   |  (3, 'Charlie', DATE '2024-09-01'),
+                   |  (4, 'Dave',    DATE '2024-12-25')
+                   |""".stripMargin)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+
+      val afterJune = df.filter(col("event_date") > java.sql.Date.valueOf("2024-06-01")).collect()
+      afterJune.length shouldBe 3
+      afterJune.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie", "Dave")
+
+      val afterSept = df.filter(col("event_date") > java.sql.Date.valueOf("2024-09-01")).collect()
+      afterSept.length shouldBe 1
+      afterSept.head.getAs[String]("name") shouldBe "Dave"
+    }
+  }
+
+  test("Date column: range filter less-than") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  event_date DATE
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   DATE '2024-01-15'),
+                   |  (2, 'Bob',     DATE '2024-06-15'),
+                   |  (3, 'Charlie', DATE '2024-09-01'),
+                   |  (4, 'Dave',    DATE '2024-12-25')
+                   |""".stripMargin)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+
+      val beforeJuly = df.filter(col("event_date") < java.sql.Date.valueOf("2024-07-01")).collect()
+      beforeJuly.length shouldBe 2
+      beforeJuly.map(_.getAs[String]("name")).toSet shouldBe Set("Alice", "Bob")
+    }
+  }
+
+  test("Date column: range filter between (AND of >= and <)") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  event_date DATE
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   DATE '2024-01-15'),
+                   |  (2, 'Bob',     DATE '2024-06-15'),
+                   |  (3, 'Charlie', DATE '2024-09-01'),
+                   |  (4, 'Dave',    DATE '2024-12-25')
+                   |""".stripMargin)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+
+      val midYear = df.filter(
+        col("event_date") >= java.sql.Date.valueOf("2024-06-01") &&
+          col("event_date") < java.sql.Date.valueOf("2024-10-01")
+      ).collect()
+      midYear.length shouldBe 2
+      midYear.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie")
+    }
+  }
+
+  test("Timestamp column: range filter greater-than") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  created_at TIMESTAMP
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   TIMESTAMP '2024-01-15 10:00:00'),
+                   |  (2, 'Bob',     TIMESTAMP '2024-06-15 14:30:00'),
+                   |  (3, 'Charlie', TIMESTAMP '2024-09-01 09:00:00'),
+                   |  (4, 'Dave',    TIMESTAMP '2024-12-25 23:59:59')
+                   |""".stripMargin)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+
+      val afterJune = df.filter(col("created_at") > java.sql.Timestamp.valueOf("2024-06-01 00:00:00")).collect()
+      afterJune.length shouldBe 3
+      afterJune.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie", "Dave")
+    }
+  }
+
+  test("Timestamp column: range filter between") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  created_at TIMESTAMP
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   TIMESTAMP '2024-01-15 10:00:00'),
+                   |  (2, 'Bob',     TIMESTAMP '2024-06-15 14:30:00'),
+                   |  (3, 'Charlie', TIMESTAMP '2024-09-01 09:00:00'),
+                   |  (4, 'Dave',    TIMESTAMP '2024-12-25 23:59:59')
+                   |""".stripMargin)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+
+      val midYear = df.filter(
+        col("created_at") >= java.sql.Timestamp.valueOf("2024-06-01 00:00:00") &&
+          col("created_at") < java.sql.Timestamp.valueOf("2024-10-01 00:00:00")
+      ).collect()
+      midYear.length shouldBe 2
+      midYear.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie")
+    }
+  }
+
+  test("Date partition column: range filter prunes partitions") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  event_date DATE
+                   |) USING DELTA
+                   |PARTITIONED BY (event_date)""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'Alice',   DATE '2024-01-15'),
+                   |  (2, 'Bob',     DATE '2024-06-15'),
+                   |  (3, 'Charlie', DATE '2024-09-01'),
+                   |  (4, 'Dave',    DATE '2024-12-25')
+                   |""".stripMargin)
+
+      val df = buildAndReadCompanion(deltaPath, indexPath)
+
+      // Range on partition column — should prune partitions
+      val afterJune = df.filter(col("event_date") > java.sql.Date.valueOf("2024-06-01")).collect()
+      afterJune.length shouldBe 3
+      afterJune.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie", "Dave")
+
+      // Between on partition column
+      val q3q4 = df.filter(
+        col("event_date") >= java.sql.Date.valueOf("2024-07-01") &&
+          col("event_date") <= java.sql.Date.valueOf("2024-12-31")
+      ).collect()
+      q3q4.length shouldBe 2
+      q3q4.map(_.getAs[String]("name")).toSet shouldBe Set("Charlie", "Dave")
     }
   }
 }

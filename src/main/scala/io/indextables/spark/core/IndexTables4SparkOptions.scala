@@ -512,6 +512,9 @@ object IndexTables4SparkOptions {
   val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
   val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 
+  // Columnar reads configuration
+  val COLUMNAR_READS_ENABLED = "spark.indextables.read.columnar.enabled"
+
   // L2 Disk Cache configuration keys
   val DISK_CACHE_ENABLED                = "spark.indextables.cache.disk.enabled"
   val DISK_CACHE_PATH                   = "spark.indextables.cache.disk.path"

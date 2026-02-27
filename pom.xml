@@ -54,6 +54,7 @@
         <scalatest.version>3.2.15</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>
+        <arrow.version>12.0.1</arrow.version>
     </properties>
 
     <dependencyManagement>
@@ -170,12 +171,20 @@
         </dependency>
 
 
+        <!-- Arrow C Data Interface for zero-copy FFI columnar reads -->
+        <!-- Must match Spark 3.5.x bundled Arrow version; do NOT shade -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
         <!-- Platform-specific classifier is set by profiles below (darwin-aarch64, linux-x86_64, etc.) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.30.9</version>
+            <version>0.31.0</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 
