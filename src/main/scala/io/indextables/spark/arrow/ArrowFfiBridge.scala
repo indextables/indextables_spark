@@ -79,12 +79,6 @@ class ArrowFfiBridge extends AutoCloseable {
       arrays.zip(schemas).foreach {
         case (arr, sch) =>
           val fieldVector: FieldVector = Data.importVector(allocator, arr, sch, dictionaryProvider)
-          logger.info(
-            s"Imported FFI vector: name=${fieldVector.getField.getName}, " +
-              s"arrowType=${fieldVector.getField.getType}, " +
-              s"vectorClass=${fieldVector.getClass.getSimpleName}, " +
-              s"valueCount=${fieldVector.getValueCount}"
-          )
           importedVectors += new ArrowColumnVector(fieldVector)
       }
       logger.debug(s"Imported ${importedVectors.size} Arrow vectors with $numRows rows")

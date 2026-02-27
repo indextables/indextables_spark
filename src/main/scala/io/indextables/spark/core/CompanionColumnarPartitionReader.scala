@@ -215,28 +215,12 @@ class CompanionColumnarPartitionReader(
    * may return columns in parquet schema order rather than the requested dataFieldNames order.
    */
   private def assembleColumnarBatch(dataBatch: ColumnarBatch, numRows: Int): ColumnarBatch = {
-    // Build name→index map from actual FFI vector field names (not positional assumption)
+    // Build name→index map from actual FFI vector field names (not positional assumption).
+    // The native FFI export may return columns in parquet schema order rather than requested order.
     val ffiColumnMap: Map[String, Int] = (0 until dataBatch.numCols()).map { i =>
-      val vector = dataBatch.column(i).asInstanceOf[ArrowColumnVector].getValueVector
-      val name = vector.getField.getName
-      logger.info(
-        s"FFI column $i: name=$name, sparkExpected=${if (i < dataFieldNames.length) dataFieldNames(i) else "N/A"}, " +
-          s"arrowType=${vector.getField.getType}, vectorClass=${vector.getClass.getSimpleName}"
-      )
+      val name = dataBatch.column(i).asInstanceOf[ArrowColumnVector].getValueVector.getField.getName
       name -> i
     }.toMap
-
-    // Warn if FFI column order differs from requested order
-    val actualOrder = (0 until dataBatch.numCols()).map { i =>
-      dataBatch.column(i).asInstanceOf[ArrowColumnVector].getValueVector.getField.getName
-    }
-    if (actualOrder != dataFieldNames.toSeq) {
-      logger.warn(
-        s"FFI column order differs from requested order! " +
-          s"Requested: [${dataFieldNames.mkString(", ")}], " +
-          s"Actual: [${actualOrder.mkString(", ")}]. Using name-based mapping."
-      )
-    }
 
     val allVectors: Array[ColumnVector] = readSchema.fields.map { field =>
       if (partitionColumnNames.contains(field.name)) {
