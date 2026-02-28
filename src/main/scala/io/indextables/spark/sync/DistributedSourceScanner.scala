@@ -41,7 +41,8 @@ case class DistributedScanResult(
   partitionColumns: Seq[String],
   storageRoot: Option[String],
   sampleFilePath: Option[String],
-  numDistributedParts: Int)
+  numDistributedParts: Int,
+  schema: Option[StructType] = None)
 
 /**
  * Static conversion functions used in RDD closures. These MUST be in the companion object (not instance methods) to
@@ -449,7 +450,8 @@ class DistributedSourceScanner(spark: SparkSession) {
       partitionColumns = snapshotPartCols,
       storageRoot = None, // Delta uses relative paths from table root
       sampleFilePath = sampleFile,
-      numDistributedParts = checkpointPartPaths.size
+      numDistributedParts = checkpointPartPaths.size,
+      schema = schemaOpt
     )
   }
 

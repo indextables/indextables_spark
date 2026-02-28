@@ -354,8 +354,9 @@ case class SyncToExternalCommand(
       )
     }
 
-    // Schema: always use reader (independent JNI call, doesn't trigger file listing)
-    val sourceSchemaOpt = Some(reader.schema())
+    // Schema: prefer distributed result (already parsed from snapshotInfo.getSchemaJson()),
+    // fall back to reader.schema() (independent JNI call) only for non-distributed or Parquet
+    val sourceSchemaOpt = distributedResult.flatMap(_.schema).orElse(Some(reader.schema()))
 
     logger.info(
       s"Source table at $sourcePath: version=${sourceVersionOpt.getOrElse("none")}, " +
@@ -415,7 +416,8 @@ case class SyncToExternalCommand(
 
     try {
       // 5. Determine sync mode: initial vs incremental
-      val sourceSchema                   = reader.schema()
+      // Reuse schema from distributed result to avoid redundant JNI call to DeltaTableReader.readSchema()
+      val sourceSchema                   = sourceSchemaOpt.getOrElse(reader.schema())
       val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, sourceSchema, partitionColumns)
 
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
