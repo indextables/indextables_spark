@@ -22,6 +22,8 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
+import org.apache.spark.sql.types.{DataType, StructType}
+
 import io.indextables.spark.arrow.ArrowFfiBridge
 import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaTableReader}
 import io.indextables.tantivy4java.filter.PartitionFilter
@@ -308,16 +310,18 @@ class DistributedSourceScanner(spark: SparkSession) {
    * Scan a Delta table using distributed checkpoint reading.
    *
    * Flow:
-   *   1. getSnapshotInfo() on driver → checkpoint part paths + commit file paths
-   *   2. readPostCheckpointChanges() on driver → adds/removes after checkpoint
-   *   3. sc.parallelize(checkpointPartPaths) → flatMap(readCheckpointPart) on executors
-   *   4. Filter out removed paths, union with post-checkpoint adds
-   *   5. Map DeltaFileEntry → CompanionSourceFile
+   *   1. getSnapshotInfo() on driver → checkpoint part paths + commit file paths + schema + partition columns
+   *   2. Build PartitionFilter from WHERE predicates using snapshot metadata (no listFiles!)
+   *   3. readPostCheckpointChanges() on driver → adds/removes after checkpoint
+   *   4. sc.parallelize(checkpointPartPaths) → flatMap(readCheckpointPart) on executors
+   *   5. Filter out removed paths, union with post-checkpoint adds
+   *   6. Map DeltaFileEntry → CompanionSourceFile
    */
   def scanDeltaTable(
     path: String,
     credentials: Map[String, String],
-    partitionFilter: Option[PartitionFilter] = None
+    partitionFilter: Option[PartitionFilter] = None,
+    wherePredicates: Seq[String] = Seq.empty
   ): DistributedScanResult = {
     val deltaKernelPath = DeltaLogReader.normalizeForDeltaKernel(path)
     val deltaConfig     = DeltaLogReader.translateCredentials(credentials)
@@ -325,6 +329,28 @@ class DistributedSourceScanner(spark: SparkSession) {
     logger.info(s"Distributed Delta scan: getting snapshot info for $path" +
       partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse(""))
     val snapshotInfo = DeltaTableReader.getSnapshotInfo(deltaKernelPath, deltaConfig)
+
+    // Build PartitionFilter from WHERE predicates using snapshot metadata.
+    // This avoids calling reader.partitionColumns() which triggers the blocking listFiles() call.
+    val effectiveFilter = partitionFilter.orElse {
+      if (wherePredicates.nonEmpty) {
+        try {
+          val partCols = snapshotInfo.getPartitionColumns.asScala.toSeq
+          if (partCols.nonEmpty) {
+            val schemaOpt = try {
+              Some(DataType.fromJson(snapshotInfo.getSchemaJson).asInstanceOf[StructType])
+            } catch { case _: Exception => None }
+            val filter = SparkPredicateToPartitionFilter.convert(wherePredicates, partCols, spark, schemaOpt)
+            filter.foreach(f => logger.info(s"Built native PartitionFilter from snapshot metadata: ${f.toJson}"))
+            filter
+          } else None
+        } catch {
+          case e: Exception =>
+            logger.debug(s"Cannot build PartitionFilter from snapshot metadata: ${e.getMessage}")
+            None
+        }
+      } else None
+    }
     logger.info(
       s"Delta snapshot: version=${snapshotInfo.getVersion}, " +
         s"checkpointParts=${snapshotInfo.getCheckpointPartPaths.size}, " +
@@ -332,7 +358,7 @@ class DistributedSourceScanner(spark: SparkSession) {
     )
 
     // Read post-checkpoint changes on driver (small: just JSON commit files after last checkpoint)
-    val postCheckpointChanges = partitionFilter match {
+    val postCheckpointChanges = effectiveFilter match {
       case Some(filter) =>
         DeltaTableReader.readPostCheckpointChanges(deltaKernelPath, deltaConfig, snapshotInfo.getCommitFilePaths, filter)
       case None =>
@@ -352,7 +378,7 @@ class DistributedSourceScanner(spark: SparkSession) {
     // Broadcast config, removed paths, filter, and Arrow FFI flag for executor use
     val broadcastConfig   = sc.broadcast((deltaKernelPath, deltaConfig))
     val broadcastRemoved  = sc.broadcast(removedPaths)
-    val broadcastFilter   = sc.broadcast(partitionFilter.orNull)
+    val broadcastFilter   = sc.broadcast(effectiveFilter.orNull)
     val broadcastArrowFfi = sc.broadcast(arrowFfiEnabled)
 
     val checkpointFilesRDD: RDD[CompanionSourceFile] = if (checkpointPartPaths.nonEmpty) {
@@ -361,7 +387,7 @@ class DistributedSourceScanner(spark: SparkSession) {
         .flatMap { partPath =>
           val (kernelPath, config) = broadcastConfig.value
           val filter               = broadcastFilter.value
-          if (broadcastArrowFfi.value && filter != null) {
+          if (broadcastArrowFfi.value) {
             readDeltaCheckpointPartArrowFfi(kernelPath, config, partPath, filter)
           } else if (filter != null) {
             DeltaTableReader.readCheckpointPart(kernelPath, config, partPath, filter).asScala
@@ -416,7 +442,8 @@ class DistributedSourceScanner(spark: SparkSession) {
     tableName: String,
     icebergConfig: java.util.Map[String, String],
     snapshotId: Option[Long],
-    partitionFilter: Option[PartitionFilter] = None
+    partitionFilter: Option[PartitionFilter] = None,
+    wherePredicates: Seq[String] = Seq.empty
   ): DistributedScanResult = {
     logger.info(s"Distributed Iceberg scan: getting snapshot info for $catalogName.$namespace.$tableName" +
       partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse(""))
@@ -460,7 +487,7 @@ class DistributedSourceScanner(spark: SparkSession) {
         val (cat, ns, tbl, config) = broadcastConfig.value
         val filter                 = broadcastFilter.value
         val root                   = broadcastRoot.value
-        if (broadcastArrowFfi.value && filter != null) {
+        if (broadcastArrowFfi.value) {
           readIcebergManifestArrowFfi(cat, ns, tbl, config, manifestPath, filter, root)
         } else if (filter != null) {
           val entries = IcebergTableReader.readManifestFile(cat, ns, tbl, config, manifestPath, false, filter)
@@ -499,7 +526,8 @@ class DistributedSourceScanner(spark: SparkSession) {
   def scanParquetDirectory(
     path: String,
     credentials: Map[String, String],
-    partitionFilter: Option[PartitionFilter] = None
+    partitionFilter: Option[PartitionFilter] = None,
+    wherePredicates: Seq[String] = Seq.empty
   ): DistributedScanResult = {
     val normalizedPath = ParquetDirectoryReader.normalizeForObjectStore(path)
     val nativeConfig   = ParquetDirectoryReader.translateCredentials(credentials)

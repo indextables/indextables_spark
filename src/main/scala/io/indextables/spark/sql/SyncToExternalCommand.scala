@@ -36,7 +36,6 @@ import io.indextables.spark.sync.{
   DeltaSourceReader,
   IcebergSourceReader,
   ParquetDirectoryReader,
-  SparkPredicateToPartitionFilter,
   SyncConfig,
   SyncIndexingGroup,
   SyncTaskExecutor
@@ -267,25 +266,10 @@ case class SyncToExternalCommand(
       .get("spark.indextables.companion.sync.distributedLogRead.enabled")
       .forall(_.equalsIgnoreCase("true"))
 
-    // Build native PartitionFilter from WHERE predicates for JNI-side filtering.
-    // This is additive — Spark-side applyWhereFilter() remains as a safety net.
-    val nativePartitionFilter = if (wherePredicates.nonEmpty) {
-      try {
-        val readerPartCols = reader.partitionColumns()
-        if (readerPartCols.nonEmpty) {
-          val filter = SparkPredicateToPartitionFilter.convert(
-            wherePredicates, readerPartCols, sparkSession, Some(reader.schema()))
-          filter.foreach(f => logger.info(s"Built native PartitionFilter: ${f.toJson}"))
-          filter
-        } else None
-      } catch {
-        case e: Exception =>
-          logger.warn(s"Cannot build native PartitionFilter, will filter Spark-side: ${e.getMessage}")
-          None
-      }
-    } else None
-
-    // Attempt distributed scan if enabled
+    // Attempt distributed scan if enabled.
+    // WHERE predicates are passed to the scanner so it can build the PartitionFilter
+    // using lightweight snapshot metadata (getSnapshotInfo) — avoids triggering the
+    // blocking DeltaTableReader.listFiles() call that reader.partitionColumns() would cause.
     val distributedResult: Option[DistributedScanResult] = if (distributedEnabled) {
       try {
         val scanner = new DistributedSourceScanner(sparkSession)
@@ -293,7 +277,7 @@ case class SyncToExternalCommand(
           case "delta" =>
             val deltaPath         = resolvedStorageLocation.getOrElse(sourcePath)
             val sourceCredentials = resolveCredentials(mergedConfigs, deltaPath)
-            scanner.scanDeltaTable(deltaPath, sourceCredentials, nativePartitionFilter)
+            scanner.scanDeltaTable(deltaPath, sourceCredentials, wherePredicates = wherePredicates)
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
             val (ns, tbl) = {
@@ -301,10 +285,10 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            scanner.scanIcebergTable(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig, fromSnapshot, nativePartitionFilter)
+            scanner.scanIcebergTable(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig, fromSnapshot, wherePredicates = wherePredicates)
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
-            scanner.scanParquetDirectory(sourcePath, sourceCredentials, nativePartitionFilter)
+            scanner.scanParquetDirectory(sourcePath, sourceCredentials, wherePredicates = wherePredicates)
           case other =>
             throw new IllegalArgumentException(s"Unsupported source format for distributed scan: $other")
         }
