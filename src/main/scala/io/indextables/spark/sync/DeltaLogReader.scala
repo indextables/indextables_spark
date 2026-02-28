@@ -37,15 +37,68 @@ import org.slf4j.LoggerFactory
  *   Credentials for accessing the Delta table's storage (spark.indextables.* keys). Translated to delta-kernel-rs
  *   credential keys (aws_access_key_id, etc.).
  */
+object DeltaLogReader {
+
+  /**
+   * Translate spark.indextables.* credential keys to the keys expected by tantivy4java's DeltaTableReader
+   * (delta-kernel-rs).
+   */
+  def translateCredentials(
+    creds: Map[String, String]
+  ): java.util.Map[String, String] = {
+    val config = new java.util.HashMap[String, String]()
+    // AWS
+    creds
+      .get("spark.indextables.aws.accessKey")
+      .foreach(v => config.put("aws_access_key_id", v))
+    creds
+      .get("spark.indextables.aws.secretKey")
+      .foreach(v => config.put("aws_secret_access_key", v))
+    creds
+      .get("spark.indextables.aws.sessionToken")
+      .foreach(v => config.put("aws_session_token", v))
+    creds
+      .get("spark.indextables.aws.region")
+      .foreach(v => config.put("aws_region", v))
+    // Azure
+    creds
+      .get("spark.indextables.azure.accountName")
+      .foreach(v => config.put("azure_account_name", v))
+    creds
+      .get("spark.indextables.azure.accountKey")
+      .foreach(v => config.put("azure_access_key", v))
+    config
+  }
+
+  /**
+   * Normalize URL scheme for delta-kernel-rs compatibility.
+   *
+   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's wasbs:// URL scheme. Convert
+   * wasbs:// to az:// which object_store recognizes as Azure Blob Storage (using the Blob endpoint, not the DFS
+   * endpoint).
+   *
+   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or SoftDelete enabled, which reject
+   * requests on the DFS endpoint.
+   */
+  def normalizeForDeltaKernel(path: String): String = {
+    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
+    path match {
+      case wasbsRegex(container, rest) =>
+        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
+      case _ => path
+    }
+  }
+}
+
 class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, String]) {
   private val logger = LoggerFactory.getLogger(classOf[DeltaLogReader])
 
   // delta-kernel-rs (object_store) doesn't support wasbs:// URLs.
   // Convert to az:// which routes through the Azure Blob endpoint.
-  private val deltaKernelPath: String = normalizeForDeltaKernel(deltaTablePath)
+  private val deltaKernelPath: String = DeltaLogReader.normalizeForDeltaKernel(deltaTablePath)
 
   private val deltaConfig: java.util.Map[String, String] =
-    translateCredentials(sourceCredentials)
+    DeltaLogReader.translateCredentials(sourceCredentials)
 
   // Lazily list files once and cache (used by currentVersion, getAllFiles, partitionColumns)
   private lazy val fileEntries: java.util.List[DeltaFileEntry] = {
@@ -94,53 +147,4 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
     DataType.fromJson(deltaSchema.getSchemaJson()).asInstanceOf[StructType]
   }
 
-  /**
-   * Normalize URL scheme for delta-kernel-rs compatibility.
-   *
-   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's wasbs:// URL scheme. Convert
-   * wasbs:// to az:// which object_store recognizes as Azure Blob Storage (using the Blob endpoint, not the DFS
-   * endpoint).
-   *
-   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or SoftDelete enabled, which reject
-   * requests on the DFS endpoint.
-   */
-  private def normalizeForDeltaKernel(path: String): String = {
-    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
-    path match {
-      case wasbsRegex(container, rest) =>
-        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
-      case _ => path
-    }
-  }
-
-  /**
-   * Translate spark.indextables.* credential keys to the keys expected by tantivy4java's DeltaTableReader
-   * (delta-kernel-rs).
-   */
-  private def translateCredentials(
-    creds: Map[String, String]
-  ): java.util.Map[String, String] = {
-    val config = new java.util.HashMap[String, String]()
-    // AWS
-    creds
-      .get("spark.indextables.aws.accessKey")
-      .foreach(v => config.put("aws_access_key_id", v))
-    creds
-      .get("spark.indextables.aws.secretKey")
-      .foreach(v => config.put("aws_secret_access_key", v))
-    creds
-      .get("spark.indextables.aws.sessionToken")
-      .foreach(v => config.put("aws_session_token", v))
-    creds
-      .get("spark.indextables.aws.region")
-      .foreach(v => config.put("aws_region", v))
-    // Azure
-    creds
-      .get("spark.indextables.azure.accountName")
-      .foreach(v => config.put("azure_account_name", v))
-    creds
-      .get("spark.indextables.azure.accountKey")
-      .foreach(v => config.put("azure_access_key", v))
-    config
-  }
 }

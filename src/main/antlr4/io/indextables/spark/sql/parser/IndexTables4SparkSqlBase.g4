@@ -97,6 +97,7 @@ statement
         (FROM VERSION fromVersion=INTEGER_VALUE)?
         (FROM SNAPSHOT fromSnapshot=INTEGER_VALUE)?
         (WHERE whereClause=predicateToken)?
+        (INVALIDATE ALL PARTITIONS)?
         AT LOCATION destPath=STRING
         (DRY RUN)?                                            #syncToExternal
     | .*?                                                       #passThrough
@@ -156,7 +157,7 @@ nonReserved
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | COMPACT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
     | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
-    | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE
+    | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE | INVALIDATE
     ;
 
 // Keywords (case-insensitive)
