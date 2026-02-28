@@ -440,6 +440,98 @@ class CloudS3DistributedSyncTest extends CloudS3TestBase {
     distResult.version shouldBe defined
   }
 
+  // ─── Column Mapping: WHERE filter via distributed path on S3 ───
+
+  test("column mapping table with WHERE should work via distributed path on S3") {
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
+
+    val deltaPath = s"$testBasePath/delta_colmap_where"
+    val indexPath = s"$testBasePath/companion_colmap_where"
+
+    val _spark = spark
+    import _spark.implicits._
+    Seq(
+      (1L, "alice", "2026-02-07", "10"),
+      (2L, "bob", "2026-02-07", "11"),
+      (3L, "carol", "2026-02-07", "12"),
+      (4L, "dave", "2026-02-08", "10"),
+      (5L, "eve", "2026-02-08", "12")
+    ).toDF("id", "name", "kdate", "khour")
+      .write.format("delta").partitionBy("kdate", "khour")
+      .option("delta.columnMapping.mode", "name")
+      .option("delta.minReaderVersion", "2")
+      .option("delta.minWriterVersion", "5")
+      .mode("overwrite").save(deltaPath)
+
+    // Force checkpoint so distributed path (readCheckpointPart with snapshotInfo) runs
+    val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
+    deltaLog.checkpoint()
+
+    val result = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+    ).collect()
+
+    result(0).getString(2) shouldBe "success"
+
+    import io.indextables.spark.transaction.TransactionLogFactory
+    val txLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(indexPath), spark)
+    try {
+      val files = txLog.listFiles()
+      files should not be empty
+      files.foreach { f =>
+        f.partitionValues.get("kdate") shouldBe Some("2026-02-07")
+        f.partitionValues.get("khour") shouldBe Some("12")
+      }
+    } finally txLog.close()
+  }
+
+  test("column mapping re-sync via distributed path should return no_action on S3") {
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
+
+    val deltaPath = s"$testBasePath/delta_colmap_resync"
+    val indexPath = s"$testBasePath/companion_colmap_resync"
+
+    val _spark = spark
+    import _spark.implicits._
+    Seq(
+      (1L, "alice", "2026-02-07", "10"),
+      (2L, "bob", "2026-02-07", "11"),
+      (3L, "carol", "2026-02-07", "12"),
+      (4L, "dave", "2026-02-08", "10"),
+      (5L, "eve", "2026-02-08", "12")
+    ).toDF("id", "name", "kdate", "khour")
+      .write.format("delta").partitionBy("kdate", "khour")
+      .option("delta.columnMapping.mode", "name")
+      .option("delta.minReaderVersion", "2")
+      .option("delta.minWriterVersion", "5")
+      .mode("overwrite").save(deltaPath)
+
+    // Force checkpoint so distributed path runs
+    val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
+    deltaLog.checkpoint()
+
+    // First sync — should succeed
+    val result1 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+    ).collect()
+    result1(0).getString(2) shouldBe "success"
+    result1(0).getInt(6) should be > 0
+
+    // Second sync against same unchanged partition — should return no_action
+    val result2 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+    ).collect()
+    result2(0).getString(2) shouldBe "no_action"
+    result2(0).getInt(4) shouldBe 0 // splits_created
+    result2(0).getInt(6) shouldBe 0 // parquet_files_indexed
+  }
+
   // ─── Re-sync: no changes should return no_action ───
 
   test("re-sync with no changes should return no_action on S3 Delta") {

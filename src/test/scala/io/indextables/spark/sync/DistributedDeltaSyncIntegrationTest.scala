@@ -778,6 +778,65 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
     }
   }
 
+  test("column mapping with WHERE should work via distributed path (with checkpoint)") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_colmap_dist").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_colmap_dist").getAbsolutePath
+
+      createColumnMappingDeltaTable(deltaPath)
+
+      // Force a checkpoint so the distributed path (readCheckpointPart with snapshotInfo) runs
+      val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
+      deltaLog.checkpoint()
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      ).collect()
+
+      result(0).getString(2) shouldBe "success"
+      val txLog = TransactionLogFactory.create(
+        new Path(indexPath), spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+      try {
+        val files = txLog.listFiles()
+        files should not be empty
+        // Verify only the matching partition was indexed
+        files.foreach { f =>
+          f.partitionValues.get("kdate") shouldBe Some("2026-02-07")
+          f.partitionValues.get("khour") shouldBe Some("12")
+        }
+      } finally txLog.close()
+    }
+  }
+
+  test("column mapping re-sync via distributed path (with checkpoint) should return no_action") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_colmap_resync_dist").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_colmap_resync_dist").getAbsolutePath
+
+      createColumnMappingDeltaTable(deltaPath)
+
+      // Force a checkpoint so the distributed path runs
+      val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
+      deltaLog.checkpoint()
+
+      // First sync — should succeed
+      val result1 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+      result1(0).getInt(6) should be > 0
+
+      // Second sync against same unchanged partition — should return no_action
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "no_action"
+      result2(0).getInt(4) shouldBe 0 // splits_created
+      result2(0).getInt(6) shouldBe 0 // parquet_files_indexed
+    }
+  }
+
   // ─── Helpers ───
 
   private def createColumnMappingDeltaTable(path: String): Unit = {

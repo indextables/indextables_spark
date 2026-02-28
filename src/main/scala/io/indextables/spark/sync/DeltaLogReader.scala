@@ -122,55 +122,24 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
     val entries = fileEntries
     logger.info(s"Delta snapshot contains ${entries.size} files")
 
-    // Build column mapping for partition value key translation (column mapping tables)
-    val columnMapping = if (!entries.isEmpty) {
-      val sampleKeys = entries.get(0).getPartitionValues.keySet.asScala
-      if (sampleKeys.exists(_.startsWith("col-"))) {
-        try {
-          DistributedSourceScanner.buildPhysicalToLogicalMapping(
-            DeltaTableReader.readSchema(deltaKernelPath, deltaConfig).getSchemaJson())
-        } catch { case _: Exception => Map.empty[String, String] }
-      } else Map.empty[String, String]
-    } else Map.empty[String, String]
-
+    // Column mapping (physical→logical) is handled by tantivy4java 0.31.0 in listFiles().
     entries.asScala.toSeq.map { entry =>
-      val rawPartVals = entry.getPartitionValues.asScala.toMap
-      val partVals = if (columnMapping.nonEmpty) {
-        rawPartVals.map { case (k, v) => columnMapping.getOrElse(k, k) -> v }
-      } else rawPartVals
       CompanionSourceFile(
         path = entry.getPath,
-        partitionValues = partVals,
+        partitionValues = entry.getPartitionValues.asScala.toMap,
         size = entry.getSize
       )
     }
   }
 
   /**
-   * Get partition columns from Delta table file entries. For tables with column mapping mode 'name', the file entries
-   * may contain physical column IDs (like `col-350d02e8-...`) instead of logical names (`kdate`). This method
-   * translates them back to logical names using the schema's column mapping metadata.
+   * Get partition columns from Delta table file entries. Column mapping (physical→logical) is handled by tantivy4java
+   * 0.31.0 in listFiles(), so partition value keys are already logical names.
    */
   def partitionColumns(): Seq[String] = {
     val entries = fileEntries
     if (entries.isEmpty) return Seq.empty
-    val rawCols = entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
-
-    // Detect column mapping: if any partition column looks like a physical ID, resolve via schema
-    if (rawCols.exists(_.startsWith("col-"))) {
-      try {
-        val schemaJson = DeltaTableReader.readSchema(deltaKernelPath, deltaConfig).getSchemaJson()
-        val physicalToLogical = DistributedSourceScanner.buildPhysicalToLogicalMapping(schemaJson)
-        if (physicalToLogical.nonEmpty) {
-          val resolved = DistributedSourceScanner.resolveLogicalPartitionColumns(rawCols, physicalToLogical)
-          logger.info(s"Column mapping: translated partition columns [${rawCols.mkString(",")}] -> [${resolved.mkString(",")}]")
-          return resolved
-        }
-      } catch {
-        case e: Exception => logger.warn(s"Failed to resolve column mapping for partition columns: ${e.getMessage}")
-      }
-    }
-    rawCols
+    entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
   }
 
   /** Get the schema from Delta table metadata as a Spark StructType. */

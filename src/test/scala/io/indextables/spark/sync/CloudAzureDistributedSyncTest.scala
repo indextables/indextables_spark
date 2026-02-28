@@ -319,6 +319,54 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
     }
   }
 
+  // ─── Column Mapping: WHERE filter via distributed path on Azure ───
+
+  test("column mapping table with WHERE should work via distributed path on Azure") {
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
+
+    val deltaPath = s"$azureBasePath/delta_colmap_where"
+    val indexPath = s"$azureBasePath/companion_colmap_where"
+
+    val _spark = spark
+    import _spark.implicits._
+    Seq(
+      (1L, "alice", "2026-02-07", "10"),
+      (2L, "bob", "2026-02-07", "11"),
+      (3L, "carol", "2026-02-07", "12"),
+      (4L, "dave", "2026-02-08", "10"),
+      (5L, "eve", "2026-02-08", "12")
+    ).toDF("id", "name", "kdate", "khour")
+      .write.format("delta").partitionBy("kdate", "khour")
+      .option("delta.columnMapping.mode", "name")
+      .option("delta.minReaderVersion", "2")
+      .option("delta.minWriterVersion", "5")
+      .mode("overwrite").save(deltaPath)
+
+    // Force checkpoint so distributed path (readCheckpointPart with snapshotInfo) runs
+    val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
+    deltaLog.checkpoint()
+
+    val result = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+    ).collect()
+
+    result(0).getString(2) shouldBe "success"
+
+    import io.indextables.spark.transaction.TransactionLogFactory
+    val txLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(indexPath), spark)
+    try {
+      val files = txLog.listFiles()
+      files should not be empty
+      files.foreach { f =>
+        f.partitionValues.get("kdate") shouldBe Some("2026-02-07")
+        f.partitionValues.get("khour") shouldBe Some("12")
+      }
+    } finally txLog.close()
+  }
+
   // ─── Re-sync: no changes should return no_action ───
 
   test("re-sync with no changes should return no_action on Azure Delta") {

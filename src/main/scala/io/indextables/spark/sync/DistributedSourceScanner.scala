@@ -25,7 +25,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import io.indextables.spark.arrow.ArrowFfiBridge
-import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaTableReader}
+import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaSnapshotInfo, DeltaTableReader}
 import io.indextables.tantivy4java.filter.PartitionFilter
 import io.indextables.tantivy4java.iceberg.{IcebergFileEntry, IcebergTableReader}
 import io.indextables.tantivy4java.parquet.{ParquetFileEntry, ParquetTableReader}
@@ -151,50 +151,6 @@ object DistributedSourceScanner {
     }.toMap
   }
 
-  /**
-   * Build a physical-to-logical column name mapping from a Delta schema JSON. When Delta column mapping mode is 'name',
-   * the schema fields have `delta.columnMapping.physicalName` metadata that maps physical column IDs (like
-   * `col-350d02e8-...`) to logical column names (like `kdate`). This mapping is needed because
-   * `DeltaTableReader.getSnapshotInfo().getPartitionColumns()` may return physical column IDs instead of logical names.
-   */
-  private[sync] def buildPhysicalToLogicalMapping(schemaJson: String): Map[String, String] = {
-    if (schemaJson == null || schemaJson.isEmpty) return Map.empty
-    try {
-      val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
-      val root   = mapper.readTree(schemaJson)
-      val fields = root.get("fields")
-      if (fields == null || !fields.isArray) return Map.empty
-
-      val mapping = scala.collection.mutable.Map[String, String]()
-      val iter = fields.elements()
-      while (iter.hasNext) {
-        val field = iter.next()
-        val logicalName = field.get("name")
-        val metadata = field.get("metadata")
-        if (logicalName != null && metadata != null) {
-          val physicalName = metadata.get("delta.columnMapping.physicalName")
-          if (physicalName != null) {
-            mapping += (physicalName.asText() -> logicalName.asText())
-          }
-        }
-      }
-      mapping.toMap
-    } catch {
-      case _: Exception => Map.empty
-    }
-  }
-
-  /**
-   * Translate partition column names from physical IDs to logical names using the column mapping. Returns the original
-   * names unchanged if no mapping applies.
-   */
-  private[sync] def resolveLogicalPartitionColumns(
-    partitionColumns: Seq[String],
-    physicalToLogical: Map[String, String]
-  ): Seq[String] =
-    if (physicalToLogical.isEmpty) partitionColumns
-    else partitionColumns.map(col => physicalToLogical.getOrElse(col, col))
-
   /** Parse partition values from a JSON string like {"year":"2024","month":"01"}. */
   private[sync] def parsePartitionValuesJson(
     jsonStr: String,
@@ -225,13 +181,14 @@ object DistributedSourceScanner {
     kernelPath: String,
     config: java.util.Map[String, String],
     partPath: String,
-    filter: PartitionFilter
+    filter: PartitionFilter,
+    snapshotInfo: DeltaSnapshotInfo = null
   ): Iterator[CompanionSourceFile] = {
     val numCols = 6
     val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-      val numRows = DeltaTableReader.readCheckpointPartArrowFfi(kernelPath, config, partPath, filter, arrayAddrs, schemaAddrs)
+      val numRows = DeltaTableReader.readCheckpointPartArrowFfi(kernelPath, config, partPath, filter, snapshotInfo, arrayAddrs, schemaAddrs)
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
@@ -386,16 +343,12 @@ class DistributedSourceScanner(spark: SparkSession) {
       partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse(""))
     val snapshotInfo = DeltaTableReader.getSnapshotInfo(deltaKernelPath, deltaConfig)
 
-    val rawPartCols = snapshotInfo.getPartitionColumns.asScala.toSeq
-
-    // Delta column mapping: getSnapshotInfo().getPartitionColumns() may return physical column IDs
-    // (like "col-350d02e8-...") instead of logical names ("kdate"). Build a physical→logical mapping
-    // from the schema JSON to translate them back.
+    // getSnapshotInfo() returns logical partition column names (translated from physical IDs
+    // for column mapping tables by tantivy4java 0.31.0).
+    val snapshotPartCols = snapshotInfo.getPartitionColumns.asScala.toSeq
     val schemaJson = snapshotInfo.getSchemaJson
-    val physicalToLogical = buildPhysicalToLogicalMapping(schemaJson)
-    val snapshotPartCols = resolveLogicalPartitionColumns(rawPartCols, physicalToLogical)
-    if (physicalToLogical.nonEmpty && snapshotPartCols != rawPartCols) {
-      logger.info(s"Column mapping: translated partition columns from [${rawPartCols.mkString(",")}] to [${snapshotPartCols.mkString(",")}]")
+    if (snapshotInfo.getColumnNameMapping != null && !snapshotInfo.getColumnNameMapping.isEmpty) {
+      logger.info(s"Column mapping active: ${snapshotInfo.getColumnNameMapping.size} mapped columns")
     }
     logger.info(s"Snapshot partition columns: ${snapshotPartCols.mkString(", ")}")
 
@@ -435,13 +388,10 @@ class DistributedSourceScanner(spark: SparkSession) {
         s"arrowFfiEnabled=$arrowFfiEnabled"
     )
 
-    // Read post-checkpoint changes on driver (small: just JSON commit files after last checkpoint)
-    val postCheckpointChanges = effectiveFilter match {
-      case Some(filter) =>
-        DeltaTableReader.readPostCheckpointChanges(deltaKernelPath, deltaConfig, snapshotInfo.getCommitFilePaths, filter)
-      case None =>
-        DeltaTableReader.readPostCheckpointChanges(deltaKernelPath, deltaConfig, snapshotInfo.getCommitFilePaths)
-    }
+    // Read post-checkpoint changes on driver (small: just JSON commit files after last checkpoint).
+    // Pass snapshotInfo for column mapping translation of partition values.
+    val postCheckpointChanges = DeltaTableReader.readPostCheckpointChanges(
+      deltaKernelPath, deltaConfig, snapshotInfo.getCommitFilePaths, effectiveFilter.orNull, snapshotInfo)
     val addedAfterCheckpoint = postCheckpointChanges.getAddedFiles.asScala.toSeq
     val removedPaths         = postCheckpointChanges.getRemovedPaths.asScala.toSet
 
@@ -453,12 +403,13 @@ class DistributedSourceScanner(spark: SparkSession) {
     val checkpointPartPaths = snapshotInfo.getCheckpointPartPaths.asScala.toSeq
     val sc                  = spark.sparkContext
 
-    // Broadcast config, removed paths, filter, Arrow FFI flag, and column mapping for executor use
-    val broadcastConfig    = sc.broadcast((deltaKernelPath, deltaConfig))
-    val broadcastRemoved   = sc.broadcast(removedPaths)
-    val broadcastFilter    = sc.broadcast(effectiveFilter.orNull)
-    val broadcastArrowFfi  = sc.broadcast(arrowFfiEnabled)
-    val broadcastColMap    = sc.broadcast(physicalToLogical)
+    // Broadcast config, removed paths, filter, Arrow FFI flag, and snapshotInfo (Serializable) for executor use.
+    // snapshotInfo carries column mapping so Rust translates physical→logical partition names.
+    val broadcastConfig       = sc.broadcast((deltaKernelPath, deltaConfig))
+    val broadcastRemoved      = sc.broadcast(removedPaths)
+    val broadcastFilter       = sc.broadcast(effectiveFilter.orNull)
+    val broadcastArrowFfi     = sc.broadcast(arrowFfiEnabled)
+    val broadcastSnapshotInfo = sc.broadcast(snapshotInfo)
 
     val checkpointFilesRDD: RDD[CompanionSourceFile] = if (checkpointPartPaths.nonEmpty) {
       val numPartitions = math.min(checkpointPartPaths.size, sc.defaultParallelism)
@@ -466,20 +417,13 @@ class DistributedSourceScanner(spark: SparkSession) {
         .flatMap { partPath =>
           val (kernelPath, config) = broadcastConfig.value
           val filter               = broadcastFilter.value
-          val colMap               = broadcastColMap.value
-          val rawFiles = if (broadcastArrowFfi.value) {
-            readDeltaCheckpointPartArrowFfi(kernelPath, config, partPath, filter)
-          } else if (filter != null) {
-            DeltaTableReader.readCheckpointPart(kernelPath, config, partPath, filter).asScala
-              .map(deltaEntryToCompanionFile)
+          val snapInfo             = broadcastSnapshotInfo.value
+          if (broadcastArrowFfi.value) {
+            readDeltaCheckpointPartArrowFfi(kernelPath, config, partPath, filter, snapInfo)
           } else {
-            DeltaTableReader.readCheckpointPart(kernelPath, config, partPath).asScala
+            DeltaTableReader.readCheckpointPart(kernelPath, config, partPath, filter, snapInfo).asScala
               .map(deltaEntryToCompanionFile)
           }
-          // Translate physical column IDs to logical names in partition values (column mapping)
-          if (colMap.nonEmpty) {
-            rawFiles.map(f => f.copy(partitionValues = f.partitionValues.map { case (k, v) => colMap.getOrElse(k, k) -> v }))
-          } else rawFiles
         }
         .filter(file => !broadcastRemoved.value.contains(file.path))
     } else {
@@ -487,14 +431,9 @@ class DistributedSourceScanner(spark: SparkSession) {
     }
 
     // Convert post-checkpoint added files (driver-side collection .map, safe) and union.
-    // Apply column mapping translation to partition values.
+    // Column mapping translation is handled by tantivy4java (readPostCheckpointChanges with snapshotInfo).
     val addedFilesRDD = if (addedAfterCheckpoint.nonEmpty) {
-      val mapped = addedAfterCheckpoint.map { e =>
-        val f = deltaEntryToCompanionFile(e)
-        if (physicalToLogical.nonEmpty) f.copy(partitionValues = f.partitionValues.map { case (k, v) => physicalToLogical.getOrElse(k, k) -> v })
-        else f
-      }
-      sc.parallelize(mapped)
+      sc.parallelize(addedAfterCheckpoint.map(deltaEntryToCompanionFile))
     } else {
       sc.emptyRDD[CompanionSourceFile]
     }
@@ -507,7 +446,7 @@ class DistributedSourceScanner(spark: SparkSession) {
     DistributedScanResult(
       filesRDD = allFilesRDD,
       version = Some(snapshotInfo.getVersion),
-      partitionColumns = snapshotPartCols, // Use logical names (translated from physical IDs for column mapping)
+      partitionColumns = snapshotPartCols,
       storageRoot = None, // Delta uses relative paths from table root
       sampleFilePath = sampleFile,
       numDistributedParts = checkpointPartPaths.size
