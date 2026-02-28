@@ -680,7 +680,126 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
     }
   }
 
+  // ─── Column Mapping ───
+
+  test("WHERE filter with column mapping mode 'name' should index matching partition") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_colmap").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_colmap").getAbsolutePath
+
+      createColumnMappingDeltaTable(deltaPath)
+
+      // WHERE on both string partition columns
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      ).collect()
+
+      result(0).getString(2) shouldBe "success"
+      val txLog = TransactionLogFactory.create(
+        new Path(indexPath), spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+      try {
+        val files = txLog.listFiles()
+        files should not be empty
+        files.foreach { f =>
+          f.partitionValues.get("kdate") shouldBe Some("2026-02-07")
+          f.partitionValues.get("khour") shouldBe Some("12")
+        }
+      } finally txLog.close()
+    }
+  }
+
+  test("column mapping table with all partitions should succeed") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_colmap_all").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_colmap_all").getAbsolutePath
+
+      createColumnMappingDeltaTable(deltaPath)
+
+      // No WHERE filter — should index all files
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      ).collect()
+
+      result(0).getString(2) shouldBe "success"
+      result(0).getInt(6) should be >= 4 // at least 4 partition combos
+    }
+  }
+
+  test("column mapping re-sync with no changes should return no_action") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_colmap_resync").getAbsolutePath
+      val indexPath = new File(tempDir, "companion_colmap_resync").getAbsolutePath
+
+      createColumnMappingDeltaTable(deltaPath)
+
+      // Initial sync
+      val result1 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+      result1(0).getInt(6) should be > 0
+
+      // Re-sync: no changes, should return no_action
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "no_action"
+      result2(0).getInt(4) shouldBe 0 // splits_created
+    }
+  }
+
+  test("column mapping table distributed vs non-distributed should produce same results") {
+    withTempPath { tempDir =>
+      val deltaPath    = new File(tempDir, "delta_colmap_cmp").getAbsolutePath
+      val distPath     = new File(tempDir, "companion_colmap_dist").getAbsolutePath
+      val nonDistPath  = new File(tempDir, "companion_colmap_nondist").getAbsolutePath
+
+      createColumnMappingDeltaTable(deltaPath)
+
+      // Build with distributed enabled (default)
+      val distResult = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AT LOCATION '$distPath'"
+      ).collect()
+
+      // Build with distributed disabled
+      spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
+      try {
+        val nonDistResult = spark.sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AT LOCATION '$nonDistPath'"
+        ).collect()
+
+        distResult(0).getString(2) shouldBe "success"
+        nonDistResult(0).getString(2) shouldBe "success"
+        distResult(0).getInt(6) shouldBe nonDistResult(0).getInt(6)
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
+      }
+    }
+  }
+
   // ─── Helpers ───
+
+  private def createColumnMappingDeltaTable(path: String): Unit = {
+    val ss = spark
+    import ss.implicits._
+    val data = Seq(
+      (1L, "alice", "2026-02-07", "10"),
+      (2L, "bob", "2026-02-07", "11"),
+      (3L, "carol", "2026-02-07", "12"),
+      (4L, "dave", "2026-02-08", "10"),
+      (5L, "eve", "2026-02-08", "12")
+    )
+    data
+      .toDF("id", "name", "kdate", "khour")
+      .write
+      .format("delta")
+      .partitionBy("kdate", "khour")
+      .option("delta.columnMapping.mode", "name")
+      .option("delta.minReaderVersion", "2")
+      .option("delta.minWriterVersion", "5")
+      .save(path)
+  }
 
   private def createPartitionedDeltaTable(path: String, dates: Seq[String]): Unit = {
     val ss = spark

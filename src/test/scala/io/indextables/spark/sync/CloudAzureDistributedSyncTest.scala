@@ -319,6 +319,70 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
     }
   }
 
+  // ─── Re-sync: no changes should return no_action ───
+
+  test("re-sync with no changes should return no_action on Azure Delta") {
+    assume(
+      hasAzureCredentials() && hasDeltaSparkDataSource && hasAzureWasbs,
+      "Azure credentials, Delta Spark DataSource, or Azure WASBS driver not available - skipping test"
+    )
+
+    val deltaPath = s"$azureBasePath/delta_resync"
+    val indexPath = s"$azureBasePath/companion_resync"
+
+    val _spark = spark
+    import _spark.implicits._
+    (0 until 20).map(i => (i.toLong, s"name_$i", i * 1.5))
+      .toDF("id", "name", "score")
+      .repartition(2)
+      .write.format("delta").mode("overwrite").save(deltaPath)
+
+    // First sync — should succeed
+    val result1 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result1(0).getString(2) shouldBe "success"
+    result1(0).getInt(6) should be > 0
+
+    // Second sync with no changes — should return no_action
+    val result2 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result2(0).getString(2) shouldBe "no_action"
+    result2(0).getInt(6) shouldBe 0
+  }
+
+  test("re-sync with no changes should return no_action on Azure Parquet") {
+    assume(
+      hasAzureCredentials() && hasAzureWasbs,
+      "Azure credentials or Azure WASBS driver not available - skipping test"
+    )
+
+    val parquetPath = s"$azureBasePath/parquet_resync"
+    val indexPath   = s"$azureBasePath/companion_parquet_resync"
+
+    val _spark = spark
+    import _spark.implicits._
+    (0 until 15).map(i => (i.toLong, s"name_$i"))
+      .toDF("id", "name")
+      .repartition(2)
+      .write.parquet(parquetPath)
+
+    // First sync — should succeed
+    val result1 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result1(0).getString(2) shouldBe "success"
+    result1(0).getInt(6) should be > 0
+
+    // Second sync with no changes — should return no_action
+    val result2 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result2(0).getString(2) shouldBe "no_action"
+    result2(0).getInt(6) shouldBe 0
+  }
+
   // ─── Fallback behavior ───
 
   test("distributed fallback should work when Delta has no checkpoint on Azure") {

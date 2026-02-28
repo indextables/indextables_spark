@@ -359,7 +359,8 @@ case class SyncToExternalCommand(
 
     logger.info(
       s"Source table at $sourcePath: version=${sourceVersionOpt.getOrElse("none")}, " +
-        s"partitionColumns=${partitionColumns.mkString(",")}, " +
+        s"partitionColumns=[${partitionColumns.mkString(",")}], " +
+        s"schemaFields=[${sourceSchemaOpt.map(_.fieldNames.mkString(",")).getOrElse("none")}], " +
         s"distributed=${distributedResult.isDefined}"
     )
 
@@ -542,6 +543,12 @@ case class SyncToExternalCommand(
         case None =>
           // In-memory anti-join (fallback path)
           computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+      }
+
+      logger.info(s"Anti-join result: ${rawParquetFiles.size} files to index, ${splitsToInvalidate.size} splits to invalidate")
+      if (rawParquetFiles.nonEmpty) {
+        val sample = rawParquetFiles.head
+        logger.info(s"Anti-join sample file: path=${sample.path}, partitionValues=${sample.partitionValues}, size=${sample.size}")
       }
 
       // 7b. Apply WHERE partition filter
@@ -893,9 +900,23 @@ case class SyncToExternalCommand(
     fullSchema: Option[StructType] = None
   ): Seq[CompanionSourceFile] = {
     val effectivePreds = if (predicates.nonEmpty) predicates else wherePredicates
-    if (effectivePreds.isEmpty || partitionColumns.isEmpty) return files
+    if (effectivePreds.isEmpty || partitionColumns.isEmpty) {
+      logger.info(s"applyWhereFilter: skipped (predicates=${effectivePreds.size}, partitionColumns=${partitionColumns.size})")
+      return files
+    }
+
+    logger.info(s"applyWhereFilter: ${files.size} files, partitionColumns=[${partitionColumns.mkString(",")}], " +
+      s"predicates=[${effectivePreds.mkString("; ")}], " +
+      s"schemaFields=${fullSchema.map(_.fieldNames.mkString(",")).getOrElse("none")}")
+
+    // Log sample partition values for diagnosis
+    files.headOption.foreach { f =>
+      logger.info(s"applyWhereFilter: sample file partitionValues=${f.partitionValues}, path=${f.path}")
+    }
 
     val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
+    logger.info(s"applyWhereFilter: partitionSchema=${partitionSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(",")}")
+
     val parsedPredicates =
       PartitionPredicateUtils.parseAndValidatePredicates(effectivePreds, partitionSchema, sparkSession)
 

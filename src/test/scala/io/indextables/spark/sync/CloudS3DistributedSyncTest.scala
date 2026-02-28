@@ -440,6 +440,67 @@ class CloudS3DistributedSyncTest extends CloudS3TestBase {
     distResult.version shouldBe defined
   }
 
+  // ─── Re-sync: no changes should return no_action ───
+
+  test("re-sync with no changes should return no_action on S3 Delta") {
+    assume(
+      awsCredentials.isDefined && hasDeltaSparkDataSource,
+      "AWS credentials or Delta Spark DataSource not available - skipping test"
+    )
+
+    val deltaPath = s"$testBasePath/delta_resync"
+    val indexPath = s"$testBasePath/companion_resync"
+
+    val _spark = spark
+    import _spark.implicits._
+    (0 until 20).map(i => (i.toLong, s"name_$i", i * 1.5))
+      .toDF("id", "name", "score")
+      .repartition(2)
+      .write.format("delta").mode("overwrite").save(deltaPath)
+
+    // First sync — should succeed
+    val result1 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result1(0).getString(2) shouldBe "success"
+    result1(0).getInt(6) should be > 0
+
+    // Second sync with no changes — should return no_action
+    val result2 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result2(0).getString(2) shouldBe "no_action"
+    result2(0).getInt(6) shouldBe 0 // no new files indexed
+  }
+
+  test("re-sync with no changes should return no_action on S3 Parquet") {
+    assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
+
+    val parquetPath = s"$testBasePath/parquet_resync"
+    val indexPath   = s"$testBasePath/companion_parquet_resync"
+
+    val _spark = spark
+    import _spark.implicits._
+    (0 until 15).map(i => (i.toLong, s"name_$i"))
+      .toDF("id", "name")
+      .repartition(2)
+      .write.parquet(parquetPath)
+
+    // First sync — should succeed
+    val result1 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result1(0).getString(2) shouldBe "success"
+    result1(0).getInt(6) should be > 0
+
+    // Second sync with no changes — should return no_action
+    val result2 = spark.sql(
+      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+    ).collect()
+    result2(0).getString(2) shouldBe "no_action"
+    result2(0).getInt(6) shouldBe 0
+  }
+
   // ─── Fallback behavior ───
 
   test("distributed fallback should work when Delta has no checkpoint on S3") {
