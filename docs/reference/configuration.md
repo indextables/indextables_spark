@@ -256,3 +256,21 @@ spark.indextables.purge.parallelism: <auto>
 spark.indextables.purge.maxFilesToDelete: 1000000
 spark.indextables.purge.deleteRetries: 3
 ```
+
+## Companion Sync Configuration
+
+```scala
+spark.indextables.companion.sync.distributedLogRead.enabled: true (default: true)
+  // When true, BUILD INDEXTABLES COMPANION reads the source table's transaction log
+  // in a distributed fashion across Spark executors, avoiding driver OOM for tables
+  // with millions of files. Falls back to single-call path on failure.
+spark.indextables.companion.sync.arrowFfi.enabled: true (default: true)
+  // When true and a WHERE clause provides a PartitionFilter, distributed checkpoint/manifest
+  // reads use Arrow FFI (zero-copy columnar export) instead of TANT buffer serialization.
+  // Eliminates per-entry JNI overhead. Set to false to use the TANT buffer path.
+spark.indextables.companion.sync.batchSize: <auto> (default: defaultParallelism)
+spark.indextables.companion.sync.maxConcurrentBatches: 6 (default: 6)
+spark.indextables.companion.writerHeapSize: "1G" (default: 1GB)
+spark.indextables.companion.readerBatchSize: 8192 (default: 8192)
+spark.indextables.companion.schedulerPool: "indextables-companion" (default)
+```

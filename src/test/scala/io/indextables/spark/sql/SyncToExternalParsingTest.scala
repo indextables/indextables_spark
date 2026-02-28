@@ -770,4 +770,58 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.hashedFastfieldsInclude shouldBe Seq("title", "category")
     cmd.hashedFastfieldsExclude shouldBe empty
   }
+
+  // ==========================================================================
+  // INVALIDATE ALL PARTITIONS tests
+  // ==========================================================================
+
+  test("parse SYNC with INVALIDATE ALL PARTITIONS flag") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 INVALIDATE ALL PARTITIONS AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe true
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("year")
+  }
+
+  test("default invalidateAllPartitions should be false") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe false
+  }
+
+  test("parse SYNC without WHERE and without INVALIDATE ALL PARTITIONS") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe false
+    cmd.wherePredicates shouldBe empty
+  }
+
+  test("parse SYNC with INVALIDATE ALL PARTITIONS and all options") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+        |  INDEXING MODES ('content':'text')
+        |  FASTFIELDS MODE HYBRID
+        |  TARGET INPUT SIZE 2G
+        |  FROM VERSION 42
+        |  WHERE year = '2024'
+        |  INVALIDATE ALL PARTITIONS
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.invalidateAllPartitions shouldBe true
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("year")
+    cmd.fromVersion shouldBe Some(42L)
+    cmd.dryRun shouldBe true
+  }
+
+  test("case-insensitive INVALIDATE ALL PARTITIONS") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 invalidate all partitions AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe true
+  }
 }

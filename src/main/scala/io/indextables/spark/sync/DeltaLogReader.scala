@@ -37,87 +37,13 @@ import org.slf4j.LoggerFactory
  *   Credentials for accessing the Delta table's storage (spark.indextables.* keys). Translated to delta-kernel-rs
  *   credential keys (aws_access_key_id, etc.).
  */
-class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, String]) {
-  private val logger = LoggerFactory.getLogger(classOf[DeltaLogReader])
-
-  // delta-kernel-rs (object_store) doesn't support wasbs:// URLs.
-  // Convert to az:// which routes through the Azure Blob endpoint.
-  private val deltaKernelPath: String = normalizeForDeltaKernel(deltaTablePath)
-
-  private val deltaConfig: java.util.Map[String, String] =
-    translateCredentials(sourceCredentials)
-
-  // Lazily list files once and cache (used by currentVersion, getAllFiles, partitionColumns)
-  private lazy val fileEntries: java.util.List[DeltaFileEntry] = {
-    logger.info(
-      s"Reading Delta table at $deltaTablePath via DeltaTableReader" +
-        (if (deltaKernelPath != deltaTablePath) s" (normalized to $deltaKernelPath)" else "")
-    )
-    DeltaTableReader.listFiles(deltaKernelPath, deltaConfig)
-  }
-
-  /** Get the current (latest) version of the Delta table. */
-  def currentVersion(): Long = {
-    val entries = fileEntries
-    val version = if (entries.isEmpty) -1L else entries.get(0).getTableVersion
-    logger.info(s"Delta table at $deltaTablePath: current version = $version")
-    version
-  }
-
-  /** Get all AddFile actions at the current snapshot (full file listing). */
-  def getAllFiles(): Seq[CompanionSourceFile] = {
-    val entries = fileEntries
-    logger.info(s"Delta snapshot contains ${entries.size} files")
-    entries.asScala.toSeq.map { entry =>
-      CompanionSourceFile(
-        path = entry.getPath,
-        partitionValues = entry.getPartitionValues.asScala.toMap,
-        size = entry.getSize
-      )
-    }
-  }
-
-  /** Get partition columns from Delta table file entries. */
-  def partitionColumns(): Seq[String] = {
-    val entries = fileEntries
-    if (entries.isEmpty) Seq.empty
-    else entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
-  }
-
-  /** Get the schema from Delta table metadata as a Spark StructType. */
-  def schema(): StructType = {
-    val deltaSchema = DeltaTableReader.readSchema(deltaKernelPath, deltaConfig)
-    logger.info(
-      s"Delta schema at $deltaTablePath: ${deltaSchema.getFieldCount} fields, " +
-        s"version=${deltaSchema.getTableVersion}"
-    )
-    DataType.fromJson(deltaSchema.getSchemaJson()).asInstanceOf[StructType]
-  }
-
-  /**
-   * Normalize URL scheme for delta-kernel-rs compatibility.
-   *
-   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's wasbs:// URL scheme. Convert
-   * wasbs:// to az:// which object_store recognizes as Azure Blob Storage (using the Blob endpoint, not the DFS
-   * endpoint).
-   *
-   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or SoftDelete enabled, which reject
-   * requests on the DFS endpoint.
-   */
-  private def normalizeForDeltaKernel(path: String): String = {
-    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
-    path match {
-      case wasbsRegex(container, rest) =>
-        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
-      case _ => path
-    }
-  }
+object DeltaLogReader {
 
   /**
    * Translate spark.indextables.* credential keys to the keys expected by tantivy4java's DeltaTableReader
    * (delta-kernel-rs).
    */
-  private def translateCredentials(
+  def translateCredentials(
     creds: Map[String, String]
   ): java.util.Map[String, String] = {
     val config = new java.util.HashMap[String, String]()
@@ -143,4 +69,118 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
       .foreach(v => config.put("azure_access_key", v))
     config
   }
+
+  /**
+   * Normalize URL scheme for delta-kernel-rs compatibility.
+   *
+   * delta-kernel-rs uses the Rust `object_store` crate which doesn't support Hadoop's wasbs:// URL scheme. Convert
+   * wasbs:// to az:// which object_store recognizes as Azure Blob Storage (using the Blob endpoint, not the DFS
+   * endpoint).
+   *
+   * This also avoids 409 errors on Azure storage accounts with BlobStorageEvents or SoftDelete enabled, which reject
+   * requests on the DFS endpoint.
+   */
+  def normalizeForDeltaKernel(path: String): String = {
+    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
+    path match {
+      case wasbsRegex(container, rest) =>
+        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
+      case _ => path
+    }
+  }
+}
+
+class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, String]) {
+  private val logger = LoggerFactory.getLogger(classOf[DeltaLogReader])
+
+  // delta-kernel-rs (object_store) doesn't support wasbs:// URLs.
+  // Convert to az:// which routes through the Azure Blob endpoint.
+  private val deltaKernelPath: String = DeltaLogReader.normalizeForDeltaKernel(deltaTablePath)
+
+  private val deltaConfig: java.util.Map[String, String] =
+    DeltaLogReader.translateCredentials(sourceCredentials)
+
+  // Lazily list files once and cache (used by currentVersion, getAllFiles, partitionColumns)
+  private lazy val fileEntries: java.util.List[DeltaFileEntry] = {
+    logger.info(
+      s"Reading Delta table at $deltaTablePath via DeltaTableReader" +
+        (if (deltaKernelPath != deltaTablePath) s" (normalized to $deltaKernelPath)" else "")
+    )
+    DeltaTableReader.listFiles(deltaKernelPath, deltaConfig)
+  }
+
+  /** Get the current (latest) version of the Delta table. */
+  def currentVersion(): Long = {
+    val entries = fileEntries
+    val version = if (entries.isEmpty) -1L else entries.get(0).getTableVersion
+    logger.info(s"Delta table at $deltaTablePath: current version = $version")
+    version
+  }
+
+  /** Get all AddFile actions at the current snapshot (full file listing). */
+  def getAllFiles(): Seq[CompanionSourceFile] = {
+    val entries = fileEntries
+    logger.info(s"Delta snapshot contains ${entries.size} files")
+
+    // Build column mapping for partition value key translation (column mapping tables)
+    val columnMapping = if (!entries.isEmpty) {
+      val sampleKeys = entries.get(0).getPartitionValues.keySet.asScala
+      if (sampleKeys.exists(_.startsWith("col-"))) {
+        try {
+          DistributedSourceScanner.buildPhysicalToLogicalMapping(
+            DeltaTableReader.readSchema(deltaKernelPath, deltaConfig).getSchemaJson())
+        } catch { case _: Exception => Map.empty[String, String] }
+      } else Map.empty[String, String]
+    } else Map.empty[String, String]
+
+    entries.asScala.toSeq.map { entry =>
+      val rawPartVals = entry.getPartitionValues.asScala.toMap
+      val partVals = if (columnMapping.nonEmpty) {
+        rawPartVals.map { case (k, v) => columnMapping.getOrElse(k, k) -> v }
+      } else rawPartVals
+      CompanionSourceFile(
+        path = entry.getPath,
+        partitionValues = partVals,
+        size = entry.getSize
+      )
+    }
+  }
+
+  /**
+   * Get partition columns from Delta table file entries. For tables with column mapping mode 'name', the file entries
+   * may contain physical column IDs (like `col-350d02e8-...`) instead of logical names (`kdate`). This method
+   * translates them back to logical names using the schema's column mapping metadata.
+   */
+  def partitionColumns(): Seq[String] = {
+    val entries = fileEntries
+    if (entries.isEmpty) return Seq.empty
+    val rawCols = entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
+
+    // Detect column mapping: if any partition column looks like a physical ID, resolve via schema
+    if (rawCols.exists(_.startsWith("col-"))) {
+      try {
+        val schemaJson = DeltaTableReader.readSchema(deltaKernelPath, deltaConfig).getSchemaJson()
+        val physicalToLogical = DistributedSourceScanner.buildPhysicalToLogicalMapping(schemaJson)
+        if (physicalToLogical.nonEmpty) {
+          val resolved = DistributedSourceScanner.resolveLogicalPartitionColumns(rawCols, physicalToLogical)
+          logger.info(s"Column mapping: translated partition columns [${rawCols.mkString(",")}] -> [${resolved.mkString(",")}]")
+          return resolved
+        }
+      } catch {
+        case e: Exception => logger.warn(s"Failed to resolve column mapping for partition columns: ${e.getMessage}")
+      }
+    }
+    rawCols
+  }
+
+  /** Get the schema from Delta table metadata as a Spark StructType. */
+  def schema(): StructType = {
+    val deltaSchema = DeltaTableReader.readSchema(deltaKernelPath, deltaConfig)
+    logger.info(
+      s"Delta schema at $deltaTablePath: ${deltaSchema.getFieldCount} fields, " +
+        s"version=${deltaSchema.getTableVersion}"
+    )
+    DataType.fromJson(deltaSchema.getSchemaJson()).asInstanceOf[StructType]
+  }
+
 }

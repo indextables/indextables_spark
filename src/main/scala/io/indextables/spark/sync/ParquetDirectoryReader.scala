@@ -25,28 +25,13 @@ import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.tantivy4java.parquet.ParquetSchemaReader
 import org.slf4j.LoggerFactory
 
-/**
- * CompanionSourceReader for bare Parquet directories (no table format). Discovers parquet files via
- * CloudStorageProvider (S3, Azure, local) and extracts Hive-style partition columns from directory structure
- * (col=value/). Schema is read via tantivy4java's ParquetSchemaReader (Arrow-based, JNI).
- *
- * @param directoryPath
- *   Root directory containing parquet files
- * @param credentials
- *   Credential map (spark.indextables.* keys)
- * @param schemaSourcePath
- *   Optional path to a specific parquet file for schema extraction
- */
-class ParquetDirectoryReader(
-  directoryPath: String,
-  credentials: Map[String, String],
-  schemaSourcePath: Option[String] = None)
-    extends CompanionSourceReader {
+object ParquetDirectoryReader {
 
-  private val logger = LoggerFactory.getLogger(classOf[ParquetDirectoryReader])
-
-  // Translate credentials for tantivy4java's ParquetSchemaReader (same format as DeltaLogReader)
-  private val nativeConfig: java.util.Map[String, String] = {
+  /**
+   * Translate spark.indextables.* credential keys to the keys expected by tantivy4java's ParquetSchemaReader /
+   * ParquetTableReader (object_store format).
+   */
+  def translateCredentials(credentials: Map[String, String]): java.util.Map[String, String] = {
     val config = new java.util.HashMap[String, String]()
     credentials
       .get("spark.indextables.aws.accessKey")
@@ -68,6 +53,55 @@ class ParquetDirectoryReader(
       .foreach(v => config.put("azure_access_key", v))
     config
   }
+
+  /** Extract object key (path after scheme+bucket) for scheme-agnostic comparison. */
+  def extractObjectKey(path: String): String = {
+    val stripped = path
+      .replaceFirst("^s3a?://[^/]+/", "")
+      .replaceFirst("^abfss?://[^/]+/", "")
+      .replaceFirst("^wasbs?://[^/]+/", "")
+      .replaceFirst("^azure?://[^/]+/", "")
+      .replaceFirst("^az://[^/]+/", "")
+    stripped.stripSuffix("/")
+  }
+
+  /**
+   * Normalize URL scheme for Rust's object_store crate. wasbs:// is not recognized by object_store; convert to az://
+   * (Azure Blob). Same normalization as DeltaLogReader.normalizeForDeltaKernel().
+   */
+  def normalizeForObjectStore(path: String): String = {
+    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
+    path match {
+      case wasbsRegex(container, rest) =>
+        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
+      case _ => path
+    }
+  }
+}
+
+/**
+ * CompanionSourceReader for bare Parquet directories (no table format). Discovers parquet files via
+ * CloudStorageProvider (S3, Azure, local) and extracts Hive-style partition columns from directory structure
+ * (col=value/). Schema is read via tantivy4java's ParquetSchemaReader (Arrow-based, JNI).
+ *
+ * @param directoryPath
+ *   Root directory containing parquet files
+ * @param credentials
+ *   Credential map (spark.indextables.* keys)
+ * @param schemaSourcePath
+ *   Optional path to a specific parquet file for schema extraction
+ */
+class ParquetDirectoryReader(
+  directoryPath: String,
+  credentials: Map[String, String],
+  schemaSourcePath: Option[String] = None)
+    extends CompanionSourceReader {
+
+  private val logger = LoggerFactory.getLogger(classOf[ParquetDirectoryReader])
+
+  // Translate credentials for tantivy4java's ParquetSchemaReader (same format as DeltaLogReader)
+  private val nativeConfig: java.util.Map[String, String] =
+    ParquetDirectoryReader.translateCredentials(credentials)
 
   // Lazily discover files and cache
   private lazy val discoveredFiles: Seq[CompanionSourceFile] = discoverFiles()
@@ -170,15 +204,8 @@ class ParquetDirectoryReader(
     else if (path.startsWith("abfs://")) "abfss://" + path.substring(7)
     else path
 
-  /** Extract object key (path after bucket) for scheme-agnostic comparison. */
-  private def extractObjectKey(path: String): String = {
-    val stripped = path
-      .replaceFirst("^s3a?://[^/]+/", "")
-      .replaceFirst("^abfss?://[^/]+/", "")
-      .replaceFirst("^wasbs?://[^/]+/", "")
-      .replaceFirst("^azure://[^/]+/", "")
-    stripped.stripSuffix("/")
-  }
+  private def extractObjectKey(path: String): String =
+    ParquetDirectoryReader.extractObjectKey(path)
 
   private def isParquetFile(path: String): Boolean = {
     val name = path.substring(path.lastIndexOf('/') + 1).toLowerCase
@@ -309,18 +336,8 @@ class ParquetDirectoryReader(
       StringType
   }
 
-  /**
-   * Normalize URL scheme for Rust's object_store crate. wasbs:// is not recognized by object_store; convert to az://
-   * (Azure Blob). Same normalization as DeltaLogReader.normalizeForDeltaKernel().
-   */
-  private def normalizeForObjectStore(path: String): String = {
-    val wasbsRegex = """^wasbs?://([^@]+)@[^/]+(?:/(.*))?$""".r
-    path match {
-      case wasbsRegex(container, rest) =>
-        if (rest != null && rest.nonEmpty) s"az://$container/$rest" else s"az://$container"
-      case _ => path
-    }
-  }
+  private def normalizeForObjectStore(path: String): String =
+    ParquetDirectoryReader.normalizeForObjectStore(path)
 
   /**
    * Strip `file:` URI scheme prefix from local filesystem paths. CloudStorageProvider returns paths with `file:` prefix
