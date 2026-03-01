@@ -506,6 +506,175 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
     }
   }
 
+  // ===== Write Queue Configuration Tests =====
+
+  test("SplitCacheConfig - write queue fragment mode with custom capacity") {
+    val config = SplitCacheConfig(
+      diskCacheEnabled = Some(true),
+      diskCachePath = Some("/tmp/test_cache"),
+      diskCacheWriteQueueMode = Some("fragment"),
+      diskCacheWriteQueueCapacity = Some("32")
+    )
+
+    config.diskCacheWriteQueueMode shouldBe Some("fragment")
+    config.diskCacheWriteQueueCapacity shouldBe Some("32")
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("SplitCacheConfig - write queue size-based mode with byte limit") {
+    val config = SplitCacheConfig(
+      diskCacheEnabled = Some(true),
+      diskCachePath = Some("/tmp/test_cache"),
+      diskCacheWriteQueueMode = Some("size"),
+      diskCacheWriteQueueCapacity = Some("2G")
+    )
+
+    config.diskCacheWriteQueueMode shouldBe Some("size")
+    config.diskCacheWriteQueueCapacity shouldBe Some("2G")
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("SplitCacheConfig - size-based mode with default capacity (no explicit capacity)") {
+    val config = SplitCacheConfig(
+      diskCacheEnabled = Some(true),
+      diskCachePath = Some("/tmp/test_cache"),
+      diskCacheWriteQueueMode = Some("size")
+      // No capacity → defaults to 1GB
+    )
+
+    config.diskCacheWriteQueueMode shouldBe Some("size")
+    config.diskCacheWriteQueueCapacity shouldBe None
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("SplitCacheConfig - drop writes when full enabled") {
+    val config = SplitCacheConfig(
+      diskCacheEnabled = Some(true),
+      diskCachePath = Some("/tmp/test_cache"),
+      diskCacheDropWritesWhenFull = Some(true)
+    )
+
+    config.diskCacheDropWritesWhenFull shouldBe Some(true)
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("SplitCacheConfig - drop writes when full disabled") {
+    val config = SplitCacheConfig(
+      diskCacheEnabled = Some(true),
+      diskCachePath = Some("/tmp/test_cache"),
+      diskCacheDropWritesWhenFull = Some(false)
+    )
+
+    config.diskCacheDropWritesWhenFull shouldBe Some(false)
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("SplitCacheConfig - unknown write queue mode falls back to size default") {
+    val config = SplitCacheConfig(
+      diskCacheEnabled = Some(true),
+      diskCachePath = Some("/tmp/test_cache"),
+      diskCacheWriteQueueMode = Some("unknown-mode")
+    )
+
+    // Should not throw, should fall back to size-based default
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("ConfigUtils.createSplitCacheConfig - write queue config round-trip") {
+    val configMap = Map(
+      "spark.indextables.cache.disk.enabled"              -> "true",
+      "spark.indextables.cache.disk.path"                 -> "/tmp/wq_test",
+      "spark.indextables.cache.disk.writeQueue.mode"      -> "fragment",
+      "spark.indextables.cache.disk.writeQueue.capacity"  -> "64",
+      "spark.indextables.cache.disk.dropWritesWhenFull"   -> "false"
+    )
+
+    val config = ConfigUtils.createSplitCacheConfig(configMap, Some("test-table"))
+
+    config.diskCacheWriteQueueMode shouldBe Some("fragment")
+    config.diskCacheWriteQueueCapacity shouldBe Some("64")
+    config.diskCacheDropWritesWhenFull shouldBe Some(false)
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("ConfigUtils.createSplitCacheConfig - size-based write queue round-trip") {
+    val configMap = Map(
+      "spark.indextables.cache.disk.enabled"              -> "true",
+      "spark.indextables.cache.disk.path"                 -> "/tmp/wq_test",
+      "spark.indextables.cache.disk.writeQueue.mode"      -> "size",
+      "spark.indextables.cache.disk.writeQueue.capacity"  -> "500M",
+      "spark.indextables.cache.disk.dropWritesWhenFull"   -> "true"
+    )
+
+    val config = ConfigUtils.createSplitCacheConfig(configMap, Some("test-table"))
+
+    config.diskCacheWriteQueueMode shouldBe Some("size")
+    config.diskCacheWriteQueueCapacity shouldBe Some("500M")
+    config.diskCacheDropWritesWhenFull shouldBe Some(true)
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("full config flow - disk cache with write queue and all settings") {
+    val options = Map(
+      "spark.indextables.cache.disk.enabled"              -> "true",
+      "spark.indextables.cache.disk.path"                 -> "/local_disk0/tantivy_cache",
+      "spark.indextables.cache.disk.maxSize"              -> "200G",
+      "spark.indextables.cache.disk.compression"          -> "lz4",
+      "spark.indextables.cache.disk.manifestSyncInterval" -> "30",
+      "spark.indextables.cache.disk.writeQueue.mode"      -> "size",
+      "spark.indextables.cache.disk.writeQueue.capacity"  -> "2G",
+      "spark.indextables.cache.disk.dropWritesWhenFull"   -> "true"
+    )
+
+    val sparkOpts = IndexTables4SparkOptions(options)
+
+    sparkOpts.diskCacheEnabled shouldBe Some(true)
+    sparkOpts.diskCacheWriteQueueMode shouldBe Some("size")
+    sparkOpts.diskCacheWriteQueueCapacity shouldBe Some("2G")
+    sparkOpts.diskCacheDropWritesWhenFull shouldBe Some(true)
+
+    val config = ConfigUtils.createSplitCacheConfig(options, Some("test-table"))
+
+    config.diskCacheWriteQueueMode shouldBe Some("size")
+    config.diskCacheWriteQueueCapacity shouldBe Some("2G")
+    config.diskCacheDropWritesWhenFull shouldBe Some(true)
+
+    val javaConfig = config.toJavaCacheConfig()
+    javaConfig should not be null
+  }
+
+  test("IndexTables4SparkOptions - write queue config parsing") {
+    val opts = IndexTables4SparkOptions(Map(
+      "spark.indextables.cache.disk.writeQueue.mode"     -> "fragment",
+      "spark.indextables.cache.disk.writeQueue.capacity" -> "16",
+      "spark.indextables.cache.disk.dropWritesWhenFull"  -> "false"
+    ))
+
+    opts.diskCacheWriteQueueMode shouldBe Some("fragment")
+    opts.diskCacheWriteQueueCapacity shouldBe Some("16")
+    opts.diskCacheDropWritesWhenFull shouldBe Some(false)
+
+    val missingOpts = IndexTables4SparkOptions(Map.empty[String, String])
+    missingOpts.diskCacheWriteQueueMode shouldBe None
+    missingOpts.diskCacheWriteQueueCapacity shouldBe None
+    missingOpts.diskCacheDropWritesWhenFull shouldBe None
+  }
+
   // ===== Integration with Batch Optimization =====
 
   test("disk cache and batch optimization can be configured together") {

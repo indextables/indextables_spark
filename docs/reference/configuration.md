@@ -194,6 +194,9 @@ spark.indextables.cache.disk.maxSize: "100G" (default: 0 = auto, 2/3 available d
 spark.indextables.cache.disk.compression: "lz4" (options: lz4, zstd, none)
 spark.indextables.cache.disk.minCompressSize: "4K" (default: 4096 bytes)
 spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
+spark.indextables.cache.disk.writeQueue.mode: "size" (options: fragment, size)
+spark.indextables.cache.disk.writeQueue.capacity: "1G" (size mode: byte limit e.g. "500M", "2G"; fragment mode: slot count e.g. "32")
+spark.indextables.cache.disk.dropWritesWhenFull: true (drop query-path writes instead of blocking)
 spark.indextables.cache.coalesceMaxGap: "512K" (default: 512KB, max gap between parquet byte ranges to coalesce)
 ```
 
