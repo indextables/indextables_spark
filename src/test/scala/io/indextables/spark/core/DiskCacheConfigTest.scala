@@ -593,11 +593,11 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
 
   test("ConfigUtils.createSplitCacheConfig - write queue config round-trip") {
     val configMap = Map(
-      "spark.indextables.cache.disk.enabled"              -> "true",
-      "spark.indextables.cache.disk.path"                 -> "/tmp/wq_test",
-      "spark.indextables.cache.disk.writeQueue.mode"      -> "fragment",
-      "spark.indextables.cache.disk.writeQueue.capacity"  -> "64",
-      "spark.indextables.cache.disk.dropWritesWhenFull"   -> "false"
+      "spark.indextables.cache.disk.enabled"             -> "true",
+      "spark.indextables.cache.disk.path"                -> "/tmp/wq_test",
+      "spark.indextables.cache.disk.writeQueue.mode"     -> "fragment",
+      "spark.indextables.cache.disk.writeQueue.capacity" -> "64",
+      "spark.indextables.cache.disk.dropWritesWhenFull"  -> "false"
     )
 
     val config = ConfigUtils.createSplitCacheConfig(configMap, Some("test-table"))
@@ -612,11 +612,11 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
 
   test("ConfigUtils.createSplitCacheConfig - size-based write queue round-trip") {
     val configMap = Map(
-      "spark.indextables.cache.disk.enabled"              -> "true",
-      "spark.indextables.cache.disk.path"                 -> "/tmp/wq_test",
-      "spark.indextables.cache.disk.writeQueue.mode"      -> "size",
-      "spark.indextables.cache.disk.writeQueue.capacity"  -> "500M",
-      "spark.indextables.cache.disk.dropWritesWhenFull"   -> "true"
+      "spark.indextables.cache.disk.enabled"             -> "true",
+      "spark.indextables.cache.disk.path"                -> "/tmp/wq_test",
+      "spark.indextables.cache.disk.writeQueue.mode"     -> "size",
+      "spark.indextables.cache.disk.writeQueue.capacity" -> "500M",
+      "spark.indextables.cache.disk.dropWritesWhenFull"  -> "true"
     )
 
     val config = ConfigUtils.createSplitCacheConfig(configMap, Some("test-table"))
@@ -659,11 +659,13 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("IndexTables4SparkOptions - write queue config parsing") {
-    val opts = IndexTables4SparkOptions(Map(
-      "spark.indextables.cache.disk.writeQueue.mode"     -> "fragment",
-      "spark.indextables.cache.disk.writeQueue.capacity" -> "16",
-      "spark.indextables.cache.disk.dropWritesWhenFull"  -> "false"
-    ))
+    val opts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.cache.disk.writeQueue.mode"     -> "fragment",
+        "spark.indextables.cache.disk.writeQueue.capacity" -> "16",
+        "spark.indextables.cache.disk.dropWritesWhenFull"  -> "false"
+      )
+    )
 
     opts.diskCacheWriteQueueMode shouldBe Some("fragment")
     opts.diskCacheWriteQueueCapacity shouldBe Some("16")

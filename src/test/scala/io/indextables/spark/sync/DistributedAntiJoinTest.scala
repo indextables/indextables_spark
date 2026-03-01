@@ -27,8 +27,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * Tests for DistributedAntiJoin — verifies distributed anti-join logic for initial sync,
- * incremental sync, invalidation, and remaining-from-invalidated.
+ * Tests for DistributedAntiJoin — verifies distributed anti-join logic for initial sync, incremental sync,
+ * invalidation, and remaining-from-invalidated.
  */
 class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -57,7 +57,11 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
       spark.stop()
     }
 
-  private def makeSourceFile(path: String, size: Long = 1000L, partVals: Map[String, String] = Map.empty) =
+  private def makeSourceFile(
+    path: String,
+    size: Long = 1000L,
+    partVals: Map[String, String] = Map.empty
+  ) =
     CompanionSourceFile(path, partVals, size)
 
   private def makeAddAction(
@@ -77,7 +81,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ─── Initial Sync ───
 
   test("initial sync should return all source files") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("file1.parquet"),
       makeSourceFile("file2.parquet"),
@@ -95,7 +99,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ─── Incremental Sync: New Files ───
 
   test("incremental sync should detect new files") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("file1.parquet"),
       makeSourceFile("file2.parquet"),
@@ -116,7 +120,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("incremental sync with no changes should return empty") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("file1.parquet"),
       makeSourceFile("file2.parquet")
@@ -137,7 +141,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ─── Incremental Sync: Invalidation ───
 
   test("incremental sync should detect gone files and invalidate splits") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("file1.parquet") // file2 is gone from source
     )
@@ -178,7 +182,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("incremental sync should look up accurate file sizes from source") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("file1.parquet", size = 42000L)
     )
@@ -197,7 +201,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ─── Deduplication ───
 
   test("should dedup files by path, preferring largest size") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("new_file.parquet", size = 5000L),
       makeSourceFile("file1.parquet", size = 10000L) // also in source, still valid
@@ -223,7 +227,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ─── URL-encoded paths ───
 
   test("should handle URL-encoded paths in anti-join") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("path%20with%20spaces/file1.parquet"),
       makeSourceFile("normal/file2.parquet") // new
@@ -245,7 +249,7 @@ class DistributedAntiJoinTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ─── Multiple splits ───
 
   test("should handle multiple companion splits correctly") {
-    val sc          = spark.sparkContext
+    val sc = spark.sparkContext
     val sourceFiles = Seq(
       makeSourceFile("file1.parquet"),
       makeSourceFile("file2.parquet"),

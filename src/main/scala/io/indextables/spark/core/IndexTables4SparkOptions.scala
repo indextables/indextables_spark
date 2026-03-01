@@ -534,7 +534,7 @@ object IndexTables4SparkOptions {
   val DISK_CACHE_COMPRESSION            = "spark.indextables.cache.disk.compression"
   val DISK_CACHE_MIN_COMPRESS_SIZE      = "spark.indextables.cache.disk.minCompressSize"
   val DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
-  val DISK_CACHE_WRITE_QUEUE_MODE      = "spark.indextables.cache.disk.writeQueue.mode"
-  val DISK_CACHE_WRITE_QUEUE_CAPACITY  = "spark.indextables.cache.disk.writeQueue.capacity"
-  val DISK_CACHE_DROP_WRITES_WHEN_FULL = "spark.indextables.cache.disk.dropWritesWhenFull"
+  val DISK_CACHE_WRITE_QUEUE_MODE       = "spark.indextables.cache.disk.writeQueue.mode"
+  val DISK_CACHE_WRITE_QUEUE_CAPACITY   = "spark.indextables.cache.disk.writeQueue.capacity"
+  val DISK_CACHE_DROP_WRITES_WHEN_FULL  = "spark.indextables.cache.disk.dropWritesWhenFull"
 }

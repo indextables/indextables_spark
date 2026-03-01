@@ -42,8 +42,8 @@ class CompanionColumnarMultiSplitPartitionReader(
   config: Map[String, String],
   tablePath: Path,
   indexQueryFilters: Array[Any] = Array.empty,
-  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
-) extends PartitionReader[ColumnarBatch] {
+  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
+    extends PartitionReader[ColumnarBatch] {
 
   private val logger = LoggerFactory.getLogger(classOf[CompanionColumnarMultiSplitPartitionReader])
 
@@ -55,10 +55,10 @@ class CompanionColumnarMultiSplitPartitionReader(
   private val effectiveLimit: Int = limit.getOrElse(configuredDefaultLimit)
 
   // Multi-split iteration state
-  private var currentSplitIndex                                                = 0
-  private var currentReader: Option[CompanionColumnarPartitionReader]           = None
-  private var totalRowsReturned                                                = 0L
-  private var initialized                                                      = false
+  private var currentSplitIndex                                       = 0
+  private var currentReader: Option[CompanionColumnarPartitionReader] = None
+  private var totalRowsReturned                                       = 0L
+  private var initialized                                             = false
 
   // Capture baseline metrics
   private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =

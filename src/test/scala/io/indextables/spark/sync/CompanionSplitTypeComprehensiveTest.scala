@@ -1195,10 +1195,12 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
-      val midYear = df.filter(
-        col("event_date") >= java.sql.Date.valueOf("2024-06-01") &&
-          col("event_date") < java.sql.Date.valueOf("2024-10-01")
-      ).collect()
+      val midYear = df
+        .filter(
+          col("event_date") >= java.sql.Date.valueOf("2024-06-01") &&
+            col("event_date") < java.sql.Date.valueOf("2024-10-01")
+        )
+        .collect()
       midYear.length shouldBe 2
       midYear.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie")
     }
@@ -1250,10 +1252,12 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
 
       val df = buildAndReadCompanion(deltaPath, indexPath)
 
-      val midYear = df.filter(
-        col("created_at") >= java.sql.Timestamp.valueOf("2024-06-01 00:00:00") &&
-          col("created_at") < java.sql.Timestamp.valueOf("2024-10-01 00:00:00")
-      ).collect()
+      val midYear = df
+        .filter(
+          col("created_at") >= java.sql.Timestamp.valueOf("2024-06-01 00:00:00") &&
+            col("created_at") < java.sql.Timestamp.valueOf("2024-10-01 00:00:00")
+        )
+        .collect()
       midYear.length shouldBe 2
       midYear.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie")
     }
@@ -1286,10 +1290,12 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       afterJune.map(_.getAs[String]("name")).toSet shouldBe Set("Bob", "Charlie", "Dave")
 
       // Between on partition column
-      val q3q4 = df.filter(
-        col("event_date") >= java.sql.Date.valueOf("2024-07-01") &&
-          col("event_date") <= java.sql.Date.valueOf("2024-12-31")
-      ).collect()
+      val q3q4 = df
+        .filter(
+          col("event_date") >= java.sql.Date.valueOf("2024-07-01") &&
+            col("event_date") <= java.sql.Date.valueOf("2024-12-31")
+        )
+        .collect()
       q3q4.length shouldBe 2
       q3q4.map(_.getAs[String]("name")).toSet shouldBe Set("Charlie", "Dave")
     }

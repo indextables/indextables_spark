@@ -27,7 +27,7 @@ import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.execution.vectorized.ConstantColumnVector
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatch, ColumnVector}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.hadoop.fs.Path
@@ -43,12 +43,12 @@ import org.slf4j.LoggerFactory
  * Uses the Arrow C Data Interface to transfer parquet data directly from the native Rust layer as Arrow columnar
  * batches — zero serialization, zero row conversion.
  *
- * Single-batch model: next() executes search + Arrow FFI retrieval once, get() returns the ColumnarBatch, close()
- * frees resources.
+ * Single-batch model: next() executes search + Arrow FFI retrieval once, get() returns the ColumnarBatch, close() frees
+ * resources.
  *
  * Shared initialization logic (effective limit, path resolution, cache config, companion validation, path
- * normalization, footer validation, SplitMetadata reconstruction, SplitSearchEngine creation, query building)
- * is delegated to [[SplitReaderContext]].
+ * normalization, footer validation, SplitMetadata reconstruction, SplitSearchEngine creation, query building) is
+ * delegated to [[SplitReaderContext]].
  */
 class CompanionColumnarPartitionReader(
   addAction: AddAction,
@@ -59,25 +59,32 @@ class CompanionColumnarPartitionReader(
   config: Map[String, String],
   tablePath: Path,
   indexQueryFilters: Array[Any] = Array.empty,
-  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
-) extends PartitionReader[ColumnarBatch] {
+  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
+    extends PartitionReader[ColumnarBatch] {
 
   private val logger = LoggerFactory.getLogger(classOf[CompanionColumnarPartitionReader])
 
   private val ctx = new SplitReaderContext(
-    addAction, readSchema, fullTableSchema, filters, limit,
-    config, tablePath, indexQueryFilters, metricsAccumulator
+    addAction,
+    readSchema,
+    fullTableSchema,
+    filters,
+    limit,
+    config,
+    tablePath,
+    indexQueryFilters,
+    metricsAccumulator
   )
 
-  private def effectiveLimit = ctx.effectiveLimit
+  private def effectiveLimit       = ctx.effectiveLimit
   private def partitionColumnNames = ctx.partitionColumnNames
-  private def dataFieldNames = ctx.dataFieldNames
+  private def dataFieldNames       = ctx.dataFieldNames
 
-  private val bridge                                = new ArrowFfiBridge()
-  private var splitSearchEngine: SplitSearchEngine  = _
-  private var batch: ColumnarBatch                  = _
-  private var initialized                           = false
-  private var consumed                              = false
+  private val bridge                               = new ArrowFfiBridge()
+  private var splitSearchEngine: SplitSearchEngine = _
+  private var batch: ColumnarBatch                 = _
+  private var initialized                          = false
+  private var consumed                             = false
 
   // NOTE: Pre-warm join is intentionally omitted for columnar companion reader.
   // Companion splits use parquet-native reads which don't benefit from the tantivy
@@ -87,7 +94,9 @@ class CompanionColumnarPartitionReader(
       try {
         splitSearchEngine = ctx.createSplitSearchEngine()
         initialized = true
-        logger.info(s"CompanionColumnarPartitionReader initialized for ${addAction.path}, effectiveLimit=$effectiveLimit")
+        logger.info(
+          s"CompanionColumnarPartitionReader initialized for ${addAction.path}, effectiveLimit=$effectiveLimit"
+        )
       } catch {
         case ex: Exception =>
           logger.error(s"Failed to initialize columnar reader for ${addAction.path}", ex)
@@ -143,28 +152,41 @@ class CompanionColumnarPartitionReader(
         val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
 
         // Call native FFI export — wrap in try/catch to clean up FFI structs on failure
-        val numRows = try {
-          val n = searcher.docBatchArrowFfi(docAddresses, arrayAddrs, schemaAddrs, dataFieldNames: _*)
+        val numRows =
+          try {
+            val n = searcher.docBatchArrowFfi(docAddresses, arrayAddrs, schemaAddrs, dataFieldNames: _*)
 
-          if (n < 0) {
-            // FFI returned -1 despite supportsArrowFfi() check — unexpected
-            arrays.foreach(a => try a.close() catch { case _: Exception => })
-            schemas.foreach(s => try s.close() catch { case _: Exception => })
-            throw new IllegalStateException(
-              s"docBatchArrowFfi returned -1 for companion split ${addAction.path} " +
-                "despite supportsArrowFfi() returning true. " +
-                "Arrow FFI not available — the split may not have a parquet manifest."
-            )
+            if (n < 0) {
+              // FFI returned -1 despite supportsArrowFfi() check — unexpected
+              arrays.foreach(a =>
+                try a.close()
+                catch { case _: Exception => }
+              )
+              schemas.foreach(s =>
+                try s.close()
+                catch { case _: Exception => }
+              )
+              throw new IllegalStateException(
+                s"docBatchArrowFfi returned -1 for companion split ${addAction.path} " +
+                  "despite supportsArrowFfi() returning true. " +
+                  "Arrow FFI not available — the split may not have a parquet manifest."
+              )
+            }
+            n
+          } catch {
+            case ex: IllegalStateException => throw ex // re-throw our own exception
+            case ex: Exception             =>
+              // Clean up FFI structs not yet consumed by importVector
+              arrays.foreach(a =>
+                try a.close()
+                catch { case _: Exception => }
+              )
+              schemas.foreach(s =>
+                try s.close()
+                catch { case _: Exception => }
+              )
+              throw ex
           }
-          n
-        } catch {
-          case ex: IllegalStateException => throw ex // re-throw our own exception
-          case ex: Exception =>
-            // Clean up FFI structs not yet consumed by importVector
-            arrays.foreach(a => try a.close() catch { case _: Exception => })
-            schemas.foreach(s => try s.close() catch { case _: Exception => })
-            throw ex
-        }
 
         // Import into ColumnarBatch via ArrowFfiBridge
         val dataBatch = bridge.importAsColumnarBatch(arrays, schemas, numRows)
@@ -208,11 +230,11 @@ class CompanionColumnarPartitionReader(
   }
 
   /**
-   * Assemble the final ColumnarBatch in readSchema column order by interleaving data columns (from FFI) with
-   * partition columns (as ConstantColumnVector).
+   * Assemble the final ColumnarBatch in readSchema column order by interleaving data columns (from FFI) with partition
+   * columns (as ConstantColumnVector).
    *
-   * Uses name-based mapping from actual FFI vector field names (not positional), since the native FFI export
-   * may return columns in parquet schema order rather than the requested dataFieldNames order.
+   * Uses name-based mapping from actual FFI vector field names (not positional), since the native FFI export may return
+   * columns in parquet schema order rather than the requested dataFieldNames order.
    */
   private def assembleColumnarBatch(dataBatch: ColumnarBatch, numRows: Int): ColumnarBatch = {
     // Build name→index map from actual FFI vector field names (not positional assumption).
@@ -260,15 +282,15 @@ class CompanionColumnarPartitionReader(
       vec.setNull()
     } else {
       dataType match {
-        case StringType    => vec.setUtf8String(UTF8String.fromString(value))
-        case IntegerType   => vec.setInt(value.toInt)
-        case LongType      => vec.setLong(value.toLong)
-        case DoubleType    => vec.setDouble(value.toDouble)
-        case FloatType     => vec.setFloat(value.toFloat)
-        case BooleanType   => vec.setBoolean(value.toBoolean)
-        case ShortType     => vec.setShort(value.toShort)
-        case ByteType      => vec.setByte(value.toByte)
-        case DateType      =>
+        case StringType  => vec.setUtf8String(UTF8String.fromString(value))
+        case IntegerType => vec.setInt(value.toInt)
+        case LongType    => vec.setLong(value.toLong)
+        case DoubleType  => vec.setDouble(value.toDouble)
+        case FloatType   => vec.setFloat(value.toFloat)
+        case BooleanType => vec.setBoolean(value.toBoolean)
+        case ShortType   => vec.setShort(value.toShort)
+        case ByteType    => vec.setByte(value.toByte)
+        case DateType =>
           vec.setInt(java.time.LocalDate.parse(value).toEpochDay.toInt)
         case TimestampType =>
           val instant = if (value.contains("T")) {

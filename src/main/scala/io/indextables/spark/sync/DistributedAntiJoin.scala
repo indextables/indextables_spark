@@ -56,9 +56,9 @@ object DistributedAntiJoin {
  * computeAntiJoinChanges() for large tables where materializing all source files on the driver would OOM.
  *
  * The anti-join identifies:
- *   1. New files: in source but not tracked by any companion split → need indexing
- *   2. Gone files: tracked by companion splits but absent from source → splits need invalidation
- *   3. Remaining files: still-valid files from invalidated splits → need re-indexing
+ *   1. New files: in source but not tracked by any companion split → need indexing 2. Gone files: tracked by companion
+ *      splits but absent from source → splits need invalidation 3. Remaining files: still-valid files from invalidated
+ *      splits → need re-indexing
  */
 class DistributedAntiJoin(spark: SparkSession) {
   import DistributedAntiJoin.normalizePath
@@ -109,9 +109,7 @@ class DistributedAntiJoin(spark: SparkSession) {
 
     // Compute new files: source files not tracked by any companion split.
     // This runs distributed — only the matching files are collected to driver.
-    val newFilesRDD = sourceFilesRDD.filter { f =>
-      !broadcastCompanionPaths.value.contains(normalizePath(f.path))
-    }
+    val newFilesRDD = sourceFilesRDD.filter(f => !broadcastCompanionPaths.value.contains(normalizePath(f.path)))
 
     // Compute source paths for "gone files" check.
     // keyBy normalized path, then collect just the distinct paths.

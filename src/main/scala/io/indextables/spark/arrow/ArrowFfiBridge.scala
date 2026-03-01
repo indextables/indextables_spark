@@ -17,10 +17,11 @@
 
 package io.indextables.spark.arrow
 
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
+
 import org.apache.arrow.c.{ArrowArray, ArrowSchema, CDataDictionaryProvider, Data}
 import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.FieldVector
-import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatch, ColumnVector}
 import org.slf4j.LoggerFactory
 
 /**
@@ -31,8 +32,8 @@ import org.slf4j.LoggerFactory
  */
 class ArrowFfiBridge extends AutoCloseable {
 
-  private val logger             = LoggerFactory.getLogger(classOf[ArrowFfiBridge])
-  private val allocator          = ArrowFfiBridge.allocator
+  private val logger    = LoggerFactory.getLogger(classOf[ArrowFfiBridge])
+  private val allocator = ArrowFfiBridge.allocator
   // NOTE: dictionaryProvider accumulates state across importAsColumnarBatch calls.
   // Safe for single-batch-per-reader model but would need per-batch cleanup for multi-batch streaming.
   private val dictionaryProvider = new CDataDictionaryProvider()
@@ -57,8 +58,8 @@ class ArrowFfiBridge extends AutoCloseable {
   /**
    * Import filled Arrow C structs into a Spark ColumnarBatch.
    *
-   * After this call, the ArrowArray/ArrowSchema structs have been consumed (ownership transferred to the
-   * FieldVectors). The returned ColumnarBatch owns the native memory — call batch.close() when done.
+   * After this call, the ArrowArray/ArrowSchema structs have been consumed (ownership transferred to the FieldVectors).
+   * The returned ColumnarBatch owns the native memory — call batch.close() when done.
    *
    * @param arrays
    *   ArrowArray structs filled by native FFI call
@@ -86,10 +87,23 @@ class ArrowFfiBridge extends AutoCloseable {
     } catch {
       case ex: Exception =>
         // Close already-imported vectors to prevent native memory leak
-        importedVectors.foreach(v => try v.close() catch { case _: Exception => })
+        importedVectors.foreach(v =>
+          try v.close()
+          catch { case _: Exception => }
+        )
         // Close unconsumed FFI structs
-        arrays.drop(importedVectors.size).foreach(a => try a.close() catch { case _: Exception => })
-        schemas.drop(importedVectors.size).foreach(s => try s.close() catch { case _: Exception => })
+        arrays
+          .drop(importedVectors.size)
+          .foreach(a =>
+            try a.close()
+            catch { case _: Exception => }
+          )
+        schemas
+          .drop(importedVectors.size)
+          .foreach(s =>
+            try s.close()
+            catch { case _: Exception => }
+          )
         throw ex
     }
   }
