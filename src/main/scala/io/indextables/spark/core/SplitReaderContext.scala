@@ -38,14 +38,13 @@ import org.slf4j.LoggerFactory
 /**
  * Shared initialization context for split-based partition readers (both row and columnar).
  *
- * Encapsulates the duplicated logic for: effective limit calculation, path resolution, cache config,
- * companion validation, path normalization, footer validation, SplitMetadata reconstruction,
- * SplitSearchEngine creation, split field name retrieval, partition filter separation, range filter
- * stats optimization, IndexQuery cleanup, and SplitQuery building.
+ * Encapsulates the duplicated logic for: effective limit calculation, path resolution, cache config, companion
+ * validation, path normalization, footer validation, SplitMetadata reconstruction, SplitSearchEngine creation, split
+ * field name retrieval, partition filter separation, range filter stats optimization, IndexQuery cleanup, and
+ * SplitQuery building.
  *
- * Both [[IndexTables4SparkPartitionReader]] and [[CompanionColumnarPartitionReader]] compose this
- * class (has-a) rather than inheriting from it, avoiding trait mixin complexity with different
- * `PartitionReader[T]` type parameters.
+ * Both [[IndexTables4SparkPartitionReader]] and [[CompanionColumnarPartitionReader]] compose this class (has-a) rather
+ * than inheriting from it, avoiding trait mixin complexity with different `PartitionReader[T]` type parameters.
  */
 class SplitReaderContext(
   addAction: AddAction,
@@ -56,8 +55,7 @@ class SplitReaderContext(
   config: Map[String, String],
   tablePath: Path,
   indexQueryFilters: Array[Any],
-  metricsAccumulator: Option[BatchOptimizationMetricsAccumulator]
-) {
+  metricsAccumulator: Option[BatchOptimizationMetricsAccumulator]) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitReaderContext])
 
@@ -105,8 +103,8 @@ class SplitReaderContext(
   /**
    * Create a SplitSearchEngine from the AddAction metadata.
    *
-   * Handles companion validation, path normalization, footer validation, SplitMetadata
-   * reconstruction, and SplitSearchEngine creation.
+   * Handles companion validation, path normalization, footer validation, SplitMetadata reconstruction, and
+   * SplitSearchEngine creation.
    */
   def createSplitSearchEngine(): SplitSearchEngine = {
     val cacheConfig = createCacheConfig()
@@ -167,8 +165,8 @@ class SplitReaderContext(
   /**
    * Build a SplitQuery from the filters and IndexQuery filters.
    *
-   * Handles split field name retrieval, partition filter separation, range filter stats
-   * optimization, IndexQuery cleanup, and filter-to-query conversion.
+   * Handles split field name retrieval, partition filter separation, range filter stats optimization, IndexQuery
+   * cleanup, and filter-to-query conversion.
    */
   def buildSplitQuery(engine: SplitSearchEngine): SplitQuery = {
     // Get field names from split schema
@@ -191,7 +189,9 @@ class SplitReaderContext(
       val (partitionOnly, nonPartition) =
         filters.partition(f => MixedBooleanFilter.isPartitionOnlyFilter(f, partitionColumnNames))
       if (partitionOnly.nonEmpty)
-        logger.info(s"Excluding ${partitionOnly.length} partition filter(s) from Tantivy query: ${partitionOnly.mkString(", ")}")
+        logger.info(
+          s"Excluding ${partitionOnly.length} partition filter(s) from Tantivy query: ${partitionOnly.mkString(", ")}"
+        )
       nonPartition
     } else {
       filters
@@ -213,7 +213,9 @@ class SplitReaderContext(
     val cleanedIndexQueryFilters = if (partitionColumnNames.nonEmpty && indexQueryFilters.nonEmpty) {
       val cleaned = MixedBooleanFilter.stripPartitionFiltersFromArray(indexQueryFilters, partitionColumnNames)
       if (cleaned.length != indexQueryFilters.length)
-        logger.info(s"Stripped ${indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s) from Tantivy query")
+        logger.info(
+          s"Stripped ${indexQueryFilters.length - cleaned.length} partition-only IndexQuery filter(s) from Tantivy query"
+        )
       cleaned
     } else {
       indexQueryFilters
@@ -224,7 +226,10 @@ class SplitReaderContext(
     val splitQuery = if (allFilters.nonEmpty) {
       if (splitFieldNames.nonEmpty) {
         val q = FiltersToQueryConverter.convertToSplitQuery(
-          allFilters, engine, Some(splitFieldNames), Some(cachedOptionsMap)
+          allFilters,
+          engine,
+          Some(splitFieldNames),
+          Some(cachedOptionsMap)
         )
         logger.debug(s"SplitQuery (with schema validation): ${q.getClass.getSimpleName}")
         q
@@ -240,7 +245,7 @@ class SplitReaderContext(
   }
 
   /** Collect batch optimization metrics delta and add to accumulator. */
-  def collectMetricsDelta(): Unit = {
+  def collectMetricsDelta(): Unit =
     metricsAccumulator.foreach { acc =>
       try {
         val currentMetrics = BatchOptMetrics.fromJavaMetrics()
@@ -263,7 +268,6 @@ class SplitReaderContext(
           logger.warn(s"Error collecting batch optimization metrics for ${addAction.path}", ex)
       }
     }
-  }
 
   /** Report bytesRead to Spark UI. */
   def reportBytesRead(): Unit = {
@@ -285,9 +289,8 @@ class SplitReaderContext(
   }
 
   /**
-   * Check if a range filter is redundant based on min/max statistics. A filter is redundant if the
-   * split's entire data range is within the filter's range, meaning all records in the split would
-   * pass the filter anyway.
+   * Check if a range filter is redundant based on min/max statistics. A filter is redundant if the split's entire data
+   * range is within the filter's range, meaning all records in the split would pass the filter anyway.
    *
    * Only applies to Date and Timestamp columns to avoid type conversion complexity.
    */
@@ -357,7 +360,11 @@ class SplitReaderContext(
       case _       => None
     }
 
-    def parseValue(value: Any, dataType: DataType, fromStats: Boolean): Option[Long] = dataType match {
+    def parseValue(
+      value: Any,
+      dataType: DataType,
+      fromStats: Boolean
+    ): Option[Long] = dataType match {
       case TimestampType => parseTimestamp(value, fromStats)
       case DateType      => parseDate(value, fromStats)
       case _             => None

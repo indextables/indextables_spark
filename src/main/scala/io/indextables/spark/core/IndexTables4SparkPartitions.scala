@@ -269,8 +269,15 @@ class IndexTables4SparkPartitionReader(
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
 
   private val ctx = new SplitReaderContext(
-    addAction, readSchema, fullTableSchema, filters, limit,
-    config, tablePath, indexQueryFilters, metricsAccumulator
+    addAction,
+    readSchema,
+    fullTableSchema,
+    filters,
+    limit,
+    config,
+    tablePath,
+    indexQueryFilters,
+    metricsAccumulator
   )
 
   private def effectiveLimit = ctx.effectiveLimit
@@ -279,7 +286,7 @@ class IndexTables4SparkPartitionReader(
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
   private var initialized                           = false
 
-  private def initialize(): Unit = {
+  private def initialize(): Unit =
     if (!initialized) {
       try {
         // Check if pre-warm is enabled and try to join warmup future
@@ -319,7 +326,6 @@ class IndexTables4SparkPartitionReader(
           throw new IOException(s"Failed to read Tantivy index: ${ex.getMessage}", ex)
       }
     }
-  }
 
   override def next(): Boolean =
     try {

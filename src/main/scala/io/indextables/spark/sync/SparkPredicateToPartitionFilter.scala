@@ -17,7 +17,6 @@
 
 package io.indextables.spark.sync
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.{And => CatalystAnd, Not => CatalystNot, Or => CatalystOr}
 import org.apache.spark.sql.catalyst.expressions.{EqualTo => CatalystEqualTo, GreaterThan => CatalystGreaterThan}
@@ -33,6 +32,7 @@ import org.apache.spark.sql.catalyst.expressions.{
   LessThanOrEqual => CatalystLessThanOrEqual
 }
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.transaction.PartitionPredicateUtils
 import io.indextables.tantivy4java.filter.PartitionFilter
@@ -189,8 +189,10 @@ object SparkPredicateToPartitionFilter {
 
       // AND: left AND right
       case CatalystAnd(left, right) =>
-        (expressionToPartitionFilter(left, partColSet, partitionSchema),
-          expressionToPartitionFilter(right, partColSet, partitionSchema)) match {
+        (
+          expressionToPartitionFilter(left, partColSet, partitionSchema),
+          expressionToPartitionFilter(right, partColSet, partitionSchema)
+        ) match {
           case (Some(l), Some(r)) => Some(PartitionFilter.and(l, r))
           case (Some(l), None)    => Some(l)
           case (None, Some(r))    => Some(r)
@@ -199,8 +201,10 @@ object SparkPredicateToPartitionFilter {
 
       // OR: left OR right (both sides must convert)
       case CatalystOr(left, right) =>
-        (expressionToPartitionFilter(left, partColSet, partitionSchema),
-          expressionToPartitionFilter(right, partColSet, partitionSchema)) match {
+        (
+          expressionToPartitionFilter(left, partColSet, partitionSchema),
+          expressionToPartitionFilter(right, partColSet, partitionSchema)
+        ) match {
           case (Some(l), Some(r)) => Some(PartitionFilter.or(l, r))
           case _                  => None
         }
@@ -227,19 +231,23 @@ object SparkPredicateToPartitionFilter {
     }
 
   /** Add .withType("long") for IntegerType/LongType partition columns so Rust compares numerically. */
-  private def maybeWithType(filter: PartitionFilter, col: String, schema: StructType): PartitionFilter =
-    try {
+  private def maybeWithType(
+    filter: PartitionFilter,
+    col: String,
+    schema: StructType
+  ): PartitionFilter =
+    try
       schema(schema.fieldIndex(col)).dataType match {
         case IntegerType | LongType => filter.withType("long")
         case _                      => filter
       }
-    } catch {
+    catch {
       case _: IllegalArgumentException => filter
     }
 
   private def literalToString(value: Any): String = value match {
-    case null                                => null
+    case null                                           => null
     case utf8: org.apache.spark.unsafe.types.UTF8String => utf8.toString
-    case other                               => other.toString
+    case other                                          => other.toString
   }
 }

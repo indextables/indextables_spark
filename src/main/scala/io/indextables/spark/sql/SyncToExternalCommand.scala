@@ -30,10 +30,10 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.sync.{
   CompanionSourceFile,
   CompanionSourceReader,
+  DeltaSourceReader,
   DistributedAntiJoin,
   DistributedScanResult,
   DistributedSourceScanner,
-  DeltaSourceReader,
   IcebergSourceReader,
   ParquetDirectoryReader,
   SyncConfig,
@@ -285,7 +285,14 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            scanner.scanIcebergTable(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig, fromSnapshot, wherePredicates = wherePredicates)
+            scanner.scanIcebergTable(
+              effectiveCatalogName.getOrElse("default"),
+              ns,
+              tbl,
+              icebergConfig,
+              fromSnapshot,
+              wherePredicates = wherePredicates
+            )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
             scanner.scanParquetDirectory(sourcePath, sourceCredentials, wherePredicates = wherePredicates)
@@ -330,7 +337,7 @@ case class SyncToExternalCommand(
     // Check for non-existent source (Delta: version -1, Parquet: empty dir, Iceberg: no snapshot)
     val sourceIsEmpty = allSourceFiles match {
       case Some(files) => files.isEmpty && sourceFormat == "delta" && sourceVersionOpt.isEmpty
-      case None =>
+      case None        =>
         // For distributed: check if version indicates empty
         sourceFormat == "delta" && sourceVersionOpt.isEmpty
     }
@@ -524,17 +531,18 @@ case class SyncToExternalCommand(
       // Scope invalidation: when WHERE clause is present and INVALIDATE ALL PARTITIONS is not set,
       // only consider companion splits whose partition values match the WHERE predicate.
       // Splits outside the WHERE range are left untouched.
-      val scopedExistingFiles = if (!invalidateAllPartitions && effectiveWherePredicates.nonEmpty && partitionColumns.nonEmpty) {
-        val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, Some(sourceSchema))
-        val parsedPredicates = PartitionPredicateUtils.parseAndValidatePredicates(
-          effectiveWherePredicates, partitionSchema, sparkSession)
-        val filtered = PartitionPredicateUtils.filterAddActionsByPredicates(
-          existingFiles, partitionSchema, parsedPredicates)
-        logger.info(s"WHERE-scoped invalidation: ${existingFiles.size} -> ${filtered.size} companion splits in scope")
-        filtered
-      } else {
-        existingFiles
-      }
+      val scopedExistingFiles =
+        if (!invalidateAllPartitions && effectiveWherePredicates.nonEmpty && partitionColumns.nonEmpty) {
+          val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, Some(sourceSchema))
+          val parsedPredicates =
+            PartitionPredicateUtils.parseAndValidatePredicates(effectiveWherePredicates, partitionSchema, sparkSession)
+          val filtered =
+            PartitionPredicateUtils.filterAddActionsByPredicates(existingFiles, partitionSchema, parsedPredicates)
+          logger.info(s"WHERE-scoped invalidation: ${existingFiles.size} -> ${filtered.size} companion splits in scope")
+          filtered
+        } else {
+          existingFiles
+        }
 
       val (rawParquetFiles, splitsToInvalidate) = distributedRDD match {
         case Some(rdd) =>
@@ -547,10 +555,14 @@ case class SyncToExternalCommand(
           computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
       }
 
-      logger.info(s"Anti-join result: ${rawParquetFiles.size} files to index, ${splitsToInvalidate.size} splits to invalidate")
+      logger.info(
+        s"Anti-join result: ${rawParquetFiles.size} files to index, ${splitsToInvalidate.size} splits to invalidate"
+      )
       if (rawParquetFiles.nonEmpty) {
         val sample = rawParquetFiles.head
-        logger.info(s"Anti-join sample file: path=${sample.path}, partitionValues=${sample.partitionValues}, size=${sample.size}")
+        logger.info(
+          s"Anti-join sample file: path=${sample.path}, partitionValues=${sample.partitionValues}, size=${sample.size}"
+        )
       }
 
       // 7b. Apply WHERE partition filter
@@ -647,9 +659,10 @@ case class SyncToExternalCommand(
                       icebergConfig
                     )
                 }
-                val fieldIdToName  = icebergTableSchema.getFieldIdToNameMap
-                val storageConfig  = IcebergSourceReader.buildParquetReaderStorageConfig(icebergConfig)
-                val mapping        = io.indextables.tantivy4java.parquet.ParquetSchemaReader.readColumnMapping(url, fieldIdToName, storageConfig)
+                val fieldIdToName = icebergTableSchema.getFieldIdToNameMap
+                val storageConfig = IcebergSourceReader.buildParquetReaderStorageConfig(icebergConfig)
+                val mapping = io.indextables.tantivy4java.parquet.ParquetSchemaReader
+                  .readColumnMapping(url, fieldIdToName, storageConfig)
                 if (mapping != null && !mapping.isEmpty) mapping.asScala.toMap else Map.empty[String, String]
               } catch {
                 case e: Exception =>
@@ -903,13 +916,17 @@ case class SyncToExternalCommand(
   ): Seq[CompanionSourceFile] = {
     val effectivePreds = if (predicates.nonEmpty) predicates else wherePredicates
     if (effectivePreds.isEmpty || partitionColumns.isEmpty) {
-      logger.info(s"applyWhereFilter: skipped (predicates=${effectivePreds.size}, partitionColumns=${partitionColumns.size})")
+      logger.info(
+        s"applyWhereFilter: skipped (predicates=${effectivePreds.size}, partitionColumns=${partitionColumns.size})"
+      )
       return files
     }
 
-    logger.info(s"applyWhereFilter: ${files.size} files, partitionColumns=[${partitionColumns.mkString(",")}], " +
-      s"predicates=[${effectivePreds.mkString("; ")}], " +
-      s"schemaFields=${fullSchema.map(_.fieldNames.mkString(",")).getOrElse("none")}")
+    logger.info(
+      s"applyWhereFilter: ${files.size} files, partitionColumns=[${partitionColumns.mkString(",")}], " +
+        s"predicates=[${effectivePreds.mkString("; ")}], " +
+        s"schemaFields=${fullSchema.map(_.fieldNames.mkString(",")).getOrElse("none")}"
+    )
 
     // Log sample partition values for diagnosis
     files.headOption.foreach { f =>
@@ -917,7 +934,9 @@ case class SyncToExternalCommand(
     }
 
     val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
-    logger.info(s"applyWhereFilter: partitionSchema=${partitionSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(",")}")
+    logger.info(
+      s"applyWhereFilter: partitionSchema=${partitionSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(",")}"
+    )
 
     val parsedPredicates =
       PartitionPredicateUtils.parseAndValidatePredicates(effectivePreds, partitionSchema, sparkSession)

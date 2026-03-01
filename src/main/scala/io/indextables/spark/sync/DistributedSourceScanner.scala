@@ -20,9 +20,8 @@ package io.indextables.spark.sync
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SparkSession
-
 import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.arrow.ArrowFfiBridge
 import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaSnapshotInfo, DeltaTableReader}
@@ -96,16 +95,16 @@ object DistributedSourceScanner {
     // Normalize: strip file: URI scheme, ensure consistent leading-slash handling.
     // The native ParquetTableReader may return local paths without leading slash (e.g. "var/folders/...")
     // while the basePath has one ("/var/folders/...").
-    val absolutePath = normalizeLocalPath(stripFileScheme(rawPath))
+    val absolutePath   = normalizeLocalPath(stripFileScheme(rawPath))
     val normalizedBase = normalizeLocalPath(stripFileScheme(basePath)).stripSuffix("/")
-    val normalizedAbs = absolutePath.stripSuffix("/")
+    val normalizedAbs  = absolutePath.stripSuffix("/")
     val relativePath = if (normalizedAbs.startsWith(normalizedBase)) {
       normalizedAbs.substring(normalizedBase.length).stripPrefix("/")
     } else {
       // The native ParquetTableReader may return S3 object keys without the scheme+bucket prefix
       // (e.g. "path/to/data/part.parquet" instead of "s3a://bucket/path/to/data/part.parquet").
       // Extract the key portion from basePath and try matching against the raw path.
-      val baseKey = ParquetDirectoryReader.extractObjectKey(basePath)
+      val baseKey       = ParquetDirectoryReader.extractObjectKey(basePath)
       val rawNormalized = rawPath.stripSuffix("/")
       if (baseKey.nonEmpty && rawNormalized.startsWith(baseKey)) {
         rawNormalized.substring(baseKey.length).stripPrefix("/")
@@ -121,7 +120,6 @@ object DistributedSourceScanner {
     )
   }
 
-
   private[sync] def stripFileScheme(path: String): String =
     if (path.startsWith("file:///")) path.substring(7)
     else if (path.startsWith("file:/")) path.substring(5)
@@ -129,8 +127,10 @@ object DistributedSourceScanner {
 
   /** Ensure local filesystem paths have a leading slash for consistent comparison. */
   private[sync] def normalizeLocalPath(path: String): String =
-    if (!path.startsWith("/") && !path.startsWith("s3://") && !path.startsWith("s3a://") &&
-      !path.startsWith("abfss://") && !path.startsWith("wasbs://") && !path.startsWith("az://")) {
+    if (
+      !path.startsWith("/") && !path.startsWith("s3://") && !path.startsWith("s3a://") &&
+      !path.startsWith("abfss://") && !path.startsWith("wasbs://") && !path.startsWith("az://")
+    ) {
       "/" + path
     } else {
       path
@@ -189,7 +189,15 @@ object DistributedSourceScanner {
     val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-      val numRows = DeltaTableReader.readCheckpointPartArrowFfi(kernelPath, config, partPath, filter, snapshotInfo, arrayAddrs, schemaAddrs)
+      val numRows = DeltaTableReader.readCheckpointPartArrowFfi(
+        kernelPath,
+        config,
+        partPath,
+        filter,
+        snapshotInfo,
+        arrayAddrs,
+        schemaAddrs
+      )
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
@@ -198,30 +206,35 @@ object DistributedSourceScanner {
       }
       val batch = bridge.importAsColumnarBatch(arrays, schemas, numRows)
       try {
-        val mapper  = new com.fasterxml.jackson.databind.ObjectMapper()
-        val results = new scala.collection.mutable.ArrayBuffer[CompanionSourceFile](numRows)
-        var i       = 0
+        val mapper       = new com.fasterxml.jackson.databind.ObjectMapper()
+        val results      = new scala.collection.mutable.ArrayBuffer[CompanionSourceFile](numRows)
+        var i            = 0
         var loggedSample = false
         while (i < numRows) {
           val pathStr = batch.column(0).getUTF8String(i)
           if (pathStr != null) {
-            val path = pathStr.toString
-            val size = batch.column(1).getLong(i)
+            val path        = pathStr.toString
+            val size        = batch.column(1).getLong(i)
             val partJsonStr = batch.column(4).getUTF8String(i)
-            val partitionValues = parsePartitionValuesJson(
-              if (partJsonStr != null) partJsonStr.toString else null, mapper)
+            val partitionValues =
+              parsePartitionValuesJson(if (partJsonStr != null) partJsonStr.toString else null, mapper)
             // Log first file's partition values for diagnostic purposes
             if (!loggedSample) {
-              ffiLogger.info(s"Arrow FFI sample from ${partPath.substring(partPath.lastIndexOf('/') + 1)}: " +
-                s"numRows=$numRows, path=$path, partitionValuesJson=${if (partJsonStr != null) partJsonStr.toString else "null"}, " +
-                s"parsedPartitionValues=$partitionValues")
+              ffiLogger.info(
+                s"Arrow FFI sample from ${partPath.substring(partPath.lastIndexOf('/') + 1)}: " +
+                  s"numRows=$numRows, path=$path, partitionValuesJson=${if (partJsonStr != null) partJsonStr.toString
+                    else "null"}, " +
+                  s"parsedPartitionValues=$partitionValues"
+              )
               loggedSample = true
             }
             results += CompanionSourceFile(path = path, partitionValues = partitionValues, size = size)
           }
           i += 1
         }
-        ffiLogger.info(s"Arrow FFI: ${results.size} files from checkpoint part ${partPath.substring(partPath.lastIndexOf('/') + 1)}")
+        ffiLogger.info(
+          s"Arrow FFI: ${results.size} files from checkpoint part ${partPath.substring(partPath.lastIndexOf('/') + 1)}"
+        )
         results.iterator
       } finally
         batch.close()
@@ -248,7 +261,15 @@ object DistributedSourceScanner {
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
       val numRows = IcebergTableReader.readManifestFileArrowFfi(
-        catalogName, namespace, tableName, config, manifestPath, filter, arrayAddrs, schemaAddrs)
+        catalogName,
+        namespace,
+        tableName,
+        config,
+        manifestPath,
+        filter,
+        arrayAddrs,
+        schemaAddrs
+      )
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
@@ -268,8 +289,8 @@ object DistributedSourceScanner {
               val absolutePath = pathStr.toString
               val fileSize     = batch.column(3).getLong(i)
               val partJsonStr  = batch.column(4).getUTF8String(i)
-              val partitionValues = parsePartitionValuesJson(
-                if (partJsonStr != null) partJsonStr.toString else null, mapper)
+              val partitionValues =
+                parsePartitionValuesJson(if (partJsonStr != null) partJsonStr.toString else null, mapper)
 
               // Convert absolute path to relative
               val relativePath = storageRoot match {
@@ -287,7 +308,11 @@ object DistributedSourceScanner {
                 extractPartitionValuesFromPath(absolutePath, storageRoot.get)
               } else partitionValues
 
-              results += CompanionSourceFile(path = relativePath, partitionValues = effectivePartitionValues, size = fileSize)
+              results += CompanionSourceFile(
+                path = relativePath,
+                partitionValues = effectivePartitionValues,
+                size = fileSize
+              )
             }
           }
           i += 1
@@ -324,12 +349,11 @@ class DistributedSourceScanner(spark: SparkSession) {
    * Scan a Delta table using distributed checkpoint reading.
    *
    * Flow:
-   *   1. getSnapshotInfo() on driver → checkpoint part paths + commit file paths + schema + partition columns
-   *   2. Build PartitionFilter from WHERE predicates using snapshot metadata (no listFiles!)
-   *   3. readPostCheckpointChanges() on driver → adds/removes after checkpoint
-   *   4. sc.parallelize(checkpointPartPaths) → flatMap(readCheckpointPart) on executors
-   *   5. Filter out removed paths, union with post-checkpoint adds
-   *   6. Map DeltaFileEntry → CompanionSourceFile
+   *   1. getSnapshotInfo() on driver → checkpoint part paths + commit file paths + schema + partition columns 2. Build
+   *      PartitionFilter from WHERE predicates using snapshot metadata (no listFiles!) 3. readPostCheckpointChanges()
+   *      on driver → adds/removes after checkpoint 4. sc.parallelize(checkpointPartPaths) → flatMap(readCheckpointPart)
+   *      on executors 5. Filter out removed paths, union with post-checkpoint adds 6. Map DeltaFileEntry →
+   *      CompanionSourceFile
    */
   def scanDeltaTable(
     path: String,
@@ -340,41 +364,49 @@ class DistributedSourceScanner(spark: SparkSession) {
     val deltaKernelPath = DeltaLogReader.normalizeForDeltaKernel(path)
     val deltaConfig     = DeltaLogReader.translateCredentials(credentials)
 
-    logger.info(s"Distributed Delta scan: getting snapshot info for $path" +
-      partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse(""))
+    logger.info(
+      s"Distributed Delta scan: getting snapshot info for $path" +
+        partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse("")
+    )
     val snapshotInfo = DeltaTableReader.getSnapshotInfo(deltaKernelPath, deltaConfig)
 
     // getSnapshotInfo() returns logical partition column names (translated from physical IDs
     // for column mapping tables by tantivy4java 0.31.0).
     val snapshotPartCols = snapshotInfo.getPartitionColumns.asScala.toSeq
-    val schemaJson = snapshotInfo.getSchemaJson
+    val schemaJson       = snapshotInfo.getSchemaJson
     if (snapshotInfo.getColumnNameMapping != null && !snapshotInfo.getColumnNameMapping.isEmpty) {
       logger.info(s"Column mapping active: ${snapshotInfo.getColumnNameMapping.size} mapped columns")
     }
     logger.info(s"Snapshot partition columns: ${snapshotPartCols.mkString(", ")}")
 
     // Parse schema (using logical names from Delta schema JSON)
-    val schemaOpt = try {
-      Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
-    } catch { case _: Exception => None }
+    val schemaOpt =
+      try
+        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+      catch { case _: Exception => None }
 
     // Build PartitionFilter from WHERE predicates using snapshot metadata.
     // This avoids calling reader.partitionColumns() which triggers the blocking listFiles() call.
     val effectiveFilter = partitionFilter.orElse {
       if (wherePredicates.nonEmpty) {
-        try {
+        try
           if (snapshotPartCols.nonEmpty) {
-            logger.info(s"Building PartitionFilter: wherePredicates=${wherePredicates.mkString("; ")}, " +
-              s"partCols=${snapshotPartCols.mkString(",")}, schemaFields=${schemaOpt.map(_.fieldNames.mkString(",")).getOrElse("none")}")
+            logger.info(
+              s"Building PartitionFilter: wherePredicates=${wherePredicates.mkString("; ")}, " +
+                s"partCols=${snapshotPartCols.mkString(",")}, schemaFields=${schemaOpt.map(_.fieldNames.mkString(",")).getOrElse("none")}"
+            )
             val filter = SparkPredicateToPartitionFilter.convert(wherePredicates, snapshotPartCols, spark, schemaOpt)
             filter match {
               case Some(f) => logger.info(s"Built native PartitionFilter from snapshot metadata: ${f.toJson}")
-              case None    => logger.warn(s"PartitionFilter build returned None — WHERE predicates may reference columns " +
-                s"not in partition columns [${snapshotPartCols.mkString(",")}], or expressions are unsupported")
+              case None =>
+                logger.warn(
+                  s"PartitionFilter build returned None — WHERE predicates may reference columns " +
+                    s"not in partition columns [${snapshotPartCols.mkString(",")}], or expressions are unsupported"
+                )
             }
             filter
           } else None
-        } catch {
+        catch {
           case e: Exception =>
             logger.warn(s"Cannot build PartitionFilter from snapshot metadata: ${e.getMessage}")
             None
@@ -392,7 +424,12 @@ class DistributedSourceScanner(spark: SparkSession) {
     // Read post-checkpoint changes on driver (small: just JSON commit files after last checkpoint).
     // Pass snapshotInfo for column mapping translation of partition values.
     val postCheckpointChanges = DeltaTableReader.readPostCheckpointChanges(
-      deltaKernelPath, deltaConfig, snapshotInfo.getCommitFilePaths, effectiveFilter.orNull, snapshotInfo)
+      deltaKernelPath,
+      deltaConfig,
+      snapshotInfo.getCommitFilePaths,
+      effectiveFilter.orNull,
+      snapshotInfo
+    )
     val addedAfterCheckpoint = postCheckpointChanges.getAddedFiles.asScala.toSeq
     val removedPaths         = postCheckpointChanges.getRemovedPaths.asScala.toSet
 
@@ -422,7 +459,9 @@ class DistributedSourceScanner(spark: SparkSession) {
           if (broadcastArrowFfi.value) {
             readDeltaCheckpointPartArrowFfi(kernelPath, config, partPath, filter, snapInfo)
           } else {
-            DeltaTableReader.readCheckpointPart(kernelPath, config, partPath, filter, snapInfo).asScala
+            DeltaTableReader
+              .readCheckpointPart(kernelPath, config, partPath, filter, snapInfo)
+              .asScala
               .map(deltaEntryToCompanionFile)
           }
         }
@@ -459,10 +498,9 @@ class DistributedSourceScanner(spark: SparkSession) {
    * Scan an Iceberg table using distributed manifest reading.
    *
    * Flow:
-   *   1. getSnapshotInfo() on driver → manifest file paths + snapshot metadata
-   *   2. Read first manifest on driver for sampleFilePath, storageRoot, and partitionColumns
-   *   3. sc.parallelize(manifestPaths) → flatMap(readManifestFile) on executors
-   *   4. Filter parquet-only, map to CompanionSourceFile with relative paths
+   *   1. getSnapshotInfo() on driver → manifest file paths + snapshot metadata 2. Read first manifest on driver for
+   *      sampleFilePath, storageRoot, and partitionColumns 3. sc.parallelize(manifestPaths) → flatMap(readManifestFile)
+   *      on executors 4. Filter parquet-only, map to CompanionSourceFile with relative paths
    */
   def scanIcebergTable(
     catalogName: String,
@@ -473,8 +511,10 @@ class DistributedSourceScanner(spark: SparkSession) {
     partitionFilter: Option[PartitionFilter] = None,
     wherePredicates: Seq[String] = Seq.empty
   ): DistributedScanResult = {
-    logger.info(s"Distributed Iceberg scan: getting snapshot info for $catalogName.$namespace.$tableName" +
-      partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse(""))
+    logger.info(
+      s"Distributed Iceberg scan: getting snapshot info for $catalogName.$namespace.$tableName" +
+        partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse("")
+    )
     val snapshotInfo = snapshotId match {
       case Some(id) => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, id)
       case None     => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig)
@@ -502,9 +542,9 @@ class DistributedSourceScanner(spark: SparkSession) {
     val partitionColumns    = firstEntry.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
 
     // Distributed: read all manifests on executors
-    val sc              = spark.sparkContext
-    val broadcastConfig = sc.broadcast((catalogName, namespace, tableName, icebergConfig))
-    val broadcastRoot   = sc.broadcast(computedStorageRoot)
+    val sc                = spark.sparkContext
+    val broadcastConfig   = sc.broadcast((catalogName, namespace, tableName, icebergConfig))
+    val broadcastRoot     = sc.broadcast(computedStorageRoot)
     val broadcastFilter   = sc.broadcast(partitionFilter.orNull)
     val broadcastArrowFfi = sc.broadcast(arrowFfiEnabled)
 
@@ -519,16 +559,22 @@ class DistributedSourceScanner(spark: SparkSession) {
           readIcebergManifestArrowFfi(cat, ns, tbl, config, manifestPath, filter, root)
         } else if (filter != null) {
           val entries = IcebergTableReader.readManifestFile(cat, ns, tbl, config, manifestPath, false, filter)
-          entries.asScala.filter { entry =>
-            val fmt = entry.getFileFormat
-            fmt == null || fmt.equalsIgnoreCase("parquet")
-          }.map(entry => icebergEntryToCompanionFile(entry, root)).iterator
+          entries.asScala
+            .filter { entry =>
+              val fmt = entry.getFileFormat
+              fmt == null || fmt.equalsIgnoreCase("parquet")
+            }
+            .map(entry => icebergEntryToCompanionFile(entry, root))
+            .iterator
         } else {
           val entries = IcebergTableReader.readManifestFile(cat, ns, tbl, config, manifestPath)
-          entries.asScala.filter { entry =>
-            val fmt = entry.getFileFormat
-            fmt == null || fmt.equalsIgnoreCase("parquet")
-          }.map(entry => icebergEntryToCompanionFile(entry, root)).iterator
+          entries.asScala
+            .filter { entry =>
+              val fmt = entry.getFileFormat
+              fmt == null || fmt.equalsIgnoreCase("parquet")
+            }
+            .map(entry => icebergEntryToCompanionFile(entry, root))
+            .iterator
         }
       }
 
@@ -546,10 +592,9 @@ class DistributedSourceScanner(spark: SparkSession) {
    * Scan a bare Parquet directory using distributed partition directory listing.
    *
    * Flow:
-   *   1. getTableInfo() on driver → partition directories + root files
-   *   2. If partitioned: sc.parallelize(partitionDirs) → flatMap(listPartitionFiles)
-   *   3. If unpartitioned: sc.parallelize(rootFiles)
-   *   4. Map ParquetFileEntry → CompanionSourceFile
+   *   1. getTableInfo() on driver → partition directories + root files 2. If partitioned: sc.parallelize(partitionDirs)
+   *      → flatMap(listPartitionFiles) 3. If unpartitioned: sc.parallelize(rootFiles) 4. Map ParquetFileEntry →
+   *      CompanionSourceFile
    */
   def scanParquetDirectory(
     path: String,
@@ -560,8 +605,10 @@ class DistributedSourceScanner(spark: SparkSession) {
     val normalizedPath = ParquetDirectoryReader.normalizeForObjectStore(path)
     val nativeConfig   = ParquetDirectoryReader.translateCredentials(credentials)
 
-    logger.info(s"Distributed Parquet scan: getting table info for $path" +
-      partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse(""))
+    logger.info(
+      s"Distributed Parquet scan: getting table info for $path" +
+        partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse("")
+    )
     val tableInfo = partitionFilter match {
       case Some(filter) => ParquetTableReader.getTableInfo(normalizedPath, nativeConfig, filter)
       case None         => ParquetTableReader.getTableInfo(normalizedPath, nativeConfig)

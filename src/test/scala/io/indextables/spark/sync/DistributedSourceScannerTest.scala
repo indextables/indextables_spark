@@ -27,8 +27,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * Tests for DistributedSourceScanner — verifies that distributed Delta and Parquet scans
- * produce the same file set as the existing single-call readers.
+ * Tests for DistributedSourceScanner — verifies that distributed Delta and Parquet scans produce the same file set as
+ * the existing single-call readers.
  */
 class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -110,12 +110,12 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       val deltaPath = new File(tempDir, "delta_paths").getAbsolutePath
       createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
 
-      val reader         = new DeltaLogReader(deltaPath, emptyCredentials)
-      val singlePaths    = reader.getAllFiles().map(_.path).toSet
+      val reader      = new DeltaLogReader(deltaPath, emptyCredentials)
+      val singlePaths = reader.getAllFiles().map(_.path).toSet
 
-      val scanner        = new DistributedSourceScanner(spark)
-      val distResult     = scanner.scanDeltaTable(deltaPath, emptyCredentials)
-      val distPaths      = distResult.filesRDD.map(_.path).collect().toSet
+      val scanner    = new DistributedSourceScanner(spark)
+      val distResult = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val distPaths  = distResult.filesRDD.map(_.path).collect().toSet
 
       distPaths shouldBe singlePaths
     }
@@ -126,7 +126,7 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       val deltaPath = new File(tempDir, "delta_version").getAbsolutePath
       createDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 5)
 
-      val reader      = new DeltaLogReader(deltaPath, emptyCredentials)
+      val reader        = new DeltaLogReader(deltaPath, emptyCredentials)
       val readerVersion = reader.currentVersion()
 
       val scanner    = new DistributedSourceScanner(spark)
@@ -160,7 +160,7 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       val reader      = new DeltaLogReader(deltaPath, emptyCredentials)
       val singleFiles = reader.getAllFiles()
 
-      val scanner   = new DistributedSourceScanner(spark)
+      val scanner    = new DistributedSourceScanner(spark)
       val distResult = scanner.scanDeltaTable(deltaPath, emptyCredentials)
       val distFiles  = distResult.filesRDD.collect().toSeq
 
@@ -226,12 +226,12 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       val deltaPath = new File(tempDir, "delta_nofilter").getAbsolutePath
       createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 10)
 
-      val scanner      = new DistributedSourceScanner(spark)
+      val scanner        = new DistributedSourceScanner(spark)
       val resultNoFilter = scanner.scanDeltaTable(deltaPath, emptyCredentials, partitionFilter = None)
       val filesNoFilter  = resultNoFilter.filesRDD.collect().toSeq
 
-      val resultDefault  = scanner.scanDeltaTable(deltaPath, emptyCredentials)
-      val filesDefault   = resultDefault.filesRDD.collect().toSeq
+      val resultDefault = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val filesDefault  = resultDefault.filesRDD.collect().toSeq
 
       filesNoFilter.size shouldBe filesDefault.size
       filesNoFilter.map(_.path).toSet shouldBe filesDefault.map(_.path).toSet
@@ -268,7 +268,11 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
 
   // ─── Helpers ───
 
-  private def createDeltaTable(path: String, numFiles: Int, rowsPerFile: Int): Unit = {
+  private def createDeltaTable(
+    path: String,
+    numFiles: Int,
+    rowsPerFile: Int
+  ): Unit = {
     val ss = spark
     import ss.implicits._
     val data = (0 until numFiles * rowsPerFile).map(i => (i.toLong, s"name_$i", i * 1.5, i % 2 == 0))

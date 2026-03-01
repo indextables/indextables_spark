@@ -20,21 +20,21 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
+import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.TransactionLogFactory
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
-import scala.jdk.CollectionConverters._
-
 /**
- * End-to-end integration tests for distributed log read in BUILD INDEXTABLES COMPANION.
- * Tests the full pipeline with distributed enabled vs disabled, verifying identical results.
+ * End-to-end integration tests for distributed log read in BUILD INDEXTABLES COMPANION. Tests the full pipeline with
+ * distributed enabled vs disabled, verifying identical results.
  */
 class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -130,9 +130,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       val txLog = TransactionLogFactory.create(
         new Path(indexPath),
@@ -164,9 +166,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       // Initial write: 2 files
       createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 10)
-      val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result1 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
       val initialFiles = result1(0).getInt(6) // parquet_files_indexed
 
@@ -183,9 +187,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
         .save(deltaPath)
 
       // Incremental sync: should detect the new file
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result2(0).getString(2) shouldBe "success"
       result2(0).getInt(6) shouldBe 1 // only the new file
@@ -199,13 +205,17 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 10)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result2(0).getString(2) shouldBe "no_action"
     }
   }
@@ -222,15 +232,16 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       // Disable distributed log read
       spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
       try {
-        val result = spark.sql(
-          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-        ).collect()
+        val result = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+          )
+          .collect()
 
         result(0).getString(2) shouldBe "success"
         result(0).getInt(6) shouldBe 2
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
-      }
     }
   }
 
@@ -238,31 +249,34 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
   test("distributed and non-distributed paths should produce identical companion indexes") {
     withTempPath { tempDir =>
-      val deltaPath    = new File(tempDir, "delta_compare").getAbsolutePath
-      val distPath     = new File(tempDir, "companion_dist").getAbsolutePath
-      val nonDistPath  = new File(tempDir, "companion_nondist").getAbsolutePath
+      val deltaPath   = new File(tempDir, "delta_compare").getAbsolutePath
+      val distPath    = new File(tempDir, "companion_dist").getAbsolutePath
+      val nonDistPath = new File(tempDir, "companion_nondist").getAbsolutePath
 
       createDeltaTable(deltaPath, numFiles = 3, rowsPerFile = 10)
 
       // Build with distributed enabled (default)
-      val distResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$distPath'"
-      ).collect()
+      val distResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$distPath'"
+        )
+        .collect()
 
       // Build with distributed disabled
       spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
       try {
-        val nonDistResult = spark.sql(
-          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$nonDistPath'"
-        ).collect()
+        val nonDistResult = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$nonDistPath'"
+          )
+          .collect()
 
         // Both should succeed with same file count
         distResult(0).getString(2) shouldBe "success"
         nonDistResult(0).getString(2) shouldBe "success"
         distResult(0).getInt(6) shouldBe nonDistResult(0).getInt(6) // same parquet_files_indexed
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
-      }
     }
   }
 
@@ -275,9 +289,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createParquetData(parquetPath, numFiles = 2)
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       result(0).getInt(6) shouldBe 2
@@ -295,9 +311,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
       // Initial sync (all partitions)
-      val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result1 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
 
       // Verify all partitions are indexed
@@ -317,9 +335,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createPartitionedDeltaTable(deltaPath, Seq("2024-02-01", "2024-03-01"))
 
       // Incremental sync with WHERE date >= '2024-02-01' (default: scoped invalidation)
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       // Verify: splits for date=2024-01-01 should NOT be invalidated
       val txLog2 = TransactionLogFactory.create(
@@ -348,9 +368,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
       // Initial sync (all partitions)
-      val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result1 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
 
       // Delete source files for date=2024-01-01 and recreate without that partition
@@ -358,9 +380,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createPartitionedDeltaTable(deltaPath, Seq("2024-02-01", "2024-03-01"))
 
       // Incremental sync with WHERE + INVALIDATE ALL PARTITIONS
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' INVALIDATE ALL PARTITIONS AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' INVALIDATE ALL PARTITIONS AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       // Verify: splits for date=2024-01-01 SHOULD be invalidated
       val txLog = TransactionLogFactory.create(
@@ -372,7 +396,7 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       )
       try {
         val remainingFiles = txLog.listFiles()
-        val jan01Splits = remainingFiles.filter(_.partitionValues.get("date").contains("2024-01-01"))
+        val jan01Splits    = remainingFiles.filter(_.partitionValues.get("date").contains("2024-01-01"))
         jan01Splits shouldBe empty
       } finally
         txLog.close()
@@ -388,9 +412,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
       // Initial sync (all partitions)
-      val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result1 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
 
       // Delete source files for date=2024-02-01 (within WHERE range) and recreate without it
@@ -398,9 +424,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-03-01"))
 
       // Incremental sync with WHERE date >= '2024-02-01' (scoped invalidation)
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       // Verify: splits for date=2024-02-01 SHOULD be invalidated (within scope)
       // Verify: splits for date=2024-01-01 should NOT be invalidated (outside scope)
@@ -413,7 +441,7 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       )
       try {
         val remainingFiles = txLog.listFiles()
-        val feb01Splits = remainingFiles.filter(_.partitionValues.get("date").contains("2024-02-01"))
+        val feb01Splits    = remainingFiles.filter(_.partitionValues.get("date").contains("2024-02-01"))
         feb01Splits shouldBe empty // invalidated (within WHERE scope)
 
         val jan01Splits = remainingFiles.filter(_.partitionValues.get("date").contains("2024-01-01"))
@@ -432,21 +460,23 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date = '2024-02-01' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date = '2024-02-01' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       // Only files from the date=2024-02-01 partition should be indexed
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files = txLog.listFiles()
         files should not be empty
-        files.foreach { f =>
-          f.partitionValues.get("date") shouldBe Some("2024-02-01")
-        }
+        files.foreach(f => f.partitionValues.get("date") shouldBe Some("2024-02-01"))
       } finally txLog.close()
     }
   }
@@ -458,14 +488,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date IN ('2024-01-01', '2024-03-01') AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date IN ('2024-01-01', '2024-03-01') AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files    = txLog.listFiles()
         val dateVals = files.flatMap(_.partitionValues.get("date")).toSet
@@ -483,19 +517,23 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createMultiPartDeltaTable(deltaPath)
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year >= 2024 AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year >= 2024 AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
-        val files     = txLog.listFiles()
-        val yearVals  = files.flatMap(_.partitionValues.get("year")).map(_.toInt).toSet
+        val files    = txLog.listFiles()
+        val yearVals = files.flatMap(_.partitionValues.get("year")).map(_.toInt).toSet
         yearVals.foreach(_ should be >= 2024)
-        yearVals should not contain 2023  // assert exclusion
+        yearVals should not contain 2023 // assert exclusion
       } finally txLog.close()
     }
   }
@@ -507,14 +545,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createMultiPartDeltaTable(deltaPath)
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year = 2024 AND region = 'east' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year = 2024 AND region = 'east' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files = txLog.listFiles()
         files should not be empty
@@ -533,14 +575,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date = '2024-01-01' OR date = '2024-03-01' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date = '2024-01-01' OR date = '2024-03-01' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val dateVals = txLog.listFiles().flatMap(_.partitionValues.get("date")).toSet
         dateVals should contain("2024-01-01")
@@ -557,19 +603,23 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createMultiPartDeltaTable(deltaPath)
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year > 2023 AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year > 2023 AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files    = txLog.listFiles()
         val yearVals = files.flatMap(_.partitionValues.get("year")).map(_.toInt).toSet
         yearVals.foreach(_ should be > 2023)
-        yearVals should not contain 2023  // strictly excluded
+        yearVals should not contain 2023 // strictly excluded
         yearVals should contain(2024)
         yearVals should contain(2025)
       } finally txLog.close()
@@ -583,14 +633,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createMultiPartDeltaTable(deltaPath)
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year >= 2024 AND year <= 2024 AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE year >= 2024 AND year <= 2024 AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files    = txLog.listFiles()
         val yearVals = files.flatMap(_.partitionValues.get("year")).map(_.toInt).toSet
@@ -606,14 +660,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createDatePartitionedDeltaTable(deltaPath)
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE dt >= '2025-01-01' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE dt >= '2025-01-01' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files  = txLog.listFiles()
         val dtVals = files.flatMap(_.partitionValues.get("dt")).toSet
@@ -631,14 +689,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date != '2024-02-01' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date != '2024-02-01' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val dateVals = txLog.listFiles().flatMap(_.partitionValues.get("date")).toSet
         dateVals should contain("2024-01-01")
@@ -652,31 +714,34 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
   test("Arrow FFI disabled should produce same results as Arrow FFI enabled") {
     withTempPath { tempDir =>
-      val deltaPath    = new File(tempDir, "delta_ffi_compare").getAbsolutePath
-      val ffiPath      = new File(tempDir, "companion_ffi").getAbsolutePath
-      val tantPath     = new File(tempDir, "companion_tant").getAbsolutePath
+      val deltaPath = new File(tempDir, "delta_ffi_compare").getAbsolutePath
+      val ffiPath   = new File(tempDir, "companion_ffi").getAbsolutePath
+      val tantPath  = new File(tempDir, "companion_tant").getAbsolutePath
 
       createPartitionedDeltaTable(deltaPath, Seq("2024-01-01", "2024-02-01", "2024-03-01"))
 
       // Build with Arrow FFI enabled (default)
-      val ffiResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$ffiPath'"
-      ).collect()
+      val ffiResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$ffiPath'"
+        )
+        .collect()
 
       // Build with Arrow FFI disabled
       spark.conf.set("spark.indextables.companion.sync.arrowFfi.enabled", "false")
       try {
-        val tantResult = spark.sql(
-          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$tantPath'"
-        ).collect()
+        val tantResult = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE date >= '2024-02-01' AT LOCATION '$tantPath'"
+          )
+          .collect()
 
         // Both should succeed with same file count
         ffiResult(0).getString(2) shouldBe "success"
         tantResult(0).getString(2) shouldBe "success"
         ffiResult(0).getInt(6) shouldBe tantResult(0).getInt(6) // same parquet_files_indexed
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.sync.arrowFfi.enabled")
-      }
     }
   }
 
@@ -690,14 +755,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createColumnMappingDeltaTable(deltaPath)
 
       // WHERE on both string partition columns
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files = txLog.listFiles()
         files should not be empty
@@ -717,9 +786,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createColumnMappingDeltaTable(deltaPath)
 
       // No WHERE filter — should index all files
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       result(0).getInt(6) should be >= 4 // at least 4 partition combos
@@ -734,16 +805,20 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       createColumnMappingDeltaTable(deltaPath)
 
       // Initial sync
-      val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-      ).collect()
+      val result1 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
       result1(0).getInt(6) should be > 0
 
       // Re-sync: no changes, should return no_action
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result2(0).getString(2) shouldBe "no_action"
       result2(0).getInt(4) shouldBe 0 // splits_created
     }
@@ -751,30 +826,33 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
 
   test("column mapping table distributed vs non-distributed should produce same results") {
     withTempPath { tempDir =>
-      val deltaPath    = new File(tempDir, "delta_colmap_cmp").getAbsolutePath
-      val distPath     = new File(tempDir, "companion_colmap_dist").getAbsolutePath
-      val nonDistPath  = new File(tempDir, "companion_colmap_nondist").getAbsolutePath
+      val deltaPath   = new File(tempDir, "delta_colmap_cmp").getAbsolutePath
+      val distPath    = new File(tempDir, "companion_colmap_dist").getAbsolutePath
+      val nonDistPath = new File(tempDir, "companion_colmap_nondist").getAbsolutePath
 
       createColumnMappingDeltaTable(deltaPath)
 
       // Build with distributed enabled (default)
-      val distResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AT LOCATION '$distPath'"
-      ).collect()
+      val distResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AT LOCATION '$distPath'"
+        )
+        .collect()
 
       // Build with distributed disabled
       spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
       try {
-        val nonDistResult = spark.sql(
-          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AT LOCATION '$nonDistPath'"
-        ).collect()
+        val nonDistResult = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AT LOCATION '$nonDistPath'"
+          )
+          .collect()
 
         distResult(0).getString(2) shouldBe "success"
         nonDistResult(0).getString(2) shouldBe "success"
         distResult(0).getInt(6) shouldBe nonDistResult(0).getInt(6)
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
-      }
     }
   }
 
@@ -789,14 +867,18 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
       deltaLog.checkpoint()
 
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+        )
+        .collect()
 
       result(0).getString(2) shouldBe "success"
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
-        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        new Path(indexPath),
+        spark,
+        new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+      )
       try {
         val files = txLog.listFiles()
         files should not be empty
@@ -821,16 +903,20 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       deltaLog.checkpoint()
 
       // First sync — should succeed
-      val result1 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-      ).collect()
+      val result1 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
       result1(0).getInt(6) should be > 0
 
       // Second sync against same unchanged partition — should return no_action
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-      ).collect()
+      val result2 = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result2(0).getString(2) shouldBe "no_action"
       result2(0).getInt(4) shouldBe 0 // splits_created
       result2(0).getInt(6) shouldBe 0 // parquet_files_indexed
@@ -863,9 +949,7 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
   private def createPartitionedDeltaTable(path: String, dates: Seq[String]): Unit = {
     val ss = spark
     import ss.implicits._
-    val data = dates.flatMap { date =>
-      (0 until 5).map(i => (i.toLong, s"name_$i", date))
-    }
+    val data = dates.flatMap(date => (0 until 5).map(i => (i.toLong, s"name_$i", date)))
     data
       .toDF("id", "name", "date")
       .repartition(dates.size)
@@ -911,7 +995,11 @@ class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with
       .save(path)
   }
 
-  private def createDeltaTable(path: String, numFiles: Int, rowsPerFile: Int): Unit = {
+  private def createDeltaTable(
+    path: String,
+    numFiles: Int,
+    rowsPerFile: Int
+  ): Unit = {
     val ss = spark
     import ss.implicits._
     val data = (0 until numFiles * rowsPerFile).map(i => (i.toLong, s"name_$i", i * 1.5, i % 2 == 0))

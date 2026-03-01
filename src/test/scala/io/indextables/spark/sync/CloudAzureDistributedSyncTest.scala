@@ -26,8 +26,8 @@ import io.indextables.spark.CloudAzureTestBase
 /**
  * Real Azure Blob Storage integration tests for the distributed log read feature of BUILD INDEXTABLES COMPANION.
  *
- * Validates that the distributed transaction log scanning (DistributedSourceScanner) works correctly
- * with real Azure paths, credentials, and Delta/Parquet data. Tests cover:
+ * Validates that the distributed transaction log scanning (DistributedSourceScanner) works correctly with real Azure
+ * paths, credentials, and Delta/Parquet data. Tests cover:
  *   - Azure credential propagation to executors via broadcast variables
  *   - Azure path normalization (wasbs:// → az:// conversion)
  *   - Distributed vs non-distributed path equivalence on real Azure storage
@@ -35,8 +35,8 @@ import io.indextables.spark.CloudAzureTestBase
  *   - Fallback behavior when distributed scan fails
  *
  * These tests require:
- *   1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables)
- *   2. An Azure Blob Storage container for test data
+ *   1. Azure credentials (via ~/.azure/credentials, system properties, or environment variables) 2. An Azure Blob
+ *      Storage container for test data
  *
  * Tests are automatically skipped if credentials are not available.
  */
@@ -135,23 +135,26 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
     df.repartition(3).write.format("delta").mode("overwrite").save(deltaPath)
 
     // Build with distributed enabled (default)
-    val distResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$distPath'"
-    ).collect()
+    val distResult = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$distPath'"
+      )
+      .collect()
 
     // Build with distributed disabled
     spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
     try {
-      val nonDistResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$nonDistPath'"
-      ).collect()
+      val nonDistResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$nonDistPath'"
+        )
+        .collect()
 
       distResult(0).getString(2) shouldBe "success"
       nonDistResult(0).getString(2) shouldBe "success"
       distResult(0).getInt(6) shouldBe nonDistResult(0).getInt(6)
-    } finally {
+    } finally
       spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
-    }
   }
 
   // ─── Delta: Distributed Sync on Azure ───
@@ -167,14 +170,17 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
 
     val _spark = spark
     import _spark.implicits._
-    val df = (0 until 50).map(i => (i.toLong, s"name_$i", i * 1.5, i % 2 == 0))
+    val df = (0 until 50)
+      .map(i => (i.toLong, s"name_$i", i * 1.5, i % 2 == 0))
       .toDF("id", "name", "score", "active")
 
     df.repartition(5).write.format("delta").mode("overwrite").save(deltaPath)
 
-    val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
 
     result(0).getString(2) shouldBe "success"
     result(0).getInt(4) should be > 0
@@ -194,26 +200,38 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
     import _spark.implicits._
 
     // Initial write
-    (0 until 20).map(i => (i.toLong, s"name_$i", i * 1.5))
+    (0 until 20)
+      .map(i => (i.toLong, s"name_$i", i * 1.5))
       .toDF("id", "name", "score")
       .repartition(2)
-      .write.format("delta").mode("overwrite").save(deltaPath)
+      .write
+      .format("delta")
+      .mode("overwrite")
+      .save(deltaPath)
 
-    val result1 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result1 = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
     result1(0).getString(2) shouldBe "success"
 
     // Append more data
-    (100 until 110).map(i => (i.toLong, s"name_$i", i * 1.5))
+    (100 until 110)
+      .map(i => (i.toLong, s"name_$i", i * 1.5))
       .toDF("id", "name", "score")
       .repartition(1)
-      .write.format("delta").mode("append").save(deltaPath)
+      .write
+      .format("delta")
+      .mode("append")
+      .save(deltaPath)
 
     // Incremental sync
-    val result2 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result2 = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
     result2(0).getString(2) shouldBe "success"
     result2(0).getInt(6) shouldBe 1
   }
@@ -239,9 +257,11 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
 
     df.write.format("delta").partitionBy("region").mode("overwrite").save(deltaPath)
 
-    val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
 
     result(0).getString(2) shouldBe "success"
 
@@ -272,14 +292,17 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
 
     val _spark = spark
     import _spark.implicits._
-    val df = (0 until 30).map(i => (i.toLong, s"name_$i", i * 1.5))
+    val df = (0 until 30)
+      .map(i => (i.toLong, s"name_$i", i * 1.5))
       .toDF("id", "name", "score")
 
     df.repartition(3).write.parquet(parquetPath)
 
-    val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
 
     result(0).getString(2) shouldBe "success"
     result(0).getInt(6) shouldBe 3
@@ -299,24 +322,28 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
     import _spark.implicits._
     Seq((1, "hello world", 100.0), (2, "foo bar", 200.0), (3, "test data", 300.0))
       .toDF("id", "content", "score")
-      .write.parquet(parquetPath)
+      .write
+      .parquet(parquetPath)
 
-    val distResult = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$distPath'"
-    ).collect()
+    val distResult = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$distPath'"
+      )
+      .collect()
 
     spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
     try {
-      val nonDistResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$nonDistPath'"
-      ).collect()
+      val nonDistResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$nonDistPath'"
+        )
+        .collect()
 
       distResult(0).getString(2) shouldBe "success"
       nonDistResult(0).getString(2) shouldBe "success"
       distResult(0).getInt(6) shouldBe nonDistResult(0).getInt(6)
-    } finally {
+    } finally
       spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
-    }
   }
 
   // ─── Column Mapping: WHERE filter via distributed path on Azure ───
@@ -339,19 +366,24 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
       (4L, "dave", "2026-02-08", "10"),
       (5L, "eve", "2026-02-08", "12")
     ).toDF("id", "name", "kdate", "khour")
-      .write.format("delta").partitionBy("kdate", "khour")
+      .write
+      .format("delta")
+      .partitionBy("kdate", "khour")
       .option("delta.columnMapping.mode", "name")
       .option("delta.minReaderVersion", "2")
       .option("delta.minWriterVersion", "5")
-      .mode("overwrite").save(deltaPath)
+      .mode("overwrite")
+      .save(deltaPath)
 
     // Force checkpoint so distributed path (readCheckpointPart with snapshotInfo) runs
     val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, deltaPath)
     deltaLog.checkpoint()
 
-    val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
-    ).collect()
+    val result = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WHERE kdate = '2026-02-07' AND khour = '12' AT LOCATION '$indexPath'"
+      )
+      .collect()
 
     result(0).getString(2) shouldBe "success"
 
@@ -380,22 +412,30 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
 
     val _spark = spark
     import _spark.implicits._
-    (0 until 20).map(i => (i.toLong, s"name_$i", i * 1.5))
+    (0 until 20)
+      .map(i => (i.toLong, s"name_$i", i * 1.5))
       .toDF("id", "name", "score")
       .repartition(2)
-      .write.format("delta").mode("overwrite").save(deltaPath)
+      .write
+      .format("delta")
+      .mode("overwrite")
+      .save(deltaPath)
 
     // First sync — should succeed
-    val result1 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result1 = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
     result1(0).getString(2) shouldBe "success"
     result1(0).getInt(6) should be > 0
 
     // Second sync with no changes — should return no_action
-    val result2 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result2 = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
     result2(0).getString(2) shouldBe "no_action"
     result2(0).getInt(6) shouldBe 0
   }
@@ -411,22 +451,28 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
 
     val _spark = spark
     import _spark.implicits._
-    (0 until 15).map(i => (i.toLong, s"name_$i"))
+    (0 until 15)
+      .map(i => (i.toLong, s"name_$i"))
       .toDF("id", "name")
       .repartition(2)
-      .write.parquet(parquetPath)
+      .write
+      .parquet(parquetPath)
 
     // First sync — should succeed
-    val result1 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result1 = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
     result1(0).getString(2) shouldBe "success"
     result1(0).getInt(6) should be > 0
 
     // Second sync with no changes — should return no_action
-    val result2 = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result2 = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
     result2(0).getString(2) shouldBe "no_action"
     result2(0).getInt(6) shouldBe 0
   }
@@ -444,12 +490,13 @@ class CloudAzureDistributedSyncTest extends CloudAzureTestBase {
 
     val _spark = spark
     import _spark.implicits._
-    Seq((1, "single row")).toDF("id", "content")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    Seq((1, "single row")).toDF("id", "content").write.format("delta").mode("overwrite").save(deltaPath)
 
-    val result = spark.sql(
-      s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-    ).collect()
+    val result = spark
+      .sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      )
+      .collect()
 
     result(0).getString(2) shouldBe "success"
     result(0).getInt(6) should be > 0
