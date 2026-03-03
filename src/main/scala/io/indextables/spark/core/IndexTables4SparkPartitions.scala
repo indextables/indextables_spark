@@ -649,15 +649,30 @@ class IndexTables4SparkWriterFactory(
       logger.info(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
     }
 
-    // Use Map-based config directly - no HadoopConf reconstruction needed (fast path)
-    new IndexTables4SparkDataWriter(
-      tablePath,
-      writeSchema,
-      partitionId,
-      taskId,
-      serializedOptions,
-      partitionColumns
-    )
+    // Check if Arrow FFI write path is enabled
+    val arrowFfiConfig = io.indextables.spark.write.ArrowFfiWriteConfig.fromMap(serializedOptions)
+    if (arrowFfiConfig.enabled) {
+      logger.info(s"Using Arrow FFI write path (batchSize=${arrowFfiConfig.batchSize})")
+      new IndexTables4SparkArrowDataWriter(
+        tablePath,
+        writeSchema,
+        partitionId,
+        taskId,
+        serializedOptions,
+        partitionColumns,
+        arrowFfiConfig
+      )
+    } else {
+      // Use Map-based config directly - no HadoopConf reconstruction needed (fast path)
+      new IndexTables4SparkDataWriter(
+        tablePath,
+        writeSchema,
+        partitionId,
+        taskId,
+        serializedOptions,
+        partitionColumns
+      )
+    }
   }
 }
 
