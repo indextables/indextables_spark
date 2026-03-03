@@ -99,7 +99,8 @@ statement
         (WHERE whereClause=predicateToken)?
         (INVALIDATE ALL PARTITIONS)?
         AT LOCATION destPath=STRING
-        (DRY RUN)?                                            #syncToExternal
+        (DRY RUN)?
+        (WITH STREAMING POLL INTERVAL pollInterval=INTEGER_VALUE pollUnit=(SECONDS | MINUTES))?   #syncToExternal
     | .*?                                                       #passThrough
     ;
 
@@ -158,6 +159,7 @@ nonReserved
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
     | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
     | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE | INVALIDATE
+    | STREAMING | POLL | INTERVAL | SECONDS | MINUTES
     ;
 
 // Keywords (case-insensitive)
@@ -248,6 +250,11 @@ TYPE: [Tt][Yy][Pp][Ee];
 WAREHOUSE: [Ww][Aa][Rr][Ee][Hh][Oo][Uu][Ss][Ee];
 HASHED: [Hh][Aa][Ss][Hh][Ee][Dd];
 EXCLUDE: [Ee][Xx][Cc][Ll][Uu][Dd][Ee];
+STREAMING: [Ss][Tt][Rr][Ee][Aa][Mm][Ii][Nn][Gg];
+POLL: [Pp][Oo][Ll][Ll];
+INTERVAL: [Ii][Nn][Tt][Ee][Rr][Vv][Aa][Ll];
+SECONDS: [Ss][Ee][Cc][Oo][Nn][Dd][Ss];
+MINUTES: [Mm][Ii][Nn][Uu][Tt][Ee][Ss];
 
 // Literals
 STRING

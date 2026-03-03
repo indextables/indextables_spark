@@ -83,7 +83,8 @@ case class SyncToExternalCommand(
   hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   invalidateAllPartitions: Boolean = false,
-  dryRun: Boolean)
+  dryRun: Boolean,
+  streamingPollIntervalMs: Option[Long] = None)
     extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[SyncToExternalCommand])
@@ -116,6 +117,11 @@ case class SyncToExternalCommand(
   )
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    if (streamingPollIntervalMs.isDefined) {
+      new StreamingCompanionManager(this, streamingPollIntervalMs.get).runStreaming(sparkSession)
+      return Seq.empty
+    }
+
     val startTime = System.currentTimeMillis()
     logger.info(
       s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
@@ -148,7 +154,7 @@ case class SyncToExternalCommand(
     }
   }
 
-  private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
+  private[sql] def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
     // 1. Extract merged configuration and resolve credentials for source table access
     val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
