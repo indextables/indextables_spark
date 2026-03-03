@@ -101,133 +101,214 @@ class IndexTables4SparkScanBuilder(
         val metadata    = transactionLog.getMetadata()
         val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
         if (isCompanion) {
-          metadata.configuration.get("indextables.companion.sourceTablePath") match {
-            case Some(path) =>
-              val sourceFormat = metadata.configuration.getOrElse("indextables.companion.sourceFormat", "delta")
+          // Check for table root designator override
+          val designator = config
+            .get("spark.indextables.companion.tableRootDesignator")
+            .filter(_.nonEmpty)
 
-              // For Iceberg: use stored S3 root for parquetTableRoot (sourcePath is a
-              // table identifier like "prod.events", not an S3 path), and try table-based
-              // credential resolution at runtime.
-              val preferPathCreds = config
-                .getOrElse("spark.indextables.companion.credential.preferPathCredentials", "false")
-                .toLowerCase == "true"
-
-              val (effectivePath, baseConfig) = if (sourceFormat == "iceberg") {
-                val storageRoot = metadata.configuration.get("indextables.companion.parquetStorageRoot")
-                val root = storageRoot.getOrElse {
-                  logger.warn(
-                    s"Iceberg companion: no parquetStorageRoot in metadata, " +
-                      s"falling back to sourceTablePath=$path"
-                  )
-                  path
-                }
-                if (preferPathCreds) {
-                  logger.info(
-                    s"Iceberg companion: preferPathCredentials=true, using path-based credentials for $root"
-                  )
-                  (root, config)
-                } else {
-                  logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
-                  val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
-                  (root, enriched)
-                }
-              } else if (
-                sourceFormat == "delta" &&
-                metadata.configuration.contains("indextables.companion.deltaTableName")
-              ) {
-                // Delta + UC table name: resolve credentials via table-based API
-                val storedPath = metadata.configuration
-                  .get("indextables.companion.parquetStorageRoot")
-                  .getOrElse(path)
-                if (preferPathCreds) {
-                  logger.info(
-                    s"Delta UC companion: preferPathCredentials=true, using path-based credentials for $storedPath"
-                  )
-                  (storedPath, config)
-                } else {
-                  logger.info(
-                    s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
-                      s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})"
-                  )
-                  val enriched = tryResolveDeltaTableCredentials(metadata.configuration, config)
-                  (storedPath, enriched)
-                }
-              } else {
-                logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
-                (path, config)
-              }
-
-              var enrichedConfig = baseConfig +
-                ("spark.indextables.companion.parquetTableRoot" -> effectivePath) +
-                // ScanBuilder is read-only, request PATH_READ credentials
-                ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-
-              // Resolve credentials for the parquet table root on the driver.
-              // On Databricks/Unity Catalog, the companion index and Delta table may need
-              // different credentials (different external locations or vended tokens).
-              try {
-                io.indextables.spark.utils.CredentialProviderFactory
-                  .resolveAWSCredentialsFromConfig(enrichedConfig, effectivePath)
-                  .foreach { creds =>
-                    logger.info(s"Companion mode: resolved parquet credentials for $effectivePath (accessKey=${creds.accessKey.take(4)}...)")
-                    enrichedConfig = enrichedConfig +
-                      ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
-                      ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
-                    creds.sessionToken.foreach { token =>
-                      enrichedConfig = enrichedConfig +
-                        ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
-                    }
-                  }
-                // Propagate region and endpoint from main config
-                enrichedConfig
-                  .get("spark.indextables.aws.region")
-                  .orElse(enrichedConfig.get("spark.indextables.aws.region".toLowerCase))
-                  .foreach { region =>
-                    enrichedConfig = enrichedConfig +
-                      ("spark.indextables.companion.parquet.aws.region" -> region)
-                  }
-                enrichedConfig
-                  .get("spark.indextables.s3.endpoint")
-                  .orElse(enrichedConfig.get("spark.indextables.s3.endpoint".toLowerCase))
-                  .foreach { endpoint =>
-                    enrichedConfig = enrichedConfig +
-                      ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
-                  }
-              } catch {
-                case e: Exception =>
-                  logger.warn(s"Failed to resolve parquet credentials for companion mode: ${e.getMessage}")
-              }
-              // Propagate stored indexing modes as typemap entries so that
-              // isFieldSuitableForExactMatching() knows which fields are TEXT vs STRING.
-              // Without this, TEXT fields default to "string" and get incorrect EqualTo pushdown.
-              metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
+          if (designator.isDefined) {
+            val rootName = designator.get
+            val rootKey  = s"indextables.companion.tableRoots.$rootName"
+            metadata.configuration.get(rootKey) match {
+              case Some(designatedPath) =>
+                logger.info(s"Table root designator '$rootName' resolved to path: $designatedPath")
+                // Use the designated root as the effective path, skip default resolution
+                var designatorConfig = config +
+                  ("spark.indextables.companion.parquetTableRoot"      -> designatedPath) +
+                  ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+                // Resolve credentials for the designated root
                 try {
-                  import scala.jdk.CollectionConverters._
-                  val modes: java.util.Map[String, String] =
-                    IndexTables4SparkScanBuilder.objectMapper.readValue(json, classOf[java.util.HashMap[String, String]])
-                  modes.asScala.foreach {
-                    case (field, mode) =>
-                      val key = s"spark.indextables.indexing.typemap.$field"
-                      if (!enrichedConfig.contains(key)) {
-                        logger.info(s"Companion mode: propagating indexingMode $field -> $mode as typemap entry")
-                        enrichedConfig = enrichedConfig + (key -> mode)
+                  io.indextables.spark.utils.CredentialProviderFactory
+                    .resolveAWSCredentialsFromConfig(designatorConfig, designatedPath)
+                    .foreach { creds =>
+                      logger.info(s"Companion mode: resolved parquet credentials for designated root $designatedPath (accessKey=${creds.accessKey.take(4)}...)")
+                      designatorConfig = designatorConfig +
+                        ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
+                        ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
+                      creds.sessionToken.foreach { token =>
+                        designatorConfig = designatorConfig +
+                          ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
                       }
-                  }
+                    }
+                  designatorConfig
+                    .get("spark.indextables.aws.region")
+                    .orElse(designatorConfig.get("spark.indextables.aws.region".toLowerCase))
+                    .foreach { region =>
+                      designatorConfig = designatorConfig +
+                        ("spark.indextables.companion.parquet.aws.region" -> region)
+                    }
+                  designatorConfig
+                    .get("spark.indextables.s3.endpoint")
+                    .orElse(designatorConfig.get("spark.indextables.s3.endpoint".toLowerCase))
+                    .foreach { endpoint =>
+                      designatorConfig = designatorConfig +
+                        ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+                    }
                 } catch {
                   case e: Exception =>
-                    logger.warn(s"Failed to parse companion indexingModes: ${e.getMessage}")
+                    logger.warn(s"Failed to resolve parquet credentials for designated root: ${e.getMessage}")
                 }
-              }
+                // Propagate stored indexing modes
+                metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
+                  try {
+                    import scala.jdk.CollectionConverters._
+                    val modes: java.util.Map[String, String] =
+                      IndexTables4SparkScanBuilder.objectMapper.readValue(json, classOf[java.util.HashMap[String, String]])
+                    modes.asScala.foreach {
+                      case (field, mode) =>
+                        val key = s"spark.indextables.indexing.typemap.$field"
+                        if (!designatorConfig.contains(key)) {
+                          designatorConfig = designatorConfig + (key -> mode)
+                        }
+                    }
+                  } catch {
+                    case e: Exception =>
+                      logger.warn(s"Failed to parse companion indexingModes: ${e.getMessage}")
+                  }
+                }
+                designatorConfig - "spark.indextables.iceberg.uc.tableId"
+              case None =>
+                // Designator set but root not found - fail with actionable error
+                val availableRoots = metadata.configuration.keys
+                  .filter(k => k.startsWith("indextables.companion.tableRoots.") && !k.endsWith(".timestamp"))
+                  .map(_.stripPrefix("indextables.companion.tableRoots."))
+                  .toSeq
+                  .sorted
+                val rootList = if (availableRoots.nonEmpty) availableRoots.mkString(", ") else "(none registered)"
+                throw new IllegalArgumentException(
+                  s"Table root designator '$rootName' not found in metadata. Available roots: $rootList"
+                )
+            }
+          } else {
 
-              // Strip tableId from the final config so that split credential resolution
-              // uses path-based credentials (for the indextables split storage), not
-              // table-based credentials (scoped to the Iceberg source table). Companion
-              // parquet credentials are already stored in separate companion.parquet.* keys.
-              enrichedConfig - "spark.indextables.iceberg.uc.tableId"
-            case None =>
-              logger.warn("Companion mode enabled but no sourceTablePath in metadata")
-              config
-          }
+            metadata.configuration.get("indextables.companion.sourceTablePath") match {
+              case Some(path) =>
+                val sourceFormat = metadata.configuration.getOrElse("indextables.companion.sourceFormat", "delta")
+
+                // For Iceberg: use stored S3 root for parquetTableRoot (sourcePath is a
+                // table identifier like "prod.events", not an S3 path), and try table-based
+                // credential resolution at runtime.
+                val preferPathCreds = config
+                  .getOrElse("spark.indextables.companion.credential.preferPathCredentials", "false")
+                  .toLowerCase == "true"
+
+                val (effectivePath, baseConfig) = if (sourceFormat == "iceberg") {
+                  val storageRoot = metadata.configuration.get("indextables.companion.parquetStorageRoot")
+                  val root = storageRoot.getOrElse {
+                    logger.warn(
+                      s"Iceberg companion: no parquetStorageRoot in metadata, " +
+                        s"falling back to sourceTablePath=$path"
+                    )
+                    path
+                  }
+                  if (preferPathCreds) {
+                    logger.info(
+                      s"Iceberg companion: preferPathCredentials=true, using path-based credentials for $root"
+                    )
+                    (root, config)
+                  } else {
+                    logger.info(s"Iceberg companion mode detected: parquetTableRoot=$root (sourceTablePath=$path)")
+                    val enriched = tryResolveIcebergTableCredentials(metadata.configuration, config)
+                    (root, enriched)
+                  }
+                } else if (
+                  sourceFormat == "delta" &&
+                  metadata.configuration.contains("indextables.companion.deltaTableName")
+                ) {
+                  // Delta + UC table name: resolve credentials via table-based API
+                  val storedPath = metadata.configuration
+                    .get("indextables.companion.parquetStorageRoot")
+                    .getOrElse(path)
+                  if (preferPathCreds) {
+                    logger.info(
+                      s"Delta UC companion: preferPathCredentials=true, using path-based credentials for $storedPath"
+                    )
+                    (storedPath, config)
+                  } else {
+                    logger.info(
+                      s"Delta UC companion mode detected: parquetTableRoot=$storedPath " +
+                        s"(deltaTableName=${metadata.configuration.getOrElse("indextables.companion.deltaTableName", "")})"
+                    )
+                    val enriched = tryResolveDeltaTableCredentials(metadata.configuration, config)
+                    (storedPath, enriched)
+                  }
+                } else {
+                  logger.info(s"Companion mode detected: injecting parquetTableRoot=$path")
+                  (path, config)
+                }
+
+                var enrichedConfig = baseConfig +
+                  ("spark.indextables.companion.parquetTableRoot" -> effectivePath) +
+                  // ScanBuilder is read-only, request PATH_READ credentials
+                  ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+
+                // Resolve credentials for the parquet table root on the driver.
+                // On Databricks/Unity Catalog, the companion index and Delta table may need
+                // different credentials (different external locations or vended tokens).
+                try {
+                  io.indextables.spark.utils.CredentialProviderFactory
+                    .resolveAWSCredentialsFromConfig(enrichedConfig, effectivePath)
+                    .foreach { creds =>
+                      logger.info(s"Companion mode: resolved parquet credentials for $effectivePath (accessKey=${creds.accessKey.take(4)}...)")
+                      enrichedConfig = enrichedConfig +
+                        ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
+                        ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
+                      creds.sessionToken.foreach { token =>
+                        enrichedConfig = enrichedConfig +
+                          ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
+                      }
+                    }
+                  // Propagate region and endpoint from main config
+                  enrichedConfig
+                    .get("spark.indextables.aws.region")
+                    .orElse(enrichedConfig.get("spark.indextables.aws.region".toLowerCase))
+                    .foreach { region =>
+                      enrichedConfig = enrichedConfig +
+                        ("spark.indextables.companion.parquet.aws.region" -> region)
+                    }
+                  enrichedConfig
+                    .get("spark.indextables.s3.endpoint")
+                    .orElse(enrichedConfig.get("spark.indextables.s3.endpoint".toLowerCase))
+                    .foreach { endpoint =>
+                      enrichedConfig = enrichedConfig +
+                        ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+                    }
+                } catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to resolve parquet credentials for companion mode: ${e.getMessage}")
+                }
+                // Propagate stored indexing modes as typemap entries so that
+                // isFieldSuitableForExactMatching() knows which fields are TEXT vs STRING.
+                // Without this, TEXT fields default to "string" and get incorrect EqualTo pushdown.
+                metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>
+                  try {
+                    import scala.jdk.CollectionConverters._
+                    val modes: java.util.Map[String, String] =
+                      IndexTables4SparkScanBuilder.objectMapper.readValue(json, classOf[java.util.HashMap[String, String]])
+                    modes.asScala.foreach {
+                      case (field, mode) =>
+                        val key = s"spark.indextables.indexing.typemap.$field"
+                        if (!enrichedConfig.contains(key)) {
+                          logger.info(s"Companion mode: propagating indexingMode $field -> $mode as typemap entry")
+                          enrichedConfig = enrichedConfig + (key -> mode)
+                        }
+                    }
+                  } catch {
+                    case e: Exception =>
+                      logger.warn(s"Failed to parse companion indexingModes: ${e.getMessage}")
+                  }
+                }
+
+                // Strip tableId from the final config so that split credential resolution
+                // uses path-based credentials (for the indextables split storage), not
+                // table-based credentials (scoped to the Iceberg source table). Companion
+                // parquet credentials are already stored in separate companion.parquet.* keys.
+                enrichedConfig - "spark.indextables.iceberg.uc.tableId"
+              case None =>
+                logger.warn("Companion mode enabled but no sourceTablePath in metadata")
+                config
+            }
+          } // end else (no designator)
         } else {
           logger.info(
             s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})"
@@ -235,6 +316,8 @@ class IndexTables4SparkScanBuilder(
           config
         }
       } catch {
+        case e: IllegalArgumentException =>
+          throw e
         case e: Exception =>
           logger.warn(s"Could not read metadata for companion mode detection: ${e.getMessage}", e)
           config

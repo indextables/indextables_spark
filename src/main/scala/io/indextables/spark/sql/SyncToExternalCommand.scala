@@ -83,6 +83,7 @@ case class SyncToExternalCommand(
   hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   invalidateAllPartitions: Boolean = false,
+  tableRoots: Map[String, String] = Map.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
 
@@ -1007,7 +1008,13 @@ case class SyncToExternalCommand(
             Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
           else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
                                 Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
-                              else Map.empty)
+                              else Map.empty) ++ tableRoots.flatMap {
+      case (name, path) =>
+        Map(
+          s"indextables.companion.tableRoots.$name"           -> path,
+          s"indextables.companion.tableRoots.$name.timestamp" -> System.currentTimeMillis().toString
+        )
+    }
     existingMetadata.copy(configuration = companionConfig)
   }
 
