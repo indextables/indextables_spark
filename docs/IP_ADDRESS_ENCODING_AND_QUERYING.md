@@ -612,10 +612,10 @@ df.groupBy("ip").agg(count("*"), sum("bytes"))
 df.filter($"ip" >= "10.0.0.0").groupBy("ip").agg(avg("latency"))
 ```
 
-### What Is NOT Supported
+### What Is NOT Yet Supported
 
-- **CIDR notation** (`192.168.1.0/24`): Not supported at any layer. Use equivalent range queries instead.
-- **Wildcard patterns** (`192.168.1.*`): Not supported. Use range queries.
+- **CIDR notation** (`192.168.1.0/24`): Planned — will expand to equivalent range queries via tantivy4java AST touchup. See [tantivy4java#111](https://github.com/indextables/tantivy4java/issues/111) and [indextables_spark#213](https://github.com/indextables/indextables_spark/issues/213).
+- **Wildcard patterns** (`192.168.1.*`): Planned — same mechanism as CIDR. See issues above.
 - **Full-text search**: IP fields are not tokenized; they are atomic values.
 - **Regular expressions on IPs**: Not supported as a query type.
 
