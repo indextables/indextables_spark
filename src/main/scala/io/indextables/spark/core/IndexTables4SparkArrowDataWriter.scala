@@ -27,7 +27,7 @@ import io.indextables.spark.arrow.ArrowFfiWriteBridge
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.json.{SparkSchemaToTantivyMapper, SparkToTantivyConverter}
 import io.indextables.spark.transaction.{AddAction, PartitionUtils}
-import io.indextables.spark.util.{JsonUtil, StatisticsCalculator, StatisticsTruncation}
+import io.indextables.spark.util.{JsonUtil, ProtocolNormalizer, StatisticsCalculator, StatisticsTruncation}
 import io.indextables.spark.write.ArrowFfiWriteConfig
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
@@ -265,17 +265,24 @@ class IndexTables4SparkArrowDataWriter(
   /** Resolve the output directory for split files (local or cloud-normalized). Ensures directory exists for local paths. */
   private def resolveOutputDir(): String = {
     val pathStr = normalizedTablePath.toString
-    if (pathStr.startsWith("file:")) {
-      val dir = new java.io.File(normalizedTablePath.toUri).getAbsolutePath
-      // Ensure directory exists for local filesystem writes
-      val dirFile = new java.io.File(dir)
+    val resolved = if (pathStr.startsWith("file:")) {
+      new java.io.File(normalizedTablePath.toUri).getAbsolutePath
+    } else if (ProtocolNormalizer.isS3Path(pathStr) || ProtocolNormalizer.isAzurePath(pathStr)) {
+      CloudStorageProviderFactory.normalizePathForTantivy(pathStr, serializedOptions)
+    } else {
+      // Raw local path (e.g., /tmp/foo/bar)
+      pathStr
+    }
+
+    // Ensure directory exists for local filesystem paths
+    if (!resolved.contains("://")) {
+      val dirFile = new java.io.File(resolved)
       if (!dirFile.exists()) {
         dirFile.mkdirs()
       }
-      dir
-    } else {
-      CloudStorageProviderFactory.normalizePathForTantivy(pathStr, serializedOptions)
     }
+
+    resolved
   }
 
   /** Build an AddAction from a native PartitionSplitResult. */
