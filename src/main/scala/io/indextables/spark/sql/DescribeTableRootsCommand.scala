@@ -23,8 +23,6 @@ import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import org.apache.hadoop.fs.Path
-
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
@@ -49,7 +47,7 @@ case class DescribeTableRootsCommand(tablePath: String) extends LeafRunnableComm
 
   override def run(sparkSession: SparkSession): Seq[Row] =
     try {
-      val resolvedPath = resolveTablePath(tablePath, sparkSession)
+      val resolvedPath = TableRootUtils.resolveTablePath(tablePath, sparkSession)
       logger.info(s"DESCRIBE TABLE ROOTS at $resolvedPath")
 
       // Build options map from Spark configuration
@@ -62,19 +60,15 @@ case class DescribeTableRootsCommand(tablePath: String) extends LeafRunnableComm
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {
         val metadata = transactionLog.getMetadata()
-        val prefix   = "indextables.companion.tableRoots."
 
         // Extract root entries (exclude .timestamp suffix keys)
         val rootEntries = metadata.configuration
-          .filter {
-            case (key, _) =>
-              key.startsWith(prefix) && !key.endsWith(".timestamp")
-          }
+          .filter { case (key, _) => TableRootUtils.isRootKey(key) }
           .map {
             case (key, path) =>
-              val rootName = key.stripPrefix(prefix)
+              val rootName = TableRootUtils.extractRootName(key)
               val timestamp = metadata.configuration
-                .getOrElse(s"$prefix$rootName.timestamp", "unknown")
+                .getOrElse(TableRootUtils.timestampKey(rootName), "unknown")
               Row(rootName, path, timestamp)
           }
           .toSeq
@@ -91,27 +85,4 @@ case class DescribeTableRootsCommand(tablePath: String) extends LeafRunnableComm
         throw new RuntimeException(errorMsg, e)
     }
 
-  /** Resolve table path from string path or table identifier. */
-  private def resolveTablePath(pathOrTable: String, sparkSession: SparkSession): Path =
-    if (
-      pathOrTable.startsWith("/") || pathOrTable.startsWith("s3://") || pathOrTable.startsWith("s3a://") ||
-      pathOrTable.startsWith("hdfs://") || pathOrTable.startsWith("file://") ||
-      pathOrTable.startsWith("abfss://") || pathOrTable.startsWith("wasbs://")
-    ) {
-      new Path(pathOrTable)
-    } else {
-      try {
-        val tableIdentifier = sparkSession.sessionState.sqlParser.parseTableIdentifier(pathOrTable)
-        val catalog         = sparkSession.sessionState.catalog
-        if (catalog.tableExists(tableIdentifier)) {
-          val tableMetadata = catalog.getTableMetadata(tableIdentifier)
-          new Path(tableMetadata.location)
-        } else {
-          throw new IllegalArgumentException(s"Table not found: $pathOrTable")
-        }
-      } catch {
-        case _: Exception =>
-          new Path(pathOrTable)
-      }
-    }
 }

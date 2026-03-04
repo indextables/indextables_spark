@@ -23,8 +23,6 @@ import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import org.apache.hadoop.fs.Path
-
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
@@ -57,7 +55,7 @@ case class SetTableRootCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] =
     try {
-      val resolvedPath = resolveTablePath(tablePath, sparkSession)
+      val resolvedPath = TableRootUtils.resolveTablePath(tablePath, sparkSession)
       logger.info(s"SET TABLE ROOT '$rootName' = '$rootPath' at $resolvedPath")
 
       // Build options map from Spark configuration
@@ -83,11 +81,9 @@ case class SetTableRootCommand(
         }
 
         // Build updated configuration with new root entry
-        val rootKey      = s"indextables.companion.tableRoots.$rootName"
-        val timestampKey = s"indextables.companion.tableRoots.$rootName.timestamp"
         val newConfig = metadata.configuration +
-          (rootKey      -> rootPath) +
-          (timestampKey -> System.currentTimeMillis().toString)
+          (TableRootUtils.rootKey(rootName)      -> rootPath) +
+          (TableRootUtils.timestampKey(rootName) -> System.currentTimeMillis().toString)
 
         val updatedMetadata = metadata.copy(configuration = newConfig)
 
@@ -112,27 +108,4 @@ case class SetTableRootCommand(
         throw new RuntimeException(errorMsg, e)
     }
 
-  /** Resolve table path from string path or table identifier. */
-  private def resolveTablePath(pathOrTable: String, sparkSession: SparkSession): Path =
-    if (
-      pathOrTable.startsWith("/") || pathOrTable.startsWith("s3://") || pathOrTable.startsWith("s3a://") ||
-      pathOrTable.startsWith("hdfs://") || pathOrTable.startsWith("file://") ||
-      pathOrTable.startsWith("abfss://") || pathOrTable.startsWith("wasbs://")
-    ) {
-      new Path(pathOrTable)
-    } else {
-      try {
-        val tableIdentifier = sparkSession.sessionState.sqlParser.parseTableIdentifier(pathOrTable)
-        val catalog         = sparkSession.sessionState.catalog
-        if (catalog.tableExists(tableIdentifier)) {
-          val tableMetadata = catalog.getTableMetadata(tableIdentifier)
-          new Path(tableMetadata.location)
-        } else {
-          throw new IllegalArgumentException(s"Table not found: $pathOrTable")
-        }
-      } catch {
-        case _: Exception =>
-          new Path(pathOrTable)
-      }
-    }
 }

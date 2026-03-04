@@ -23,8 +23,6 @@ import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import org.apache.hadoop.fs.Path
-
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
@@ -52,7 +50,7 @@ case class UnsetTableRootCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] =
     try {
-      val resolvedPath = resolveTablePath(tablePath, sparkSession)
+      val resolvedPath = TableRootUtils.resolveTablePath(tablePath, sparkSession)
       logger.info(s"UNSET TABLE ROOT '$rootName' at $resolvedPath")
 
       // Build options map from Spark configuration
@@ -69,16 +67,16 @@ case class UnsetTableRootCommand(
         val metadata = transactionLog.getMetadata()
 
         // Check if root exists
-        val rootKey      = s"indextables.companion.tableRoots.$rootName"
-        val timestampKey = s"indextables.companion.tableRoots.$rootName.timestamp"
+        val rKey = TableRootUtils.rootKey(rootName)
+        val tKey = TableRootUtils.timestampKey(rootName)
 
-        if (!metadata.configuration.contains(rootKey)) {
+        if (!metadata.configuration.contains(rKey)) {
           logger.warn(s"Table root '$rootName' does not exist, nothing to unset")
           return Seq(Row(s"Table root '$rootName' does not exist (no-op)"))
         }
 
         // Build updated configuration without the root entry
-        val newConfig       = metadata.configuration - rootKey - timestampKey
+        val newConfig       = metadata.configuration - rKey - tKey
         val updatedMetadata = metadata.copy(configuration = newConfig)
 
         // Write updated metadata via commitSyncActions (uses retry internally)
@@ -100,27 +98,4 @@ case class UnsetTableRootCommand(
         throw new RuntimeException(errorMsg, e)
     }
 
-  /** Resolve table path from string path or table identifier. */
-  private def resolveTablePath(pathOrTable: String, sparkSession: SparkSession): Path =
-    if (
-      pathOrTable.startsWith("/") || pathOrTable.startsWith("s3://") || pathOrTable.startsWith("s3a://") ||
-      pathOrTable.startsWith("hdfs://") || pathOrTable.startsWith("file://") ||
-      pathOrTable.startsWith("abfss://") || pathOrTable.startsWith("wasbs://")
-    ) {
-      new Path(pathOrTable)
-    } else {
-      try {
-        val tableIdentifier = sparkSession.sessionState.sqlParser.parseTableIdentifier(pathOrTable)
-        val catalog         = sparkSession.sessionState.catalog
-        if (catalog.tableExists(tableIdentifier)) {
-          val tableMetadata = catalog.getTableMetadata(tableIdentifier)
-          new Path(tableMetadata.location)
-        } else {
-          throw new IllegalArgumentException(s"Table not found: $pathOrTable")
-        }
-      } catch {
-        case _: Exception =>
-          new Path(pathOrTable)
-      }
-    }
 }

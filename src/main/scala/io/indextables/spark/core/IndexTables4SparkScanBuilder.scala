@@ -57,7 +57,9 @@ import io.indextables.spark.filters.{
   MixedOrFilter,
   MixedSparkFilter
 }
+import io.indextables.spark.sql.TableRootUtils
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.util.ProtocolNormalizer
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
@@ -108,43 +110,71 @@ class IndexTables4SparkScanBuilder(
 
           if (designator.isDefined) {
             val rootName = designator.get
-            val rootKey  = s"indextables.companion.tableRoots.$rootName"
-            metadata.configuration.get(rootKey) match {
+            metadata.configuration.get(TableRootUtils.rootKey(rootName)) match {
               case Some(designatedPath) =>
                 logger.info(s"Table root designator '$rootName' resolved to path: $designatedPath")
                 // Use the designated root as the effective path, skip default resolution
                 var designatorConfig = config +
                   ("spark.indextables.companion.parquetTableRoot"      -> designatedPath) +
                   ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-                // Resolve credentials for the designated root
-                try {
-                  io.indextables.spark.utils.CredentialProviderFactory
-                    .resolveAWSCredentialsFromConfig(designatorConfig, designatedPath)
-                    .foreach { creds =>
-                      logger.info(s"Companion mode: resolved parquet credentials for designated root $designatedPath (accessKey=${creds.accessKey.take(4)}...)")
-                      designatorConfig = designatorConfig +
-                        ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
-                        ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
-                      creds.sessionToken.foreach { token =>
+                // Resolve credentials for the designated root based on cloud provider
+                try
+                  if (ProtocolNormalizer.isS3Path(designatedPath)) {
+                    // AWS S3 credential resolution
+                    io.indextables.spark.utils.CredentialProviderFactory
+                      .resolveAWSCredentialsFromConfig(designatorConfig, designatedPath)
+                      .foreach { creds =>
+                        logger.info(s"Companion mode: resolved parquet credentials for designated root $designatedPath (accessKey=${creds.accessKey.take(4)}...)")
                         designatorConfig = designatorConfig +
-                          ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
+                          ("spark.indextables.companion.parquet.aws.accessKey" -> creds.accessKey) +
+                          ("spark.indextables.companion.parquet.aws.secretKey" -> creds.secretKey)
+                        creds.sessionToken.foreach { token =>
+                          designatorConfig = designatorConfig +
+                            ("spark.indextables.companion.parquet.aws.sessionToken" -> token)
+                        }
                       }
-                    }
-                  designatorConfig
-                    .get("spark.indextables.aws.region")
-                    .orElse(designatorConfig.get("spark.indextables.aws.region".toLowerCase))
-                    .foreach { region =>
-                      designatorConfig = designatorConfig +
-                        ("spark.indextables.companion.parquet.aws.region" -> region)
-                    }
-                  designatorConfig
-                    .get("spark.indextables.s3.endpoint")
-                    .orElse(designatorConfig.get("spark.indextables.s3.endpoint".toLowerCase))
-                    .foreach { endpoint =>
-                      designatorConfig = designatorConfig +
-                        ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
-                    }
-                } catch {
+                    designatorConfig
+                      .get("spark.indextables.aws.region")
+                      .orElse(designatorConfig.get("spark.indextables.aws.region".toLowerCase))
+                      .foreach { region =>
+                        designatorConfig = designatorConfig +
+                          ("spark.indextables.companion.parquet.aws.region" -> region)
+                      }
+                    designatorConfig
+                      .get("spark.indextables.s3.endpoint")
+                      .orElse(designatorConfig.get("spark.indextables.s3.endpoint".toLowerCase))
+                      .foreach { endpoint =>
+                        designatorConfig = designatorConfig +
+                          ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
+                      }
+                  } else if (ProtocolNormalizer.isAzurePath(designatedPath)) {
+                    // Azure credential propagation
+                    logger.info(s"Companion mode: propagating Azure credentials for designated root $designatedPath")
+                    designatorConfig
+                      .get("spark.indextables.azure.accountName")
+                      .foreach { accountName =>
+                        designatorConfig = designatorConfig +
+                          ("spark.indextables.companion.parquet.azure.accountName" -> accountName)
+                      }
+                    designatorConfig
+                      .get("spark.indextables.azure.accountKey")
+                      .foreach { accountKey =>
+                        designatorConfig = designatorConfig +
+                          ("spark.indextables.companion.parquet.azure.accountKey" -> accountKey)
+                      }
+                    designatorConfig
+                      .get("spark.indextables.azure.connectionString")
+                      .foreach { connStr =>
+                        designatorConfig = designatorConfig +
+                          ("spark.indextables.companion.parquet.azure.connectionString" -> connStr)
+                      }
+                  } else {
+                    // Local/HDFS paths - no credential resolution needed
+                    logger.info(
+                      s"Companion mode: local/HDFS designated root $designatedPath, no credential resolution needed"
+                    )
+                  }
+                catch {
                   case e: Exception =>
                     logger.warn(s"Failed to resolve parquet credentials for designated root: ${e.getMessage}")
                 }
@@ -170,8 +200,8 @@ class IndexTables4SparkScanBuilder(
               case None =>
                 // Designator set but root not found - fail with actionable error
                 val availableRoots = metadata.configuration.keys
-                  .filter(k => k.startsWith("indextables.companion.tableRoots.") && !k.endsWith(".timestamp"))
-                  .map(_.stripPrefix("indextables.companion.tableRoots."))
+                  .filter(k => TableRootUtils.isRootKey(k))
+                  .map(k => TableRootUtils.extractRootName(k))
                   .toSeq
                   .sorted
                 val rootList = if (availableRoots.nonEmpty) availableRoots.mkString(", ") else "(none registered)"

@@ -1011,8 +1011,8 @@ case class SyncToExternalCommand(
                               else Map.empty) ++ tableRoots.flatMap {
       case (name, path) =>
         Map(
-          s"indextables.companion.tableRoots.$name"           -> path,
-          s"indextables.companion.tableRoots.$name.timestamp" -> System.currentTimeMillis().toString
+          TableRootUtils.rootKey(name)      -> path,
+          TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
         )
     }
     existingMetadata.copy(configuration = companionConfig)
