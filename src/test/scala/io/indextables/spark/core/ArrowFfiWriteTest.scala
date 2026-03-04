@@ -393,6 +393,57 @@ class ArrowFfiWriteTest extends TestBase {
     }
   }
 
+  test("Arrow FFI vs TANT batch: statistics parity") {
+    import io.indextables.spark.transaction.TransactionLog
+    import org.apache.spark.sql.util.CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+
+    withTempPath { path =>
+      val arrowPath = s"file://$path/test_stats_arrow"
+      val tantPath  = s"file://$path/test_stats_tant"
+      val df = spark.range(0, 100).selectExpr("id", "CAST(id * 10 AS LONG) as score", "CAST(id AS STRING) as name")
+
+      // Write with both paths
+      df.write.mode("overwrite").format(FORMAT).save(arrowPath)
+      df.write.mode("overwrite").format(FORMAT).option(ArrowFfiWriteConfig.KEY_ENABLED, "false").save(tantPath)
+
+      def getActions(tablePath: String) = {
+        val txLog = new TransactionLog(
+          new org.apache.hadoop.fs.Path(tablePath), spark,
+          new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        txLog.listFiles()
+      }
+
+      val arrowActions = getActions(arrowPath)
+      val tantActions  = getActions(tantPath)
+
+      // Both paths should write all 100 records
+      arrowActions.flatMap(_.numRecords).sum shouldBe 100
+      tantActions.flatMap(_.numRecords).sum shouldBe 100
+
+      // Compute global min/max across all splits for each path
+      def globalMin(actions: Seq[io.indextables.spark.transaction.AddAction], col: String): String =
+        actions.flatMap(_.minValues).flatMap(_.get(col)).min
+      def globalMax(actions: Seq[io.indextables.spark.transaction.AddAction], col: String): String =
+        actions.flatMap(_.maxValues).flatMap(_.get(col)).max
+
+      // All splits should have statistics
+      arrowActions.foreach { a =>
+        a.minValues shouldBe defined
+        a.maxValues shouldBe defined
+        a.docMappingJson shouldBe defined
+        a.footerStartOffset shouldBe defined
+        a.footerEndOffset shouldBe defined
+      }
+
+      // Global min/max should match between paths
+      globalMin(arrowActions, "id") shouldBe globalMin(tantActions, "id")
+      globalMax(arrowActions, "id") shouldBe globalMax(tantActions, "id")
+      globalMin(arrowActions, "score") shouldBe globalMin(tantActions, "score")
+      globalMax(arrowActions, "score") shouldBe globalMax(tantActions, "score")
+    }
+  }
+
   test("TANT batch: OptimizedWrite combination") {
     withTempPath { path =>
       val tablePath = s"file://$path/test_tant_optimized"
