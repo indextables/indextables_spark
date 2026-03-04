@@ -649,14 +649,10 @@ class IndexTables4SparkWriterFactory(
       logger.info(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
     }
 
-    // Check if Arrow FFI write path is enabled.
-    // Arrow FFI does not support split rolling (maxRowsPerSplit) because finishAllSplits is
-    // a terminal operation — fall back to TANT batch path when split rolling is configured.
+    // Check if Arrow FFI write path is enabled
     val arrowFfiConfig = io.indextables.spark.write.ArrowFfiWriteConfig.fromMap(serializedOptions)
-    val hasMaxRowsPerSplit = Option(serializedOptions.getOrElse("__maxRowsPerSplit", null))
-      .exists(_.nonEmpty)
 
-    if (arrowFfiConfig.enabled && !hasMaxRowsPerSplit) {
+    if (arrowFfiConfig.enabled) {
       logger.info(s"Using Arrow FFI write path (batchSize=${arrowFfiConfig.batchSize})")
       new IndexTables4SparkArrowDataWriter(
         tablePath,
@@ -668,9 +664,6 @@ class IndexTables4SparkWriterFactory(
         arrowFfiConfig
       )
     } else {
-      if (hasMaxRowsPerSplit && arrowFfiConfig.enabled) {
-        logger.info(s"Split rolling enabled — falling back to TANT batch write path")
-      }
       // Use Map-based config directly - no HadoopConf reconstruction needed (fast path)
       new IndexTables4SparkDataWriter(
         tablePath,
