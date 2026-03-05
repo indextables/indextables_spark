@@ -38,7 +38,8 @@ import org.slf4j.LoggerFactory
  * @param batchSize
  *   Number of rows to buffer before flushing via FFI (default: 8192)
  * @param heapSize
- *   Heap size in bytes for the native split writer (default: 128MB)
+ *   Heap size in bytes for the native split writer. Reads from the shared `spark.indextables.indexWriter.heapSize`
+ *   config (same as the TANT batch path) so users don't need to configure heap size separately. Default: 256MB.
  */
 case class ArrowFfiWriteConfig(
   enabled: Boolean = ArrowFfiWriteConfig.DEFAULT_ENABLED,
@@ -64,12 +65,13 @@ object ArrowFfiWriteConfig {
   // Configuration key constants
   val KEY_ENABLED    = "spark.indextables.write.arrowFfi.enabled"
   val KEY_BATCH_SIZE = "spark.indextables.write.arrowFfi.batchSize"
-  val KEY_HEAP_SIZE  = "spark.indextables.write.arrowFfi.heapSize"
+  // Shared with TANT batch path — both write paths use the same heap size config
+  val KEY_HEAP_SIZE  = "spark.indextables.indexWriter.heapSize"
 
   // Default values
   val DEFAULT_ENABLED: Boolean  = true
   val DEFAULT_BATCH_SIZE: Int   = 8192
-  val DEFAULT_HEAP_SIZE: Long   = 128L * 1024 * 1024 // 128MB
+  val DEFAULT_HEAP_SIZE: Long   = 256L * 1024 * 1024 // 256MB
 
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 

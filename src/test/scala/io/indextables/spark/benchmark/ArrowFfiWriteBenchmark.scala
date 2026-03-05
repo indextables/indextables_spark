@@ -173,6 +173,67 @@ class ArrowFfiWriteBenchmark extends TestBase {
     runBenchmark("JSON/nested fields (200K x 10)", df)
   }
 
+  test("benchmark: struct-heavy (200K x 8)") {
+    val df = spark
+      .range(0, 200000)
+      .selectExpr(
+        "id",
+        "named_struct('name', CAST(id AS STRING), 'age', CAST(id % 100 AS INT)) as user",
+        "named_struct('lat', CAST(id * 0.01 AS DOUBLE), 'lon', CAST(id * 0.02 AS DOUBLE)) as location",
+        "named_struct('street', CAST(id AS STRING), 'city', CAST(id % 50 AS STRING), 'zip', CAST(id % 10000 AS INT)) as address",
+        "CAST(id AS STRING) as label",
+        "CAST(id * 2 AS STRING) as category",
+        "id as score",
+        "CAST(id % 2 = 0 AS BOOLEAN) as active"
+      )
+    runBenchmark("Struct-heavy (200K x 8)", df)
+  }
+
+  test("benchmark: array fields (200K x 6)") {
+    val df = spark
+      .range(0, 200000)
+      .selectExpr(
+        "id",
+        "array(CAST(id AS STRING), CAST(id * 2 AS STRING), CAST(id * 3 AS STRING)) as tags",
+        "array(CAST(id AS INT), CAST(id * 2 AS INT), CAST(id * 3 AS INT), CAST(id * 4 AS INT)) as scores",
+        "array(CAST(id * 0.1 AS DOUBLE), CAST(id * 0.2 AS DOUBLE)) as values",
+        "CAST(id AS STRING) as name",
+        "id as num"
+      )
+    runBenchmark("Array fields (200K x 6)", df)
+  }
+
+  test("benchmark: map fields (200K x 5)") {
+    val df = spark
+      .range(0, 200000)
+      .selectExpr(
+        "id",
+        "map('key1', CAST(id AS STRING), 'key2', CAST(id * 2 AS STRING)) as str_map",
+        "map('a', id, 'b', id * 2, 'c', id * 3) as num_map",
+        "CAST(id AS STRING) as label",
+        "id as score"
+      )
+    runBenchmark("Map fields (200K x 5)", df)
+  }
+
+  test("benchmark: mixed complex types (200K x 10)") {
+    val df = spark
+      .range(0, 200000)
+      .selectExpr(
+        "id",
+        "named_struct('name', CAST(id AS STRING), 'value', CAST(id AS INT)) as metadata",
+        "array(CAST(id AS STRING), CAST(id * 2 AS STRING)) as tags",
+        "map('k1', CAST(id AS STRING), 'k2', CAST(id * 2 AS STRING)) as attrs",
+        "named_struct('x', CAST(id * 0.1 AS DOUBLE), 'y', CAST(id * 0.2 AS DOUBLE)) as coords",
+        "array(CAST(id AS INT), CAST(id * 10 AS INT)) as nums",
+        "CAST(id AS STRING) as name",
+        "id as score",
+        "CAST(id * 1.5 AS DOUBLE) as weight",
+        "CAST(id % 2 = 0 AS BOOLEAN) as flag"
+      )
+    runBenchmark("Mixed complex types (200K x 10)", df)
+  }
+
   test("benchmark: partitioned low cardinality (500K x 10 / 10p)") {
     val cols = (1 to 9).map(i => s"CAST(id * $i AS STRING) as col$i")
     val allCols = cols :+ "CAST(id % 10 AS STRING) as part_col"
