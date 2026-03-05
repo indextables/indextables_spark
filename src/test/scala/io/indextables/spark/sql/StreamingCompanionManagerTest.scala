@@ -38,6 +38,14 @@ class StreamingCompanionManagerTest extends TestBase {
       dryRun = false
     )
 
+  test("readLastSyncedVersionFromLog returns None when companion index does not exist") {
+    val indexDir  = Files.createTempDirectory("streaming-index-noexist").toString
+    val sourceDir = Files.createTempDirectory("streaming-source-noexist").toString
+    val command   = makeCommand(sourceDir, indexDir)
+    // Companion transaction log has never been initialized — must return None, not throw
+    command.readLastSyncedVersionFromLog(spark) shouldBe None
+  }
+
   test("cheapSourceVersion returns None for parquet format") {
     val sourceDir = Files.createTempDirectory("streaming-source-parquet").toString
     val indexDir  = Files.createTempDirectory("streaming-index-parquet").toString
