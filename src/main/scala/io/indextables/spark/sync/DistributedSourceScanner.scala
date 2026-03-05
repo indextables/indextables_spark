@@ -391,6 +391,13 @@ class DistributedSourceScanner(spark: SparkSession) {
         Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
       catch { case _: Exception => None }
 
+    // True current version = checkpoint version + number of post-checkpoint commits.
+    // snapshotInfo.getVersion is ONLY the checkpoint version; post-checkpoint commits
+    // are tracked separately in getCommitFilePaths. Using snapshotInfo.getVersion alone
+    // would cause the streaming incremental path to miss all post-checkpoint commits.
+    val trueCurrentVersion: Long =
+      snapshotInfo.getVersion + snapshotInfo.getCommitFilePaths.size.toLong
+
     // Build PartitionFilter from WHERE predicates using snapshot metadata.
     // This avoids calling reader.partitionColumns() which triggers the blocking listFiles() call.
     val effectiveFilter = partitionFilter.orElse {
@@ -431,16 +438,19 @@ class DistributedSourceScanner(spark: SparkSession) {
     // When fromVersion is provided (streaming incremental cycle), use getChangesBetween()
     // to read only the commit JSON files in the version range. This skips the expensive
     // distributed checkpoint parquet reading (which reads all checkpoint parts across executors).
+    //
+    // Uses trueCurrentVersion (checkpoint + post-checkpoint count), NOT snapshotInfo.getVersion
+    // (checkpoint only). If we used the checkpoint version here and a table had post-checkpoint
+    // commits, the incremental comparison would always see "no change" and miss those commits.
     fromVersion match {
       case Some(fv) =>
-        val currentVersion = snapshotInfo.getVersion
-        if (currentVersion == fv) {
+        if (trueCurrentVersion == fv) {
           // No new commits since last sync — return empty incremental result.
-          logger.info(s"Delta incremental: no new commits since version $fv")
+          logger.info(s"Delta incremental: no new commits since version $fv (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
           val sc = spark.sparkContext
           return DistributedScanResult(
             filesRDD = sc.emptyRDD[CompanionSourceFile],
-            version = Some(currentVersion),
+            version = Some(trueCurrentVersion),
             partitionColumns = snapshotPartCols,
             storageRoot = None,
             sampleFilePath = None,
@@ -449,16 +459,16 @@ class DistributedSourceScanner(spark: SparkSession) {
             isIncremental = true
           )
         } else {
-          // New commits available — read only the delta (commit JSON files from fv+1 to currentVersion).
+          // New commits available — read only the delta (commit JSON files from fv+1 to trueCurrentVersion).
           // This is O(delta_commits) instead of O(checkpoint_parts + delta_commits).
-          logger.info(s"Delta incremental: reading changes from version $fv to $currentVersion")
-          val changes    = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, currentVersion, snapshotInfo)
+          logger.info(s"Delta incremental: reading changes from version $fv to $trueCurrentVersion (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
+          val changes    = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
           val addedFiles = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
           logger.info(s"Delta incremental: ${addedFiles.size} added files, ${changes.getRemovedPaths.size} removed paths")
           val sc         = spark.sparkContext
           return DistributedScanResult(
             filesRDD = sc.parallelize(addedFiles),
-            version = Some(currentVersion),
+            version = Some(trueCurrentVersion),
             partitionColumns = snapshotPartCols,
             storageRoot = None,
             sampleFilePath = addedFiles.headOption.map(_.path),
@@ -534,7 +544,7 @@ class DistributedSourceScanner(spark: SparkSession) {
 
     DistributedScanResult(
       filesRDD = allFilesRDD,
-      version = Some(snapshotInfo.getVersion),
+      version = Some(trueCurrentVersion),
       partitionColumns = snapshotPartCols,
       storageRoot = None, // Delta uses relative paths from table root
       sampleFilePath = sampleFile,
