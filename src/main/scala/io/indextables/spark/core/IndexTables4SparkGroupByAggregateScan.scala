@@ -404,26 +404,35 @@ class IndexTables4SparkGroupByAggregateBatch(
       PartitionUtils.interleaveByHost(batchesByHost)
     } else {
       // Group splits by host and batch them
+      // When partition columns are in GROUP BY, splits from different partitions must not be merged
+      // together because the native merge_fruits loses partition context. Sub-group by partition values first.
+      val partitionGroupByCols = groupByColumns.filter(partitionColumns.contains)
       val batchesByHost = splitsByHost.map {
         case (host, hostSplits) =>
-          host -> hostSplits
-            .grouped(splitsPerTask)
-            .map { batch =>
-              new IndexTables4SparkMultiSplitGroupByAggregatePartition(
-                splits = batch,
-                pushedFilters = pushedFilters,
-                config = config,
-                aggregation = aggregation,
-                groupByColumns = groupByColumns,
-                tablePath = transactionLog.getTablePath(),
-                schema = schema,
-                indexQueryFilters = indexQueryFilters,
-                preferredHost = if (host == "unknown") None else Some(host),
-                bucketConfig = bucketConfig,
-                partitionColumns = partitionColumns
-              )
-            }
-            .toSeq
+          val groupedSplits = if (partitionGroupByCols.nonEmpty) {
+            // Sub-group by partition values so splits from different partitions aren't merged
+            hostSplits.groupBy { split =>
+              val pv = Option(split.partitionValues).getOrElse(Map.empty[String, String])
+              partitionGroupByCols.map(col => pv.getOrElse(col, "")).mkString("|")
+            }.values.flatMap(_.grouped(splitsPerTask)).toSeq
+          } else {
+            hostSplits.grouped(splitsPerTask).toSeq
+          }
+          host -> groupedSplits.map { batch =>
+            new IndexTables4SparkMultiSplitGroupByAggregatePartition(
+              splits = batch,
+              pushedFilters = pushedFilters,
+              config = config,
+              aggregation = aggregation,
+              groupByColumns = groupByColumns,
+              tablePath = transactionLog.getTablePath(),
+              schema = schema,
+              indexQueryFilters = indexQueryFilters,
+              preferredHost = if (host == "unknown") None else Some(host),
+              bucketConfig = bucketConfig,
+              partitionColumns = partitionColumns
+            )
+          }
       }
       PartitionUtils.interleaveByHost(batchesByHost)
     }
@@ -527,8 +536,9 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
+  private val arrowFfiEnabled = io.indextables.spark.arrow.AggregationArrowFfiConfig.isEnabled(config)
 
-  logger.debug(s"GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
+  logger.debug(s"GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled")
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
@@ -552,6 +562,25 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
           sparkSession,
           schema
         )
+
+      case other =>
+        throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
+    }
+
+  override def supportColumnarReads(partition: org.apache.spark.sql.connector.read.InputPartition): Boolean =
+    arrowFfiEnabled
+
+  override def createColumnarReader(
+    partition: org.apache.spark.sql.connector.read.InputPartition
+  ): org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.vectorized.ColumnarBatch] =
+    partition match {
+      case multiSplitPartition: IndexTables4SparkMultiSplitGroupByAggregatePartition =>
+        logger.info(s"GROUP BY READER FACTORY: Creating columnar multi-split reader with ${multiSplitPartition.splits.length} splits")
+        new MultiSplitGroupByAggregateColumnarReader(multiSplitPartition, sparkSession, schema)
+
+      case groupByPartition: IndexTables4SparkGroupByAggregatePartition =>
+        logger.info(s"GROUP BY READER FACTORY: Creating columnar reader for GROUP BY partition")
+        new GroupByAggregateColumnarReader(groupByPartition, sparkSession, schema)
 
       case other =>
         throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")

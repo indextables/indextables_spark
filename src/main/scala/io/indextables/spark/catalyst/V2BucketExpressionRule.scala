@@ -239,8 +239,14 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
           fieldName = fieldRef.name,
           ranges = r.ranges
         )
-        // Keep the original field reference - the data type will be handled during execution
-        (config, fieldRef)
+        // Range bucket keys are strings (e.g., "cheap", "mid", "expensive"), so the
+        // replacement AttributeReference must have StringType to match RangeExpression.dataType.
+        // Without this, Spark's final aggregate expects DoubleType (the field's type),
+        // causing string keys to be cast to 0.0 and all buckets to collapse into one.
+        val typedRef = AttributeReference(fieldRef.name, StringType, fieldRef.nullable, fieldRef.metadata)(
+          fieldRef.exprId, fieldRef.qualifier
+        )
+        (config, typedRef)
 
       case _ =>
         throw new IllegalArgumentException(s"Unsupported bucket expression type: ${expr.getClass.getName}")
