@@ -20,7 +20,6 @@ Items requiring attention in the next session. Remove entries as they are addres
 - **IT-041** (#10): Scala compiler warnings cleanup — initial signal Low (tech debt)
 
 ### Ready to Work (no blockers)
-- **IT-057**: Concurrent-safe metadata-only transaction log writes — Medium priority (discovered during IT-055)
 - **IT-056**: exact_only IndexQuery validation remainder — Medium priority
 - **IT-012**: Fix deprecated config in features.md — Medium, quick fix
 - **IT-013**: Document IP address fields and structured streaming — Medium
@@ -325,19 +324,8 @@ Systematic replacement of per-row/per-field JNI with zero-copy Arrow FFI across 
 ### ~~IT-055: Multi-region table roots for companion splits~~ **DONE**
 Moved to Completed.
 
----
-
-## Medium (New)
-
-### IT-057: Concurrent-safe metadata-only transaction log writes
-**Type**: Tech Debt / Correctness
-**Priority**: Medium
-**Description**: Discovered during IT-055 adversarial review. `commitSyncActions` → `writeActionsWithRetry` does not re-read metadata between retry attempts. For metadata-only operations like SET/UNSET TABLE ROOT, concurrent writers can silently overwrite each other's changes. The fix is to add a `commitMetadataUpdate(transform: MetadataAction => MetadataAction)` method that re-reads metadata on each retry, or implement a manual compare-and-swap loop at the command level.
-**Affected Commands**: `SetTableRootCommand`, `UnsetTableRootCommand`
-**Acceptance Criteria**:
-- [ ] Concurrent SET TABLE ROOT operations preserve both writers' root entries
-- [ ] Test with parallel metadata writes
-- [ ] No regression in existing commitSyncActions callers
+### ~~IT-057: Concurrent-safe metadata-only transaction log writes~~ **DONE**
+Moved to Completed.
 
 ### IT-056: exact_only IndexQuery validation (remainder)
 **GitHub**: [#186](https://github.com/indextables/indextables_spark/issues/186)
@@ -401,3 +389,4 @@ Moved to Completed.
 | IT-011 | Document companion/sync feature ([PR #191](https://github.com/indextables/indextables_spark/pull/191)) | 2026-02 |
 | IT-036 | Partition predicate numeric comparisons ([PR #173](https://github.com/indextables/indextables_spark/pull/173)) | 2026-02 |
 | IT-055 | Multi-region table roots for companion splits ([#179](https://github.com/indextables/indextables_spark/issues/179)) | 2026-03 |
+| IT-057 | Concurrent-safe metadata-only transaction log writes | 2026-03 |
