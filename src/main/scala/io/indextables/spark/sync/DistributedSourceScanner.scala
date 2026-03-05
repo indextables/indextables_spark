@@ -46,7 +46,13 @@ case class DistributedScanResult(
    * True when filesRDD contains ONLY newly added files (from an incremental changeset).
    * When true, the anti-join should be skipped — all files in the RDD are known to be new.
    */
-  isIncremental: Boolean = false)
+  isIncremental: Boolean = false,
+  /**
+   * Source file paths removed from the source table since the last sync (Delta only).
+   * Companion splits that indexed these files must be invalidated. Empty for full-scan results
+   * and for Iceberg (Iceberg deletion tracking is a follow-up).
+   */
+  removedSourcePaths: Seq[String] = Seq.empty)
 
 /**
  * Static conversion functions used in RDD closures. These MUST be in the companion object (not instance methods) to
@@ -476,10 +482,11 @@ class DistributedSourceScanner(spark: SparkSession) {
             // New commits available — read only the delta (commit JSON files from fv+1 to trueCurrentVersion).
             // This is O(delta_commits) instead of O(checkpoint_parts + delta_commits).
             logger.info(s"Delta incremental: reading changes from version $fv to $trueCurrentVersion (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
-            val changes    = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
-            val addedFiles = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
-            logger.info(s"Delta incremental: ${addedFiles.size} added files, ${changes.getRemovedPaths.size} removed paths")
-            val sc         = spark.sparkContext
+            val changes      = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
+            val addedFiles   = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
+            val removedPaths = changes.getRemovedPaths.asScala.toSeq
+            logger.info(s"Delta incremental: ${addedFiles.size} added files, ${removedPaths.size} removed paths")
+            val sc           = spark.sparkContext
             return DistributedScanResult(
               filesRDD = sc.parallelize(addedFiles),
               version = Some(trueCurrentVersion),
@@ -488,7 +495,8 @@ class DistributedSourceScanner(spark: SparkSession) {
               sampleFilePath = addedFiles.headOption.map(_.path),
               numDistributedParts = 0,
               schema = schemaOpt,
-              isIncremental = true
+              isIncremental = true,
+              removedSourcePaths = removedPaths
             )
           }
         }
