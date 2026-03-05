@@ -24,89 +24,178 @@ import org.slf4j.LoggerFactory
  * Manages the streaming companion sync loop for BUILD INDEXTABLES COMPANION ... WITH STREAMING.
  *
  * Runs an initial full sync followed by repeated incremental cycles at the configured poll
- * interval. Each cycle calls executeSyncInternal on the underlying command. On incremental cycles,
- * the last seen source version is passed as fromVersion (Delta) or fromSnapshot (Iceberg) so that
- * when tantivy4java adds efficient range reads, the hint is already wired up. Until then, the
- * anti-join in executeSyncInternal guarantees correctness — files already indexed are never
- * re-processed.
+ * interval. On each incremental cycle:
+ *   1. A cheap version probe is attempted (Delta only: 1 GET + O(k) HEADs, no parquet reads).
+ *      If the source version is unchanged since the last sync, the full sync is skipped entirely.
+ *   2. If changed (or no cheap probe available), executeSyncInternal is called with the last
+ *      known source version as fromVersion/fromSnapshot so the underlying scanner uses an
+ *      incremental changeset instead of a full anti-join.
  *
  * Stops when:
  *   - The calling thread is interrupted (Ctrl+C, notebook cancel, sparkContext.cancelAllJobs())
  *   - sparkContext.isStopped returns true
- *   - Consecutive error limit is exceeded (MaxConsecutiveErrors)
+ *   - Consecutive error limit is exceeded
+ *
+ * Configurable via SparkSession:
+ *   spark.indextables.companion.stream.maxConsecutiveErrors  (default: 10)
+ *   spark.indextables.companion.stream.errorBackoffMultiplier (default: 2)
+ *   spark.indextables.companion.stream.quietPollLogInterval   (default: 10)
  */
 private[sql] class StreamingCompanionManager(
   command: SyncToExternalCommand,
   pollIntervalMs: Long
 ) {
 
-  private val logger              = LoggerFactory.getLogger(classOf[StreamingCompanionManager])
-  private val MaxConsecutiveErrors = 10
+  private val logger = LoggerFactory.getLogger(classOf[StreamingCompanionManager])
 
   def runStreaming(sparkSession: SparkSession): Unit = {
+    val maxConsecutiveErrors = sparkSession.conf
+      .getOption("spark.indextables.companion.stream.maxConsecutiveErrors")
+      .map(_.toInt).getOrElse(10)
+    val errorBackoffMultiplier = sparkSession.conf
+      .getOption("spark.indextables.companion.stream.errorBackoffMultiplier")
+      .map(_.toLong).getOrElse(2L)
+    val quietPollLogInterval = sparkSession.conf
+      .getOption("spark.indextables.companion.stream.quietPollLogInterval")
+      .map(_.toInt).getOrElse(10)
+
+    val streamStart = System.currentTimeMillis()
     logger.info(
-      s"Starting streaming companion sync: source=${command.sourcePath}, " +
-        s"dest=${command.destPath}, pollIntervalMs=$pollIntervalMs"
+      s"[IndextablesCompanionStream] Starting streaming companion sync: " +
+        s"source=${command.sourcePath} (${command.sourceFormat.toUpperCase}), " +
+        s"dest=${command.destPath}, pollIntervalMs=$pollIntervalMs, " +
+        s"maxConsecutiveErrors=$maxConsecutiveErrors, errorBackoffMultiplier=$errorBackoffMultiplier"
     )
 
     val metrics = new StreamingCompanionMetrics(sparkSession.sparkContext)
 
-    var lastSourceVersion: Option[Long] = None
-    var consecutiveErrors               = 0
-    var cycle                           = 0
+    var lastSyncedVersion: Option[Long]  = None
+    var lastCurrentVersion: Option[Long] = None
+    var consecutiveErrors  = 0
+    var cycle              = 0
+    var pollsWithNoChanges = 0
+    var lastSyncCompleteMs = 0L
+    var lastSyncDurationMs = 0L
+    var lastFilesIndexed   = 0L
+    var lastSplitsCreated  = 0L
 
     while (!Thread.currentThread().isInterrupted && !sparkSession.sparkContext.isStopped) {
       cycle += 1
       val cycleStart = System.currentTimeMillis()
-      logger.info(s"Streaming sync cycle $cycle starting (lastSourceVersion=$lastSourceVersion)")
 
-      try {
-        val cycleCommand = buildCycleCommand(lastSourceVersion)
-        val rows         = cycleCommand.executeSyncInternal(sparkSession, cycleStart)
+      // ── Cheap version pre-check (Delta only) ────────────────────────────────────────────────
+      // Avoids reading checkpoint parquet (getSnapshotInfo) on no-change polling cycles.
+      // If the probe throws or returns None (Iceberg, Parquet, Unity Catalog paths), fall through
+      // to executeSyncInternal which does its own version check after getSnapshotInfo.
+      val cheapVersion     = command.cheapSourceVersion(sparkSession)
+      val versionUnchanged = cheapVersion.exists(cv => lastSyncedVersion.contains(cv))
+      var hadError         = false
 
-        consecutiveErrors = 0
+      if (versionUnchanged) {
+        // ── No-change path ─────────────────────────────────────────────────────────────────────
+        pollsWithNoChanges += 1
+        metrics.recordPollWithNoChanges()
+        lastCurrentVersion = cheapVersion
 
-        // Output schema: table_path(0), source_path(1), status(2), source_version(3),
-        //   splits_created(4), splits_invalidated(5), parquet_files_indexed(6),
-        //   parquet_bytes_downloaded(7), split_bytes_uploaded(8), duration_ms(9), message(10)
-        val (filesIndexed, durationMs) = rows.headOption.map { row =>
-          if (!row.isNullAt(3)) lastSourceVersion = Some(row.getLong(3))
-          val files = if (!row.isNullAt(6)) row.getInt(6).toLong else 0L
-          val dur   = if (!row.isNullAt(9)) row.getLong(9) else System.currentTimeMillis() - cycleStart
-          (files, dur)
-        }.getOrElse((0L, System.currentTimeMillis() - cycleStart))
-
-        metrics.recordCycleSuccess(filesIndexed, durationMs)
-
-        logger.info(
-          s"Streaming sync cycle $cycle complete: durationMs=$durationMs, " +
-            s"filesIndexed=$filesIndexed, sourceVersion=$lastSourceVersion"
-        )
-      } catch {
-        case _: InterruptedException =>
-          Thread.currentThread().interrupt()
-          logger.info(s"Streaming sync interrupted during cycle $cycle")
-          return
-        case e: Exception =>
-          consecutiveErrors += 1
-          metrics.recordCycleError()
-          logger.error(
-            s"Streaming sync cycle $cycle failed " +
-              s"($consecutiveErrors/$MaxConsecutiveErrors consecutive errors): ${e.getMessage}",
-            e
+        // Log on first no-change cycle and every quietPollLogInterval thereafter to reduce noise.
+        val shouldLog = pollsWithNoChanges == 1 || (pollsWithNoChanges % quietPollLogInterval == 0)
+        if (shouldLog) {
+          val uptimeSec      = (cycleStart - streamStart) / 1000
+          val lastSyncAgoSec = if (lastSyncCompleteMs > 0) (cycleStart - lastSyncCompleteMs) / 1000 else -1L
+          val lastSyncLine =
+            if (lastSyncAgoSec >= 0)
+              s"\n  Last sync: ${lastSyncAgoSec}s ago | Duration: ${lastSyncDurationMs / 1000.0}s | " +
+                s"Files: $lastFilesIndexed | Splits: $lastSplitsCreated"
+            else ""
+          logger.info(
+            s"[IndextablesCompanionStream] POLLING | Source: ${command.sourcePath} (${command.sourceFormat.toUpperCase})" +
+              s"\n  Current version: ${cheapVersion.get} | Last synced: ${lastSyncedVersion.getOrElse("none")} | Lag: 0 versions (caught up)" +
+              lastSyncLine +
+              s"\n  Total: ${metrics.syncCycles.value} cycles | ${metrics.totalFilesIndexed.value} files indexed | " +
+              s"${metrics.errorCount.value} errors | Uptime: ${uptimeSec}s"
           )
-          if (consecutiveErrors >= MaxConsecutiveErrors) {
-            throw new RuntimeException(
-              s"Streaming companion sync aborted after $MaxConsecutiveErrors consecutive errors",
+        }
+
+      } else {
+        // ── Sync path ───────────────────────────────────────────────────────────────────────────
+        pollsWithNoChanges = 0
+        cheapVersion.foreach(cv => lastCurrentVersion = Some(cv))
+        val lagVersions = for (cur <- lastCurrentVersion; synced <- lastSyncedVersion) yield cur - synced
+        logger.info(
+          s"[IndextablesCompanionStream] SYNCING cycle $cycle | " +
+            s"source=${command.sourcePath} (${command.sourceFormat.toUpperCase})" +
+            lagVersions.map(l => s" | Lag: $l versions").getOrElse("") +
+            s" | lastSyncedVersion=$lastSyncedVersion"
+        )
+
+        try {
+          val cycleCommand = buildCycleCommand(lastSyncedVersion)
+          val rows         = cycleCommand.executeSyncInternal(sparkSession, cycleStart)
+
+          consecutiveErrors = 0
+
+          // Row schema: table_path(0), source_path(1), status(2), source_version(3),
+          //   splits_created(4), splits_invalidated(5), parquet_files_indexed(6),
+          //   parquet_bytes_downloaded(7), split_bytes_uploaded(8), duration_ms(9), message(10)
+          val (filesIndexed, splitsCreated, durationMs) = rows.headOption.map { row =>
+            if (!row.isNullAt(3)) {
+              lastSyncedVersion  = Some(row.getLong(3))
+              lastCurrentVersion = lastSyncedVersion
+            }
+            val files  = if (!row.isNullAt(6)) row.getInt(6).toLong else 0L
+            val splits = if (!row.isNullAt(4)) row.getInt(4).toLong else 0L
+            val dur    = if (!row.isNullAt(9)) row.getLong(9) else System.currentTimeMillis() - cycleStart
+            (files, splits, dur)
+          }.getOrElse((0L, 0L, System.currentTimeMillis() - cycleStart))
+
+          lastSyncCompleteMs = System.currentTimeMillis()
+          lastSyncDurationMs = durationMs
+          lastFilesIndexed   = filesIndexed
+          lastSplitsCreated  = splitsCreated
+
+          metrics.recordCycleSuccess(filesIndexed, durationMs, splitsCreated)
+          logger.info(
+            s"[IndextablesCompanionStream] Sync cycle #$cycle complete" +
+              s"\n  Duration: ${durationMs / 1000.0}s | Files indexed: $filesIndexed | Splits created: $splitsCreated" +
+              s"\n  Synced version: $lastSyncedVersion" +
+              s"\n  Total: ${metrics.syncCycles.value} cycles | ${metrics.totalFilesIndexed.value} files indexed | " +
+              s"${metrics.errorCount.value} errors"
+          )
+
+        } catch {
+          case _: InterruptedException =>
+            Thread.currentThread().interrupt()
+            logger.info(s"[IndextablesCompanionStream] Streaming sync interrupted during cycle $cycle")
+            return
+          case e: Exception =>
+            hadError = true
+            consecutiveErrors += 1
+            metrics.recordCycleError()
+            logger.error(
+              s"[IndextablesCompanionStream] ERROR in sync cycle #$cycle " +
+                s"($consecutiveErrors/$maxConsecutiveErrors consecutive errors, " +
+                s"will retry in ${pollIntervalMs * errorBackoffMultiplier / 1000}s): ${e.getMessage}",
               e
             )
-          }
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+              throw new RuntimeException(
+                s"Streaming companion sync aborted after $maxConsecutiveErrors consecutive errors",
+                e
+              )
+            }
+        }
       }
 
-      waitForNextCycle()
+      val sleepMs = if (hadError) pollIntervalMs * errorBackoffMultiplier else pollIntervalMs
+      waitForNextCycle(sleepMs)
     }
 
-    logger.info("Streaming companion sync stopped")
+    val uptimeSec = (System.currentTimeMillis() - streamStart) / 1000
+    logger.info(
+      s"[IndextablesCompanionStream] Streaming companion sync stopped. " +
+        s"Total: ${metrics.syncCycles.value} cycles | ${metrics.totalFilesIndexed.value} files indexed | " +
+        s"${metrics.errorCount.value} errors | Uptime: ${uptimeSec}s"
+    )
   }
 
   /**
@@ -114,8 +203,8 @@ private[sql] class StreamingCompanionManager(
    * as fromVersion (Delta) or fromSnapshot (Iceberg). streamingPollIntervalMs is cleared so that
    * executeSyncInternal is called directly and does not recurse into streaming dispatch.
    */
-  private def buildCycleCommand(lastSourceVersion: Option[Long]): SyncToExternalCommand =
-    lastSourceVersion match {
+  private def buildCycleCommand(lastSyncedVersion: Option[Long]): SyncToExternalCommand =
+    lastSyncedVersion match {
       case Some(v) if command.sourceFormat == "delta" =>
         command.copy(fromVersion = Some(v), streamingPollIntervalMs = None)
       case Some(v) if command.sourceFormat == "iceberg" =>
@@ -124,9 +213,9 @@ private[sql] class StreamingCompanionManager(
         command.copy(streamingPollIntervalMs = None)
     }
 
-  private def waitForNextCycle(): Unit =
+  private def waitForNextCycle(sleepMs: Long): Unit =
     try {
-      Thread.sleep(pollIntervalMs)
+      Thread.sleep(sleepMs)
     } catch {
       case _: InterruptedException =>
         Thread.currentThread().interrupt()
