@@ -198,7 +198,11 @@ class StateWriter(
    * @param compactionConfig
    *   Configuration for compaction thresholds
    * @param metadata
-   *   Optional JSON-encoded MetadataAction for fast getMetadata()
+   *   Optional JSON-encoded MetadataAction for fast getMetadata(). Ignored if metadataTransform is provided.
+   * @param metadataTransform
+   *   Optional transform function applied to the base state's metadata on each retry attempt, ensuring concurrent
+   *   metadata writers compose correctly. When provided, this takes precedence over the `metadata` parameter. The
+   *   function receives the base state's metadata (or None if no base state) and returns the updated metadata.
    * @return
    *   StateWriteResult containing the written state directory, actual version, and retry info
    * @throws ConcurrentStateWriteException
@@ -210,7 +214,8 @@ class StateWriter(
     schemaRegistry: Map[String, String],
     compactionConfig: CompactionConfig = CompactionConfig(),
     metadata: Option[String] = None,
-    minVersion: Option[Long] = None
+    minVersion: Option[Long] = None,
+    metadataTransform: Option[Option[String] => Option[String]] = None
   ): StateWriteResult = {
 
     var attempt             = 1
@@ -223,10 +228,12 @@ class StateWriter(
     var lastReadBaseVersion                              = -1L
 
     while (attempt <= retryConfig.maxAttempts) {
-      // Only re-read base state if:
+      // Re-read base state if:
       // 1. First attempt (no cache)
       // 2. Version conflict detected (state directory already existed)
-      val needsReread = cachedBaseState.isEmpty || lastConflictVersion > lastReadBaseVersion
+      // 3. metadataTransform is provided (ALWAYS re-read to capture concurrent metadata changes)
+      val needsReread =
+        cachedBaseState.isEmpty || lastConflictVersion > lastReadBaseVersion || metadataTransform.isDefined
 
       val existingState = if (needsReread) {
         log.debug(s"Reading base state (attempt $attempt, lastConflict=$lastConflictVersion)")
@@ -244,10 +251,15 @@ class StateWriter(
         case None                => (0L, None)
       }
 
-      // Safety net: preserve existing metadata from the base state when the
-      // caller passes None. This ensures companion config (and any other
-      // metadata) is never silently dropped during incremental writes.
-      val effectiveMetadata = metadata.orElse(baseManifest.flatMap(_.metadata))
+      // Compute effective metadata for this state version.
+      // When metadataTransform is provided, it is applied to the base state's metadata on each attempt,
+      // ensuring concurrent writers' changes are incorporated (re-read base state → transform → write).
+      // When only metadata is provided, use it directly (frozen across retries — legacy behavior).
+      // When neither is provided, preserve the base state's metadata (safety net).
+      val effectiveMetadata = metadataTransform match {
+        case Some(transform) => transform(baseManifest.flatMap(_.metadata))
+        case None            => metadata.orElse(baseManifest.flatMap(_.metadata))
+      }
 
       val newVersion = math.max(baseVersion + 1, minVersion.getOrElse(1L))
       val stateDir   = s"$transactionLogPath/${manifestIO.formatStateDir(newVersion)}"

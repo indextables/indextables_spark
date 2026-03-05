@@ -222,6 +222,12 @@ class TransactionLogAdapter(
     result
   }
 
+  override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long = {
+    val result = optimizedLog.commitMetadataUpdate(transform)
+    super.invalidateCache()
+    result
+  }
+
   override def getCacheStats(): Option[CacheStats] = {
     // Convert EnhancedTransactionLogCache statistics to legacy CacheStats format
     val enhancedStats = optimizedLog.getCacheStatistics()
