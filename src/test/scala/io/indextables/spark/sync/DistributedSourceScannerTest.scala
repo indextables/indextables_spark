@@ -297,6 +297,33 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     }
   }
 
+  test("scanDeltaTable falls back to full scan when version gap exceeds maxIncrementalCommits") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_catchup").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner       = new DistributedSourceScanner(spark)
+      val fullResult    = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val syncedVersion = fullResult.version.get
+
+      // Append 3 more commits
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 1, rowsPerFile = 5)
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 1, rowsPerFile = 5)
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 1, rowsPerFile = 5)
+
+      // Set threshold to 1 so a gap of 3 triggers fallback
+      spark.conf.set("spark.indextables.companion.sync.maxIncrementalCommits", "1")
+      try {
+        val result = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(syncedVersion))
+        // Full scan: isIncremental is false and all files are returned
+        result.isIncremental shouldBe false
+        result.filesRDD.collect() should not be empty
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.maxIncrementalCommits")
+      }
+    }
+  }
+
   // ─── Parquet Tests ───
 
   test("distributed Parquet scan should produce same file count as ParquetDirectoryReader.getAllFiles()") {
