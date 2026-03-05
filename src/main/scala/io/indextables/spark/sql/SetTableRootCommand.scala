@@ -36,10 +36,8 @@ import org.slf4j.LoggerFactory
  * This stores the root name and path in the transaction log metadata configuration so readers in different regions can
  * select the appropriate data root.
  *
- * Note: Concurrent SET TABLE ROOT operations on the same table can race. The underlying commitSyncActions retry
- * mechanism does not re-read metadata on conflict, so the last writer wins and may silently overwrite a concurrent
- * writer's root entry. This is acceptable for an admin-level operation — use DESCRIBE TABLE ROOTS to verify all roots
- * are registered after concurrent modifications.
+ * Concurrent safety: This command uses commitMetadataUpdate which re-reads metadata and re-applies the transform on
+ * each retry attempt, ensuring concurrent SET/UNSET TABLE ROOT operations compose correctly without silent overwrites.
  */
 case class SetTableRootCommand(
   rootName: String,
@@ -68,10 +66,11 @@ case class SetTableRootCommand(
 
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {
-        // Read current metadata
-        val metadata = transactionLog.getMetadata()
-
-        // Validate companion mode is enabled
+        // Invalidate cache to ensure fresh metadata read (global caches may have stale data
+        // from prior operations on the same table path)
+        transactionLog.invalidateCache()
+        // Validate companion mode is enabled (read once before entering retry loop)
+        val metadata    = transactionLog.getMetadata()
         val isCompanion = metadata.configuration.getOrElse("indextables.companion.enabled", "false") == "true"
         if (!isCompanion) {
           throw new IllegalStateException(
@@ -80,19 +79,16 @@ case class SetTableRootCommand(
           )
         }
 
-        // Build updated configuration with new root entry
-        val newConfig = metadata.configuration +
-          (TableRootUtils.rootKey(rootName)      -> rootPath) +
-          (TableRootUtils.timestampKey(rootName) -> System.currentTimeMillis().toString)
-
-        val updatedMetadata = metadata.copy(configuration = newConfig)
-
-        // Write updated metadata via commitSyncActions (uses retry internally)
-        transactionLog.commitSyncActions(
-          removeActions = Seq.empty,
-          addActions = Seq.empty,
-          metadataUpdate = Some(updatedMetadata)
-        )
+        // Use commitMetadataUpdate for concurrent safety — the transform is re-applied
+        // on each retry after re-reading fresh metadata, so concurrent writers compose correctly.
+        val timestamp = System.currentTimeMillis().toString
+        transactionLog.commitMetadataUpdate { currentMetadata =>
+          currentMetadata.copy(configuration =
+            currentMetadata.configuration +
+              (TableRootUtils.rootKey(rootName)      -> rootPath) +
+              (TableRootUtils.timestampKey(rootName) -> timestamp)
+          )
+        }
         transactionLog.invalidateCache()
 
         logger.info(s"Successfully set table root '$rootName' = '$rootPath'")

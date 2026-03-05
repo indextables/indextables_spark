@@ -259,6 +259,34 @@ trait TransactionLogInterface extends AutoCloseable {
   ): Long = commitMergeSplits(removeActions, addActions)
 
   /**
+   * Commits a metadata-only update using a transform function for concurrent safety.
+   *
+   * Unlike commitSyncActions which takes a pre-built MetadataAction, this method accepts a transform function that is
+   * re-applied on each retry attempt after re-reading the current metadata. This ensures concurrent metadata writers
+   * don't silently overwrite each other's changes.
+   *
+   * Use this for metadata-only operations like SET/UNSET TABLE ROOT where the update modifies a subset of configuration
+   * keys and must compose safely with concurrent updates.
+   *
+   * Note: Conflict detection relies on the storage layer's conditional write semantics (write-if-not-exists) and
+   * list-after-write consistency. On strongly consistent stores (S3, Azure Blob, HDFS) this provides full concurrent
+   * safety. On eventually consistent stores or local filesystems under heavy contention, some retry attempts may read
+   * stale state; the retry budget (spark.indextables.state.retry.maxAttempts) should be sized accordingly.
+   *
+   * @param transform
+   *   function that receives current metadata and returns updated metadata
+   * @return
+   *   The transaction version number
+   */
+  def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long = {
+    // Default implementation: read metadata, apply transform, commit via commitSyncActions.
+    // This default is NOT concurrent-safe — subclasses override with retry-loop implementations.
+    val currentMetadata = getMetadata()
+    val updatedMetadata = transform(currentMetadata)
+    commitSyncActions(Seq.empty, Seq.empty, Some(updatedMetadata))
+  }
+
+  /**
    * Commits remove actions to mark files as logically deleted.
    *
    * This operation marks files as removed in the transaction log without physically deleting them. The files become

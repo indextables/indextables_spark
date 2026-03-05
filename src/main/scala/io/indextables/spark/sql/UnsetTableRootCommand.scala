@@ -35,7 +35,8 @@ import org.slf4j.LoggerFactory
  *
  * This is idempotent: if the root doesn't exist, the command succeeds with a warning message.
  *
- * Note: Concurrent SET/UNSET TABLE ROOT operations on the same table can race. See SetTableRootCommand for details.
+ * Concurrent safety: This command uses commitMetadataUpdate which re-reads metadata and re-applies the transform on
+ * each retry attempt, ensuring concurrent SET/UNSET TABLE ROOT operations compose correctly without silent overwrites.
  */
 case class UnsetTableRootCommand(
   rootName: String,
@@ -63,28 +64,24 @@ case class UnsetTableRootCommand(
 
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {
-        // Read current metadata
+        // Invalidate cache to ensure fresh metadata read (global caches may have stale data
+        // from prior operations on the same table path)
+        transactionLog.invalidateCache()
+        // Check if root exists (read once before entering retry loop for the no-op case)
         val metadata = transactionLog.getMetadata()
-
-        // Check if root exists
-        val rKey = TableRootUtils.rootKey(rootName)
-        val tKey = TableRootUtils.timestampKey(rootName)
+        val rKey     = TableRootUtils.rootKey(rootName)
+        val tKey     = TableRootUtils.timestampKey(rootName)
 
         if (!metadata.configuration.contains(rKey)) {
           logger.warn(s"Table root '$rootName' does not exist, nothing to unset")
           return Seq(Row(s"Table root '$rootName' does not exist (no-op)"))
         }
 
-        // Build updated configuration without the root entry
-        val newConfig       = metadata.configuration - rKey - tKey
-        val updatedMetadata = metadata.copy(configuration = newConfig)
-
-        // Write updated metadata via commitSyncActions (uses retry internally)
-        transactionLog.commitSyncActions(
-          removeActions = Seq.empty,
-          addActions = Seq.empty,
-          metadataUpdate = Some(updatedMetadata)
-        )
+        // Use commitMetadataUpdate for concurrent safety — the transform is re-applied
+        // on each retry after re-reading fresh metadata, so concurrent writers compose correctly.
+        transactionLog.commitMetadataUpdate { currentMetadata =>
+          currentMetadata.copy(configuration = currentMetadata.configuration - rKey - tKey)
+        }
         transactionLog.invalidateCache()
 
         logger.info(s"Successfully unset table root '$rootName'")

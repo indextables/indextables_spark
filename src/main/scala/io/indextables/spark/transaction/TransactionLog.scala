@@ -694,6 +694,124 @@ class TransactionLog(
   }
 
   /**
+   * Commits a metadata-only update with concurrent safety by re-reading metadata on each retry.
+   *
+   * Unlike writeActionsWithRetry which freezes the action payload across retries, this method re-reads the current
+   * metadata and re-applies the transform function on every attempt. This prevents concurrent metadata writers from
+   * silently overwriting each other's changes.
+   *
+   * @param transform
+   *   function that receives current metadata and returns updated metadata
+   * @return
+   *   The transaction version number
+   * @throws TransactionConflictException
+   *   if all retry attempts are exhausted
+   */
+  override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long = {
+    val retryConfig         = getRetryConfig()
+    var attempt             = 1
+    var lastConflictVersion = -1L
+    val conflictedVersions  = scala.collection.mutable.ListBuffer[Long]()
+
+    while (attempt <= retryConfig.maxAttempts) {
+      // Re-read metadata fresh on EACH attempt to capture concurrent changes
+      if (attempt > 1) {
+        refreshVersionCounterFromDisk()
+      }
+
+      val currentMetadata      = getMetadata()
+      val updatedMetadata      = transform(currentMetadata)
+      val actions: Seq[Action] = Seq(updatedMetadata)
+
+      val version = if (attempt == 1) {
+        getNextVersion()
+      } else {
+        versionCounter.incrementAndGet()
+      }
+
+      val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
+      val versionFilePath = versionFile.toString
+
+      // Apply schema deduplication fresh on each attempt
+      val (deduplicatedActions, metadataUpdate) = applySchemaDeduplicationForWrite(actions)
+
+      val actionsToWrite = metadataUpdate match {
+        case Some(schemaUpdatedMetadata) =>
+          deduplicatedActions.map {
+            case _: MetadataAction => schemaUpdatedMetadata
+            case other             => other
+          }
+        case None =>
+          deduplicatedActions
+      }
+
+      val codec           = getCompressionCodec()
+      val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+
+      val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
+        actions = actionsToWrite,
+        cloudProvider = cloudProvider,
+        path = versionFilePath,
+        codec = codec,
+        ifNotExists = true
+      )
+
+      if (writeSucceeded) {
+        // Success - update caches
+        metadataUpdate.foreach { um =>
+          val newSchemas = SchemaDeduplication.extractSchemaRegistry(um.configuration)
+          updateSchemaRegistry(newSchemas)
+        }
+        cache.foreach(_.invalidateVersionDependentCaches())
+
+        lastRetryMetrics = Some(
+          TxRetryMetrics(
+            attemptsMade = attempt,
+            conflictsEncountered = attempt - 1,
+            finalVersion = version,
+            conflictedVersions = conflictedVersions.toSeq
+          )
+        )
+
+        if (attempt > 1) {
+          logger.info(
+            s"Metadata update written to version $version$compressionInfo after $attempt attempts (conflict on version $lastConflictVersion)"
+          )
+        } else {
+          logger.info(s"Metadata update written to version $version$compressionInfo")
+        }
+
+        handleCheckpointCreation(version)
+        return version
+      }
+
+      // Conflict - retry with fresh metadata on next iteration
+      lastConflictVersion = version
+      conflictedVersions += version
+      logger.warn(
+        s"Concurrent write conflict at version $version during metadata update (attempt $attempt/${retryConfig.maxAttempts}). " +
+          "Will re-read metadata and retry."
+      )
+
+      if (attempt < retryConfig.maxAttempts) {
+        val delay = calculateRetryDelay(attempt, retryConfig)
+        logger.debug(s"Waiting ${delay}ms before retry attempt ${attempt + 1}")
+        Thread.sleep(delay)
+      }
+
+      attempt += 1
+    }
+
+    throw new TransactionConflictException(
+      s"Failed to write metadata update after ${retryConfig.maxAttempts} attempts. " +
+        s"Last conflicted version: $lastConflictVersion. " +
+        "This may indicate high write contention on this table.",
+      lastConflictVersion,
+      retryConfig.maxAttempts
+    )
+  }
+
+  /**
    * Commits remove actions to mark files as logically deleted.
    *
    * This operation marks files as removed in the transaction log without physically deleting them. The files become
