@@ -559,11 +559,37 @@ case class SyncToExternalCommand(
       val (rawParquetFiles, splitsToInvalidate) = distributedResult match {
         case Some(dr) if dr.isIncremental =>
           // Incremental changeset from getChangesBetween / getChangesSince.
-          // All files in the RDD are guaranteed to be new additions — skip the anti-join.
-          // This avoids O(checkpoint_size) distributed work on every streaming cycle.
-          val files = dr.filesRDD.collect().toSeq
-          logger.info(s"Incremental changeset: ${files.size} new files (anti-join skipped)")
-          (files, Seq.empty[AddAction])
+          // New files are guaranteed additions — anti-join is skipped for those.
+          // Removed source paths (Delta only) require finding and invalidating the companion
+          // splits that indexed them, and re-indexing any sibling files from those splits.
+          val newFiles = dr.filesRDD.collect().toSeq
+          if (dr.removedSourcePaths.isEmpty) {
+            logger.info(s"Incremental changeset: ${newFiles.size} new files (anti-join skipped)")
+            (newFiles, Seq.empty[AddAction])
+          } else {
+            val normalizedRemoved = dr.removedSourcePaths.map(normalizePath).toSet
+            val splitsToInvalidate = scopedExistingFiles.filter { split =>
+              split.companionSourceFiles.exists(_.exists(f => normalizedRemoved.contains(normalizePath(f))))
+            }
+            // Files from invalidated splits that are NOT in the removed set still exist in the
+            // source and must be re-indexed (their split is being removed).
+            val remainingToReindex = splitsToInvalidate
+              .flatMap { split =>
+                split.companionSourceFiles.getOrElse(Seq.empty)
+                  .filterNot(f => normalizedRemoved.contains(normalizePath(f)))
+                  .map(relPath => CompanionSourceFile(normalizePath(relPath), split.partitionValues, 0L))
+              }
+              .groupBy(f => normalizePath(f.path))
+              .map(_._2.head)
+              .toSeq
+            logger.info(
+              s"Incremental changeset: ${newFiles.size} new files, " +
+                s"${dr.removedSourcePaths.size} removed source paths, " +
+                s"${splitsToInvalidate.size} splits to invalidate, " +
+                s"${remainingToReindex.size} sibling files to re-index"
+            )
+            (newFiles ++ remainingToReindex, splitsToInvalidate)
+          }
         case _ =>
           distributedRDD match {
             case Some(rdd) =>
@@ -1340,6 +1366,38 @@ case class SyncToExternalCommand(
    * Note: Unity Catalog table-name paths (non-URL sourcePaths) will fail the native call and
    * return None, which is safe — the manager will fall through to the full sync.
    */
+  /**
+   * Reads the last successfully synced source version from the companion index transaction log.
+   * Used by StreamingCompanionManager to resume incremental sync after a restart without
+   * performing a full anti-join scan.
+   *
+   * Returns None if the companion index does not yet exist, has never been synced, or on any error.
+   */
+  private[sql] def readLastSyncedVersionFromLog(sparkSession: SparkSession): Option[Long] = {
+    try {
+      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+      val transactionLog = TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(destPath),
+        sparkSession,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
+      )
+      try {
+        transactionLog.getMetadata().configuration
+          .get("indextables.companion.lastSyncedVersion")
+          .flatMap(v => scala.util.Try(v.toLong).toOption)
+      } catch {
+        case _: Exception => None
+      } finally {
+        transactionLog.close()
+      }
+    } catch {
+      case _: Exception => None
+    }
+  }
+
   private[sql] def cheapSourceVersion(sparkSession: SparkSession): Option[Long] = {
     try {
       val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration

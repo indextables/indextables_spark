@@ -72,7 +72,18 @@ private[sql] class StreamingCompanionManager(
 
     val metrics = new StreamingCompanionMetrics(sparkSession.sparkContext)
 
-    var lastSyncedVersion: Option[Long]  = None
+    // Attempt to resume from the last committed source version in the companion transaction log.
+    // On a clean first run this returns None and a full sync is performed.
+    // On restart after an outage this skips the full anti-join and resumes incrementally.
+    val resumedVersion = command.readLastSyncedVersionFromLog(sparkSession)
+    if (resumedVersion.isDefined) {
+      logger.info(
+        s"[IndextablesCompanionStream] Resuming from lastSyncedVersion=${resumedVersion.get} " +
+          s"(read from companion transaction log)"
+      )
+    }
+
+    var lastSyncedVersion: Option[Long]  = resumedVersion
     var lastCurrentVersion: Option[Long] = None
     var consecutiveErrors  = 0
     var cycle              = 0
