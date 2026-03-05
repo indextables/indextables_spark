@@ -473,23 +473,38 @@ class DistributedSourceScanner(spark: SparkSession) {
             isIncremental = true
           )
         } else {
-          // New commits available — read only the delta (commit JSON files from fv+1 to trueCurrentVersion).
-          // This is O(delta_commits) instead of O(checkpoint_parts + delta_commits).
-          logger.info(s"Delta incremental: reading changes from version $fv to $trueCurrentVersion (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
-          val changes    = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
-          val addedFiles = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
-          logger.info(s"Delta incremental: ${addedFiles.size} added files, ${changes.getRemovedPaths.size} removed paths")
-          val sc         = spark.sparkContext
-          return DistributedScanResult(
-            filesRDD = sc.parallelize(addedFiles),
-            version = Some(trueCurrentVersion),
-            partitionColumns = snapshotPartCols,
-            storageRoot = None,
-            sampleFilePath = addedFiles.headOption.map(_.path),
-            numDistributedParts = 0,
-            schema = schemaOpt,
-            isIncremental = true
-          )
+          // Check whether the version gap is small enough for incremental commit-log reads.
+          // get_changes_between reads commit JSON files serially (1 GET per file). For large
+          // catch-up scenarios this is slower than a full distributed checkpoint scan.
+          val maxIncrementalCommits = scala.util.Try(
+            spark.conf.get("spark.indextables.companion.sync.maxIncrementalCommits", "100").toLong
+          ).getOrElse(100L)
+          val versionGap = trueCurrentVersion - fv
+          if (versionGap > maxIncrementalCommits) {
+            logger.warn(
+              s"Delta incremental: version gap $versionGap exceeds maxIncrementalCommits=$maxIncrementalCommits — " +
+              s"falling back to full scan (from=$fv, current=$trueCurrentVersion)"
+            )
+            // fall through to full scan below
+          } else {
+            // New commits available — read only the delta (commit JSON files from fv+1 to trueCurrentVersion).
+            // This is O(delta_commits) instead of O(checkpoint_parts + delta_commits).
+            logger.info(s"Delta incremental: reading changes from version $fv to $trueCurrentVersion (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
+            val changes    = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
+            val addedFiles = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
+            logger.info(s"Delta incremental: ${addedFiles.size} added files, ${changes.getRemovedPaths.size} removed paths")
+            val sc         = spark.sparkContext
+            return DistributedScanResult(
+              filesRDD = sc.parallelize(addedFiles),
+              version = Some(trueCurrentVersion),
+              partitionColumns = snapshotPartCols,
+              storageRoot = None,
+              sampleFilePath = addedFiles.headOption.map(_.path),
+              numDistributedParts = 0,
+              schema = schemaOpt,
+              isIncremental = true
+            )
+          }
         }
       case None => // fall through to full scan below
     }

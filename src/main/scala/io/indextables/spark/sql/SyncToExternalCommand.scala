@@ -1341,17 +1341,30 @@ case class SyncToExternalCommand(
    * return None, which is safe — the manager will fall through to the full sync.
    */
   private[sql] def cheapSourceVersion(sparkSession: SparkSession): Option[Long] = {
-    if (sourceFormat != "delta") return None
     try {
       val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
       val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
         ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
-      val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
-      val kernelPath        = io.indextables.spark.sync.DeltaLogReader.normalizeForDeltaKernel(sourcePath)
-      val deltaConfig       = io.indextables.spark.sync.DeltaLogReader.translateCredentials(sourceCredentials)
-      Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
+      sourceFormat match {
+        case "delta" =>
+          val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+          val kernelPath        = io.indextables.spark.sync.DeltaLogReader.normalizeForDeltaKernel(sourcePath)
+          val deltaConfig       = io.indextables.spark.sync.DeltaLogReader.translateCredentials(sourceCredentials)
+          Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
+        case "iceberg" =>
+          val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials)
+          val parts             = sourcePath.split("\\.", 2)
+          if (parts.length != 2) None
+          else {
+            val (ns, tbl) = (parts(0), parts(1))
+            Some(io.indextables.tantivy4java.iceberg.IcebergTableReader.getCurrentSnapshotId(
+              effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig))
+          }
+        case _ => None
+      }
     } catch {
       case _: Exception => None
     }

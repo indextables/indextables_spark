@@ -25,7 +25,10 @@ import org.slf4j.LoggerFactory
  *
  * Runs an initial full sync followed by repeated incremental cycles at the configured poll
  * interval. On each incremental cycle:
- *   1. A cheap version probe is attempted (Delta only: 1 GET + O(k) HEADs, no parquet reads).
+ *   1. A cheap version probe is attempted:
+ *        Delta:   1 GET + O(k) HEAD probes, no parquet read.
+ *        Iceberg: 1 catalog.load_table() call, no manifest list read.
+ *        Parquet: no probe available, always falls through to step 2.
  *      If the source version is unchanged since the last sync, the full sync is skipped entirely.
  *   2. If changed (or no cheap probe available), executeSyncInternal is called with the last
  *      known source version as fromVersion/fromSnapshot so the underlying scanner uses an
@@ -83,10 +86,11 @@ private[sql] class StreamingCompanionManager(
       cycle += 1
       val cycleStart = System.currentTimeMillis()
 
-      // ── Cheap version pre-check (Delta only) ────────────────────────────────────────────────
-      // Avoids reading checkpoint parquet (getSnapshotInfo) on no-change polling cycles.
-      // If the probe throws or returns None (Iceberg, Parquet, Unity Catalog paths), fall through
-      // to executeSyncInternal which does its own version check after getSnapshotInfo.
+      // ── Cheap version pre-check ──────────────────────────────────────────────────────────────
+      // Delta:   1 GET (_last_checkpoint) + O(k) HEAD probes, no parquet read.
+      // Iceberg: 1 catalog.load_table() call, no manifest list read.
+      // Parquet / unknown: returns None — fall through to executeSyncInternal.
+      // If the probe throws for any reason, returns None and falls through to full sync.
       val cheapVersion     = command.cheapSourceVersion(sparkSession)
       val versionUnchanged = cheapVersion.exists(cv => lastSyncedVersion.contains(cv))
       var hadError         = false

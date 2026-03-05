@@ -38,6 +38,29 @@ class StreamingCompanionManagerTest extends TestBase {
       dryRun = false
     )
 
+  test("cheapSourceVersion returns None for parquet format") {
+    val sourceDir = Files.createTempDirectory("streaming-source-parquet").toString
+    val indexDir  = Files.createTempDirectory("streaming-index-parquet").toString
+    val command   = makeCommand(sourceDir, indexDir)
+    command.cheapSourceVersion(spark) shouldBe None
+  }
+
+  test("cheapSourceVersion returns None for iceberg format when catalog is unreachable") {
+    val sourceDir = "namespace.tableName"
+    val indexDir  = Files.createTempDirectory("streaming-index-iceberg").toString
+    val command   = SyncToExternalCommand(
+      sourceFormat = "iceberg",
+      sourcePath   = sourceDir,
+      destPath     = indexDir,
+      indexingModes = Map.empty,
+      fastFieldMode = "HYBRID",
+      targetInputSize = None,
+      dryRun = false
+    )
+    // Iceberg catalog call fails (no real catalog) — cheapSourceVersion must return None, not throw
+    command.cheapSourceVersion(spark) shouldBe None
+  }
+
   test("runStreaming stops cleanly when thread is interrupted during poll sleep") {
     val sourceDir = Files.createTempDirectory("streaming-source").toString
     val indexDir  = Files.createTempDirectory("streaming-index").toString
