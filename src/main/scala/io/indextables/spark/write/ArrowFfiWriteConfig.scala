@@ -37,15 +37,22 @@ import org.slf4j.LoggerFactory
  *   Whether Arrow FFI write path is enabled (default: true)
  * @param batchSize
  *   Number of rows to buffer before flushing via FFI (default: 8192)
+ * @param heapSize
+ *   Heap size in bytes for the native split writer (default: 128MB)
  */
 case class ArrowFfiWriteConfig(
   enabled: Boolean = ArrowFfiWriteConfig.DEFAULT_ENABLED,
-  batchSize: Int = ArrowFfiWriteConfig.DEFAULT_BATCH_SIZE) {
+  batchSize: Int = ArrowFfiWriteConfig.DEFAULT_BATCH_SIZE,
+  heapSize: Long = ArrowFfiWriteConfig.DEFAULT_HEAP_SIZE) {
 
   def validate(): ArrowFfiWriteConfig = {
     require(
       batchSize > 0,
       s"batchSize must be > 0, got: $batchSize"
+    )
+    require(
+      heapSize > 0,
+      s"heapSize must be > 0, got: $heapSize"
     )
     this
   }
@@ -57,20 +64,24 @@ object ArrowFfiWriteConfig {
   // Configuration key constants
   val KEY_ENABLED    = "spark.indextables.write.arrowFfi.enabled"
   val KEY_BATCH_SIZE = "spark.indextables.write.arrowFfi.batchSize"
+  val KEY_HEAP_SIZE  = "spark.indextables.write.arrowFfi.heapSize"
 
   // Default values
-  val DEFAULT_ENABLED: Boolean = true
-  val DEFAULT_BATCH_SIZE: Int  = 8192
+  val DEFAULT_ENABLED: Boolean  = true
+  val DEFAULT_BATCH_SIZE: Int   = 8192
+  val DEFAULT_HEAP_SIZE: Long   = 128L * 1024 * 1024 // 128MB
 
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 
   def fromOptions(options: CaseInsensitiveStringMap): ArrowFfiWriteConfig = {
     val enabled   = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
     val batchSize = getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
+    val heapSize  = getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true)
 
     val config = ArrowFfiWriteConfig(
       enabled = enabled,
-      batchSize = batchSize
+      batchSize = batchSize,
+      heapSize = heapSize
     )
 
     if (enabled) {
@@ -88,7 +99,8 @@ object ArrowFfiWriteConfig {
 
     ArrowFfiWriteConfig(
       enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED),
-      batchSize = get(KEY_BATCH_SIZE).map(_.toInt).getOrElse(DEFAULT_BATCH_SIZE)
+      batchSize = get(KEY_BATCH_SIZE).map(_.toInt).getOrElse(DEFAULT_BATCH_SIZE),
+      heapSize = get(KEY_HEAP_SIZE).map(_.toLong).getOrElse(DEFAULT_HEAP_SIZE)
     ).validate()
   }
 
@@ -130,6 +142,31 @@ object ArrowFfiWriteConfig {
       } catch {
         case _: NumberFormatException =>
           logger.warn(s"Invalid int value for $key: '$value', using default: $default")
+          default
+      }
+    }
+  }
+
+  private def getLongOption(
+    options: CaseInsensitiveStringMap,
+    key: String,
+    default: Long,
+    mustBePositive: Boolean = false
+  ): Long = {
+    val value = options.get(key)
+    if (value == null || value.isEmpty) default
+    else {
+      try {
+        val parsed = value.toLong
+        if (mustBePositive && parsed <= 0) {
+          logger.warn(s"Invalid value for $key: '$value' (must be > 0), using default: $default")
+          default
+        } else {
+          parsed
+        }
+      } catch {
+        case _: NumberFormatException =>
+          logger.warn(s"Invalid long value for $key: '$value', using default: $default")
           default
       }
     }

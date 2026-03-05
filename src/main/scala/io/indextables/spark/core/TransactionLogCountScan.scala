@@ -448,6 +448,9 @@ class TransactionLogGroupByCountPartitionReader(
               Instant.parse(decodedStr)
             } else if (decodedStr.contains("T")) {
               LocalDateTime.parse(decodedStr).toInstant(ZoneOffset.UTC)
+            } else if (decodedStr.contains(" ")) {
+              // Space-separated format: "2024-01-01 15:00:00"
+              LocalDateTime.parse(decodedStr.replace(" ", "T")).toInstant(ZoneOffset.UTC)
             } else {
               throw new IllegalArgumentException(s"Unrecognized timestamp format: $value")
             }

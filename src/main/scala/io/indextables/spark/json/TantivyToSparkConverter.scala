@@ -227,9 +227,11 @@ class TantivyToSparkConverter(
 
     field.dataType match {
       case at: ArrayType =>
-        // Handle both raw JSON arrays and wrapped format:
+        // Handle three array formats:
         // - Raw JSON array: ["a","b","c"] (from companion splits / parquet)
-        // - Wrapped format: {"_values": ["a","b","c"]} (from standard index writes)
+        // - Wrapped with "_values" key: {"_values": ["a","b","c"]} (from JSON-serialized writes)
+        // - Wrapped with column name: {"scores": [90,85,92]} (from native Arrow FFI writes —
+        //   Rust wraps top-level List columns in a synthetic object using the column name as key)
         val trimmed = jsonString.trim
         if (trimmed.startsWith("[")) {
           // Raw JSON array - parse directly as List
@@ -239,12 +241,14 @@ class TantivyToSparkConverter(
           )
           jsonListToArray(jsonList, at)
         } else {
-          // Wrapped format - parse as Map and extract "_values"
+          // Wrapped format - try "_values" first, then column name
           val jsonMap = io.indextables.spark.util.JsonUtil.parseAsJava(
             jsonString,
             classOf[java.util.Map[String, Object]]
           )
-          val jsonList = jsonMap.get("_values")
+          val jsonList = Option(jsonMap.get("_values"))
+            .orElse(Option(jsonMap.get(field.name)))
+            .orNull
           if (jsonList == null) {
             org.apache.spark.sql.catalyst.util.ArrayData.toArrayData(Array.empty[Any])
           } else {
