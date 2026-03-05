@@ -109,7 +109,19 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
     DeltaTableReader.listFiles(deltaKernelPath, deltaConfig)
   }
 
-  /** Get the current (latest) version of the Delta table. */
+  /**
+   * Get the current (latest) version of the Delta table via a cheap HEAD-probe scan.
+   *
+   * Cost: 1 GET (_last_checkpoint) + O(k) HEAD probes. No parquet reads.
+   * Use this instead of currentVersion() when you only need the version number.
+   */
+  def cheapCurrentVersion(): Long = {
+    val version = DeltaTableReader.getCurrentVersion(deltaKernelPath, deltaConfig)
+    logger.info(s"Delta table at $deltaTablePath: cheap current version = $version")
+    version
+  }
+
+  /** Get the current (latest) version of the Delta table. Reads all file entries lazily. */
   def currentVersion(): Long = {
     val entries = fileEntries
     val version = if (entries.isEmpty) -1L else entries.get(0).getTableVersion

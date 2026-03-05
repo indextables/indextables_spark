@@ -189,6 +189,66 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     }
   }
 
+  // ─── Incremental Delta Tests (fromVersion parameter) ───
+
+  test("DistributedScanResult.isIncremental defaults to false") {
+    val sc  = spark.sparkContext
+    val result = DistributedScanResult(
+      filesRDD = sc.emptyRDD[CompanionSourceFile],
+      version = Some(5L),
+      partitionColumns = Seq.empty,
+      storageRoot = None,
+      sampleFilePath = None,
+      numDistributedParts = 0
+    )
+    result.isIncremental shouldBe false
+  }
+
+  test("DistributedScanResult.isIncremental can be set to true") {
+    val sc  = spark.sparkContext
+    val result = DistributedScanResult(
+      filesRDD = sc.emptyRDD[CompanionSourceFile],
+      version = Some(5L),
+      partitionColumns = Seq.empty,
+      storageRoot = None,
+      sampleFilePath = None,
+      numDistributedParts = 0,
+      isIncremental = true
+    )
+    result.isIncremental shouldBe true
+  }
+
+  test("scanDeltaTable with fromVersion equal to current version returns empty incremental result") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_incr_noop").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner    = new DistributedSourceScanner(spark)
+      // Full scan to learn the current version
+      val fullResult = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val currentVersion = fullResult.version.get
+
+      // Incremental scan with fromVersion == currentVersion → no new commits → empty result
+      val incrResult = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(currentVersion))
+
+      incrResult.isIncremental shouldBe true
+      incrResult.version shouldBe Some(currentVersion)
+      incrResult.filesRDD.collect() shouldBe empty
+    }
+  }
+
+  test("scanDeltaTable without fromVersion is not incremental") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_non_incr").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner = new DistributedSourceScanner(spark)
+      val result  = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+
+      result.isIncremental shouldBe false
+    }
+  }
+
   // ─── Parquet Tests ───
 
   test("distributed Parquet scan should produce same file count as ParquetDirectoryReader.getAllFiles()") {

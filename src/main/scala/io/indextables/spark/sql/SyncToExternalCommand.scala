@@ -283,7 +283,9 @@ case class SyncToExternalCommand(
           case "delta" =>
             val deltaPath         = resolvedStorageLocation.getOrElse(sourcePath)
             val sourceCredentials = resolveCredentials(mergedConfigs, deltaPath)
-            scanner.scanDeltaTable(deltaPath, sourceCredentials, wherePredicates = wherePredicates)
+            scanner.scanDeltaTable(deltaPath, sourceCredentials,
+              wherePredicates = wherePredicates,
+              fromVersion = fromVersion)
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
             val (ns, tbl) = {
@@ -291,13 +293,16 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
+            // fromSnapshot means "return changes added after this snapshot" (incremental filter),
+            // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
-              fromSnapshot,
-              wherePredicates = wherePredicates
+              snapshotId = None,
+              wherePredicates = wherePredicates,
+              fromSnapshotId = fromSnapshot
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -550,15 +555,25 @@ case class SyncToExternalCommand(
           existingFiles
         }
 
-      val (rawParquetFiles, splitsToInvalidate) = distributedRDD match {
-        case Some(rdd) =>
-          // Distributed anti-join using RDDs
-          val antiJoin = new DistributedAntiJoin(sparkSession)
-          val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
-          (result.filesToIndex, result.splitsToInvalidate)
-        case None =>
-          // In-memory anti-join (fallback path)
-          computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+      val (rawParquetFiles, splitsToInvalidate) = distributedResult match {
+        case Some(dr) if dr.isIncremental =>
+          // Incremental changeset from getChangesBetween / getChangesSince.
+          // All files in the RDD are guaranteed to be new additions — skip the anti-join.
+          // This avoids O(checkpoint_size) distributed work on every streaming cycle.
+          val files = dr.filesRDD.collect().toSeq
+          logger.info(s"Incremental changeset: ${files.size} new files (anti-join skipped)")
+          (files, Seq.empty[AddAction])
+        case _ =>
+          distributedRDD match {
+            case Some(rdd) =>
+              // Distributed anti-join using RDDs (full-snapshot path)
+              val antiJoin = new DistributedAntiJoin(sparkSession)
+              val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
+              (result.filesToIndex, result.splitsToInvalidate)
+            case None =>
+              // In-memory anti-join (fallback path)
+              computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+          }
       }
 
       logger.info(
