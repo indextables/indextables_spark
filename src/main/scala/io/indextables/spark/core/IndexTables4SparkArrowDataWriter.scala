@@ -25,9 +25,8 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import io.indextables.spark.arrow.ArrowFfiWriteBridge
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.json.{SparkSchemaToTantivyMapper, SparkToTantivyConverter}
 import io.indextables.spark.transaction.AddAction
-import io.indextables.spark.util.{JsonUtil, ProtocolNormalizer, StatisticsCalculator, StatisticsTruncation}
+import io.indextables.spark.util.{ProtocolNormalizer, StatisticsCalculator, StatisticsTruncation}
 import java.util.{Map => JMap}
 import io.indextables.spark.write.ArrowFfiWriteConfig
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
@@ -88,47 +87,11 @@ class IndexTables4SparkArrowDataWriter(
     new Path(normalizedStr)
   }
 
-  // Build JSON serializer function for complex types (Struct/Array/Map)
-  private lazy val tantivyOptions  = IndexTables4SparkOptions(options)
-  private lazy val jsonFieldMapper = new SparkSchemaToTantivyMapper(tantivyOptions)
-  private lazy val jsonConverter   = new SparkToTantivyConverter(writeSchema, jsonFieldMapper)
+  private lazy val tantivyOptions = IndexTables4SparkOptions(options)
 
-  private def serializeComplexType(row: InternalRow, colIdx: Int, dataType: DataType): String =
-    dataType match {
-      case st: StructType =>
-        val internalRow = row.getStruct(colIdx, st.fields.length)
-        val genericRow = org.apache.spark.sql.Row.fromSeq(
-          st.fields.zipWithIndex.map { case (field, idx) => internalRow.get(idx, field.dataType) }
-        )
-        val jsonMap = jsonConverter.structToJsonMap(genericRow, st)
-        JsonUtil.toJson(jsonMap)
-
-      case at: ArrayType =>
-        val arrayData = row.getArray(colIdx)
-        val seq       = (0 until arrayData.numElements()).map(i => arrayData.get(i, at.elementType))
-        val jsonList  = jsonConverter.arrayToJsonList(seq, at)
-        // Arrays need wrapping for tantivy JSON field format
-        val wrappedMap = jsonConverter.wrapArrayInObject(jsonList)
-        JsonUtil.toJson(wrappedMap)
-
-      case mt: MapType =>
-        val mapData = row.getMap(colIdx)
-        val sparkMap = scala.collection.Map(
-          mapData.keyArray().toSeq[Any](mt.keyType).zip(mapData.valueArray().toSeq[Any](mt.valueType)): _*
-        )
-        val jsonMap = jsonConverter.mapToJsonMap(sparkMap, mt)
-        JsonUtil.toJson(jsonMap)
-
-      case _ =>
-        row.get(colIdx, dataType).toString
-    }
-
-  // Arrow FFI bridge for row→Arrow→FFI conversion
-  private val bridge = new ArrowFfiWriteBridge(
-    writeSchema,
-    arrowFfiConfig.batchSize,
-    jsonSerializer = Some(serializeComplexType)
-  )
+  // Arrow FFI bridge for row→Arrow→FFI conversion. Complex types (Struct/Array/Map) are passed as
+  // native Arrow complex vectors — Rust converts them directly to tantivy OwnedValue without JSON serialization.
+  private val bridge = new ArrowFfiWriteBridge(writeSchema, arrowFfiConfig.batchSize)
 
   // Stats-eligible fields (used to set "stats" flags in field config JSON)
   private lazy val statsEligibleColumns: Set[String] =
@@ -147,11 +110,8 @@ class IndexTables4SparkArrowDataWriter(
     .filter(_.nonEmpty)
     .map(_.toLong)
 
-  // Heap size for native split writer (default 128MB)
-  private val heapSize: Long = Option(serializedOptions.getOrElse("spark.indextables.write.arrowFfi.heapSize", null))
-    .filter(_.nonEmpty)
-    .map(_.toLong)
-    .getOrElse(128L * 1024 * 1024)
+  // Heap size for native split writer
+  private val heapSize: Long = arrowFfiConfig.heapSize
 
   logger.info(
     s"ArrowDataWriter initialized for partition $partitionId, batchSize=${arrowFfiConfig.batchSize}, " +
@@ -206,9 +166,12 @@ class IndexTables4SparkArrowDataWriter(
 
       // Explicit tokenizer override wins over default
       val effectiveTokenizer = tokenizerOverrides.getOrElse(field.name.toLowerCase, defaultTokenizer)
-      val tokenizer = if (effectiveTokenizer.nonEmpty) s""","tokenizer":"$effectiveTokenizer"""" else ""
+      val escapedName = escapeJsonString(field.name)
+      val tokenizer = if (effectiveTokenizer.nonEmpty) {
+        s""","tokenizer":"${escapeJsonString(effectiveTokenizer)}""""
+      } else ""
       val stats = if (statsEligibleColumns.contains(field.name)) ""","stats":true""" else ""
-      s"""{"name":"${field.name}","type":"$fieldType"$tokenizer$stats}"""
+      s"""{"name":"$escapedName","type":"$fieldType"$tokenizer$stats}"""
     }.mkString("[", ",", "]")
   }
 
@@ -363,43 +326,37 @@ class IndexTables4SparkArrowDataWriter(
     val numDocs         = getLong(result, "numDocs")
     val fileName        = localSplitPath.substring(localSplitPath.lastIndexOf('/') + 1)
 
-    // For cloud tables, upload the local split file to cloud storage
-    val finalSplitPath = if (isCloudTable) {
+    // For cloud tables, upload the local split file to cloud storage and capture size from local file.
+    // For local tables, get file size directly from the filesystem.
+    val (finalSplitPath, splitSize) = if (isCloudTable) {
       val cloudDest = if (partitionKey.nonEmpty) {
         s"$cloudTablePath/$partitionKey/$fileName"
       } else {
         s"$cloudTablePath/$fileName"
       }
-      val localFile = new java.io.File(localSplitPath)
+      val localFile     = new java.io.File(localSplitPath)
+      val localFileSize = localFile.length()
       val cloudProvider = CloudStorageProviderFactory.createProvider(cloudDest, serializedOptions)
       try {
         val inputStream = new java.io.FileInputStream(localFile)
         try
-          cloudProvider.writeFileFromStream(cloudDest, inputStream, Some(localFile.length()))
+          cloudProvider.writeFileFromStream(cloudDest, inputStream, Some(localFileSize))
         finally
           inputStream.close()
-        logger.info(s"Uploaded split $fileName to $cloudDest (${localFile.length()} bytes)")
+        logger.info(s"Uploaded split $fileName to $cloudDest ($localFileSize bytes)")
       } finally
         cloudProvider.close()
 
       // Clean up local temp file
-      new java.io.File(localSplitPath).delete()
-      cloudDest
+      localFile.delete()
+      (cloudDest, localFileSize)
     } else {
-      localSplitPath
-    }
-
-    // Get file size
-    val splitSize = {
-      val cloudProvider = CloudStorageProviderFactory.createProvider(finalSplitPath, serializedOptions)
-      try {
-        val fileInfo = cloudProvider.getFileInfo(finalSplitPath)
-        fileInfo.map(_.size).getOrElse {
-          logger.warn(s"Could not get file info for $finalSplitPath")
-          0L
-        }
-      } finally
-        cloudProvider.close()
+      val localFile = new java.io.File(localSplitPath)
+      val fileSize = if (localFile.exists()) localFile.length() else {
+        logger.warn(s"Could not get file size for $localSplitPath")
+        0L
+      }
+      (localSplitPath, fileSize)
     }
 
     // Compute relative path for AddAction
@@ -418,15 +375,22 @@ class IndexTables4SparkArrowDataWriter(
       .getOrElse(Map.empty[String, String])
 
     // Apply statistics truncation (Spark-side concern — prevents long strings from bloating the transaction log)
-    val configMap = options.asCaseSensitiveMap().asScala.toMap
     val (minValues, maxValues) = StatisticsTruncation.truncateStatistics(
       rawMinValues,
       rawMaxValues,
-      configMap
+      serializedOptions
     )
 
     // Get docMappingJson from the native split metadata (includes fast field attributes)
     val docMappingJson = Option(getStr(result, "docMappingJson")).filter(_.nonEmpty)
+
+    // Extract time range and tags from native result (matches TANT writer's SplitMetadata extraction)
+    val timeRangeStart = Option(result.get("timeRangeStart")).map(_.toString).filter(_.nonEmpty)
+    val timeRangeEnd   = Option(result.get("timeRangeEnd")).map(_.toString).filter(_.nonEmpty)
+    val splitTags = Option(result.get("splitTags")).map(_.asInstanceOf[java.util.Set[String]]).filter(!_.isEmpty).map { tagSet =>
+      import scala.jdk.CollectionConverters._
+      tagSet.asScala.toSet
+    }
 
     AddAction(
       path = addActionPath,
@@ -442,9 +406,9 @@ class IndexTables4SparkArrowDataWriter(
       hotcacheStartOffset = Some(getLong(result, "hotcacheStartOffset")),
       hotcacheLength = Some(getLong(result, "hotcacheLength")),
       hasFooterOffsets = true,
-      timeRangeStart = None,
-      timeRangeEnd = None,
-      splitTags = None,
+      timeRangeStart = timeRangeStart,
+      timeRangeEnd = timeRangeEnd,
+      splitTags = splitTags,
       deleteOpstamp = Some(getLong(result, "deleteOpstamp")),
       numMergeOps = Some(getInt(result, "numMergeOps")),
       docMappingJson = docMappingJson,
@@ -452,18 +416,26 @@ class IndexTables4SparkArrowDataWriter(
     )
   }
 
-  /** Clean up the local temp directory used for cloud table writes. */
+  /** Clean up the local temp directory used for cloud table writes. Handles partition subdirectories. */
   private def cleanupTempDir(): Unit =
     if (isCloudTable) {
       try {
         val dir = new java.io.File(outputDir)
-        if (dir.exists()) {
-          dir.listFiles().foreach(_.delete())
-          dir.delete()
-        }
+        if (dir.exists()) deleteRecursively(dir)
       } catch {
         case e: Exception =>
           logger.debug(s"Failed to clean up temp dir $outputDir: ${e.getMessage}")
       }
     }
+
+  private def escapeJsonString(s: String): String =
+    s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+  private def deleteRecursively(f: java.io.File): Unit = {
+    if (f.isDirectory) {
+      val children = f.listFiles()
+      if (children != null) children.foreach(deleteRecursively)
+    }
+    f.delete()
+  }
 }

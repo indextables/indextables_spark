@@ -383,16 +383,21 @@ class IndexTables4SparkPartitionReader(
     java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
   }
 
-  /** Inject partition column values for companion splits where partition values are not in parquet. */
+  /** Inject partition column values from AddAction metadata into InternalRows.
+    *
+    * Partition columns are not stored in tantivy split files — their values live in
+    * AddAction.partitionValues (derived from directory paths). This method injects those
+    * values into the InternalRow at the correct schema positions so that Spark post-filters
+    * (e.g., In/IsIn on partition columns) see the actual values instead of NULL.
+    */
   private def injectPartitionValuesIfNeeded(searchResults: Array[InternalRow]): Iterator[InternalRow] = {
-    val isCompanionSplit = config.contains("spark.indextables.companion.parquetTableRoot")
-    if (isCompanionSplit && addAction.partitionValues.nonEmpty) {
+    if (addAction.partitionValues.nonEmpty) {
       val partitionIndices = readSchema.fields.zipWithIndex.collect {
         case (field, idx) if addAction.partitionValues.contains(field.name) =>
           (idx, field.dataType, addAction.partitionValues(field.name))
       }
       if (partitionIndices.nonEmpty) {
-        logger.info(s"Companion split: injecting ${partitionIndices.length} partition column value(s)")
+        logger.info(s"Injecting ${partitionIndices.length} partition column value(s) from AddAction metadata")
         searchResults.iterator.map { row =>
           val values = row.toSeq(readSchema).toArray
           partitionIndices.foreach {
@@ -431,6 +436,9 @@ class IndexTables4SparkPartitionReader(
           // Spark stores TimestampType as Long (microseconds since epoch)
           val instant = if (value.contains("T")) {
             java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant
+          } else if (value.contains(" ")) {
+            // Space-separated format: "2024-01-01 15:00:00"
+            java.time.LocalDateTime.parse(value.replace(" ", "T")).atZone(java.time.ZoneOffset.UTC).toInstant
           } else {
             java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
           }

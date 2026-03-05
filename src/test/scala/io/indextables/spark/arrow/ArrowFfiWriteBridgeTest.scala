@@ -19,6 +19,7 @@ package io.indextables.spark.arrow
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
+import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -30,7 +31,7 @@ import org.scalatest.matchers.should.Matchers
 
 class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
 
-  // ===== Schema conversion tests =====
+  // ===== Schema conversion tests: primitive types =====
 
   test("toArrowSchema maps StringType to Utf8") {
     val schema      = new StructType().add("name", StringType)
@@ -96,23 +97,70 @@ class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
     arrowSchema.getFields.get(0).getType shouldBe ArrowType.Binary.INSTANCE
   }
 
-  test("toArrowSchema maps StructType to Utf8 (JSON serialized)") {
-    val innerStruct = new StructType().add("nested", StringType)
+  // ===== Schema conversion tests: complex types (native Arrow) =====
+
+  test("toArrowSchema maps StructType to Arrow Struct with child fields") {
+    val innerStruct = new StructType()
+      .add("name", StringType)
+      .add("age", IntegerType)
     val schema      = new StructType().add("obj", innerStruct)
     val arrowSchema = ArrowFfiWriteBridge.toArrowSchema(schema)
-    arrowSchema.getFields.get(0).getType shouldBe ArrowType.Utf8.INSTANCE
+    val field       = arrowSchema.getFields.get(0)
+
+    field.getType shouldBe ArrowType.Struct.INSTANCE
+    field.getChildren.size() shouldBe 2
+    field.getChildren.get(0).getName shouldBe "name"
+    field.getChildren.get(0).getType shouldBe ArrowType.Utf8.INSTANCE
+    field.getChildren.get(1).getName shouldBe "age"
+    field.getChildren.get(1).getType.asInstanceOf[ArrowType.Int].getBitWidth shouldBe 64
   }
 
-  test("toArrowSchema maps ArrayType to Utf8 (JSON serialized)") {
-    val schema      = new StructType().add("tags", ArrayType(StringType))
+  test("toArrowSchema maps ArrayType to Arrow List with element child") {
+    val schema      = new StructType().add("tags", ArrayType(StringType, containsNull = true))
     val arrowSchema = ArrowFfiWriteBridge.toArrowSchema(schema)
-    arrowSchema.getFields.get(0).getType shouldBe ArrowType.Utf8.INSTANCE
+    val field       = arrowSchema.getFields.get(0)
+
+    field.getType shouldBe ArrowType.List.INSTANCE
+    field.getChildren.size() shouldBe 1
+    field.getChildren.get(0).getName shouldBe "item"
+    field.getChildren.get(0).getType shouldBe ArrowType.Utf8.INSTANCE
+    field.getChildren.get(0).isNullable shouldBe true
   }
 
-  test("toArrowSchema maps MapType to Utf8 (JSON serialized)") {
-    val schema      = new StructType().add("attrs", MapType(StringType, StringType))
+  test("toArrowSchema maps MapType to Arrow Map with key/value entries") {
+    val schema      = new StructType().add("attrs", MapType(StringType, LongType, valueContainsNull = true))
     val arrowSchema = ArrowFfiWriteBridge.toArrowSchema(schema)
-    arrowSchema.getFields.get(0).getType shouldBe ArrowType.Utf8.INSTANCE
+    val field       = arrowSchema.getFields.get(0)
+
+    field.getType shouldBe a[ArrowType.Map]
+    field.getChildren.size() shouldBe 1
+
+    val entries = field.getChildren.get(0)
+    entries.getName shouldBe "entries"
+    entries.getType shouldBe ArrowType.Struct.INSTANCE
+    entries.getChildren.size() shouldBe 2
+    entries.getChildren.get(0).getName shouldBe "key"
+    entries.getChildren.get(0).getType shouldBe ArrowType.Utf8.INSTANCE
+    entries.getChildren.get(0).isNullable shouldBe false
+    entries.getChildren.get(1).getName shouldBe "value"
+    entries.getChildren.get(1).getType.asInstanceOf[ArrowType.Int].getBitWidth shouldBe 64
+    entries.getChildren.get(1).isNullable shouldBe true
+  }
+
+  test("toArrowSchema handles nested complex types (List of Structs)") {
+    val innerStruct = new StructType()
+      .add("x", IntegerType)
+      .add("label", StringType)
+    val schema      = new StructType().add("items", ArrayType(innerStruct))
+    val arrowSchema = ArrowFfiWriteBridge.toArrowSchema(schema)
+    val field       = arrowSchema.getFields.get(0)
+
+    field.getType shouldBe ArrowType.List.INSTANCE
+    val itemField = field.getChildren.get(0)
+    itemField.getType shouldBe ArrowType.Struct.INSTANCE
+    itemField.getChildren.size() shouldBe 2
+    itemField.getChildren.get(0).getName shouldBe "x"
+    itemField.getChildren.get(1).getName shouldBe "label"
   }
 
   test("toArrowSchema handles mixed schema correctly") {
@@ -126,7 +174,7 @@ class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
     arrowSchema.getFields.size() shouldBe 5
   }
 
-  // ===== Row buffering tests =====
+  // ===== Row buffering tests: primitives =====
 
   test("bufferRow returns false when batch not full") {
     val schema = new StructType().add("name", StringType)
@@ -194,6 +242,111 @@ class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
       val row = new GenericInternalRow(Array[Any](null, null))
       bridge.bufferRow(row) shouldBe false
       bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  // ===== Row buffering tests: complex types =====
+
+  test("bufferRow handles StructType natively") {
+    val innerStruct = new StructType()
+      .add("name", StringType)
+      .add("age", LongType)
+    val schema = new StructType().add("obj", innerStruct)
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val innerRow = new GenericInternalRow(Array[Any](UTF8String.fromString("Alice"), 30L))
+      val row      = new GenericInternalRow(Array[Any](innerRow))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles ArrayType natively") {
+    val schema = new StructType().add("tags", ArrayType(StringType))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val arrayData = new GenericArrayData(
+        Array(UTF8String.fromString("a"), UTF8String.fromString("b"), UTF8String.fromString("c"))
+      )
+      val row = new GenericInternalRow(Array[Any](arrayData))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles MapType natively") {
+    val schema = new StructType().add("attrs", MapType(StringType, LongType))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val mapData = ArrayBasedMapData(
+        Array[Any](UTF8String.fromString("x"), UTF8String.fromString("y")),
+        Array[Any](1L, 2L)
+      )
+      val row = new GenericInternalRow(Array[Any](mapData))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles null struct value") {
+    val innerStruct = new StructType().add("name", StringType)
+    val schema      = new StructType().add("obj", innerStruct, nullable = true)
+    val bridge      = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val row = new GenericInternalRow(Array[Any](null))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles struct with null fields") {
+    val innerStruct = new StructType()
+      .add("name", StringType, nullable = true)
+      .add("age", LongType, nullable = true)
+    val schema = new StructType().add("obj", innerStruct)
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val innerRow = new GenericInternalRow(Array[Any](null, 42L))
+      val row      = new GenericInternalRow(Array[Any](innerRow))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles nested complex types (List of Structs)") {
+    val innerStruct = new StructType()
+      .add("x", LongType)
+      .add("label", StringType)
+    val schema = new StructType().add("items", ArrayType(innerStruct))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val struct1   = new GenericInternalRow(Array[Any](1L, UTF8String.fromString("first")))
+      val struct2   = new GenericInternalRow(Array[Any](2L, UTF8String.fromString("second")))
+      val arrayData = new GenericArrayData(Array[Any](struct1, struct2))
+      val row       = new GenericInternalRow(Array[Any](arrayData))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles multiple rows with varying list sizes") {
+    val schema = new StructType().add("nums", ArrayType(LongType))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val row1 = new GenericInternalRow(Array[Any](new GenericArrayData(Array(1L, 2L, 3L))))
+      val row2 = new GenericInternalRow(Array[Any](new GenericArrayData(Array(4L))))
+      val row3 = new GenericInternalRow(Array[Any](new GenericArrayData(Array(5L, 6L))))
+      bridge.bufferRow(row1) shouldBe false
+      bridge.bufferRow(row2) shouldBe false
+      bridge.bufferRow(row3) shouldBe false
+      bridge.bufferedRowCount shouldBe 3
     } finally
       bridge.close()
   }
@@ -277,22 +430,102 @@ class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
       bridge.close()
   }
 
-  test("complex types use JSON serializer") {
-    val innerStruct = new StructType().add("nested", StringType)
-    val schema      = new StructType().add("obj", innerStruct)
-
-    var serializerCalled = false
-    val jsonSerializer: (InternalRow, Int, DataType) => String = (_, _, _) => {
-      serializerCalled = true
-      """{"nested":"value"}"""
-    }
-
-    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100, jsonSerializer = Some(jsonSerializer))
+  test("bufferRow handles empty array") {
+    val schema = new StructType().add("tags", ArrayType(StringType))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
     try {
-      val innerRow = new GenericInternalRow(Array[Any](UTF8String.fromString("value")))
-      val row      = new GenericInternalRow(Array[Any](innerRow))
+      val emptyArray = new GenericArrayData(Array.empty[Any])
+      val row        = new GenericInternalRow(Array[Any](emptyArray))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles empty map") {
+    val schema = new StructType().add("attrs", MapType(StringType, LongType))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val emptyMap = ArrayBasedMapData(Array.empty[Any], Array.empty[Any])
+      val row      = new GenericInternalRow(Array[Any](emptyMap))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles null elements within array") {
+    val schema = new StructType().add("tags", ArrayType(StringType, containsNull = true))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val arrayWithNulls = new GenericArrayData(
+        Array(UTF8String.fromString("a"), null, UTF8String.fromString("c"))
+      )
+      val row = new GenericInternalRow(Array[Any](arrayWithNulls))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles deeply nested structures (Struct of Array of Struct)") {
+    val innerStruct = new StructType()
+      .add("name", StringType)
+      .add("value", LongType)
+    val midStruct = new StructType()
+      .add("items", ArrayType(innerStruct))
+      .add("label", StringType)
+    val schema = new StructType().add("outer", midStruct)
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val item1     = new GenericInternalRow(Array[Any](UTF8String.fromString("a"), 1L))
+      val item2     = new GenericInternalRow(Array[Any](UTF8String.fromString("b"), 2L))
+      val itemArray = new GenericArrayData(Array[Any](item1, item2))
+      val midRow    = new GenericInternalRow(Array[Any](itemArray, UTF8String.fromString("test")))
+      val row       = new GenericInternalRow(Array[Any](midRow))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("bufferRow handles Map with null values") {
+    val schema = new StructType().add("attrs", MapType(StringType, LongType, valueContainsNull = true))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val mapData = ArrayBasedMapData(
+        Array[Any](UTF8String.fromString("x"), UTF8String.fromString("y")),
+        Array[Any](1L, null)
+      )
+      val row = new GenericInternalRow(Array[Any](mapData))
+      bridge.bufferRow(row) shouldBe false
+      bridge.bufferedRowCount shouldBe 1
+    } finally
+      bridge.close()
+  }
+
+  test("exportBatch with complex types produces non-zero addresses") {
+    val innerStruct = new StructType()
+      .add("name", StringType)
+      .add("score", LongType)
+    val schema = new StructType()
+      .add("data", innerStruct)
+      .add("tags", ArrayType(StringType))
+      .add("attrs", MapType(StringType, LongType))
+    val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
+    try {
+      val structVal = new GenericInternalRow(Array[Any](UTF8String.fromString("Alice"), 95L))
+      val arrayVal  = new GenericArrayData(Array(UTF8String.fromString("a"), UTF8String.fromString("b")))
+      val mapVal = ArrayBasedMapData(
+        Array[Any](UTF8String.fromString("k1")),
+        Array[Any](10L)
+      )
+      val row = new GenericInternalRow(Array[Any](structVal, arrayVal, mapVal))
       bridge.bufferRow(row)
-      serializerCalled shouldBe true
+
+      val (arrayAddr, schemaAddr) = bridge.exportBatch()
+      arrayAddr should not be 0L
+      schemaAddr should not be 0L
     } finally
       bridge.close()
   }
