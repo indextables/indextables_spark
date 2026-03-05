@@ -324,6 +324,24 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     }
   }
 
+  test("scanDeltaTable incremental result has empty removedSourcePaths for append-only tables") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_incr_noremove").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner       = new DistributedSourceScanner(spark)
+      val fullResult    = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val syncedVersion = fullResult.version.get
+
+      // Append-only: no remove actions, removedSourcePaths must be empty
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val result = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(syncedVersion))
+      result.isIncremental shouldBe true
+      result.removedSourcePaths shouldBe empty
+    }
+  }
+
   // ─── Parquet Tests ───
 
   test("distributed Parquet scan should produce same file count as ParquetDirectoryReader.getAllFiles()") {
