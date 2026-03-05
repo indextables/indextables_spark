@@ -78,7 +78,7 @@ object ArrowFfiWriteConfig {
   def fromOptions(options: CaseInsensitiveStringMap): ArrowFfiWriteConfig = {
     val enabled   = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
     val batchSize = getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
-    val heapSize  = getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true)
+    val heapSize  = getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
 
     val config = ArrowFfiWriteConfig(
       enabled = enabled,
@@ -102,7 +102,7 @@ object ArrowFfiWriteConfig {
     ArrowFfiWriteConfig(
       enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED),
       batchSize = get(KEY_BATCH_SIZE).map(_.toInt).getOrElse(DEFAULT_BATCH_SIZE),
-      heapSize = get(KEY_HEAP_SIZE).map(_.toLong).getOrElse(DEFAULT_HEAP_SIZE)
+      heapSize = get(KEY_HEAP_SIZE).map(parseSize).getOrElse(DEFAULT_HEAP_SIZE)
     ).validate()
   }
 
@@ -149,17 +149,37 @@ object ArrowFfiWriteConfig {
     }
   }
 
+  /** Parse a size value with optional K/M/G/T suffix (e.g., "100M", "2G", "512K", "1000000"). */
+  private def parseSize(value: String): Long = {
+    val trimmed = value.trim.toUpperCase
+    if (trimmed.matches("\\d+[KMGT]?")) {
+      val (numberPart, suffix) = if (trimmed.last.isLetter) (trimmed.dropRight(1), trimmed.last.toString) else (trimmed, "")
+      val baseValue = numberPart.toLong
+      suffix match {
+        case "K" => baseValue * 1024L
+        case "M" => baseValue * 1024L * 1024L
+        case "G" => baseValue * 1024L * 1024L * 1024L
+        case "T" => baseValue * 1024L * 1024L * 1024L * 1024L
+        case ""  => baseValue
+        case _   => throw new IllegalArgumentException(s"Unknown size suffix: $suffix")
+      }
+    } else {
+      throw new IllegalArgumentException(s"Invalid size format: $value")
+    }
+  }
+
   private def getLongOption(
     options: CaseInsensitiveStringMap,
     key: String,
     default: Long,
-    mustBePositive: Boolean = false
+    mustBePositive: Boolean = false,
+    supportSizeSuffix: Boolean = false
   ): Long = {
     val value = options.get(key)
     if (value == null || value.isEmpty) default
     else {
       try {
-        val parsed = value.toLong
+        val parsed = if (supportSizeSuffix) parseSize(value) else value.toLong
         if (mustBePositive && parsed <= 0) {
           logger.warn(s"Invalid value for $key: '$value' (must be > 0), using default: $default")
           default
@@ -169,6 +189,9 @@ object ArrowFfiWriteConfig {
       } catch {
         case _: NumberFormatException =>
           logger.warn(s"Invalid long value for $key: '$value', using default: $default")
+          default
+        case _: IllegalArgumentException =>
+          logger.warn(s"Invalid size value for $key: '$value', using default: $default")
           default
       }
     }

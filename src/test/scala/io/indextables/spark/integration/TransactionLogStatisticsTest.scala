@@ -220,7 +220,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     // Verify that min equals max for uniform columns
     assert(minVals("name") == "SameName" && maxVals("name") == "SameName", "Uniform string column should have min=max")
     assert(minVals("age") == "30" && maxVals("age") == "30", "Uniform int column should have min=max")
-    assert(minVals("salary") == "75000.0" && maxVals("salary") == "75000.0", "Uniform double column should have min=max")
+    assert(minVals("salary").toDouble == 75000.0 && maxVals("salary").toDouble == 75000.0, "Uniform double column should have min=max")
     assert(
       minVals("department") == "Engineering" && maxVals("department") == "Engineering",
       "Uniform string column should have min=max"
@@ -255,7 +255,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     assert(minVals("id") == "42" && maxVals("id") == "42")
     assert(minVals("name") == "Single" && maxVals("name") == "Single")
     assert(minVals("age") == "50" && maxVals("age") == "50")
-    assert(minVals("salary") == "100000.0" && maxVals("salary") == "100000.0")
+    assert(minVals("salary").toDouble == 100000.0 && maxVals("salary").toDouble == 100000.0)
     assert(addAction.numRecords.get.toString.toLong == 1L)
 
     println("✅ Single record statistics handled correctly")
