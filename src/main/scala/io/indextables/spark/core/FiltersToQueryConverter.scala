@@ -1893,38 +1893,35 @@ object FiltersToQueryConverter {
         }
 
       case StringStartsWith(attribute, value) =>
-        // Use parseQuery with explicit field:pattern format for prefix matching
         try {
-          val queryString = s"$attribute:$value*"
-          queryLog(s"StringStartsWith: creating parseQuery for '$queryString'")
-          Some(splitSearchEngine.parseQuery(queryString))
+          val pattern = s"$value*"
+          queryLog(s"StringStartsWith: SplitWildcardQuery($attribute, '$pattern')")
+          Some(new io.indextables.tantivy4java.split.SplitWildcardQuery(attribute, pattern))
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create parseQuery for StringStartsWith: ${e.getMessage}")
+            queryLog(s"Failed to create SplitWildcardQuery for StringStartsWith: ${e.getMessage}")
             None
         }
 
       case StringEndsWith(attribute, value) =>
-        // Use parseQuery with explicit field:pattern format for suffix matching
         try {
-          val queryString = s"$attribute:*$value"
-          queryLog(s"StringEndsWith: creating parseQuery for '$queryString'")
-          Some(splitSearchEngine.parseQuery(queryString))
+          val pattern = s"*$value"
+          queryLog(s"StringEndsWith: SplitWildcardQuery($attribute, '$pattern')")
+          Some(new io.indextables.tantivy4java.split.SplitWildcardQuery(attribute, pattern))
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create parseQuery for StringEndsWith: ${e.getMessage}")
+            queryLog(s"Failed to create SplitWildcardQuery for StringEndsWith: ${e.getMessage}")
             None
         }
 
       case StringContains(attribute, value) =>
-        // Use parseQuery with explicit field:pattern format for contains matching
         try {
-          val queryString = s"$attribute:*$value*"
-          queryLog(s"StringContains: creating parseQuery for '$queryString'")
-          Some(splitSearchEngine.parseQuery(queryString))
+          val pattern = s"*$value*"
+          queryLog(s"StringContains: SplitWildcardQuery($attribute, '$pattern')")
+          Some(new io.indextables.tantivy4java.split.SplitWildcardQuery(attribute, pattern))
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create parseQuery for StringContains: ${e.getMessage}")
+            queryLog(s"Failed to create SplitWildcardQuery for StringContains: ${e.getMessage}")
             None
         }
 
