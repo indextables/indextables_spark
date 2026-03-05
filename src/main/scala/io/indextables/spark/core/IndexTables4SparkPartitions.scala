@@ -383,14 +383,14 @@ class IndexTables4SparkPartitionReader(
     java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
   }
 
-  /** Inject partition column values from AddAction metadata into InternalRows.
-    *
-    * Partition columns are not stored in tantivy split files — their values live in
-    * AddAction.partitionValues (derived from directory paths). This method injects those
-    * values into the InternalRow at the correct schema positions so that Spark post-filters
-    * (e.g., In/IsIn on partition columns) see the actual values instead of NULL.
-    */
-  private def injectPartitionValuesIfNeeded(searchResults: Array[InternalRow]): Iterator[InternalRow] = {
+  /**
+   * Inject partition column values from AddAction metadata into InternalRows.
+   *
+   * Partition columns are not stored in tantivy split files — their values live in AddAction.partitionValues (derived
+   * from directory paths). This method injects those values into the InternalRow at the correct schema positions so
+   * that Spark post-filters (e.g., In/IsIn on partition columns) see the actual values instead of NULL.
+   */
+  private def injectPartitionValuesIfNeeded(searchResults: Array[InternalRow]): Iterator[InternalRow] =
     if (addAction.partitionValues.nonEmpty) {
       val partitionIndices = readSchema.fields.zipWithIndex.collect {
         case (field, idx) if addAction.partitionValues.contains(field.name) =>
@@ -412,7 +412,6 @@ class IndexTables4SparkPartitionReader(
     } else {
       searchResults.iterator
     }
-  }
 
   /** Convert a partition value string to the appropriate Spark internal representation. */
   private def convertPartitionValue(value: String, dataType: org.apache.spark.sql.types.DataType): Any = {

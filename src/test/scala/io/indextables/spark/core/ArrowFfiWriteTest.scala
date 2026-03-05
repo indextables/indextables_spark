@@ -17,8 +17,8 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.write.ArrowFfiWriteConfig
+import io.indextables.spark.TestBase
 
 class ArrowFfiWriteTest extends TestBase {
 
@@ -409,8 +409,10 @@ class ArrowFfiWriteTest extends TestBase {
 
       def getActions(tablePath: String) = {
         val txLog = new TransactionLog(
-          new org.apache.hadoop.fs.Path(tablePath), spark,
-          new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+          new org.apache.hadoop.fs.Path(tablePath),
+          spark,
+          new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava)
+        )
         txLog.listFiles()
       }
 
