@@ -1316,6 +1316,37 @@ case class SyncToExternalCommand(
   }
 
   /**
+   * Cheap source version probe for streaming pre-poll.
+   *
+   * For Delta: costs 1 GET (_last_checkpoint) + O(k) HEAD probes — no checkpoint parquet reads.
+   * For Iceberg and Parquet: returns None (no cheap probe available; incremental behavior is
+   * handled inside executeSyncInternal via fromVersion/fromSnapshot hints).
+   * On any error: returns None so the caller falls through to a full executeSyncInternal cycle.
+   *
+   * Used by StreamingCompanionManager to skip executeSyncInternal entirely on no-change polling
+   * cycles, avoiding the checkpoint parquet read that getSnapshotInfo() would otherwise trigger.
+   *
+   * Note: Unity Catalog table-name paths (non-URL sourcePaths) will fail the native call and
+   * return None, which is safe — the manager will fall through to the full sync.
+   */
+  private[sql] def cheapSourceVersion(sparkSession: SparkSession): Option[Long] = {
+    if (sourceFormat != "delta") return None
+    try {
+      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+        ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+      val kernelPath        = io.indextables.spark.sync.DeltaLogReader.normalizeForDeltaKernel(sourcePath)
+      val deltaConfig       = io.indextables.spark.sync.DeltaLogReader.translateCredentials(sourceCredentials)
+      Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  /**
    * Resolve credentials for a given storage path. Returns a flat map of credential properties suitable for immediate
    * use.
    *

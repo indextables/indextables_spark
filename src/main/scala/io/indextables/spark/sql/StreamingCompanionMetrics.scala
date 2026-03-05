@@ -30,6 +30,8 @@ import org.apache.spark.util.LongAccumulator
  *   - syncCycles: number of completed sync cycles (successful or no-op)
  *   - totalFilesIndexed: total parquet files indexed across all cycles
  *   - totalDurationMs: total time spent in sync execution across all cycles
+ *   - totalSplitsCreated: total companion splits created across all cycles
+ *   - pollsWithNoChanges: number of poll cycles where the source had no new data
  *   - errorCount: total number of failed cycles
  */
 private[sql] class StreamingCompanionMetrics(sparkContext: SparkContext) {
@@ -43,6 +45,12 @@ private[sql] class StreamingCompanionMetrics(sparkContext: SparkContext) {
   val totalDurationMs: LongAccumulator =
     sparkContext.longAccumulator("indextables.companion.streaming.totalDurationMs")
 
+  val totalSplitsCreated: LongAccumulator =
+    sparkContext.longAccumulator("indextables.companion.streaming.totalSplitsCreated")
+
+  val pollsWithNoChanges: LongAccumulator =
+    sparkContext.longAccumulator("indextables.companion.streaming.pollsWithNoChanges")
+
   val errorCount: LongAccumulator =
     sparkContext.longAccumulator("indextables.companion.streaming.errorCount")
 
@@ -51,6 +59,14 @@ private[sql] class StreamingCompanionMetrics(sparkContext: SparkContext) {
     totalFilesIndexed.add(filesIndexed)
     totalDurationMs.add(durationMs)
   }
+
+  def recordCycleSuccess(filesIndexed: Long, durationMs: Long, splitsCreated: Long): Unit = {
+    recordCycleSuccess(filesIndexed, durationMs)
+    totalSplitsCreated.add(splitsCreated)
+  }
+
+  def recordPollWithNoChanges(): Unit =
+    pollsWithNoChanges.add(1)
 
   def recordCycleError(): Unit =
     errorCount.add(1)

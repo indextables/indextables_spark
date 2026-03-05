@@ -85,4 +85,61 @@ class StreamingCompanionMetricsTest extends TestBase {
     metrics.totalDurationMs.name.get should include("totalDurationMs")
     metrics.errorCount.name.get should include("errorCount")
   }
+
+  test("new accumulators are registered with expected name prefixes") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.totalSplitsCreated.name.get should include("totalSplitsCreated")
+    metrics.pollsWithNoChanges.name.get should include("pollsWithNoChanges")
+  }
+
+  test("totalSplitsCreated starts at zero") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.totalSplitsCreated.value shouldBe 0L
+  }
+
+  test("pollsWithNoChanges starts at zero") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.pollsWithNoChanges.value shouldBe 0L
+  }
+
+  test("recordCycleSuccess with splitsCreated updates totalSplitsCreated") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.recordCycleSuccess(filesIndexed = 10, durationMs = 100, splitsCreated = 3)
+    metrics.totalSplitsCreated.value shouldBe 3L
+    metrics.syncCycles.value shouldBe 1L
+    metrics.totalFilesIndexed.value shouldBe 10L
+  }
+
+  test("recordCycleSuccess without splitsCreated does not affect totalSplitsCreated") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.recordCycleSuccess(filesIndexed = 5, durationMs = 200)
+    metrics.totalSplitsCreated.value shouldBe 0L
+  }
+
+  test("recordPollWithNoChanges increments pollsWithNoChanges") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.recordPollWithNoChanges()
+    metrics.recordPollWithNoChanges()
+    metrics.recordPollWithNoChanges()
+    metrics.pollsWithNoChanges.value shouldBe 3L
+  }
+
+  test("recordPollWithNoChanges does not affect sync cycle accumulators") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.recordCycleSuccess(filesIndexed = 7, durationMs = 50)
+    metrics.recordPollWithNoChanges()
+    metrics.recordPollWithNoChanges()
+    metrics.syncCycles.value shouldBe 1L
+    metrics.totalFilesIndexed.value shouldBe 7L
+    metrics.pollsWithNoChanges.value shouldBe 2L
+  }
+
+  test("totalSplitsCreated accumulates across multiple cycles") {
+    val metrics = new StreamingCompanionMetrics(spark.sparkContext)
+    metrics.recordCycleSuccess(filesIndexed = 10, durationMs = 100, splitsCreated = 2)
+    metrics.recordCycleSuccess(filesIndexed = 5, durationMs = 50, splitsCreated = 1)
+    metrics.recordCycleSuccess(filesIndexed = 0, durationMs = 30, splitsCreated = 0)
+    metrics.totalSplitsCreated.value shouldBe 3L
+    metrics.syncCycles.value shouldBe 3L
+  }
 }
