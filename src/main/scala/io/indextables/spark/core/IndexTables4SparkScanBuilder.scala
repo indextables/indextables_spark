@@ -174,7 +174,10 @@ class IndexTables4SparkScanBuilder(
                   }
                 catch {
                   case e: Exception =>
-                    logger.warn(s"Failed to resolve parquet credentials for designated root: ${e.getMessage}")
+                    throw new IllegalStateException(
+                      s"Failed to resolve credentials for designated root '$rootName': ${e.getMessage}",
+                      e
+                    )
                 }
                 // Propagate stored indexing modes
                 metadata.configuration.get("indextables.companion.indexingModes").foreach { json =>

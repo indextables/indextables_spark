@@ -52,6 +52,7 @@ case class DescribeTableRootsCommand(tablePath: String) extends LeafRunnableComm
 
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {
+        transactionLog.invalidateCache()
         val metadata = transactionLog.getMetadata()
 
         // Extract root entries (exclude .timestamp suffix keys)
