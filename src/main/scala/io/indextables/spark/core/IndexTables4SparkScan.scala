@@ -377,8 +377,9 @@ class IndexTables4SparkScan(
     // instead of N calls from N executors
     // Note: companion mode config (parquetTableRoot) is already injected by ScanBuilder.effectiveConfig
     // Read path only needs PATH_READ credentials (no write operations via table credentials)
-    val readConfig     = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-    val resolvedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath.toString)
+    val readConfig = config + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+    val resolvedConfig =
+      io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, tablePath.toString)
 
     // Diagnostic: log companion config state on driver before serialization to executors
     val hasCompanionKey = resolvedConfig.contains("spark.indextables.companion.parquetTableRoot")
@@ -846,7 +847,7 @@ class IndexTables4SparkScan(
             val minVal = minVals.get(attribute)
             val maxVal = maxVals.get(attribute)
             (minVal, maxVal) match {
-              case (Some(min), Some(max)) =>
+              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
                 val valueStr = value.toString
                 // Very conservative: only skip if min and max are identical and don't end with value
                 min == max && !min.endsWith(valueStr)
@@ -857,7 +858,7 @@ class IndexTables4SparkScan(
             val minVal = minVals.get(attribute)
             val maxVal = maxVals.get(attribute)
             (minVal, maxVal) match {
-              case (Some(min), Some(max)) =>
+              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
                 val valueStr = value.toString
                 min == max && !min.contains(valueStr)
               case _ => false
@@ -941,24 +942,31 @@ class IndexTables4SparkScan(
               epochDate.until(filterDate).getDays
           }
 
-          // Helper function to parse date string or integer to days since epoch
-          def parseDateOrInt(value: String): Int =
-            if (value.contains("-")) {
-              // Date string format (e.g., "2023-02-15")
+          // Helper function to parse date string or integer to days since epoch.
+          // Statistics values may be: date strings ("2023-02-15"), days-since-epoch integers,
+          // or microsecond timestamps from tantivy's internal date representation.
+          def parseDateOrInt(value: String): Option[Int] =
+            if (value.isEmpty) None
+            else if (value.contains("-")) {
               val date      = LocalDate.parse(value)
               val epochDate = LocalDate.of(1970, 1, 1)
-              java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt
+              Some(java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt)
             } else {
-              value.toInt
+              val longVal = value.toLong
+              if (longVal > Int.MaxValue || longVal < Int.MinValue) {
+                // Microsecond timestamp from tantivy — convert to days since epoch
+                Some((longVal / (1000000L * 86400L)).toInt)
+              } else {
+                Some(longVal.toInt)
+              }
             }
 
           val minDays = parseDateOrInt(minValue)
           val maxDays = parseDateOrInt(maxValue)
-          // logger.debug(s"DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
           (
             filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
-            minDays.asInstanceOf[Comparable[Any]],
-            maxDays.asInstanceOf[Comparable[Any]]
+            minDays.map(_.asInstanceOf[Comparable[Any]]).getOrElse("".asInstanceOf[Comparable[Any]]),
+            maxDays.map(_.asInstanceOf[Comparable[Any]]).getOrElse("".asInstanceOf[Comparable[Any]])
           )
         } catch {
           case ex: Exception =>

@@ -90,8 +90,9 @@ case class DescribeComponentSizesCommand(
 
       // PERFORMANCE OPTIMIZATION: Resolve credentials on driver to avoid executor-side HTTP calls
       // Describe is read-only, request PATH_READ credentials
-      val readConfig   = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
-      val mergedConfig = io.indextables.spark.utils.CredentialProviderFactory.resolveCredentialsOnDriver(readConfig, resolvedPath.toString)
+      val readConfig = baseConfig + ("spark.indextables.databricks.credential.operation" -> "PATH_READ")
+      val mergedConfig = io.indextables.spark.utils.CredentialProviderFactory
+        .resolveCredentialsOnDriver(readConfig, resolvedPath.toString)
 
       // Create transaction log
       val transactionLog = TransactionLogFactory.create(

@@ -25,6 +25,29 @@ import io.indextables.tantivy4java.iceberg.IcebergTableReader
 import io.indextables.tantivy4java.parquet.ParquetSchemaReader
 import org.slf4j.LoggerFactory
 
+object IcebergSourceReader {
+
+  /**
+   * Translate Iceberg catalog config keys to ParquetSchemaReader/object_store storage config keys. Iceberg uses:
+   * s3.access-key-id, s3.secret-access-key, s3.session-token, s3.region ParquetSchemaReader/object_store uses:
+   * aws_access_key_id, aws_secret_access_key, aws_session_token, aws_region
+   */
+  def buildParquetReaderStorageConfig(icebergConfig: java.util.Map[String, String]): java.util.Map[String, String] = {
+    val config     = new java.util.HashMap[String, String]()
+    val icebergMap = icebergConfig.asScala
+    icebergMap.get("s3.access-key-id").foreach(v => config.put("aws_access_key_id", v))
+    icebergMap.get("s3.secret-access-key").foreach(v => config.put("aws_secret_access_key", v))
+    icebergMap.get("s3.session-token").foreach(v => config.put("aws_session_token", v))
+    icebergMap.get("s3.region").foreach(v => config.put("aws_region", v))
+    icebergMap.get("s3.endpoint").foreach(v => config.put("aws_endpoint", v))
+    icebergMap.get("s3.path-style-access").foreach(v => config.put("aws_force_path_style", v))
+    // Azure credentials
+    icebergMap.get("adls.account-name").foreach(v => config.put("azure_account_name", v))
+    icebergMap.get("adls.account-key").foreach(v => config.put("azure_access_key", v))
+    config
+  }
+}
+
 /**
  * CompanionSourceReader for Apache Iceberg tables. Wraps tantivy4java 0.29.6's IcebergTableReader (Rust iceberg-rust
  * via JNI).
@@ -258,25 +281,8 @@ class IcebergSourceReader(
     }
   }
 
-  /**
-   * Translate Iceberg catalog config keys to ParquetSchemaReader storage config keys. Iceberg uses: s3.access-key-id,
-   * s3.secret-access-key, s3.session-token, s3.region ParquetSchemaReader uses: aws_access_key_id,
-   * aws_secret_access_key, aws_session_token, aws_region
-   */
-  private def buildParquetReaderStorageConfig(): java.util.Map[String, String] = {
-    val config     = new java.util.HashMap[String, String]()
-    val icebergMap = icebergConfig.asScala
-    icebergMap.get("s3.access-key-id").foreach(v => config.put("aws_access_key_id", v))
-    icebergMap.get("s3.secret-access-key").foreach(v => config.put("aws_secret_access_key", v))
-    icebergMap.get("s3.session-token").foreach(v => config.put("aws_session_token", v))
-    icebergMap.get("s3.region").foreach(v => config.put("aws_region", v))
-    icebergMap.get("s3.endpoint").foreach(v => config.put("aws_endpoint", v))
-    icebergMap.get("s3.path-style-access").foreach(v => config.put("aws_force_path_style", v))
-    // Azure credentials
-    icebergMap.get("adls.account-name").foreach(v => config.put("azure_account_name", v))
-    icebergMap.get("adls.account-key").foreach(v => config.put("azure_access_key", v))
-    config
-  }
+  private def buildParquetReaderStorageConfig(): java.util.Map[String, String] =
+    IcebergSourceReader.buildParquetReaderStorageConfig(icebergConfig)
 
   /**
    * Convert Iceberg-format schema JSON to Spark StructType. Iceberg format: {"schema-id":0, "type":"struct",

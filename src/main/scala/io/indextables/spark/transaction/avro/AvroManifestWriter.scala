@@ -248,8 +248,7 @@ class AvroManifestWriter(cloudProvider: CloudStorageProvider) {
     // Partition values are stored as strings but may represent numbers (e.g., month=1..12).
     // Without numeric-aware ordering, lexicographic min/max would produce incorrect bounds:
     // e.g., for months 1-12, lex max would be "9" instead of "12".
-    val numericAwareOrdering: Ordering[String] = (a: String, b: String) =>
-      PartitionPruner.numericAwareCompare(a, b)
+    val numericAwareOrdering: Ordering[String] = (a: String, b: String) => PartitionPruner.numericAwareCompare(a, b)
 
     val bounds = partitionColumns.map { col =>
       val values = entries.flatMap(_.partitionValues.get(col)).filter(_.nonEmpty)

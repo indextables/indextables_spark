@@ -782,6 +782,17 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Fast field mode: $fastFieldMode")
 
+      // Hashed fastfields include/exclude
+      val (hashedFastfieldsInclude, hashedFastfieldsExclude): (Seq[String], Seq[String]) =
+        if (ctx.hashedFastfieldsList != null) {
+          val fields = ctx.hashedFastfieldsList.STRING().asScala.map(ParserUtils.string(_)).toSeq
+          ctx.hashedFastfieldsMode.getText.toUpperCase match {
+            case "INCLUDE" => (fields, Seq.empty)
+            case "EXCLUDE" => (Seq.empty, fields)
+          }
+        } else (Seq.empty, Seq.empty)
+      logger.debug(s"Hashed fastfields include: $hashedFastfieldsInclude, exclude: $hashedFastfieldsExclude")
+
       // Target input size
       val targetInputSize = if (ctx.targetInputSize != null) {
         Some(parseAlphanumericSize(ctx.targetInputSize.getText))
@@ -848,6 +859,10 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         Seq.empty
       }
 
+      // INVALIDATE ALL PARTITIONS flag
+      val invalidateAllPartitions = ctx.INVALIDATE() != null && ctx.ALL() != null && ctx.PARTITIONS() != null
+      logger.debug(s"INVALIDATE ALL PARTITIONS flag: $invalidateAllPartitions")
+
       // DRY RUN flag
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
       logger.debug(s"DRY RUN flag: $dryRun")
@@ -866,7 +881,10 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         catalogName = catalogName,
         catalogType = catalogType,
         warehouse = warehouse,
+        hashedFastfieldsInclude = hashedFastfieldsInclude,
+        hashedFastfieldsExclude = hashedFastfieldsExclude,
         wherePredicates = wherePredicates,
+        invalidateAllPartitions = invalidateAllPartitions,
         dryRun = dryRun
       )
       logger.debug(s"Created SyncToExternalCommand: $result")

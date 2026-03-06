@@ -116,7 +116,11 @@ object AwsCredentialsFileProvider {
  *      UNSET in the Spark context 3. Configures only the provider class 4. Performs all relevant operations against
  *      real S3 5. Validates that credentials are properly resolved on driver and propagated to executors
  */
-class CloudS3CredentialProviderE2ETest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
+class CloudS3CredentialProviderE2ETest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with BeforeAndAfterEach {
 
   private var spark: SparkSession = _
 

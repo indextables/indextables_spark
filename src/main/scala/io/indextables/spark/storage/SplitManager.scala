@@ -443,12 +443,17 @@ case class SplitCacheConfig(
   adaptiveTuningEnabled: Option[Boolean] = None,
   adaptiveTuningMinBatches: Option[Int] = None,
   // L2 Disk Cache configuration (persistent NVMe caching)
-  diskCacheEnabled: Option[Boolean] = None,          // Master switch (auto-enabled on /local_disk0)
-  diskCachePath: Option[String] = None,              // Cache directory path
-  diskCacheMaxSize: Option[Long] = None,             // Max size in bytes (0 = auto: 2/3 available disk)
-  diskCacheCompression: Option[String] = None,       // "lz4" (default), "zstd", "none"
-  diskCacheMinCompressSize: Option[Long] = None,     // Skip compression below threshold (default: 4096)
-  diskCacheManifestSyncInterval: Option[Int] = None, // Seconds between manifest writes (default: 30)
+  diskCacheEnabled: Option[Boolean] = None,            // Master switch (auto-enabled on /local_disk0)
+  diskCachePath: Option[String] = None,                // Cache directory path
+  diskCacheMaxSize: Option[Long] = None,               // Max size in bytes (0 = auto: 2/3 available disk)
+  diskCacheCompression: Option[String] = None,         // "lz4" (default), "zstd", "none"
+  diskCacheMinCompressSize: Option[Long] = None,       // Skip compression below threshold (default: 4096)
+  diskCacheManifestSyncInterval: Option[Int] = None,   // Seconds between manifest writes (default: 30)
+  diskCacheWriteQueueMode: Option[String] = None,      // "fragment" or "size" (default: size)
+  diskCacheWriteQueueCapacity: Option[String] = None,  // Fragment: slot count; Size: byte limit ("1G")
+  diskCacheDropWritesWhenFull: Option[Boolean] = None, // Drop query-path writes when full (default: true)
+  // Parquet coalesce configuration
+  coalesceMaxGap: Option[Long] = None, // Max gap between byte ranges to coalesce (default: 512KB)
   // Companion mode (parquet companion splits)
   companionSourceTableRoot: Option[String] = None, // Root path of parquet table for companion splits
   // Parquet-specific credentials (resolved for the Delta table path, may differ from split credentials)
@@ -606,6 +611,12 @@ case class SplitCacheConfig(
     createTieredCacheConfig().foreach { tieredConfig =>
       logger.info(s"L2 Disk cache configured")
       config = config.withTieredCache(tieredConfig)
+    }
+
+    // Configure parquet coalesce max gap
+    coalesceMaxGap.foreach { gap =>
+      logger.debug(s"Parquet coalesce max gap: $gap bytes")
+      config = config.withCoalesceMaxGap(gap)
     }
 
     // Note: Companion mode parquet config (parquetTableRoot and parquetStorageConfig)
@@ -783,6 +794,29 @@ case class SplitCacheConfig(
           logger.debug(s"L2 Disk cache manifest sync interval: $interval seconds")
           tieredConfig = tieredConfig.withManifestSyncInterval(interval)
         }
+
+        // Apply write queue mode (default: size-based, 1GB, drop when full)
+        val effectiveMode = diskCacheWriteQueueMode.map(_.toLowerCase).getOrElse("size")
+        effectiveMode match {
+          case "fragment" =>
+            val capacity = diskCacheWriteQueueCapacity.map(_.toInt).getOrElse(16)
+            logger.debug(s"L2 Disk cache write queue: fragment mode, capacity=$capacity slots")
+            tieredConfig = tieredConfig.withWriteQueueFragmentCapacity(capacity)
+          case "size" | "size_based" | "sizebased" =>
+            val maxBytes = diskCacheWriteQueueCapacity
+              .map(SplitCacheConfig.parseSizeString)
+              .getOrElse(1L * 1024L * 1024L * 1024L) // 1GB default
+            logger.debug(s"L2 Disk cache write queue: size-based mode, limit=$maxBytes bytes")
+            tieredConfig = tieredConfig.withWriteQueueSizeLimit(maxBytes)
+          case other =>
+            logger.warn(s"Unknown write queue mode: '$other'. Valid: fragment, size. Using size default.")
+            tieredConfig = tieredConfig.withWriteQueueSizeLimit(1L * 1024L * 1024L * 1024L)
+        }
+
+        // Apply drop-writes-when-full (default: true)
+        val dropWrites = diskCacheDropWritesWhenFull.getOrElse(true)
+        logger.debug(s"L2 Disk cache drop writes when full: $dropWrites")
+        tieredConfig = tieredConfig.withDropWritesWhenFull(dropWrites)
 
         logger.info(s"L2 Disk cache enabled at: $path")
         Some(tieredConfig)

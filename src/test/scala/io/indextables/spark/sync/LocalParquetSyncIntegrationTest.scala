@@ -647,9 +647,9 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       import ss.implicits._
       val data = Seq(
         (1L, "alice", 10.0),
-        (2L, "bob",   20.0),
+        (2L, "bob", 20.0),
         (3L, "alice", 30.0),
-        (4L, "bob",   40.0),
+        (4L, "bob", 40.0),
         (5L, "alice", 50.0)
       )
       data.toDF("id", "name", "score").repartition(1).write.parquet(parquetPath)
@@ -737,10 +737,10 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       // The fixed code picks __pq_file_hash (always non-null) → returns 5 (correct).
       val data = Seq(
         ("alice", Some(10.0)),
-        ("bob",   None: Option[Double]),
+        ("bob", None: Option[Double]),
         ("carol", None: Option[Double]),
-        ("dave",  None: Option[Double]),
-        ("eve",   Some(50.0))
+        ("dave", None: Option[Double]),
+        ("eve", Some(50.0))
       )
       data.toDF("name", "score").repartition(1).write.parquet(parquetPath)
 

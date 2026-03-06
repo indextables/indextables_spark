@@ -72,14 +72,17 @@ class SplitConversionMetadataTest extends TestBase {
     val tableDir   = new File(s"$tempDir/test_uuid_naming")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
-    // Split files have format: part-NNNNN-N-UUID.split
+    // Split files have format:
+    //   TANT path: part-NNNNN-N-UUID.split
+    //   Arrow FFI path: part-UUID.split (Rust-generated)
     // UUID format: 8-4-4-4-12 hex digits
-    val splitPattern = """^part-\d+-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.split$""".r
+    val uuidPattern = """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
+    val splitPattern = s"""^part-(?:\\d+-\\d+-)?$uuidPattern\\.split$$""".r
 
     splitFiles.foreach { f =>
       assert(
         splitPattern.findFirstIn(f.getName).isDefined,
-        s"File ${f.getName} should follow split naming convention (part-NNNNN-N-UUID.split)"
+        s"File ${f.getName} should follow split naming convention (part-[NNNNN-N-]UUID.split)"
       )
     }
 

@@ -349,6 +349,25 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def diskCacheManifestSyncInterval: Option[Int] =
     Option(options.get("spark.indextables.cache.disk.manifestSyncInterval")).map(_.toInt)
 
+  /** Write queue mode: "fragment" or "size". Default: "size". */
+  def diskCacheWriteQueueMode: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.writeQueue.mode"))
+
+  /** Write queue capacity. Fragment: slot count (int). Size: byte limit ("1G"). */
+  def diskCacheWriteQueueCapacity: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.writeQueue.capacity"))
+
+  /** Drop query-path writes when queue is full instead of blocking. Default: true. */
+  def diskCacheDropWritesWhenFull: Option[Boolean] =
+    Option(options.get("spark.indextables.cache.disk.dropWritesWhenFull")).map(_.toBoolean)
+
+  /**
+   * Max gap between byte ranges to coalesce into a single request. Supports "64K", "512K", "1M" formats. Default:
+   * 512KB.
+   */
+  def coalesceMaxGap: Option[String] =
+    Option(options.get("spark.indextables.cache.coalesceMaxGap"))
+
   /** Get indexing configuration for a specific field. */
   def getFieldIndexingConfig(fieldName: String): FieldIndexingConfig = {
     val fieldTypeMapping         = getFieldTypeMapping
@@ -505,6 +524,9 @@ object IndexTables4SparkOptions {
   val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
   val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 
+  // Columnar reads configuration
+  val COLUMNAR_READS_ENABLED = "spark.indextables.read.columnar.enabled"
+
   // L2 Disk Cache configuration keys
   val DISK_CACHE_ENABLED                = "spark.indextables.cache.disk.enabled"
   val DISK_CACHE_PATH                   = "spark.indextables.cache.disk.path"
@@ -512,4 +534,7 @@ object IndexTables4SparkOptions {
   val DISK_CACHE_COMPRESSION            = "spark.indextables.cache.disk.compression"
   val DISK_CACHE_MIN_COMPRESS_SIZE      = "spark.indextables.cache.disk.minCompressSize"
   val DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
+  val DISK_CACHE_WRITE_QUEUE_MODE       = "spark.indextables.cache.disk.writeQueue.mode"
+  val DISK_CACHE_WRITE_QUEUE_CAPACITY   = "spark.indextables.cache.disk.writeQueue.capacity"
+  val DISK_CACHE_DROP_WRITES_WHEN_FULL  = "spark.indextables.cache.disk.dropWritesWhenFull"
 }

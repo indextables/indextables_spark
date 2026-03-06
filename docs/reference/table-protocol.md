@@ -1,1005 +1,500 @@
-# IndexTables Table Protocol Specification
+# IndexTables Table Protocol
 
-**Version:** 1.0
+**Version:** 2.1
 **Status:** Production
-**Last Updated:** October 2025
+**Last Updated:** February 2026
+**Protocol Version:** V4 (Avro State)
 
 ## Overview
 
-IndexTables implements a Delta Lake-inspired transaction log protocol for ACID guarantees, schema evolution, and time-travel capabilities. The protocol ensures atomic operations, data consistency, and protection against concurrent write conflicts.
+IndexTables implements a Delta Lake-inspired transaction log protocol that provides ACID guarantees, time travel, and schema evolution safety for tables of Tantivy search indexes. Every table operation -- write, merge, overwrite, purge -- is recorded as an atomic, versioned transaction. The current protocol version (V4) uses an Avro-based state format with Iceberg-style manifest reuse for efficient incremental state writes.
+
+This document covers the conceptual architecture, ACID guarantees, operational guidance, and performance characteristics of the table protocol. For the detailed wire-level specification -- action schemas, Avro field IDs, file format details, and configuration reference -- see [protocol.md](protocol.md). For the original design rationale and implementation details of the Avro state format, see [Avro State Design Document](../design/avro-state-file.md).
 
 ## Design Principles
 
-1. **Immutability**: Transaction log files are write-once, never modified
-2. **Atomicity**: All operations are atomic at the file level
-3. **Isolation**: Concurrent operations are detected and prevented
-4. **Durability**: S3 Conditional Writes ensure no accidental overwrites
-5. **Consistency**: Version numbering provides strict ordering
+1. **Immutability** -- Transaction log files are write-once, never modified after creation.
+2. **Atomicity** -- All operations within a version are visible together or not at all.
+3. **Isolation** -- Concurrent writers are detected and serialized via conditional writes.
+4. **Durability** -- Cloud storage conditional writes (S3 `If-None-Match`, Azure leases) prevent accidental overwrites.
+5. **Consistency** -- Monotonically increasing version numbers provide strict ordering.
+
+---
+
+## ACID Guarantees
+
+### Atomicity
+
+Each write operation produces a single version file containing all actions (adds, removes) for that transaction. Readers either see the complete version or none of it. The version file is written atomically using cloud storage conditional writes.
+
+### Consistency
+
+The transaction log enforces a consistent view of the table at every version:
+
+- **Version 0 establishes the table.** It contains the ProtocolAction and MetadataAction that define the table's identity, schema, and partition columns. Version 0 is protected by conditional writes during initial table creation to prevent duplicate initialization. Once its contents are captured in a checkpoint or Avro state snapshot, version 0 may be cleaned up by PURGE or TRUNCATE TIME TRAVEL operations -- the table's identity is preserved in the checkpoint.
+- **Active file computation** is deterministic: replay all adds and removes from the latest checkpoint forward to derive the set of live files.
+- **Protocol version checks** run before every read and write, preventing incompatible clients from corrupting the table.
+
+### Isolation
+
+Writers use optimistic concurrency control:
+
+1. Read the current latest version.
+2. Prepare actions for the next version.
+3. Attempt to write the version file with conditional `ifNotExists` semantics.
+4. On conflict (HTTP 412), retry with exponential backoff and a re-read of current state.
+
+This serializes concurrent writers without requiring locks. Retry behavior is configurable (see [protocol.md -- Concurrency Control](protocol.md#concurrency-control)).
+
+### Durability
+
+Once a version file is successfully written to cloud storage, its contents are durable. S3 Conditional Writes (`If-None-Match: *`) and equivalent Azure mechanisms guarantee that no subsequent write can overwrite an existing version file.
+
+---
 
 ## Directory Structure
 
 ```
-table_root/
-├── _transaction_log/
-│   ├── 00000000000000000000.json          # Version 0 (metadata + protocol)
-│   ├── 00000000000000000001.json          # Version 1 (add files)
-│   ├── 00000000000000000002.json          # Version 2 (more files)
-│   ├── 00000000000000000010.checkpoint.json  # Checkpoint at version 10
-│   ├── _last_checkpoint                    # Points to latest checkpoint
+<table_path>/
+├── splits/                              # Data files (tantivy4java split files)
+│   ├── split-<uuid>.split
 │   └── ...
-├── part-00000-uuid.split                  # Data files
-├── part-00001-uuid.split
-└── ...
+├── <partition_col>=<value>/             # Partitioned data (if applicable)
+│   └── splits/
+│       └── split-<uuid>.split
+└── _transaction_log/
+    ├── 00000000000000000000.json        # Version 0 (protocol + metadata)
+    ├── 00000000000000000001.json        # Version 1 (incremental changes)
+    ├── ...
+    ├── _last_checkpoint                 # Pointer to latest checkpoint/state
+    ├── manifests/                       # Shared Avro manifest directory (V4+)
+    │   ├── manifest-<hash>.avro         # Reusable manifest files
+    │   └── ...
+    └── state-v<version>/                # Avro state directory (V4+)
+        └── _manifest.avro              # State manifest referencing shared manifests
 ```
 
-## File Naming Convention
+**Key directories:**
 
-### Version Files
-- **Format**: `{version:020d}.json`
-- **Example**: `00000000000000000042.json` (version 42)
-- **Encoding**: 20-digit zero-padded decimal number
-- **Content**: JSON Lines format (newline-delimited JSON objects)
+- **`_transaction_log/`** -- All metadata lives here. Version files record incremental changes; the state directory captures consolidated snapshots.
+- **`manifests/`** -- Shared Avro manifest files written once and referenced by multiple state versions (Iceberg-style reuse).
+- **`state-v<version>/`** -- Each state snapshot is a directory containing a `_manifest.avro` that references entries in `manifests/`.
 
-### Checkpoint Files
-- **Format**: `{version:020d}.checkpoint.json`
-- **Example**: `00000000000000000050.checkpoint.json`
-- **Content**: Consolidated state up to specified version
+For detailed file naming conventions, version file format, and compression options, see [protocol.md -- Transaction Log Format](protocol.md#transaction-log-format).
 
-### Last Checkpoint Marker
-- **File**: `_last_checkpoint`
-- **Format**: JSON with checkpoint version and timestamp
+---
 
-## Transaction Log Format
+## Protocol Versions
 
-### JSON Lines Structure
+| Version | Status | Key Features |
+|---------|--------|--------------|
+| V1 | Historical | Basic transaction log: AddAction, RemoveAction, MetadataAction |
+| V2 | Historical | SkipAction, extended AddAction metadata, footer offsets |
+| V3 | Historical | Schema deduplication (`docMappingRef`), feature flags |
+| **V4** | **Current** | **Avro state format, manifest-level partition pruning, incremental state writes** |
 
-Each transaction file contains one JSON object per line:
+All new tables are created at V4. Tables at older protocol versions are automatically upgraded to V4 when a checkpoint is created.
 
-```json
-{"protocol":{"minReaderVersion":1,"minWriterVersion":2}}
-{"metaData":{"id":"uuid","format":{"provider":"indextables","options":{}},"schemaString":"...","partitionColumns":[],"configuration":{},"createdTime":1696000000000}}
-{"add":{"path":"s3://bucket/table/part-00000.split","partitionValues":{},"size":1048576,"modificationTime":1696000000000,"dataChange":true,"stats":"{...}","tags":{}}}
-{"remove":{"path":"s3://bucket/table/old-file.split","deletionTimestamp":1696000000001,"dataChange":true}}
-{"mergeskip":{"path":"s3://bucket/corrupted.split","skipTimestamp":1696000000002,"reason":"Corrupted file","operation":"merge","retryAfter":1696086400000}}
-```
+For the complete feature flag list and version compatibility matrix, see [protocol.md -- Protocol Versions](protocol.md#protocol-versions).
 
-## Action Types
-
-### 1. ProtocolAction (Version 0 Only)
-
-Defines protocol version compatibility. Follows Delta Lake's protocol versioning approach.
-
-```scala
-case class ProtocolAction(
-  minReaderVersion: Int,                      // Minimum reader version required
-  minWriterVersion: Int,                      // Minimum writer version required
-  readerFeatures: Option[Set[String]] = None, // Optional reader feature names (version 3+)
-  writerFeatures: Option[Set[String]] = None  // Optional writer feature names (version 3+)
-)
-```
-
-**Current Protocol:**
-- `minReaderVersion: 1` - Basic read operations
-- `minWriterVersion: 2` - Supports batch writes and merge operations
-
-**Readers and writers MUST:**
-- Check protocol version before performing any operations
-- Silently ignore unknown fields and actions
-- Reject operations if protocol version is incompatible
-
-**JSON Example (Basic):**
-```json
-{
-  "protocol": {
-    "minReaderVersion": 1,
-    "minWriterVersion": 2
-  }
-}
-```
-
-**JSON Example (With Features):**
-```json
-{
-  "protocol": {
-    "minReaderVersion": 3,
-    "minWriterVersion": 3,
-    "readerFeatures": ["footerOffsets", "tantivy4java"],
-    "writerFeatures": ["conditionalWrites", "checkpoints"]
-  }
-}
-```
-
-### 2. MetadataAction (Version 0 Only)
-
-Contains table schema, partition information, and configuration.
-
-```scala
-case class MetadataAction(
-  id: String,                          // Unique table identifier (UUID)
-  name: Option[String],                // Optional table name
-  description: Option[String],         // Optional description
-  format: FileFormat,                  // File format specification
-  schemaString: String,                // JSON-encoded Spark schema
-  partitionColumns: Seq[String],       // Partition column names
-  configuration: Map[String, String],  // Table configuration
-  createdTime: Option[Long]            // Creation timestamp (milliseconds)
-)
-
-case class FileFormat(
-  provider: String,                    // "indextables"
-  options: Map[String, String]         // Format-specific options
-)
-```
-
-**JSON Example:**
-```json
-{
-  "metaData": {
-    "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
-    "name": null,
-    "description": null,
-    "format": {
-      "provider": "indextables",
-      "options": {}
-    },
-    "schemaString": "{\"type\":\"struct\",\"fields\":[{\"name\":\"id\",\"type\":\"long\",\"nullable\":true,\"metadata\":{}},{\"name\":\"content\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}}]}",
-    "partitionColumns": ["year", "month"],
-    "configuration": {},
-    "createdTime": 1696000000000
-  }
-}
-```
-
-### 3. AddAction
-
-Records addition of a data file to the table.
-
-```scala
-case class AddAction(
-  // Core file metadata
-  path: String,                                // File path (absolute)
-  partitionValues: Map[String, String],        // Partition column values
-  size: Long,                                  // File size in bytes
-  modificationTime: Long,                      // File modification timestamp
-  dataChange: Boolean,                         // Whether this changes user-visible data
-
-  // Statistics and metadata
-  stats: Option[String] = None,                // Optional JSON-encoded statistics
-  tags: Option[Map[String, String]] = None,    // Optional metadata tags
-  minValues: Option[Map[String, String]] = None,  // Minimum values per column
-  maxValues: Option[Map[String, String]] = None,  // Maximum values per column
-  numRecords: Option[Long] = None,             // Number of records in file
-
-  // Footer offset optimization metadata for tantivy4java splits
-  footerStartOffset: Option[Long] = None,      // Start offset of footer in split file
-  footerEndOffset: Option[Long] = None,        // End offset of footer in split file
-  hotcacheStartOffset: Option[Long] = None,    // Start offset of hot cache data
-  hotcacheLength: Option[Long] = None,         // Length of hot cache data
-  hasFooterOffsets: Boolean = false,           // Flag indicating if footer offsets are available
-
-  // Complete tantivy4java SplitMetadata fields
-  timeRangeStart: Option[String] = None,       // Time range start (ISO timestamp)
-  timeRangeEnd: Option[String] = None,         // Time range end (ISO timestamp)
-  splitTags: Option[Set[String]] = None,       // Tantivy4java split tags
-  deleteOpstamp: Option[Long] = None,          // Delete operation stamp
-  numMergeOps: Option[Int] = None,             // Number of merge operations
-  docMappingJson: Option[String] = None,       // Document mapping as JSON string
-  uncompressedSizeBytes: Option[Long] = None   // Uncompressed size of the split
-)
-```
-
-**JSON Example (Basic):**
-```json
-{
-  "add": {
-    "path": "s3://bucket/table/part-00000-a1b2c3d4.split",
-    "partitionValues": {"year": "2024", "month": "10"},
-    "size": 1048576,
-    "modificationTime": 1696000000000,
-    "dataChange": true,
-    "stats": "{\"numRecords\":1000,\"minValues\":{\"id\":1},\"maxValues\":{\"id\":1000}}",
-    "tags": {"source": "batch-job-123"},
-    "numRecords": 1000
-  }
-}
-```
-
-**JSON Example (With Footer Offsets and Tantivy Metadata):**
-```json
-{
-  "add": {
-    "path": "s3://bucket/table/part-00000-a1b2c3d4.split",
-    "partitionValues": {"year": "2024", "month": "10"},
-    "size": 1048576,
-    "modificationTime": 1696000000000,
-    "dataChange": true,
-    "numRecords": 1000,
-    "minValues": {"id": "1", "timestamp": "2024-10-01T00:00:00Z"},
-    "maxValues": {"id": "1000", "timestamp": "2024-10-01T23:59:59Z"},
-    "footerStartOffset": 1040000,
-    "footerEndOffset": 1048576,
-    "hotcacheStartOffset": 0,
-    "hotcacheLength": 8192,
-    "hasFooterOffsets": true,
-    "timeRangeStart": "2024-10-01T00:00:00Z",
-    "timeRangeEnd": "2024-10-01T23:59:59Z",
-    "splitTags": ["production", "batch-123"],
-    "deleteOpstamp": 0,
-    "numMergeOps": 0,
-    "docMappingJson": "{\"fields\":[{\"name\":\"id\",\"type\":\"i64\"},{\"name\":\"content\",\"type\":\"text\"}]}",
-    "uncompressedSizeBytes": 2097152
-  }
-}
-```
-
-### 4. RemoveAction
-
-Records removal of a data file from the table.
-
-```scala
-case class RemoveAction(
-  path: String,                                  // File path to remove
-  deletionTimestamp: Option[Long],               // When file was logically deleted
-  dataChange: Boolean,                           // Whether this changes user-visible data
-  extendedFileMetadata: Option[Boolean],         // Reserved for future use
-  partitionValues: Option[Map[String, String]],  // Partition values
-  size: Option[Long],                            // File size in bytes
-  tags: Option[Map[String, String]] = None       // Optional metadata tags
-)
-```
-
-**JSON Example:**
-```json
-{
-  "remove": {
-    "path": "s3://bucket/table/old-file.split",
-    "deletionTimestamp": 1696000001000,
-    "dataChange": true,
-    "extendedFileMetadata": null,
-    "partitionValues": {"year": "2024", "month": "09"},
-    "size": 524288,
-    "tags": {"reason": "overwrite"}
-  }
-}
-```
-
-### 5. SkipAction
-
-Records files skipped during merge operations with cooldown tracking.
-
-```scala
-case class SkipAction(
-  path: String,                          // File path that was skipped
-  skipTimestamp: Long,                   // When file was skipped
-  reason: String,                        // Why it was skipped
-  operation: String,                     // Operation that skipped it (e.g., "merge")
-  partitionValues: Option[Map[String, String]], // Partition values
-  size: Option[Long],                    // File size
-  retryAfter: Option[Long],              // Timestamp when retry is allowed
-  skipCount: Int                         // Number of times skipped
-)
-```
-
-**JSON Example:**
-```json
-{
-  "mergeskip": {
-    "path": "s3://bucket/table/corrupted-file.split",
-    "skipTimestamp": 1696000000000,
-    "reason": "Failed to merge: corrupted split metadata",
-    "operation": "merge",
-    "partitionValues": {"year": "2024", "month": "10"},
-    "size": 102400,
-    "retryAfter": 1696086400000,
-    "skipCount": 1
-  }
-}
-```
-
-## Version 0 Requirements
-
-**Version 0 (`00000000000000000000.json`) MUST contain exactly:**
-1. **One ProtocolAction** - Defines protocol compatibility
-2. **One MetadataAction** - Defines table schema and configuration
-
-**Critical Protection:**
-- Version 0 is **immutable** and **protected by S3 Conditional Writes**
-- Once written, version 0 **cannot be overwritten** - attempts will fail with `IllegalStateException`
-- Loss of version 0 means **loss of table metadata** - the table becomes unreadable
-
-## Write Operations
-
-### Initialization (Version 0)
-
-```scala
-// Check if already initialized
-if (cloudProvider.exists("_transaction_log/00000000000000000000.json")) {
-  return // Already initialized
-}
-
-// Write protocol and metadata atomically
-val actions = Seq(
-  ProtocolAction(minReaderVersion = 1, minWriterVersion = 2),
-  MetadataAction(/* ... */)
-)
-
-// Uses S3 Conditional Write (If-None-Match: *)
-writeActions(version = 0, actions)
-```
-
-### Append Mode
-
-```scala
-// Get next version number atomically
-val version = getNextVersion()  // e.g., 5
-
-// Write new files
-val addActions = Seq(
-  AddAction(path = "s3://bucket/table/new-file-1.split", /* ... */),
-  AddAction(path = "s3://bucket/table/new-file-2.split", /* ... */)
-)
-
-// Uses S3 Conditional Write to prevent conflicts
-writeActions(version, addActions)
-```
-
-### Overwrite Mode
-
-```scala
-// Get all existing files
-val existingFiles = listFiles()
-
-// Create remove actions for all existing files
-val removeActions = existingFiles.map { file =>
-  RemoveAction(path = file.path, deletionTimestamp = now, /* ... */)
-}
-
-// Create add actions for new files
-val addActions = /* new files */
-
-// Get next version and write both removes and adds atomically
-val version = getNextVersion()
-writeActions(version, removeActions ++ addActions)
-```
-
-### Merge Operations
-
-```scala
-// Merge multiple small files into larger ones
-val filesToMerge = selectFilesForMerge()
-
-// Create merged file
-val mergedFile = performMerge(filesToMerge)
-
-// Atomic transaction: remove old files, add merged file
-val version = getNextVersion()
-val actions = filesToMerge.map(f => RemoveAction(f.path, /* ... */)) :+
-              AddAction(mergedFile.path, /* ... */)
-
-writeActions(version, actions)
-```
-
-## S3 Conditional Writes
-
-**Critical Feature:** All transaction log writes use S3 Conditional Writes to prevent overwrites.
-
-### Implementation
-
-```scala
-// S3 Provider uses If-None-Match: * header
-val request = PutObjectRequest
-  .builder()
-  .bucket(bucket)
-  .key(key)
-  .ifNoneMatch("*")  // Only write if object doesn't exist
-  .build()
-
-try {
-  s3Client.putObject(request, requestBody)
-  return true  // Write succeeded
-} catch {
-  case ex: S3Exception if ex.statusCode() == 412 =>
-    return false  // File already exists (412 Precondition Failed)
-}
-```
-
-### Protection Guarantees
-
-1. **No Overwrites**: Transaction files cannot be accidentally overwritten
-2. **Concurrent Write Detection**: Multiple writers attempting same version will conflict
-3. **Metadata Protection**: Version 0 is permanently protected
-4. **Atomic Creates**: S3 handles atomicity server-side (no race conditions)
-
-### Error Handling
-
-```scala
-val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, content)
-
-if (!writeSucceeded) {
-  throw new IllegalStateException(
-    s"Failed to write transaction log version $version - file already exists. " +
-    "This indicates a concurrent write conflict or version counter synchronization issue."
-  )
-}
-```
-
-## Checkpoint System
-
-### Purpose
-
-Checkpoints consolidate transaction history to improve read performance:
-- **Without checkpoints**: Must read all N transaction files (O(N))
-- **With checkpoints**: Read 1 checkpoint + K incremental files (O(1) + O(K), where K << N)
-
-### Checkpoint Creation
-
-**Trigger Conditions:**
-- Every N transactions (configurable, default: 10)
-- Manual trigger via API
-
-**Content:**
-```json
-{
-  "protocol": { /* latest protocol */ },
-  "metaData": { /* latest metadata */ },
-  "add": [ /* all active files */ ]
-}
-```
-
-**Process:**
-1. Read all transactions from 0 to current version
-2. Compute current state (apply all adds/removes)
-3. Write consolidated state to `{version}.checkpoint.json`
-4. Update `_last_checkpoint` marker
-5. **Optionally** clean up old transaction files based on retention policy
-
-### Checkpoint Reading
-
-```scala
-// 1. Check for checkpoint
-val lastCheckpoint = readLastCheckpoint()
-
-// 2. Load base state from checkpoint
-val baseState = if (lastCheckpoint.isDefined) {
-  readCheckpoint(lastCheckpoint.get.version)
-} else {
-  Seq.empty
-}
-
-// 3. Apply incremental changes since checkpoint
-val incrementalVersions = getVersions().filter(_ > lastCheckpoint.get.version)
-val incrementalActions = incrementalVersions.flatMap(readVersion)
-
-// 4. Compute final state
-val finalState = applyActions(baseState, incrementalActions)
-```
-
-### Performance Impact
-
-**Measured Improvement:**
-- **Before checkpoints**: ~1,300ms for 50 transactions (O(N))
-- **After checkpoints**: ~500ms for 50 transactions (60% faster, 2.5x speedup)
-- **Scalability**: Performance improvements increase with transaction count
-
-## File Retention
-
-### Configuration
-
-```scala
-// Transaction log retention (default: 30 days)
-"spark.indextables.logRetention.duration" -> "2592000000"
-
-// Checkpoint retention (default: 2 hours)
-"spark.indextables.checkpointRetention.duration" -> "7200000"
-
-// Cleanup policy (default: continue)
-"spark.indextables.cleanup.failurePolicy" -> "continue"
-
-// Dry run mode for testing
-"spark.indextables.cleanup.dryRun" -> "false"
-```
-
-### Cleanup Logic
-
-**Ultra-Conservative Deletion** - Files deleted ONLY when ALL conditions met:
-
-```scala
-if (fileAge > logRetentionDuration &&
-    version < checkpointVersion &&
-    version < currentVersion) {
-  // Safe to delete - contents preserved in checkpoint
-  deleteFile(versionFile)
-}
-```
-
-**Safety Gates:**
-1. ✅ File is older than retention period
-2. ✅ File version is included in a checkpoint
-3. ✅ File is not the current version being written
-4. ✅ **Version 0 is NEVER deleted** (metadata protection)
-
-### Cleanup Guarantees
-
-- **Data Consistency**: All data remains accessible during and after cleanup
-- **Checkpoint Redundancy**: Multiple checkpoint versions can coexist
-- **Graceful Failures**: Cleanup failures don't affect operations (logged as warnings)
-- **Version 0 Protection**: Metadata file never cleaned up
+---
 
 ## Read Path
 
-### Schema Resolution
+### How a Read Works
 
-```scala
-// 1. Get latest version
-val versions = getVersions()
-val latestVersion = versions.max
-
-// 2. Read version 0 for metadata
-val metadataActions = readVersion(0)
-val metadata = metadataActions.collectFirst {
-  case m: MetadataAction => m
-}.getOrElse(throw new IllegalStateException("No metadata found"))
-
-// 3. Extract and deserialize schema
-val schema = DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
-```
-
-### File Listing
-
-```scala
-// 1. Load checkpoint if available
-val checkpoint = readLastCheckpoint()
-val baseActions = checkpoint.map(c => readCheckpoint(c.version)).getOrElse(Seq.empty)
-
-// 2. Load incremental changes
-val startVersion = checkpoint.map(_.version + 1).getOrElse(0L)
-val incrementalActions = getVersions()
-  .filter(_ >= startVersion)
-  .flatMap(readVersion)
-
-// 3. Combine and compute active files
-val allActions = baseActions ++ incrementalActions
-val activeFiles = computeActiveFiles(allActions)
-```
-
-### Active File Computation
-
-```scala
-def computeActiveFiles(actions: Seq[Action]): Seq[AddAction] = {
-  val addedFiles = mutable.Map[String, AddAction]()
-
-  actions.foreach {
-    case add: AddAction =>
-      addedFiles(add.path) = add
-    case remove: RemoveAction =>
-      addedFiles.remove(remove.path)
-    case _ => // Ignore protocol, metadata, skip actions
-  }
-
-  addedFiles.values.toSeq
-}
-```
-
-## Concurrency Control
-
-### Version Counter
-
-```scala
-// Atomic version counter for thread-safe version assignment
-private val versionCounter = new AtomicLong(-1L)
-
-def getNextVersion(): Long = {
-  // Initialize from latest version if needed
-  if (versionCounter.get() == -1L) {
-    val latest = getLatestVersion()
-    versionCounter.set(latest)
-  }
-
-  // Atomically increment and return
-  versionCounter.incrementAndGet()
-}
-```
-
-### Write Conflicts
-
-**Scenario**: Two writers simultaneously try to write version 5
-
-```
-Writer A: getNextVersion() -> 5
-Writer B: getNextVersion() -> 5
-Writer A: writeActions(5, actions) -> SUCCESS (file created)
-Writer B: writeActions(5, actions) -> FAILURE (412 Precondition Failed)
-```
-
-**Result**: Writer B fails with `IllegalStateException`, must retry with new version
-
-### Isolation Levels
-
-- **Read Committed**: Readers see only committed transactions
-- **Write Serialization**: Writes are serialized via version counter + conditional writes
-- **No Dirty Reads**: Uncommitted data is never visible
-- **No Lost Updates**: Concurrent writes are detected and prevented
-
-## Cache Invalidation
-
-### Invalidation Triggers
-
-```scala
-// After every write operation
-cache.foreach(_.invalidateVersionDependentCaches())
-
-// After checkpoint creation
-cache.foreach(_.invalidateAll())
-
-// Manual invalidation API
-transactionLog.invalidateCache()
-```
-
-### Cache Types
-
-1. **Version Cache**: Stores parsed actions for each version
-2. **File List Cache**: Stores computed active file list
-3. **Metadata Cache**: Stores table schema and configuration
-4. **Checkpoint Cache**: Stores checkpoint locations
-
-### TTL Configuration
-
-```scala
-// Cache expiration (default: 5 minutes)
-"spark.indextables.transaction.cache.expirationSeconds" -> "300"
-
-// Disable caching (for debugging)
-"spark.indextables.transaction.cache.enabled" -> "false"
-```
-
-## Partition Support
-
-### Partition Metadata
-
-Partition columns are stored in `MetadataAction`:
-
-```json
-{
-  "metaData": {
-    "partitionColumns": ["year", "month", "day"],
-    ...
-  }
-}
-```
-
-### Partition Values in AddAction
-
-```json
-{
-  "add": {
-    "path": "s3://bucket/table/year=2024/month=10/day=15/part-00000.split",
-    "partitionValues": {
-      "year": "2024",
-      "month": "10",
-      "day": "15"
-    },
-    ...
-  }
-}
-```
+1. **Check `_last_checkpoint`** -- Locate the latest Avro state directory.
+2. **Load base state** -- Read `_manifest.avro` from the state directory. Apply partition pruning at the manifest level to skip irrelevant manifests entirely. Read matching Avro manifests in parallel (default: 8 threads). Filter out tombstoned entries.
+3. **Apply incremental versions** -- Read any version files written after the state snapshot and apply their adds/removes.
+4. **Return active files** -- The final set of AddActions represents all live splits in the table.
 
 ### Partition Pruning
 
-```scala
-// Filter files by partition values
-val prunedFiles = activeFiles.filter { file =>
-  file.partitionValues.get("year") == "2024" &&
-  file.partitionValues.get("month") == "10"
-}
-```
+Each manifest entry in `_manifest.avro` carries `partitionBounds` -- the min/max values for each partition column across all files in that manifest. When a query includes partition filters, entire manifests are skipped if their bounds don't overlap the filter predicates.
 
-## Example Workflows
+For a table with 1M files across 1,000 partitions, a single-partition query can skip 99.9% of manifests when compaction has sorted files by partition (see [Compaction](#compaction) below).
 
-### Create New Table
+### Performance Characteristics
 
-```
-1. Write 00000000000000000000.json:
-   - ProtocolAction (minReaderVersion=1, minWriterVersion=2)
-   - MetadataAction (schema, partitions, config)
+| Scenario | Performance |
+|----------|-------------|
+| Read 70K files | <500ms |
+| Read 100K files | <700ms |
+| Incremental write (add 100 files to 70K file table) | Write only 100 new entries (O(delta), not O(N)) |
+| Query 1 partition (1M file table) | Load only matching manifests |
+| Cold read (no state snapshot) | Parse all version files from version 0 |
 
-State: Empty table with schema defined
-Files: []
-```
+---
 
-### First Data Write (Append)
+## Write Path
 
-```
-2. Write 00000000000000000001.json:
-   - AddAction(path="file-1.split", size=1048576, numRecords=1000)
-   - AddAction(path="file-2.split", size=1048576, numRecords=1000)
+### How a Write Works
 
-State: Table with 2 files
-Files: [file-1.split, file-2.split]
-```
+1. **Initialize** (first write only) -- Write version 0 with ProtocolAction and MetadataAction. Protected by conditional write to prevent multiple initializations.
+2. **Determine next version** -- Read the latest version and increment atomically.
+3. **Write version file** -- Serialize all actions (adds, removes) as newline-delimited JSON, optionally GZIP-compressed. Write with conditional `ifNotExists`.
+4. **Update state** (if checkpoint interval reached):
+   - Write a new Avro manifest to `manifests/` containing only the new file entries (incremental -- existing manifests are not rewritten).
+   - Write a new `_manifest.avro` in `state-v<version>/` that references all existing manifests plus the new one, with any new tombstones appended.
+   - Update `_last_checkpoint` to point to the new state directory.
+5. **Handle conflicts** -- If the version file write fails (412), re-read state and retry with exponential backoff.
 
-### Second Write (Append)
+### Incremental State Writes
 
-```
-3. Write 00000000000000000002.json:
-   - AddAction(path="file-3.split", size=1048576, numRecords=1000)
-
-State: Table with 3 files
-Files: [file-1.split, file-2.split, file-3.split]
-```
-
-### Overwrite
+A key design feature borrowed from Apache Iceberg: state writes are incremental. When a transaction adds 100 files to a table with 70,000 existing files, only the 100 new entries are written as a new manifest. The state manifest simply references the existing manifests plus the new one. This reduces write amplification from O(N) to O(delta).
 
 ```
-4. Write 00000000000000000003.json:
-   - RemoveAction(path="file-1.split")
-   - RemoveAction(path="file-2.split")
-   - RemoveAction(path="file-3.split")
-   - AddAction(path="file-4.split", size=3145728, numRecords=3000)
+Transaction 100: 70,000 files
+  state-v100/_manifest.avro --> [manifests/manifest-aaa.avro (50K entries),
+                                  manifests/manifest-bbb.avro (20K entries)]
 
-State: Table with 1 file (overwrote previous data)
-Files: [file-4.split]
+Transaction 101: +100 files
+  state-v101/_manifest.avro --> [manifests/manifest-aaa.avro (50K entries),   # reused
+                                  manifests/manifest-bbb.avro (20K entries),  # reused
+                                  manifests/manifest-ccc.avro (100 entries)]  # new
 ```
 
-### Merge Operation
+### Write Modes
 
-```
-5. Write 00000000000000000004.json:
-   - AddAction(path="file-5.split", size=524288, numRecords=500)
+| Mode | Behavior |
+|------|----------|
+| **Append** | Adds new split files. Version file contains only AddActions. |
+| **Overwrite** | Removes all existing files and adds new ones. Version file contains RemoveActions for every active file, followed by AddActions. |
+| **Merge** | Consolidates small splits. Removes source files, adds merged output. A single atomic version. |
 
-6. Write 00000000000000000005.json:
-   - AddAction(path="file-6.split", size=524288, numRecords=500)
+### Merge Resilience (SkipAction)
 
-State: Table with 3 small files
-Files: [file-4.split, file-5.split, file-6.split]
+During a merge operation, individual split files may fail to process -- for example, due to transient I/O errors or data corruption. Rather than failing the entire merge, the system records a SkipAction for the problematic file. The merge proceeds with the remaining files, and the skipped file is left in place as an active split.
 
-7. MERGE SPLITS operation - Write 00000000000000000006.json:
-   - RemoveAction(path="file-5.split")
-   - RemoveAction(path="file-6.split")
-   - AddAction(path="file-7-merged.split", size=1048576, numRecords=1000)
+Skipped files have a cooldown period (`retryAfter` timestamp) before the system attempts to include them in a subsequent merge. Each skip increments a counter (`skipCount`) that tracks how many times the file has been skipped. The current skip state for a table is visible via `DESCRIBE INDEXTABLES STATE`. For the SkipAction field-level schema, see [protocol.md](protocol.md).
 
-State: Table with 2 files (merged small files)
-Files: [file-4.split, file-7-merged.split]
-```
+### Automatic Maintenance
 
-### Checkpoint Creation
+**Purge-on-write.** When enabled (`spark.indextables.purgeOnWrite.enabled`), write operations automatically trigger cleanup of orphaned split files and old transaction log versions as part of the write commit. This provides transparent table hygiene without requiring scheduled maintenance. See [configuration.md](configuration.md) for purge-on-write settings and thresholds.
 
-```
-8. After 10 transactions, create checkpoint:
-   - Write 00000000000000000010.checkpoint.json
-   - Update _last_checkpoint
-   - Optionally clean up old transaction files
+**Merge-on-write.** When enabled (`spark.indextables.mergeOnWrite.enabled`), the system evaluates whether a merge is warranted after each write commits. If the number of small splits exceeds a configurable threshold, a merge is initiated -- asynchronously by default (`spark.indextables.mergeOnWrite.async.enabled`). See [configuration.md](configuration.md) for merge-on-write settings.
 
-State: Same data, but faster reads via checkpoint
-Files: [file-4.split, file-7-merged.split]
-```
+---
 
-## Error Scenarios
+## Checkpoint and State Management
 
-### Corrupted Version 0
+### State Format
 
-```
-Error: "No transaction log found"
-Cause: Version 0 file missing or corrupted
-Impact: Table completely unreadable
-Recovery: Must reconstruct metadata from split files or backups
-Prevention: S3 Conditional Writes protect version 0 from overwrites
-```
+The Avro state format uses a `state-v<version>/` directory containing a `_manifest.avro` file that references shared Avro manifest files in the `manifests/` directory. Each manifest file contains binary Avro-encoded `FileEntry` records representing live splits.
 
-### Version Gap
+Key properties of the Avro state format:
 
-```
-Files: 00000.json, 00001.json, 00003.json (missing 00002.json)
-Behavior: Stop reading at version 1, ignore version 3
-Impact: Data from version 2+ is invisible
-Recovery: Restore missing version file or accept data loss
-```
+- **Binary encoding** -- Avro binary format for fast serialization/deserialization.
+- **Manifest reuse** -- New transactions write only a manifest for new files, referencing existing manifests by path (Iceberg-style incremental writes).
+- **Partition bounds** -- Each manifest entry in the state manifest carries min/max partition values, enabling manifest-level pruning before any file entries are read.
+- **Zstandard compression** -- Manifests use zstd compression by default (configurable).
 
-### Concurrent Write Conflict
+For the full Avro schema (FileEntry, ManifestInfo, PartitionBounds) and field ID ranges, see [protocol.md -- Avro State Format](protocol.md#avro-state-format-v4). For design rationale, see [Avro State Design Document](../design/avro-state-file.md).
 
-```
-Error: "Failed to write transaction log version 5 - file already exists"
-Cause: Two writers tried to write same version simultaneously
-Impact: One writer succeeds, other fails
-Recovery: Failed writer retries with new version number
-```
+### When Checkpoints Are Created
 
-### Checkpoint Read Failure
+- **Automatically** every N transactions (default: 10, configured via `spark.indextables.checkpoint.interval`).
+- **Manually** via `CHECKPOINT INDEXTABLES '<path>'` or `COMPACT INDEXTABLES '<path>'` SQL commands.
+- **After MERGE SPLITS** operations (when `spark.indextables.state.compaction.afterMerge` is enabled, which is the default).
 
-```
-Error: Failed to read checkpoint at version 50
-Behavior: Fall back to reading all individual transaction files
-Impact: Slower read performance, but data remains accessible
-Recovery: Recreate checkpoint or continue with degraded performance
-```
+### Compaction
 
-## Migration and Upgrades
+Over time, incremental state writes accumulate tombstones (removed file paths) and manifest fragmentation. Compaction rewrites the entire state cleanly:
 
-### Protocol Version Upgrades
+**Compaction triggers:**
 
-```scala
-// Automatic upgrade when new features are used
-transactionLog.upgradeProtocol(
-  newMinReaderVersion = 2,  // Requires readers to understand new features
-  newMinWriterVersion = 3   // Requires writers to support new operations
-)
+| Condition | Default Threshold | Config Key |
+|-----------|------------------|------------|
+| Tombstone ratio exceeds threshold | >10% | `spark.indextables.state.compaction.tombstoneThreshold` |
+| Manifest count exceeds limit | >20 | `spark.indextables.state.compaction.maxManifests` |
+| After MERGE SPLITS | Always | `spark.indextables.state.compaction.afterMerge` |
+| Force via SQL | N/A | `COMPACT INDEXTABLES '<path>'` |
 
-// Writes new protocol version in next transaction
+**Compaction process:**
+
+1. Read all live files (tombstones applied).
+2. Sort files by partition values for locality -- this ensures files from the same partition end up in the same manifest, maximizing the effectiveness of partition pruning.
+3. Partition into chunks of up to 50,000 entries (configurable via `spark.indextables.state.entriesPerManifest`).
+4. Write new manifests with computed partition bounds.
+5. Write a clean state manifest with zero tombstones.
+
+### Observability
+
+Use `DESCRIBE INDEXTABLES STATE` to inspect the current state:
+
+```sql
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
 ```
 
-### Schema Evolution
+Returns the current state format, version, file count, manifest count, tombstone count and ratio, and whether compaction is recommended.
 
-**Not Currently Supported** - Schema is immutable after table creation.
+---
 
-**Future Enhancement:**
-- Add `SchemaEvolutionAction` to track schema changes
-- Support column additions, deletions, type changes
-- Maintain backward compatibility with old data files
+## Retention and Cleanup
 
-### Backward Compatibility
+### Time Travel
 
-- **Version 0 Format**: Must remain stable forever (breaking changes require new table)
-- **Action Types**: New action types can be added (old readers ignore unknown types)
-- **Optional Fields**: New optional fields can be added to existing actions
+The transaction log enables time travel -- the ability to query the table's state at any historical version. Because each version file records a delta of changes (files added and removed), replaying versions from a checkpoint (or from version 0 if no checkpoint exists) up to version N reconstructs the exact table state at version N.
 
-## Best Practices
+Time travel is bounded by retention settings. As old version files and state directories are cleaned up, the range of reachable historical versions narrows. Once a version file is deleted, the table state at that version can no longer be reconstructed. The `TRUNCATE INDEXTABLES TIME TRAVEL` SQL command explicitly removes all historical versions, collapsing the table to only its current state. Always run with `DRY RUN` first to preview what will be deleted.
 
-### For Table Writers
+### Transaction Log Retention
 
-1. **Always check initialization**: Call `initialize()` is idempotent
-2. **Use atomic operations**: Prefer batch writes over individual file commits
-3. **Handle conflicts gracefully**: Retry with new version on conflict
-4. **Set proper retention**: Balance storage costs vs recovery capabilities
-5. **Enable checkpoints**: Dramatically improves read performance
+Old version files are cleaned up when all conditions are met:
 
-### For Table Readers
+1. File age exceeds retention period (default: configurable via `spark.indextables.purge.txLogRetentionHours`).
+2. File version is covered by an existing checkpoint.
+3. File is not the current version.
+4. Version 0 follows the same rules -- it may be deleted once covered by a checkpoint. The checkpoint preserves the protocol and metadata information originally recorded in version 0.
 
-1. **Cache aggressively**: Transaction log reads can be expensive
-2. **Use checkpoints**: Always prefer checkpoint + incremental over full read
-3. **Handle missing files**: Gracefully handle temporary S3 inconsistencies
-4. **Validate schema**: Always check protocol compatibility before reading
+### State Retention
 
-### For Operations Teams
+Multiple state directories may exist temporarily. Retention controls:
 
-1. **Monitor version 0**: Alert if version 0 is ever missing or corrupted
-2. **Set up retention policies**: Configure appropriate retention for your use case
-3. **Enable cleanup**: Automatic cleanup prevents unbounded storage growth
-4. **Test recovery**: Regularly verify you can recover from checkpoint
-5. **Monitor checkpoint creation**: Ensure checkpoints are being created on schedule
+| Config | Default | Description |
+|--------|---------|-------------|
+| `spark.indextables.state.retention.versions` | 2 | Number of old state versions to keep |
+| `spark.indextables.state.retention.hours` | 168 (7 days) | Time-based retention for old states |
 
-## Performance Tuning
+### Manifest Garbage Collection
 
-### Parallel I/O
+With shared manifests, orphaned manifest files can accumulate when state directories are deleted but their manifests are no longer referenced. The garbage collector:
 
-```scala
-// Configure parallel transaction log reading
-"spark.indextables.checkpoint.parallelism" -> "8"  // Use 8 threads for I/O
+1. Scans all retained state versions to build a set of reachable manifests.
+2. Lists all files in `manifests/`.
+3. Deletes unreferenced manifests older than the safety window (default: 1 hour, configured via `spark.indextables.state.gc.minManifestAgeHours`).
 
-// Configure read timeout
-"spark.indextables.checkpoint.read.timeoutSeconds" -> "60"
+The age-based safety window prevents race conditions with in-flight writes that reference newly-created manifests.
+
+### SQL Commands for Maintenance
+
+| Command | Purpose |
+|---------|---------|
+| `CHECKPOINT INDEXTABLES '<path>'` | Force state snapshot creation |
+| `COMPACT INDEXTABLES '<path>'` | Alias for CHECKPOINT -- forces full compaction |
+| `TRUNCATE INDEXTABLES TIME TRAVEL '<path>'` | Remove all historical versions, keep only current state |
+| `PURGE INDEXTABLE '<path>' OLDER THAN 7 DAYS` | Remove orphaned splits, old versions, old state dirs |
+| `DESCRIBE INDEXTABLES STATE '<path>'` | Inspect state format, version, tombstone ratio |
+
+See [sql-commands.md](sql-commands.md) for full syntax, options, and output schemas.
+
+---
+
+## Concurrency Control
+
+### Optimistic Concurrency with Conditional Writes
+
+All transaction log writes use cloud storage conditional writes:
+
+- **S3**: `PutObject` with `If-None-Match: *` header. Returns HTTP 412 on conflict.
+- **Azure**: Equivalent lease-based conditional writes.
+
+This provides serializable write isolation without distributed locks. When two writers race for the same version:
+
+```
+Writer A: writes version 5 --> SUCCESS (file created)
+Writer B: writes version 5 --> FAILURE (412 Precondition Failed)
+Writer B: re-reads state, writes version 6 --> SUCCESS
 ```
 
-### Checkpoint Frequency
+### State Write Concurrency
 
-```scala
-// More frequent checkpoints = faster reads but more I/O
-"spark.indextables.checkpoint.interval" -> "10"  // Checkpoint every 10 transactions
+Avro state writes also use conditional semantics:
 
-// Less frequent checkpoints = slower reads but less I/O
-"spark.indextables.checkpoint.interval" -> "50"  // Checkpoint every 50 transactions
+1. Check if the target state directory exists.
+2. Write `_manifest.avro` with `ifNotExists`.
+3. On conflict, **re-read the base state** (to pick up the concurrent writer's changes), increment version, and retry.
+
+Re-reading the base state on every retry is critical to avoid stale manifest lists.
+
+### Retry Configuration
+
+| Config | Default | Description |
+|--------|---------|-------------|
+| `spark.indextables.transaction.retry.maxAttempts` | 10 | Maximum version-file retry attempts |
+| `spark.indextables.transaction.retry.baseDelayMs` | 100 | Initial backoff delay |
+| `spark.indextables.transaction.retry.maxDelayMs` | 5000 | Maximum backoff cap |
+| `spark.indextables.state.retry.maxAttempts` | 10 | Maximum state-write retry attempts |
+| `spark.indextables.state.retry.baseDelayMs` | 100 | Initial backoff delay |
+| `spark.indextables.state.retry.maxDelayMs` | 5000 | Maximum backoff cap |
+
+---
+
+## Schema Deduplication
+
+Large schemas (400+ columns) can bloat the transaction log when each AddAction carries a full copy. Schema deduplication (V3+) solves this:
+
+1. Compute a canonical SHA-256 hash of the schema JSON (sorted keys, sorted named arrays, Base64-encoded, truncated to 16 characters).
+2. Store the schema once in `MetadataAction.configuration` under the key `docMappingSchema.<hash>`.
+3. Each AddAction carries only the hash in `docMappingRef` instead of the full schema in `docMappingJson`.
+
+For details on hash computation and renormalization, see [protocol.md -- Schema Deduplication](protocol.md#schema-deduplication-v3).
+
+---
+
+## Data Skipping
+
+AddActions carry per-column `minValues` and `maxValues` maps that enable data skipping at the split level. Long text values are truncated (default: 32 characters) to prevent state bloat. Partition columns are never truncated.
+
+With Avro state (V4), partition bounds are also stored at the manifest level in `ManifestInfo.partitionBounds`, enabling an additional layer of pruning before individual file entries are even read.
+
+Configuration:
+
+| Config | Default | Description |
+|--------|---------|-------------|
+| `spark.indextables.stats.truncation.enabled` | true | Enable statistics truncation |
+| `spark.indextables.stats.truncation.maxLength` | 32 | Maximum characters for string statistics |
+| `spark.indextables.dataSkippingNumIndexedCols` | 32 | Number of columns to index for skipping |
+
+---
+
+## Comparison to Delta Lake and Iceberg
+
+| Aspect | IndexTables (V4) | Delta Lake | Apache Iceberg |
+|--------|-----------------|------------|----------------|
+| **Data file format** | Tantivy search index (`.split`) | Parquet | Parquet, ORC, Avro |
+| **Primary use case** | Full-text search | OLAP/Analytics | OLAP/Analytics |
+| **State format** | Avro manifests (binary) | JSON checkpoint + Parquet | Avro manifest files |
+| **Manifest reuse** | Iceberg-style shared manifests | No (full rewrite) | Yes (manifest lists) |
+| **Partition pruning** | Manifest-level bounds | File-level statistics | Manifest-level bounds |
+| **Conditional writes** | S3 `If-None-Match` (native) | DynamoDB / S3 multi-part | Catalog-based locking |
+| **Schema evolution** | Immutable (future planned) | Full support | Full support |
+| **Time travel** | Via transaction log | Via transaction log | Via snapshots |
+| **Merge resilience** | SkipAction with cooldown | Not present | Not present |
+
+IndexTables' state architecture is most similar to Iceberg's manifest list + manifest file approach. The key difference is that IndexTables stores search indexes rather than columnar data files.
+
+---
+
+## Migration Guide
+
+### Upgrading Existing Tables
+
+Tables created at older protocol versions (V1, V2, V3) are automatically upgraded to V4 Avro state when a checkpoint is created. You can also force the upgrade explicitly:
+
+```sql
+-- Check current state format
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+
+-- Upgrade to V4 Avro state
+CHECKPOINT INDEXTABLES 's3://bucket/path';
+
+-- Verify upgrade
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+-- format should now show "avro-state"
 ```
 
-### Cache Tuning
+The upgrade reads the current table state (from version files or any existing checkpoint), writes a new Avro state directory with all live files, and updates `_last_checkpoint`. No data files are modified -- the upgrade only affects transaction log metadata.
 
-```scala
-// Longer cache TTL = fewer reads but stale data risk
-"spark.indextables.transaction.cache.expirationSeconds" -> "600"  // 10 minutes
-
-// Shorter cache TTL = fresher data but more I/O
-"spark.indextables.transaction.cache.expirationSeconds" -> "60"  // 1 minute
-```
-
-## Comparison to Delta Lake
-
-### Similarities
-
-- JSON-based transaction log format
-- Version numbering with zero-padding
-- Checkpoint compaction system
-- Add/Remove action semantics
-- Protocol versioning
-- Metadata in version 0
-
-### Differences
-
-| Feature | IndexTables | Delta Lake |
-|---------|-------------|------------|
-| **File Format** | Tantivy search index (.split) | Parquet (.parquet) |
-| **Primary Use Case** | Full-text search | OLAP/Analytics |
-| **Conditional Writes** | S3 If-None-Match (native) | S3 PutObject with conflict detection |
-| **Version Protection** | All versions immutable via S3 | Optimistic concurrency control |
-| **Schema Evolution** | Not yet supported | Full support |
-| **Time Travel** | Via transaction log | Via transaction log + @ syntax |
-| **SkipAction** | Built-in for merge resilience | Not present |
-| **Merge Operations** | In-process via tantivy4java | Spark-based merge |
-
-## Future Enhancements
-
-### Planned
-
-1. **Schema Evolution**: Support for schema changes over time
-2. **Column Mapping**: Decouple physical column names from logical names
-3. **Deletion Vectors**: Efficient row-level deletes without rewriting files
-4. **Multi-Part Checkpoints**: Support for very large tables (millions of files)
-5. **Incremental Checksums**: Faster checkpoint validation
-
-### Under Consideration
-
-1. **Time Travel Queries**: `SELECT * FROM table@v100` syntax
-2. **VACUUM Command**: Physically delete removed files
-3. **OPTIMIZE Command**: Automatic file compaction
-4. **Change Data Feed**: Track row-level changes
-5. **Liquid Clustering**: Automatic data organization
+---
 
 ## Troubleshooting
 
-### Table Unreadable
+### Table Unreadable ("No transaction log found")
 
-**Symptom**: "No transaction log found" error
-**Diagnosis**:
+**Cause:** No checkpoint and no version 0 exist. On a healthy table, version 0 may have been deleted after a checkpoint captured its contents -- this is normal. The error indicates that neither a checkpoint nor version 0 can be found.
+
 ```bash
-# Check if version 0 exists
-aws s3 ls s3://bucket/table/_transaction_log/00000000000000000000.json
+# Check for a checkpoint or state directory
+aws s3 ls s3://bucket/table/_transaction_log/_last_checkpoint
+aws s3 ls s3://bucket/table/_transaction_log/state-v
 
-# Check if _transaction_log directory exists
-aws s3 ls s3://bucket/table/_transaction_log/
+# If no checkpoint exists, check for version 0
+aws s3 ls s3://bucket/table/_transaction_log/00000000000000000000.json
 ```
 
-**Solutions**:
-1. Restore version 0 from backup
-2. Reconstruct metadata from existing split files
-3. If unrecoverable, recreate table with same schema
+**Recovery:** If a checkpoint exists but `_last_checkpoint` is missing or corrupted, recreate it. If no checkpoint or version files exist, use `REPAIR INDEXFILES TRANSACTION LOG '<path>'` to reconstruct from existing split files.
 
 ### Slow Reads
 
-**Symptom**: Reads taking multiple seconds
-**Diagnosis**:
-```scala
-// Check number of transaction files
-val versions = transactionLog.getVersions()
-println(s"Transaction files: ${versions.length}")
+**Cause:** No state snapshot exists, forcing replay of all version files from version 0.
 
-// Check if checkpoints exist
-val checkpoint = transactionLog.readLastCheckpoint()
-println(s"Last checkpoint: ${checkpoint.map(_.version)}")
+```sql
+-- Check current state
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+
+-- Create a state snapshot
+CHECKPOINT INDEXTABLES 's3://bucket/path';
 ```
 
-**Solutions**:
-1. Create checkpoint manually
-2. Increase checkpoint frequency
-3. Enable parallel I/O
-4. Increase cache TTL
+### High Tombstone Ratio
 
-### High S3 Costs
+**Cause:** Many merge or delete operations without compaction.
 
-**Symptom**: Excessive S3 GET requests
-**Diagnosis**: Monitor S3 access logs for transaction log reads
-**Solutions**:
-1. Increase cache TTL
-2. Create checkpoints more frequently
-3. Enable aggressive cleanup of old versions
+```sql
+-- Check tombstone ratio
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+
+-- If needs_compaction is true:
+COMPACT INDEXTABLES 's3://bucket/path';
+```
+
+### Concurrent Write Conflicts
+
+**Symptom:** `IllegalStateException: Failed to write transaction log version N - file already exists`
+
+**Cause:** Multiple writers attempted the same version. The system retries automatically (up to 10 attempts by default). If retries are exhausted, increase `spark.indextables.transaction.retry.maxAttempts` or reduce write concurrency.
+
+---
+
+## Best Practices
+
+### For Writers
+
+- **Prefer append mode** -- Appends are the cheapest operation (no file listing required).
+- **Batch small writes** -- Many tiny transactions create checkpoint/compaction overhead. Prefer fewer, larger transactions.
+- **Let checkpoints happen automatically** -- The default interval of 10 transactions is appropriate for most workloads.
+
+### For Readers
+
+- **Upgrade older tables** -- Run `CHECKPOINT INDEXTABLES` on any pre-V4 tables to upgrade them to the Avro state format.
+- **Leverage partition pruning** -- Partition your data and filter by partition columns to skip irrelevant manifests.
+- **Configure cache TTL appropriately** -- Default cache expiration is 5 minutes (`spark.indextables.transaction.cache.expirationSeconds`). Increase for read-heavy workloads; decrease for write-heavy workloads where freshness matters.
+
+### For Operations
+
+- **Run periodic PURGE** -- Schedule `PURGE INDEXTABLE` to clean up orphaned files and old state directories.
+- **Monitor tombstone ratio** -- Use `DESCRIBE INDEXTABLES STATE` to check health. Compact when tombstone ratio exceeds 10%.
+- **Monitor checkpoint existence** -- Ensure at least one valid checkpoint or Avro state directory exists. Version 0 is routinely deleted after checkpoints, so monitor for checkpoint health rather than version 0 file presence.
+- **Use TRUNCATE TIME TRAVEL with caution** -- This is irreversible. Always run with `DRY RUN` first.
+
+---
 
 ## References
 
-- [Delta Lake Protocol](https://github.com/delta-io/delta/blob/master/PROTOCOL.md)
-- [AWS S3 Conditional Writes](https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes/)
-- [JSON Lines Format](https://jsonlines.org/)
+- [protocol.md](protocol.md) -- Detailed wire-level protocol specification (action schemas, Avro field IDs, configuration tables)
+- [sql-commands.md](sql-commands.md) -- Full SQL command syntax and output schemas
+- [configuration.md](configuration.md) -- Complete configuration reference
+- [Avro State Design Document](../design/avro-state-file.md) -- Original design document for the V4 Avro state format
+- [Delta Lake Protocol](https://github.com/delta-io/delta/blob/master/PROTOCOL.md) -- Inspiration for the transaction log design
+- [Apache Iceberg Spec](https://iceberg.apache.org/spec/) -- Inspiration for the manifest reuse architecture
+
+---
 
 ## Changelog
 
+### v2.1 (February 2026)
+
+- Removed all references to the deprecated JSON checkpoint/state format
+- Document now exclusively covers the V4 Avro state protocol
+- Simplified read path, migration guide, and performance table
+- Updated cross-references to avro-state-file.md design document
+
+### v2.0 (February 2026)
+
+- Rewrote document to reflect V4 Avro state as the current protocol version
+- Removed spec-level detail that duplicates protocol.md
+- Added ACID guarantees section with conceptual explanations
+- Added migration guide for V1/V2/V3 to V4 upgrades
+- Updated directory structure to include `manifests/` and `state-v*/`
+- Updated comparison table to include Apache Iceberg
+- Added compaction triggers and operational guidance
+- Added SQL command summary for maintenance operations
+- Added troubleshooting section
+
 ### v1.0 (October 2025)
+
 - Initial protocol specification
 - S3 Conditional Writes implementation
-- Version 0 immutability protection
-- Checkpoint system with parallel I/O
+- Version 0 conditional write protection
 - SkipAction for merge resilience
-- Enhanced cache management

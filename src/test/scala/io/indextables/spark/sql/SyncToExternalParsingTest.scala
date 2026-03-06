@@ -707,4 +707,121 @@ class SyncToExternalParsingTest extends TestBase {
       )
     }
   }
+
+  // ==========================================================================
+  // HASHED FASTFIELDS INCLUDE / EXCLUDE tests
+  // ==========================================================================
+
+  test("parse SYNC with HASHED FASTFIELDS INCLUDE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data' HASHED FASTFIELDS INCLUDE ('title', 'category') AT LOCATION '/index'"
+    )
+    cmd.hashedFastfieldsInclude shouldBe Seq("title", "category")
+    cmd.hashedFastfieldsExclude shouldBe empty
+  }
+
+  test("parse SYNC with HASHED FASTFIELDS EXCLUDE") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/data' HASHED FASTFIELDS EXCLUDE ('huge_blob', 'raw_html') AT LOCATION '/index'"
+    )
+    cmd.hashedFastfieldsInclude shouldBe empty
+    cmd.hashedFastfieldsExclude shouldBe Seq("huge_blob", "raw_html")
+  }
+
+  test("parse SYNC with HASHED FASTFIELDS INCLUDE single field") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data' HASHED FASTFIELDS INCLUDE ('title') AT LOCATION '/index'"
+    )
+    cmd.hashedFastfieldsInclude shouldBe Seq("title")
+    cmd.hashedFastfieldsExclude shouldBe empty
+  }
+
+  test("parse SYNC with all options combined including HASHED FASTFIELDS") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+        |  INDEXING MODES ('content':'text', 'status':'string')
+        |  FASTFIELDS MODE HYBRID
+        |  HASHED FASTFIELDS INCLUDE ('title', 'category')
+        |  TARGET INPUT SIZE 1G
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "delta"
+    cmd.hashedFastfieldsInclude shouldBe Seq("title", "category")
+    cmd.hashedFastfieldsExclude shouldBe empty
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.targetInputSize shouldBe Some(1L * 1024L * 1024L * 1024L)
+    cmd.dryRun shouldBe true
+    cmd.indexingModes should have size 2
+  }
+
+  test("default hashed fastfields should be empty") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.hashedFastfieldsInclude shouldBe empty
+    cmd.hashedFastfieldsExclude shouldBe empty
+  }
+
+  test("case-insensitive HASHED FASTFIELDS keyword") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/data' hashed fastfields include ('title', 'category') AT LOCATION '/index'"
+    )
+    cmd.hashedFastfieldsInclude shouldBe Seq("title", "category")
+    cmd.hashedFastfieldsExclude shouldBe empty
+  }
+
+  // ==========================================================================
+  // INVALIDATE ALL PARTITIONS tests
+  // ==========================================================================
+
+  test("parse SYNC with INVALIDATE ALL PARTITIONS flag") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 INVALIDATE ALL PARTITIONS AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe true
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("year")
+  }
+
+  test("default invalidateAllPartitions should be false") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe false
+  }
+
+  test("parse SYNC without WHERE and without INVALIDATE ALL PARTITIONS") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe false
+    cmd.wherePredicates shouldBe empty
+  }
+
+  test("parse SYNC with INVALIDATE ALL PARTITIONS and all options") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+        |  INDEXING MODES ('content':'text')
+        |  FASTFIELDS MODE HYBRID
+        |  TARGET INPUT SIZE 2G
+        |  FROM VERSION 42
+        |  WHERE year = '2024'
+        |  INVALIDATE ALL PARTITIONS
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.invalidateAllPartitions shouldBe true
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("year")
+    cmd.fromVersion shouldBe Some(42L)
+    cmd.dryRun shouldBe true
+  }
+
+  test("case-insensitive INVALIDATE ALL PARTITIONS") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' WHERE year >= 2024 invalidate all partitions AT LOCATION '/tmp/index'"
+    )
+    cmd.invalidateAllPartitions shouldBe true
+  }
 }

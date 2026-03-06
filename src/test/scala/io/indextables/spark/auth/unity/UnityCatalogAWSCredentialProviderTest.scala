@@ -740,8 +740,10 @@ class UnityCatalogAWSCredentialProviderTest
     val writeCreds = writeProvider.getCredentials()
 
     // Must get WRITE credentials, NOT the cached READ credentials
-    assert(writeCreds.getAWSAccessKeyId == "WRITE_KEY_2",
-      "PATH_READ_WRITE should get its own credentials, not reuse cached PATH_READ credentials")
+    assert(
+      writeCreds.getAWSAccessKeyId == "WRITE_KEY_2",
+      "PATH_READ_WRITE should get its own credentials, not reuse cached PATH_READ credentials"
+    )
     assert(requestLog.size == 2, "Should have made a second API call for PATH_READ_WRITE")
     assert(requestLog.last.body.contains("PATH_READ_WRITE"))
   }
@@ -777,8 +779,10 @@ class UnityCatalogAWSCredentialProviderTest
     val readCreds = readProvider.getCredentials()
 
     // Must get READ credentials, NOT the cached WRITE credentials
-    assert(readCreds.getAWSAccessKeyId == "READ_KEY_2",
-      "PATH_READ should get its own credentials, not reuse cached PATH_READ_WRITE credentials")
+    assert(
+      readCreds.getAWSAccessKeyId == "READ_KEY_2",
+      "PATH_READ should get its own credentials, not reuse cached PATH_READ_WRITE credentials"
+    )
     assert(requestLog.size == 2, "Should have made a second API call for PATH_READ")
     assert(requestLog.last.body.contains("PATH_READ"))
     assert(!requestLog.last.body.contains("PATH_READ_WRITE"))

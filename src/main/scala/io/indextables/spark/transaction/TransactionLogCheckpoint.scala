@@ -1019,7 +1019,7 @@ class TransactionLogCheckpoint(
         val currentTime = System.currentTimeMillis()
 
         // List files once, build a map for O(1) lookups
-        val allFiles = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
+        val allFiles       = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
         val fileInfoByName = allFiles.map(f => new Path(f.path).getName -> f).toMap
 
         // Clean up old log files based on retention policy

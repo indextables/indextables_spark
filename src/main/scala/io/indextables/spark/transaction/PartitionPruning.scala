@@ -508,7 +508,7 @@ object PartitionPruning {
           // For timestamp partitions, partitionValue might be stored as ISO-8601 string, JDBC format, or epoch millis
           try {
             // Try ISO-8601 format first (matches storage format)
-            val instant           = java.time.Instant.parse(partitionValue)
+            val instant            = java.time.Instant.parse(partitionValue)
             val partitionTimestamp = java.sql.Timestamp.from(instant)
             partitionTimestamp.compareTo(timestamp)
           } catch {

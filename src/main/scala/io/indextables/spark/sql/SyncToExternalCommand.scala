@@ -31,6 +31,9 @@ import io.indextables.spark.sync.{
   CompanionSourceFile,
   CompanionSourceReader,
   DeltaSourceReader,
+  DistributedAntiJoin,
+  DistributedScanResult,
+  DistributedSourceScanner,
   IcebergSourceReader,
   ParquetDirectoryReader,
   SyncConfig,
@@ -76,7 +79,10 @@ case class SyncToExternalCommand(
   catalogName: Option[String] = None,
   catalogType: Option[String] = None,
   warehouse: Option[String] = None,
+  hashedFastfieldsInclude: Seq[String] = Seq.empty,
+  hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
+  invalidateAllPartitions: Boolean = false,
   dryRun: Boolean)
     extends LeafRunnableCommand {
 
@@ -144,9 +150,9 @@ case class SyncToExternalCommand(
 
   private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
     // 1. Extract merged configuration and resolve credentials for source table access
-    val hadoopConf        = sparkSession.sparkContext.hadoopConfiguration
-    val sparkConfigs      = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-    val hadoopConfigs     = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
       ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
@@ -255,12 +261,87 @@ case class SyncToExternalCommand(
     resolvedStorageLocation: Option[String],
     startTime: Long
   ): Seq[Row] = {
-    val sourceVersionOpt                  = reader.sourceVersion()
+    // 1. Check if distributed log read is enabled (default: true)
+    val distributedEnabled = mergedConfigs
+      .get("spark.indextables.companion.sync.distributedLogRead.enabled")
+      .forall(_.equalsIgnoreCase("true"))
+
+    // Attempt distributed scan if enabled.
+    // WHERE predicates are passed to the scanner so it can build the PartitionFilter
+    // using lightweight snapshot metadata (getSnapshotInfo) — avoids triggering the
+    // blocking DeltaTableReader.listFiles() call that reader.partitionColumns() would cause.
+    val distributedResult: Option[DistributedScanResult] = if (distributedEnabled) {
+      try {
+        val scanner = new DistributedSourceScanner(sparkSession)
+        val result = sourceFormat match {
+          case "delta" =>
+            val deltaPath         = resolvedStorageLocation.getOrElse(sourcePath)
+            val sourceCredentials = resolveCredentials(mergedConfigs, deltaPath)
+            scanner.scanDeltaTable(deltaPath, sourceCredentials, wherePredicates = wherePredicates)
+          case "iceberg" =>
+            val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
+            val (ns, tbl) = {
+              val parts = sourcePath.split("\\.", 2)
+              if (parts.length == 2) (parts(0), parts(1))
+              else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
+            }
+            scanner.scanIcebergTable(
+              effectiveCatalogName.getOrElse("default"),
+              ns,
+              tbl,
+              icebergConfig,
+              fromSnapshot,
+              wherePredicates = wherePredicates
+            )
+          case "parquet" =>
+            val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+            scanner.scanParquetDirectory(sourcePath, sourceCredentials, wherePredicates = wherePredicates)
+          case other =>
+            throw new IllegalArgumentException(s"Unsupported source format for distributed scan: $other")
+        }
+        logger.info(
+          s"Distributed scan succeeded: ${result.numDistributedParts} parts, " +
+            s"version=${result.version.getOrElse("none")}"
+        )
+        Some(result)
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Distributed log read failed, falling back to single-call path: ${e.getMessage}")
+          None
+      }
+    } else {
+      None
+    }
+
+    // Extract metadata from distributed result or fall back to reader
+    val (sourceVersionOpt, partitionColumns, icebergStorageRoot, sampleFilePath) = distributedResult match {
+      case Some(dr) =>
+        (dr.version, dr.partitionColumns, dr.storageRoot, dr.sampleFilePath)
+      case None =>
+        (reader.sourceVersion(), reader.partitionColumns(), reader.storageRoot(), reader.schemaSourceParquetFile())
+    }
+
     val sourceVersionLong: java.lang.Long = sourceVersionOpt.map(Long.box).orNull
 
+    // Get source files: from distributed RDD or fallback to reader.getAllFiles()
+    val (allSourceFiles, distributedRDD) = distributedResult match {
+      case Some(dr) =>
+        // For DRY RUN and simple checks, we need collected files.
+        // For the anti-join, we'll use the RDD directly.
+        (None, Some(dr.filesRDD))
+      case None =>
+        val files = reader.getAllFiles()
+        (Some(files), None)
+    }
+
     // Check for non-existent source (Delta: version -1, Parquet: empty dir, Iceberg: no snapshot)
-    val allSourceFiles = reader.getAllFiles()
-    if (allSourceFiles.isEmpty && sourceFormat == "delta" && sourceVersionOpt.isEmpty) {
+    val sourceIsEmpty = allSourceFiles match {
+      case Some(files) => files.isEmpty && sourceFormat == "delta" && sourceVersionOpt.isEmpty
+      case None        =>
+        // For distributed: check if version indicates empty
+        sourceFormat == "delta" && sourceVersionOpt.isEmpty
+    }
+    if (sourceIsEmpty) {
       val durationMs = System.currentTimeMillis() - startTime
       logger.error(s"Source table at $sourcePath does not exist or has no data")
       return Seq(
@@ -280,23 +361,22 @@ case class SyncToExternalCommand(
       )
     }
 
-    // For Iceberg: the storage root is the actual S3/Azure base path. This is needed
-    // because sourcePath is a table identifier (e.g., "prod.events"), not an S3 path.
-    // The reader computes this internally and returns relative file paths from getAllFiles().
-    val icebergStorageRoot: Option[String] = reader.storageRoot()
-
-    val partitionColumns = reader.partitionColumns()
-    val sourceSchema     = Some(reader.schema())
+    // Schema: prefer distributed result (already parsed from snapshotInfo.getSchemaJson()),
+    // fall back to reader.schema() (independent JNI call) only for non-distributed or Parquet
+    val sourceSchemaOpt = distributedResult.flatMap(_.schema).orElse(Some(reader.schema()))
 
     logger.info(
       s"Source table at $sourcePath: version=${sourceVersionOpt.getOrElse("none")}, " +
-        s"partitionColumns=${partitionColumns.mkString(",")}, files=${allSourceFiles.size}"
+        s"partitionColumns=[${partitionColumns.mkString(",")}], " +
+        s"schemaFields=[${sourceSchemaOpt.map(_.fieldNames.mkString(",")).getOrElse("none")}], " +
+        s"distributed=${distributedResult.isDefined}"
     )
 
     // 2. DRY RUN mode: compute plan from source table only, no filesystem modifications
     if (dryRun) {
-      var allFiles = allSourceFiles
-      allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession, fullSchema = sourceSchema)
+      val collectedFiles = allSourceFiles.getOrElse(distributedRDD.get.collect().toSeq)
+      var allFiles       = collectedFiles
+      allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession, fullSchema = sourceSchemaOpt)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups       = planIndexingGroups(allFiles, maxGroupSize)
       val durationMs   = System.currentTimeMillis() - startTime
@@ -343,7 +423,8 @@ case class SyncToExternalCommand(
 
     try {
       // 5. Determine sync mode: initial vs incremental
-      val sourceSchema = reader.schema()
+      // Reuse schema from distributed result to avoid redundant JNI call to DeltaTableReader.readSchema()
+      val sourceSchema                   = sourceSchemaOpt.getOrElse(reader.schema())
       val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, sourceSchema, partitionColumns)
 
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
@@ -370,31 +451,36 @@ case class SyncToExternalCommand(
 
       // Validate indexing mode values
       import io.indextables.spark.util.IndexingModes
-      effectiveIndexingModes.foreach { case (field, mode) =>
-        if (!IndexingModes.isRecognized(mode)) {
-          throw new IllegalArgumentException(
-            s"Unrecognized indexing mode '$mode' for field '$field'. " +
-            s"Valid modes: ${IndexingModes.validModesDescription}")
-        }
-        // Validate non-empty regex for custom modes
-        IndexingModes.extractCustomRegex(mode).foreach { regex =>
-          if (regex.isEmpty) {
+      effectiveIndexingModes.foreach {
+        case (field, mode) =>
+          if (!IndexingModes.isRecognized(mode)) {
             throw new IllegalArgumentException(
-              s"Custom regex mode '$mode' for field '$field' requires a non-empty regex pattern after ':'")
+              s"Unrecognized indexing mode '$mode' for field '$field'. " +
+                s"Valid modes: ${IndexingModes.validModesDescription}"
+            )
           }
-        }
+          // Validate non-empty regex for custom modes
+          IndexingModes.extractCustomRegex(mode).foreach { regex =>
+            if (regex.isEmpty) {
+              throw new IllegalArgumentException(
+                s"Custom regex mode '$mode' for field '$field' requires a non-empty regex pattern after ':'"
+              )
+            }
+          }
       }
 
       // Validate field names exist in source schema
       if (effectiveIndexingModes.nonEmpty) {
         val schemaFieldNames = sourceSchema.fieldNames.map(_.toLowerCase).toSet ++
           partitionColumns.map(_.toLowerCase).toSet
-        effectiveIndexingModes.foreach { case (field, mode) =>
-          if (!schemaFieldNames.contains(field.toLowerCase)) {
-            throw new IllegalArgumentException(
-              s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
-              s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}")
-          }
+        effectiveIndexingModes.foreach {
+          case (field, mode) =>
+            if (!schemaFieldNames.contains(field.toLowerCase)) {
+              throw new IllegalArgumentException(
+                s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
+                  s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}"
+              )
+            }
         }
       }
 
@@ -415,15 +501,73 @@ case class SyncToExternalCommand(
         Seq.empty[String]
       }
 
+      // Resolve effective hashed fastfields include/exclude: use stored config from metadata if not specified
+      val (effectiveHfInclude, effectiveHfExclude) =
+        if (hashedFastfieldsInclude.nonEmpty || hashedFastfieldsExclude.nonEmpty) {
+          (hashedFastfieldsInclude, hashedFastfieldsExclude)
+        } else if (!isInitialSync) {
+          try {
+            val existingMeta = transactionLog.getMetadata()
+            val inc = existingMeta.configuration
+              .get("indextables.companion.hashedFastfieldsInclude")
+              .map(_.split(",").filter(_.nonEmpty).toSeq)
+              .getOrElse(Seq.empty)
+            val exc = existingMeta.configuration
+              .get("indextables.companion.hashedFastfieldsExclude")
+              .map(_.split(",").filter(_.nonEmpty).toSeq)
+              .getOrElse(Seq.empty)
+            (inc, exc)
+          } catch {
+            case _: Exception => (Seq.empty[String], Seq.empty[String])
+          }
+        } else {
+          (Seq.empty[String], Seq.empty[String])
+        }
+
       // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
       // All source readers return relative paths, so the anti-join is bucket-independent
       // and works across cross-region failover (different S3 buckets, same relative paths).
-      val (rawParquetFiles, splitsToInvalidate) =
-        computeAntiJoinChanges(allSourceFiles, existingFiles, isInitialSync)
+
+      // Scope invalidation: when WHERE clause is present and INVALIDATE ALL PARTITIONS is not set,
+      // only consider companion splits whose partition values match the WHERE predicate.
+      // Splits outside the WHERE range are left untouched.
+      val scopedExistingFiles =
+        if (!invalidateAllPartitions && effectiveWherePredicates.nonEmpty && partitionColumns.nonEmpty) {
+          val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, Some(sourceSchema))
+          val parsedPredicates =
+            PartitionPredicateUtils.parseAndValidatePredicates(effectiveWherePredicates, partitionSchema, sparkSession)
+          val filtered =
+            PartitionPredicateUtils.filterAddActionsByPredicates(existingFiles, partitionSchema, parsedPredicates)
+          logger.info(s"WHERE-scoped invalidation: ${existingFiles.size} -> ${filtered.size} companion splits in scope")
+          filtered
+        } else {
+          existingFiles
+        }
+
+      val (rawParquetFiles, splitsToInvalidate) = distributedRDD match {
+        case Some(rdd) =>
+          // Distributed anti-join using RDDs
+          val antiJoin = new DistributedAntiJoin(sparkSession)
+          val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
+          (result.filesToIndex, result.splitsToInvalidate)
+        case None =>
+          // In-memory anti-join (fallback path)
+          computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+      }
+
+      logger.info(
+        s"Anti-join result: ${rawParquetFiles.size} files to index, ${splitsToInvalidate.size} splits to invalidate"
+      )
+      if (rawParquetFiles.nonEmpty) {
+        val sample = rawParquetFiles.head
+        logger.info(
+          s"Anti-join sample file: path=${sample.path}, partitionValues=${sample.partitionValues}, size=${sample.size}"
+        )
+      }
 
       // 7b. Apply WHERE partition filter
       val parquetFilesToIndex =
-        applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession, effectiveWherePredicates, sourceSchema)
+        applyWhereFilter(rawParquetFiles, partitionColumns, sparkSession, effectiveWherePredicates, Some(sourceSchema))
 
       // Source version for commits (Delta version, Iceberg snapshot ID, or -1 for Parquet)
       val sourceVersion = sourceVersionOpt.getOrElse(-1L)
@@ -475,6 +619,61 @@ case class SyncToExternalCommand(
         .map(_.toInt)
         .getOrElse(8192)
 
+      // For distributed mode, column name mapping and schema source may come from the
+      // distributed result's sampleFilePath instead of the reader (which would trigger
+      // lazy file listing). For non-distributed mode, use reader methods as before.
+      val effectiveSchemaSourceFile = distributedResult match {
+        case Some(dr) => dr.sampleFilePath.orElse(reader.schemaSourceParquetFile())
+        case None     => reader.schemaSourceParquetFile()
+      }
+      val effectiveColumnNameMapping = distributedResult match {
+        case Some(_) if sourceFormat == "iceberg" =>
+          // For Iceberg in distributed mode, compute column name mapping from sample file
+          // without going through reader.columnNameMapping() (which triggers file listing)
+          sampleFilePath
+            .map { url =>
+              try {
+                val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
+                val icebergTableSchema = fromSnapshot match {
+                  case Some(id) =>
+                    val (ns, tbl) = {
+                      val parts = sourcePath.split("\\.", 2)
+                      (parts(0), parts(1))
+                    }
+                    io.indextables.tantivy4java.iceberg.IcebergTableReader.readSchema(
+                      effectiveCatalogName.getOrElse("default"),
+                      ns,
+                      tbl,
+                      icebergConfig,
+                      id
+                    )
+                  case None =>
+                    val (ns, tbl) = {
+                      val parts = sourcePath.split("\\.", 2)
+                      (parts(0), parts(1))
+                    }
+                    io.indextables.tantivy4java.iceberg.IcebergTableReader.readSchema(
+                      effectiveCatalogName.getOrElse("default"),
+                      ns,
+                      tbl,
+                      icebergConfig
+                    )
+                }
+                val fieldIdToName = icebergTableSchema.getFieldIdToNameMap
+                val storageConfig = IcebergSourceReader.buildParquetReaderStorageConfig(icebergConfig)
+                val mapping = io.indextables.tantivy4java.parquet.ParquetSchemaReader
+                  .readColumnMapping(url, fieldIdToName, storageConfig)
+                if (mapping != null && !mapping.isEmpty) mapping.asScala.toMap else Map.empty[String, String]
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"Failed to resolve Iceberg column name mapping in distributed mode: ${e.getMessage}")
+                  Map.empty[String, String]
+              }
+            }
+            .getOrElse(Map.empty[String, String])
+        case _ => reader.columnNameMapping()
+      }
+
       val syncConfig = SyncConfig(
         indexingModes = effectiveIndexingModes,
         fastFieldMode = fastFieldMode,
@@ -482,9 +681,11 @@ case class SyncToExternalCommand(
         splitTablePath = destPath,
         writerHeapSize = resolvedWriterHeapSize,
         readerBatchSize = readerBatchSize,
-        schemaSourceParquetFile = reader.schemaSourceParquetFile(),
-        columnNameMapping = reader.columnNameMapping(),
-        autoDetectNameMapping = sourceFormat == "iceberg"
+        schemaSourceParquetFile = effectiveSchemaSourceFile,
+        columnNameMapping = effectiveColumnNameMapping,
+        autoDetectNameMapping = sourceFormat == "iceberg",
+        hashedFastfieldsInclude = effectiveHfInclude,
+        hashedFastfieldsExclude = effectiveHfExclude
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
@@ -499,6 +700,8 @@ case class SyncToExternalCommand(
         splitsToInvalidate,
         effectiveIndexingModes,
         effectiveWherePredicates,
+        effectiveHfInclude,
+        effectiveHfExclude,
         sourceVersion,
         batchSize,
         maxConcurrentBatches,
@@ -523,6 +726,8 @@ case class SyncToExternalCommand(
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
+    effectiveHfInclude: Seq[String],
+    effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     batchSize: Int,
     maxConcurrentBatches: Int,
@@ -664,6 +869,8 @@ case class SyncToExternalCommand(
                     transactionLog,
                     effectiveIndexingModes,
                     effectiveWherePredicates,
+                    effectiveHfInclude,
+                    effectiveHfExclude,
                     sourceVersion,
                     externalStorageRoot
                   )
@@ -708,9 +915,29 @@ case class SyncToExternalCommand(
     fullSchema: Option[StructType] = None
   ): Seq[CompanionSourceFile] = {
     val effectivePreds = if (predicates.nonEmpty) predicates else wherePredicates
-    if (effectivePreds.isEmpty || partitionColumns.isEmpty) return files
+    if (effectivePreds.isEmpty || partitionColumns.isEmpty) {
+      logger.info(
+        s"applyWhereFilter: skipped (predicates=${effectivePreds.size}, partitionColumns=${partitionColumns.size})"
+      )
+      return files
+    }
+
+    logger.info(
+      s"applyWhereFilter: ${files.size} files, partitionColumns=[${partitionColumns.mkString(",")}], " +
+        s"predicates=[${effectivePreds.mkString("; ")}], " +
+        s"schemaFields=${fullSchema.map(_.fieldNames.mkString(",")).getOrElse("none")}"
+    )
+
+    // Log sample partition values for diagnosis
+    files.headOption.foreach { f =>
+      logger.info(s"applyWhereFilter: sample file partitionValues=${f.partitionValues}, path=${f.path}")
+    }
 
     val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(partitionColumns, fullSchema)
+    logger.info(
+      s"applyWhereFilter: partitionSchema=${partitionSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(",")}"
+    )
+
     val parsedPredicates =
       PartitionPredicateUtils.parseAndValidatePredicates(effectivePreds, partitionSchema, sparkSession)
 
@@ -737,6 +964,8 @@ case class SyncToExternalCommand(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
+    effectiveHfInclude: Seq[String],
+    effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     externalStorageRoot: Option[String]
   ): MetadataAction = {
@@ -774,7 +1003,11 @@ case class SyncToExternalCommand(
                                                         )
                                                       } else Map.empty) ++ fromVersion.map(v =>
       "indextables.companion.fromVersion" -> v.toString
-    )
+    ) ++ (if (effectiveHfInclude.nonEmpty)
+            Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
+          else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
+                                Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
+                              else Map.empty)
     existingMetadata.copy(configuration = companionConfig)
   }
 

@@ -24,16 +24,19 @@ import io.indextables.spark.TestBase
 /**
  * Tests for the multi-split limit short-circuit behavior.
  *
- * When splitsPerTask > 1, multiple splits are bundled into a single task.
- * The MultiSplitPartitionReader should stop processing splits once the
- * pushed limit has been satisfied.
+ * When splitsPerTask > 1, multiple splits are bundled into a single task. The MultiSplitPartitionReader should stop
+ * processing splits once the pushed limit has been satisfied.
  */
 class MultiSplitLimitShortCircuitTest extends TestBase {
 
   private val FORMAT = "io.indextables.spark.core.IndexTables4SparkTableProvider"
 
   /** Write multiple batches to the same path to create multiple splits. */
-  private def writeMultipleSplits(path: String, batchCount: Int, rowsPerBatch: Int): Unit = {
+  private def writeMultipleSplits(
+    path: String,
+    batchCount: Int,
+    rowsPerBatch: Int
+  ): Unit =
     (0 until batchCount).foreach { batch =>
       val startId = batch * rowsPerBatch
       val data = spark
@@ -49,7 +52,6 @@ class MultiSplitLimitShortCircuitTest extends TestBase {
         .mode("append")
         .save(path)
     }
-  }
 
   test("multi-split reader respects pushed LIMIT and returns exact row count") {
     withTempPath { tempPath =>
@@ -116,9 +118,7 @@ class MultiSplitLimitShortCircuitTest extends TestBase {
       // Filter + limit: category "0" appears for id % 10 == 0 → 10 per batch, 30 total
       val result = df.filter(col("category") === "0").limit(5).collect()
       result.length shouldBe 5
-      result.foreach { row =>
-        row.getString(row.fieldIndex("category")) shouldBe "0"
-      }
+      result.foreach(row => row.getString(row.fieldIndex("category")) shouldBe "0")
     }
   }
 

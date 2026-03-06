@@ -34,8 +34,8 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Tests for compact string indexing modes in companion splits.
  *
- * Exercises the `exact_only`, `text_uuid_exactonly`, `text_uuid_strip`,
- * and `text_custom_exactonly` modes via BUILD INDEXTABLES COMPANION FOR PARQUET.
+ * Exercises the `exact_only`, `text_uuid_exactonly`, `text_uuid_strip`, and `text_custom_exactonly` modes via BUILD
+ * INDEXTABLES COMPANION FOR PARQUET.
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
@@ -105,9 +105,9 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     val ss = spark
     import ss.implicits._
     val data = (0 until numRows).map { i =>
-      val traceId = UUID.randomUUID().toString
+      val traceId   = UUID.randomUUID().toString
       val requestId = UUID.randomUUID().toString
-      val message = s"Processing request $requestId for user_$i with trace $traceId"
+      val message   = s"Processing request $requestId for user_$i with trace $traceId"
       (i.toLong, traceId, requestId, message, s"name_$i", i * 1.5)
     }
     data
@@ -147,7 +147,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 10)
 
       // Read back one trace_id for later filtering
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData    = spark.read.parquet(parquetPath).collect()
       val targetTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
 
       val result = spark.sql(
@@ -198,9 +198,11 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Verify text search works on stripped text via IndexQuery
       companionDf.createOrReplaceTempView("text_uuid_test")
-      val textResults = spark.sql(
-        "SELECT * FROM text_uuid_test WHERE message indexquery 'processing'"
-      ).collect()
+      val textResults = spark
+        .sql(
+          "SELECT * FROM text_uuid_test WHERE message indexquery 'processing'"
+        )
+        .collect()
       // All messages contain "Processing" — should match all rows
       textResults.length shouldBe 10
     }
@@ -230,9 +232,11 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Verify text search works on stripped text
       companionDf.createOrReplaceTempView("strip_test")
-      val textResults = spark.sql(
-        "SELECT * FROM strip_test WHERE message indexquery 'processing'"
-      ).collect()
+      val textResults = spark
+        .sql(
+          "SELECT * FROM strip_test WHERE message indexquery 'processing'"
+        )
+        .collect()
       textResults.length shouldBe 10
     }
   }
@@ -263,9 +267,11 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Verify text search works on non-pattern content
       companionDf.createOrReplaceTempView("custom_test")
-      val textResults = spark.sql(
-        "SELECT * FROM custom_test WHERE audit_log indexquery 'processing'"
-      ).collect()
+      val textResults = spark
+        .sql(
+          "SELECT * FROM custom_test WHERE audit_log indexquery 'processing'"
+        )
+        .collect()
       // 4 out of 5 messages contain "Processing order"
       textResults.length shouldBe 4
 
@@ -274,31 +280,39 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       // After stripping, this token should NOT exist in the text index.
       // Note: we can't use "ORD-00000001" because the hash_field_rewriter
       // redirects regex-matching queries to the companion U64 hash field (expected).
-      val tokenResults = spark.sql(
-        "SELECT * FROM custom_test WHERE audit_log indexquery '00000001'"
-      ).collect()
+      val tokenResults = spark
+        .sql(
+          "SELECT * FROM custom_test WHERE audit_log indexquery '00000001'"
+        )
+        .collect()
       tokenResults.length shouldBe 0
 
       // Term "ORD" should also return 0 — "ord" token only exists if text wasn't stripped.
       // (The default tokenizer splits "ORD-00000001" into tokens "ord" and "00000001".)
       // Note: can't use "OR*" because it also matches "order" from "Processing order...".
-      val ordResults = spark.sql(
-        "SELECT * FROM custom_test WHERE audit_log indexquery 'ORD'"
-      ).collect()
+      val ordResults = spark
+        .sql(
+          "SELECT * FROM custom_test WHERE audit_log indexquery 'ORD'"
+        )
+        .collect()
       ordResults.length shouldBe 0
 
       // Wildcard "00*" should return 0 — tokens starting with "00" (e.g., "00000001")
       // only exist if the ORD-XXXXXXXX pattern was not stripped from the text.
-      val zeroWildcardResults = spark.sql(
-        "SELECT * FROM custom_test WHERE audit_log indexquery '00*'"
-      ).collect()
+      val zeroWildcardResults = spark
+        .sql(
+          "SELECT * FROM custom_test WHERE audit_log indexquery '00*'"
+        )
+        .collect()
       zeroWildcardResults.length shouldBe 0
 
       // Verify the extracted pattern IS still queryable via the companion hash redirect.
       // This is the key difference from text_custom_strip: exactonly preserves exact lookups.
-      val exactResults = spark.sql(
-        "SELECT * FROM custom_test WHERE audit_log indexquery '\"ORD-00000001\"'"
-      ).collect()
+      val exactResults = spark
+        .sql(
+          "SELECT * FROM custom_test WHERE audit_log indexquery '\"ORD-00000001\"'"
+        )
+        .collect()
       exactResults.length shouldBe 1
     }
   }
@@ -329,18 +343,22 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Verify text search works — "processing" should match even after ORD-* patterns stripped
       companionDf.createOrReplaceTempView("custom_strip_test")
-      val textResults = spark.sql(
-        "SELECT * FROM custom_strip_test WHERE audit_log indexquery 'processing'"
-      ).collect()
+      val textResults = spark
+        .sql(
+          "SELECT * FROM custom_strip_test WHERE audit_log indexquery 'processing'"
+        )
+        .collect()
       // 4 out of 5 messages contain "Processing order"
       textResults.length shouldBe 4
 
       // Verify stripped pattern is NOT searchable via phrase query on audit_log.
       // text_custom_strip should have removed ORD-XXXXXXXX from indexed text,
       // so a phrase query for "ORD-00000001" on audit_log should return 0.
-      val strippedResults = spark.sql(
-        "SELECT * FROM custom_strip_test WHERE audit_log indexquery '\"ORD-00000001\"'"
-      ).collect()
+      val strippedResults = spark
+        .sql(
+          "SELECT * FROM custom_strip_test WHERE audit_log indexquery '\"ORD-00000001\"'"
+        )
+        .collect()
       strippedResults.length shouldBe 0
     }
   }
@@ -406,14 +424,17 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 10)
 
       // Get a known trace_id
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData    = spark.read.parquet(parquetPath).collect()
       val targetTraceId = sourceData(3).getString(sourceData(3).fieldIndex("trace_id"))
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -434,14 +455,17 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 10)
 
       // Get a known message for filtering
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData    = spark.read.parquet(parquetPath).collect()
       val targetMessage = sourceData(0).getString(sourceData(0).fieldIndex("message"))
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('message':'text_uuid_exactonly') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('message':'text_uuid_exactonly') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -461,11 +485,14 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createUuidParquetData(parquetPath, numRows = 15)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -488,11 +515,13 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 5)
 
       // The command catches exceptions and returns an error row
-      val rows = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'bogus_mode') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()
+      val rows = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'bogus_mode') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()
       rows.length shouldBe 1
       rows(0).getString(2) shouldBe "error" // status
       rows(0).getString(10) should include("Unrecognized indexing mode")
@@ -508,11 +537,13 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 5)
 
       // Reference a field that doesn't exist in the parquet schema
-      val rows = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('nonexistent_field':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()
+      val rows = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('nonexistent_field':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()
       rows.length shouldBe 1
       rows(0).getString(2) shouldBe "error" // status
       rows(0).getString(10) should include("does not exist in source schema")
@@ -527,7 +558,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createUuidParquetData(parquetPath, numRows = 5)
 
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData    = spark.read.parquet(parquetPath).collect()
       val targetTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
 
       // Use UPPER CASE mode name — should be recognized by IndexingModes.isRecognized
@@ -558,11 +589,13 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createCustomPatternParquetData(parquetPath)
 
-      val rows = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('audit_log':'text_custom_strip:') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()
+      val rows = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('audit_log':'text_custom_strip:') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()
       rows.length shouldBe 1
       rows(0).getString(2) shouldBe "error"
       rows(0).getString(10) should include("empty regex")
@@ -577,16 +610,19 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 5)
 
       // Get a known UUID from the source data
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData   = spark.read.parquet(parquetPath).collect()
       val knownTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
       // Extract first 8 hex chars from UUID for a targeted search
       val uuidPrefix = knownTraceId.split("-")(0) // e.g., "550e8400"
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('message':'text_uuid_strip') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('message':'text_uuid_strip') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -594,15 +630,19 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Text search for non-UUID content should still work
       companionDf.createOrReplaceTempView("uuid_strip_verify")
-      val textResults = spark.sql(
-        "SELECT * FROM uuid_strip_verify WHERE message indexquery 'processing'"
-      ).collect()
+      val textResults = spark
+        .sql(
+          "SELECT * FROM uuid_strip_verify WHERE message indexquery 'processing'"
+        )
+        .collect()
       textResults.length shouldBe 5
 
       // UUID prefix should NOT be searchable — it was stripped before indexing
-      val uuidResults = spark.sql(
-        s"SELECT * FROM uuid_strip_verify WHERE message indexquery '$uuidPrefix'"
-      ).collect()
+      val uuidResults = spark
+        .sql(
+          s"SELECT * FROM uuid_strip_verify WHERE message indexquery '$uuidPrefix'"
+        )
+        .collect()
       uuidResults.length shouldBe 0
     }
   }
@@ -615,16 +655,19 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 5)
 
       // Get a known UUID from the source data
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData   = spark.read.parquet(parquetPath).collect()
       val knownMessage = sourceData(0).getString(sourceData(0).fieldIndex("message"))
       val knownTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
-      val uuidPrefix = knownTraceId.split("-")(0)
+      val uuidPrefix   = knownTraceId.split("-")(0)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('message':'text_uuid_exactonly') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('message':'text_uuid_exactonly') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -633,15 +676,19 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       companionDf.createOrReplaceTempView("uuid_exactonly_verify")
 
       // UUID prefix should NOT be searchable via IndexQuery — stripped from text
-      val uuidResults = spark.sql(
-        s"SELECT * FROM uuid_exactonly_verify WHERE message indexquery '$uuidPrefix'"
-      ).collect()
+      val uuidResults = spark
+        .sql(
+          s"SELECT * FROM uuid_exactonly_verify WHERE message indexquery '$uuidPrefix'"
+        )
+        .collect()
       uuidResults.length shouldBe 0
 
       // Wildcard on UUID prefix should also NOT match — hex chars were fully removed
-      val wildcardResults = spark.sql(
-        s"SELECT * FROM uuid_exactonly_verify WHERE message indexquery '$uuidPrefix*'"
-      ).collect()
+      val wildcardResults = spark
+        .sql(
+          s"SELECT * FROM uuid_exactonly_verify WHERE message indexquery '$uuidPrefix*'"
+        )
+        .collect()
       wildcardResults.length shouldBe 0
 
       // But EqualTo on message should still work — parquet has the original unstripped value
@@ -659,15 +706,18 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 10)
 
       // Get known trace_ids for verification
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData     = spark.read.parquet(parquetPath).collect()
       val sortedTraceIds = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
-      val midTraceId = sortedTraceIds(sortedTraceIds.length / 2)
+      val midTraceId     = sortedTraceIds(sortedTraceIds.length / 2)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -675,19 +725,19 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Range queries on exact_only should not crash — Spark handles them as post-filters
       // on the parquet data (which has the original string values)
-      val gtResults = companionDf.filter(col("trace_id") > midTraceId).collect()
+      val gtResults  = companionDf.filter(col("trace_id") > midTraceId).collect()
       val expectedGt = sortedTraceIds.count(_ > midTraceId)
       gtResults.length shouldBe expectedGt
 
-      val gteResults = companionDf.filter(col("trace_id") >= midTraceId).collect()
+      val gteResults  = companionDf.filter(col("trace_id") >= midTraceId).collect()
       val expectedGte = sortedTraceIds.count(_ >= midTraceId)
       gteResults.length shouldBe expectedGte
 
-      val ltResults = companionDf.filter(col("trace_id") < midTraceId).collect()
+      val ltResults  = companionDf.filter(col("trace_id") < midTraceId).collect()
       val expectedLt = sortedTraceIds.count(_ < midTraceId)
       ltResults.length shouldBe expectedLt
 
-      val lteResults = companionDf.filter(col("trace_id") <= midTraceId).collect()
+      val lteResults  = companionDf.filter(col("trace_id") <= midTraceId).collect()
       val expectedLte = sortedTraceIds.count(_ <= midTraceId)
       lteResults.length shouldBe expectedLte
 
@@ -704,11 +754,14 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 10)
 
       // trace_id is exact_only; name has no explicit mode (defaults to string)
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -722,11 +775,11 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       results.length shouldBe 10 // Pre-existing: filter not actually applied
 
       // Contrast with exact_only: isFilterSupported returns false, so Spark post-filters correctly
-      val sourceData = spark.read.parquet(parquetPath).collect()
-      val sortedTraceIds = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
-      val midTraceId = sortedTraceIds(sortedTraceIds.length / 2)
+      val sourceData       = spark.read.parquet(parquetPath).collect()
+      val sortedTraceIds   = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
+      val midTraceId       = sortedTraceIds(sortedTraceIds.length / 2)
       val exactOnlyResults = companionDf.filter(col("trace_id") > midTraceId).collect()
-      val expectedGt = sortedTraceIds.count(_ > midTraceId)
+      val expectedGt       = sortedTraceIds.count(_ > midTraceId)
       exactOnlyResults.length shouldBe expectedGt // exact_only: Spark post-filters correctly
     }
   }
@@ -738,11 +791,14 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createUuidParquetData(parquetPath, numRows = 10)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('message':'text_uuid_exactonly') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('message':'text_uuid_exactonly') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -766,26 +822,29 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createUuidParquetData(parquetPath, numRows = 10)
 
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData    = spark.read.parquet(parquetPath).collect()
       val targetTraceId = sourceData(0).getString(sourceData(0).fieldIndex("trace_id"))
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(indexPath)
 
       // Range filter on exact_only should NOT appear in pushed filters
-      val filtered = companionDf.filter(col("trace_id") > targetTraceId)
+      val filtered   = companionDf.filter(col("trace_id") > targetTraceId)
       val planString = filtered.queryExecution.executedPlan.toString()
       planString should not include "GreaterThan(trace_id"
 
       // EqualTo on exact_only SHOULD appear in pushed filters (it's supported)
-      val equalFiltered = companionDf.filter(col("trace_id") === targetTraceId)
+      val equalFiltered   = companionDf.filter(col("trace_id") === targetTraceId)
       val equalPlanString = equalFiltered.queryExecution.executedPlan.toString()
       equalPlanString should include("trace_id")
     }
@@ -798,15 +857,18 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createUuidParquetData(parquetPath, numRows = 10)
 
-      val sourceData = spark.read.parquet(parquetPath).collect()
+      val sourceData     = spark.read.parquet(parquetPath).collect()
       val sortedTraceIds = sourceData.map(r => r.getString(r.fieldIndex("trace_id"))).sorted
-      val midTraceId = sortedTraceIds(sortedTraceIds.length / 2)
+      val midTraceId     = sortedTraceIds(sortedTraceIds.length / 2)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -841,11 +903,14 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       createUuidParquetData(parquetPath, numRows = 10)
 
       // exact_only on trace_id; id (Long) and score (Double) are default numeric types
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val companionDf = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -854,16 +919,12 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       // GreaterThan on numeric 'id' (Long → INTEGER type) should still work
       val gtResults = companionDf.filter(col("id") > 5L).collect()
       gtResults.length shouldBe 4 // id 6, 7, 8, 9
-      gtResults.foreach { row =>
-        row.getLong(row.fieldIndex("id")) should be > 5L
-      }
+      gtResults.foreach(row => row.getLong(row.fieldIndex("id")) should be > 5L)
 
       // LessThanOrEqual on numeric 'id' should also work
       val lteResults = companionDf.filter(col("id") <= 2L).collect()
       lteResults.length shouldBe 3 // id 0, 1, 2
-      lteResults.foreach { row =>
-        row.getLong(row.fieldIndex("id")) should be <= 2L
-      }
+      lteResults.foreach(row => row.getLong(row.fieldIndex("id")) should be <= 2L)
     }
   }
 
@@ -874,15 +935,18 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       createUuidParquetData(parquetPath, numRows = 5)
 
-      spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
-          s"INDEXING MODES ('trace_id':'exact_only', 'message':'text_uuid_exactonly') " +
-          s"AT LOCATION '$indexPath'"
-      ).collect()(0).getString(2) shouldBe "success"
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only', 'message':'text_uuid_exactonly') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()(0)
+        .getString(2) shouldBe "success"
 
       val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
       try {
-        val metadata = txLog.getMetadata()
+        val metadata  = txLog.getMetadata()
         val modesJson = metadata.configuration("indextables.companion.indexingModes")
         modesJson should include("exact_only")
         modesJson should include("text_uuid_exactonly")
@@ -890,6 +954,178 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         modesJson should include("message")
       } finally
         txLog.close()
+    }
+  }
+
+  // -------------------------------------------------------
+  //  HASHED FASTFIELDS INCLUDE / EXCLUDE tests
+  // -------------------------------------------------------
+
+  test("HASHED FASTFIELDS INCLUDE should build companion successfully") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_fp_include").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_fp_include").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS INCLUDE ('name', 'trace_id') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 10
+    }
+  }
+
+  test("HASHED FASTFIELDS EXCLUDE should build companion successfully") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_fp_exclude").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_fp_exclude").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 10)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS EXCLUDE ('message') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 10
+    }
+  }
+
+  test("incremental sync should preserve hashed fastfields config from metadata") {
+    withTempPath { tempDir =>
+      val parquetPath  = new File(tempDir, "parquet_fp_inc").getAbsolutePath
+      val parquetPath2 = new File(tempDir, "parquet_fp_inc2").getAbsolutePath
+      val indexPath    = new File(tempDir, "companion_fp_inc").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data1 = (0 until 5).map(i => (i.toLong, UUID.randomUUID().toString, s"name_$i", i * 1.5))
+      data1.toDF("id", "trace_id", "name", "score").repartition(1).write.parquet(parquetPath)
+
+      // Initial sync with HASHED FASTFIELDS INCLUDE
+      val result1 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS INCLUDE ('name', 'trace_id') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result1.collect()(0).getString(2) shouldBe "success"
+
+      // Verify hashed fastfields config is stored in metadata
+      val txLog = TransactionLogFactory.create(new Path(indexPath), spark)
+      try {
+        val metadata  = txLog.getMetadata()
+        val hfInclude = metadata.configuration("indextables.companion.hashedFastfieldsInclude")
+        hfInclude should include("name")
+        hfInclude should include("trace_id")
+      } finally
+        txLog.close()
+
+      // Add more data and re-sync WITHOUT specifying hashed fastfields config
+      val data2 = (5 until 10).map(i => (i.toLong, UUID.randomUUID().toString, s"name_$i", i * 1.5))
+      data2.toDF("id", "trace_id", "name", "score").repartition(1).write.parquet(parquetPath2)
+
+      val combinedPath = new File(tempDir, "parquet_fp_combined").getAbsolutePath
+      new File(combinedPath).mkdirs()
+      new File(parquetPath).listFiles().filter(_.getName.endsWith(".parquet")).foreach { f =>
+        java.nio.file.Files.copy(f.toPath, new File(combinedPath, f.getName).toPath)
+      }
+      new File(parquetPath2).listFiles().filter(_.getName.endsWith(".parquet")).foreach { f =>
+        java.nio.file.Files.copy(f.toPath, new File(combinedPath, "batch2_" + f.getName).toPath)
+      }
+
+      // Re-sync from combined path — hashed fastfields config should be inherited from metadata
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$combinedPath' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result2.collect()(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("text field should support COUNT aggregation with HYBRID fast fields") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_text_count").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_text_count").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 15).map(i => (i.toLong, s"Document content number $i", s"category_${i % 3}"))
+      data.toDF("id", "content", "category").repartition(1).write.parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('content':'text') " +
+          s"FASTFIELDS MODE HYBRID " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.count() shouldBe 15
+      companionDf.agg(count("content")).collect()(0).getLong(0) shouldBe 15L
+    }
+  }
+
+  test("text field with hashed fastfield should support GROUP BY aggregation") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_text_groupby").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_text_groupby").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      // Create data with a string category column that will have hashed fastfields
+      val data = Seq(
+        (1L, "First document about cats", "animals"),
+        (2L, "Second document about cats", "animals"),
+        (3L, "Third document about dogs", "animals"),
+        (4L, "Document about python", "tech"),
+        (5L, "Document about scala", "tech")
+      )
+      data.toDF("id", "content", "category").repartition(1).write.parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"INDEXING MODES ('content':'text') " +
+          s"FASTFIELDS MODE HYBRID " +
+          s"HASHED FASTFIELDS INCLUDE ('category') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      // Total count should be correct
+      companionDf.count() shouldBe 5
+
+      // GROUP BY on the hashed category field should work
+      val grouped = companionDf.groupBy("category").agg(count("*").as("cnt")).collect()
+      grouped.length shouldBe 2
+      val groupMap = grouped.map(r => r.getString(0) -> r.getLong(1)).toMap
+      groupMap("animals") shouldBe 3L
+      groupMap("tech") shouldBe 2L
     }
   }
 }
