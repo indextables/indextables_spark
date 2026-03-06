@@ -385,8 +385,9 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
+  private val arrowFfiEnabled = io.indextables.spark.arrow.AggregationArrowFfiConfig.isEnabled(config)
 
-  logger.debug(s"SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
+  logger.debug(s"SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled")
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
@@ -408,6 +409,28 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
           simpleAggPartition,
           sparkSession
         )
+
+      case other =>
+        throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
+    }
+
+  override def supportColumnarReads(partition: org.apache.spark.sql.connector.read.InputPartition): Boolean = {
+    if (arrowFfiEnabled)
+      logger.debug("SIMPLE AGGREGATE READER FACTORY: Columnar reads enabled via Arrow FFI aggregation")
+    arrowFfiEnabled
+  }
+
+  override def createColumnarReader(
+    partition: org.apache.spark.sql.connector.read.InputPartition
+  ): org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.vectorized.ColumnarBatch] =
+    partition match {
+      case multiSplitPartition: IndexTables4SparkMultiSplitSimpleAggregatePartition =>
+        logger.info(s"SIMPLE AGGREGATE READER FACTORY: Creating columnar multi-split reader with ${multiSplitPartition.splits.length} splits")
+        new MultiSplitSimpleAggregateColumnarReader(multiSplitPartition, sparkSession)
+
+      case simpleAggPartition: IndexTables4SparkSimpleAggregatePartition =>
+        logger.info(s"SIMPLE AGGREGATE READER FACTORY: Creating columnar reader for split ${simpleAggPartition.split.path}")
+        new SimpleAggregateColumnarReader(simpleAggPartition, sparkSession)
 
       case other =>
         throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
