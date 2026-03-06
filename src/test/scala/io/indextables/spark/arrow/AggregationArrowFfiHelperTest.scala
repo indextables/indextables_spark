@@ -133,7 +133,8 @@ class AggregationArrowFfiHelperTest extends AnyFunSuite with Matchers {
 
       result._1 shouldBe 3
       result._2 should contain theSameElementsInOrderAs Array("key", "doc_count", "sum_0")
-      result._3 shouldBe 42
+      result._3 should contain theSameElementsInOrderAs Array("Utf8", "Int64", "Float64")
+      result._4 shouldBe 42
     } finally
       helper.close()
   }
@@ -147,7 +148,9 @@ class AggregationArrowFfiHelperTest extends AnyFunSuite with Matchers {
       result._1 shouldBe 1
       result._2 should have length 1
       result._2(0) shouldBe "count"
-      result._3 shouldBe 1
+      result._3 should have length 1
+      result._3(0) shouldBe "Int64"
+      result._4 shouldBe 1
     } finally
       helper.close()
   }
@@ -160,7 +163,8 @@ class AggregationArrowFfiHelperTest extends AnyFunSuite with Matchers {
 
       result._1 shouldBe 0
       result._2 shouldBe empty
-      result._3 shouldBe 0
+      result._3 shouldBe empty
+      result._4 shouldBe 0
     } finally
       helper.close()
   }

@@ -65,8 +65,30 @@ object GroupByColumnarReaderUtils {
 
   // --- Type casting ---
 
-  def castColumnSafe(source: ColumnVector, targetType: DataType, numRows: Int): ColumnVector = {
+  /**
+   * Arrow type names from tantivy4java schema JSON.
+   * Used to select the right read path without exception-based probing.
+   */
+  private val ARROW_UTF8    = "Utf8"
+  private val ARROW_INT64   = "Int64"
+  private val ARROW_INT32   = "Int32"
+  private val ARROW_FLOAT64 = "Float64"
+
+  /**
+   * Cast a source Arrow column to the target Spark type.
+   *
+   * @param source      The FFI Arrow column
+   * @param targetType  The Spark DataType to produce
+   * @param numRows     Number of rows
+   * @param arrowType   Arrow type name from schema JSON (e.g. "Utf8", "Int64", "Float64").
+   *                    When known, selects the direct read path. Pass "" for legacy fallback.
+   */
+  def castColumnSafe(source: ColumnVector, targetType: DataType, numRows: Int, arrowType: String = ""): ColumnVector = {
     val onHeap = new OnHeapColumnVector(numRows, targetType)
+    val isUtf8    = arrowType == ARROW_UTF8
+    val isInt64   = arrowType == ARROW_INT64
+    val isFloat64 = arrowType == ARROW_FLOAT64
+
     (0 until numRows).foreach { row =>
       if (source.isNullAt(row)) {
         onHeap.putNull(row)
@@ -80,53 +102,92 @@ object GroupByColumnarReaderUtils {
             } else {
               onHeap.putNull(row)
             }
+
           case IntegerType =>
-            val value = try source.getLong(row).toInt
-            catch { case _: Exception =>
-              try Math.round(source.getDouble(row)).toInt
-              catch { case _: Exception =>
-                source.getUTF8String(row).toString.toDouble.toInt
-              }
-            }
-            onHeap.putInt(row, value)
+            if (isUtf8) onHeap.putInt(row, source.getUTF8String(row).toString.toDouble.toInt)
+            else if (isInt64) onHeap.putInt(row, source.getLong(row).toInt)
+            else if (isFloat64) onHeap.putInt(row, Math.round(source.getDouble(row)).toInt)
+            else onHeap.putInt(row, source.getLong(row).toInt) // best guess
+
           case LongType =>
-            val value = try source.getLong(row)
-            catch { case _: Exception =>
-              try Math.round(source.getDouble(row))
-              catch { case _: Exception =>
-                source.getUTF8String(row).toString.toDouble.toLong
-              }
-            }
-            onHeap.putLong(row, value)
+            if (isUtf8) onHeap.putLong(row, source.getUTF8String(row).toString.toDouble.toLong)
+            else if (isInt64) onHeap.putLong(row, source.getLong(row))
+            else if (isFloat64) onHeap.putLong(row, Math.round(source.getDouble(row)))
+            else onHeap.putLong(row, source.getLong(row))
+
           case DoubleType =>
-            val value = try source.getDouble(row)
-            catch { case _: Exception =>
-              try source.getLong(row).toDouble
-              catch { case _: Exception =>
-                source.getUTF8String(row).toString.toDouble
-              }
-            }
-            onHeap.putDouble(row, value)
+            if (isUtf8) onHeap.putDouble(row, source.getUTF8String(row).toString.toDouble)
+            else if (isFloat64) onHeap.putDouble(row, source.getDouble(row))
+            else if (isInt64) onHeap.putDouble(row, source.getLong(row).toDouble)
+            else onHeap.putDouble(row, source.getDouble(row))
+
           case FloatType =>
-            val value = try source.getDouble(row).toFloat
-            catch { case _: Exception =>
-              try source.getFloat(row)
-              catch { case _: Exception =>
-                source.getUTF8String(row).toString.toFloat
-              }
+            if (isUtf8) onHeap.putFloat(row, source.getUTF8String(row).toString.toFloat)
+            else if (isFloat64) onHeap.putFloat(row, source.getDouble(row).toFloat)
+            else if (isInt64) onHeap.putFloat(row, source.getLong(row).toFloat)
+            else onHeap.putFloat(row, source.getDouble(row).toFloat)
+
+          case DateType =>
+            // Spark DateType uses Int (days since epoch)
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              onHeap.putInt(row, parseDateString(str))
+            } else if (isInt64) {
+              // Tantivy dates stored as microseconds since epoch
+              onHeap.putInt(row, (source.getLong(row) / (86400L * 1000000L)).toInt)
+            } else if (arrowType == ARROW_INT32) {
+              onHeap.putInt(row, source.getInt(row))
+            } else {
+              onHeap.putInt(row, source.getInt(row))
             }
-            onHeap.putFloat(row, value)
+
+          case TimestampType =>
+            // Spark TimestampType uses Long (microseconds since epoch)
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              onHeap.putLong(row, java.time.Instant.parse(str).toEpochMilli * 1000L)
+            } else if (isInt64) {
+              onHeap.putLong(row, source.getLong(row))
+            } else if (isFloat64) {
+              onHeap.putLong(row, source.getDouble(row).toLong)
+            } else {
+              onHeap.putLong(row, source.getLong(row))
+            }
+
+          case BooleanType =>
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              onHeap.putBoolean(row, str == "true" || str == "1")
+            } else if (isInt64) {
+              onHeap.putBoolean(row, source.getLong(row) != 0)
+            } else if (isFloat64) {
+              onHeap.putBoolean(row, source.getDouble(row) != 0.0)
+            } else {
+              onHeap.putBoolean(row, source.getBoolean(row))
+            }
+
           case _ =>
-            try onHeap.putLong(row, source.getLong(row))
-            catch {
-              case _: Exception =>
-                try onHeap.putDouble(row, source.getDouble(row))
-                catch { case _: Exception => onHeap.putNull(row) }
-            }
+            if (isInt64) onHeap.putLong(row, source.getLong(row))
+            else if (isFloat64) onHeap.putDouble(row, source.getDouble(row))
+            else onHeap.putNull(row)
         }
       }
     }
     onHeap
+  }
+
+  /** Parse ISO 8601 date or datetime string to days since epoch. */
+  private def parseDateString(str: String): Int = {
+    // Try date-only format first (most common for Date fields)
+    try java.time.LocalDate.parse(str.take(10)).toEpochDay.toInt
+    catch { case _: Exception =>
+      // Try full ISO datetime with zone
+      try java.time.LocalDate.parse(str, java.time.format.DateTimeFormatter.ISO_DATE_TIME).toEpochDay.toInt
+      catch { case _: Exception =>
+        // Try as numeric microseconds since epoch
+        (str.toLong / (86400L * 1000000L)).toInt
+      }
+    }
   }
 
   def getAggOutputType(aggExpr: AggregateFunc, schema: StructType): DataType = aggExpr match {
@@ -155,7 +216,8 @@ object GroupByColumnarReaderUtils {
     columnNames: Array[String],
     aggExprs: Array[AggregateFunc],
     dataGroupByCols: Array[String],
-    schema: StructType
+    schema: StructType,
+    columnTypes: Array[String] = Array.empty
   ): ColumnarBatch = {
     val numRows  = ffiBatch.numRows()
     val numOutCols = numKeyColumns + aggExprs.length
@@ -171,7 +233,7 @@ object GroupByColumnarReaderUtils {
     (0 until numKeyColumns).foreach { i =>
       val keyColName = dataGroupByCols(i)
       val targetType = schema.fields.find(_.name == keyColName).map(_.dataType).getOrElse(StringType)
-      vectors(i) = castColumnSafe(ffiBatch.column(i), targetType, numRows)
+      vectors(i) = castColumnSafe(ffiBatch.column(i), targetType, numRows, arrowTypeAt(columnTypes, i))
     }
 
     val colNameToIdx = if (columnNames.nonEmpty) columnNames.zipWithIndex.toMap
@@ -190,7 +252,7 @@ object GroupByColumnarReaderUtils {
           case _      => colNameToIdx.getOrElse(s"agg_$outIdx", findNextSubAggCol(colNameToIdx, docCountIdx))
         }
         val targetType = getAggOutputType(aggExpr, schema)
-        vectors(numKeyColumns + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows)
+        vectors(numKeyColumns + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows, arrowTypeAt(columnTypes, ffiColIdx))
     }
 
     new ColumnarBatch(vectors, numRows)
@@ -199,12 +261,17 @@ object GroupByColumnarReaderUtils {
   private def findNextSubAggCol(colNameToIdx: Map[String, Int], docCountIdx: Int): Int =
     docCountIdx + 1
 
+  /** Safe lookup into columnTypes array; returns "" if index is out of bounds. */
+  private def arrowTypeAt(columnTypes: Array[String], idx: Int): String =
+    if (idx >= 0 && idx < columnTypes.length) columnTypes(idx) else ""
+
   def assembleBucketBatch(
     ffiBatch: ColumnarBatch,
     columnNames: Array[String],
     aggExprs: Array[AggregateFunc],
     dataGroupByCols: Array[String],
-    schema: StructType
+    schema: StructType,
+    columnTypes: Array[String] = Array.empty
   ): ColumnarBatch = {
     val numRows = ffiBatch.numRows()
 
@@ -226,7 +293,7 @@ object GroupByColumnarReaderUtils {
       val keyColName = if (outIdx < dataGroupByCols.length) dataGroupByCols(outIdx) else "key"
       val keyTargetType = if (outIdx == 0 && isRange) StringType
                           else schema.fields.find(_.name == keyColName).map(_.dataType).getOrElse(StringType)
-      vectors(outIdx) = castColumnSafe(ffiBatch.column(ffiIdx), keyTargetType, numRows)
+      vectors(outIdx) = castColumnSafe(ffiBatch.column(ffiIdx), keyTargetType, numRows, arrowTypeAt(columnTypes, ffiIdx))
     }
 
     val docCountIdx = columnNames.indexOf("doc_count")
@@ -261,7 +328,7 @@ object GroupByColumnarReaderUtils {
             subAggOffset += 1; idx
         }
         val targetType = getAggOutputType(aggExpr, schema)
-        vectors(numKeyColumns + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows)
+        vectors(numKeyColumns + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows, arrowTypeAt(columnTypes, ffiColIdx))
     }
 
     new ColumnarBatch(vectors, numRows)
@@ -273,7 +340,8 @@ object GroupByColumnarReaderUtils {
     numOutputKeys: Int,
     aggExprs: Array[AggregateFunc],
     dataGroupByCols: Array[String],
-    schema: StructType
+    schema: StructType,
+    columnTypes: Array[String] = Array.empty
   ): ColumnarBatch = {
     val numRows  = ffiBatch.numRows()
     val numOutCols = numOutputKeys + aggExprs.length
@@ -328,7 +396,7 @@ object GroupByColumnarReaderUtils {
           case _      => colNameToIdx.getOrElse(s"agg_$outIdx", docCountIdx + 1)
         }
         val targetType = getAggOutputType(aggExpr, schema)
-        vectors(numOutputKeys + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows)
+        vectors(numOutputKeys + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows, arrowTypeAt(columnTypes, ffiColIdx))
     }
 
     new ColumnarBatch(vectors, numRows)

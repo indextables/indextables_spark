@@ -72,14 +72,15 @@ class AggregationArrowFfiHelper extends AutoCloseable {
    * Query the Arrow schema that would be returned for a given aggregation.
    *
    * @return
-   *   (numCols, columnNames, rowCount)
+   *   (numCols, columnNames, columnTypes, rowCount)
+   *   columnTypes are Arrow type names: "Utf8", "Int64", "Float64", "Int32", etc.
    */
   def querySchema(
     searcher: SplitSearcher,
     queryAstJson: String,
     aggName: String,
     aggJson: String
-  ): (Int, Array[String], Int) = {
+  ): (Int, Array[String], Array[String], Int) = {
     val schemaJson = searcher.getAggregationArrowSchema(queryAstJson, aggName, aggJson)
     parseSchemaJson(schemaJson)
   }
@@ -97,7 +98,7 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     aggJson: String
   ): ColumnarBatch = {
     // Query schema to know how many columns to allocate
-    val (numCols, columnNames, _) = querySchema(searcher, queryAstJson, aggName, aggJson)
+    val (numCols, columnNames, _, _) = querySchema(searcher, queryAstJson, aggName, aggJson)
     logger.debug(s"Aggregation FFI schema: $numCols columns: ${columnNames.mkString(", ")}")
 
     // Allocate FFI structs
@@ -133,7 +134,7 @@ class AggregationArrowFfiHelper extends AutoCloseable {
   ): ColumnarBatch = {
     // Query schema from first searcher
     val firstSearcher = searchers.get(0)
-    val (numCols, columnNames, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
+    val (numCols, columnNames, _, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
     logger.debug(s"Multi-split aggregation FFI schema: $numCols columns: ${columnNames.mkString(", ")}, ${searchers.size()} splits")
 
     // Allocate FFI structs
@@ -172,7 +173,7 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     val firstSearcher = searchers.get(0)
     val aggInfos = aggregations.map { case (aggName, agg) =>
       val aggJson = buildAggJson(aggName, agg)
-      val (numCols, columnNames, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
+      val (numCols, columnNames, _, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
       (aggName, numCols, columnNames)
     }
 
@@ -293,18 +294,20 @@ class AggregationArrowFfiHelper extends AutoCloseable {
 
   // --- Private helpers ---
 
-  private[arrow] def parseSchemaJson(json: String): (Int, Array[String], Int) = {
+  private[arrow] def parseSchemaJson(json: String): (Int, Array[String], Array[String], Int) = {
     // Parse JSON response from tantivy4java 0.31.2+:
     // {"columns":[{"name":"key","type":"Utf8"},{"name":"doc_count","type":"Int64"}],"row_count":2}
     // Simple regex parsing without external dependency
     val rowCountPattern = """"row_count"\s*:\s*(\d+)""".r
     val namePattern     = """"name"\s*:\s*"([^"]+)"""".r
+    val typePattern     = """"type"\s*:\s*"([^"]+)"""".r
 
     val rowCount    = rowCountPattern.findFirstMatchIn(json).map(_.group(1).toInt).getOrElse(0)
     val columnNames = namePattern.findAllMatchIn(json).map(_.group(1)).toArray
+    val columnTypes = typePattern.findAllMatchIn(json).map(_.group(1)).toArray
     val numCols     = columnNames.length
 
-    (numCols, columnNames, rowCount)
+    (numCols, columnNames, columnTypes, rowCount)
   }
 
   private def needsTypeCast(sourceColumn: ColumnVector, targetType: DataType): Boolean =

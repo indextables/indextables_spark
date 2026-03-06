@@ -150,7 +150,7 @@ class GroupByAggregateColumnarReader(
 
     // Execute via FFI
     val aggJson  = helper.buildAggJson(aggName, termsAgg)
-    val (_, columnNames, _) = helper.querySchema(searcher, queryAstJson, aggName, aggJson)
+    val (_, columnNames, columnTypes, _) = helper.querySchema(searcher, queryAstJson, aggName, aggJson)
     val ffiBatch = helper.executeSingleSplit(searcher, queryAstJson, aggName, aggJson)
 
     val isMultiKey = dataGroupByCols.length > 1
@@ -158,9 +158,9 @@ class GroupByAggregateColumnarReader(
     val needsPipeKeySplitting = isMultiKey && numFfiKeyColumns < dataGroupByCols.length
 
     val assembled = if (needsPipeKeySplitting) {
-      U.assembleGroupByBatchWithCompoundKeys(ffiBatch, columnNames, dataGroupByCols.length, aggExprs, dataGroupByCols, schema)
+      U.assembleGroupByBatchWithCompoundKeys(ffiBatch, columnNames, dataGroupByCols.length, aggExprs, dataGroupByCols, schema, columnTypes)
     } else {
-      U.assembleGroupByBatch(ffiBatch, numFfiKeyColumns, columnNames, aggExprs, dataGroupByCols, schema)
+      U.assembleGroupByBatch(ffiBatch, numFfiKeyColumns, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
     }
 
     if (partitionGroupByCols.nonEmpty) {
@@ -243,11 +243,11 @@ class GroupByAggregateColumnarReader(
     }
 
     val aggJson = helper.buildAggJson(aggName, bucketAgg)
-    val (_, columnNames, _) = helper.querySchema(searcher, queryAstJson, aggName, aggJson)
+    val (_, columnNames, columnTypes, _) = helper.querySchema(searcher, queryAstJson, aggName, aggJson)
     val ffiBatch = helper.executeSingleSplit(searcher, queryAstJson, aggName, aggJson)
 
     val dataGroupByCols = partition.groupByColumns.filterNot(partition.partitionColumns.contains)
-    U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema)
+    U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
   }
 
   private def createCacheConfig(): io.indextables.spark.storage.SplitCacheConfig =
@@ -419,7 +419,7 @@ class MultiSplitGroupByAggregateColumnarReader(
     val aggJson = helper.buildAggJson(aggName, termsAgg)
 
     val firstSearcher = searchers.get(0)
-    val (_, columnNames, _) = helper.querySchema(firstSearcher, queryAstJson, aggName, aggJson)
+    val (_, columnNames, columnTypes, _) = helper.querySchema(firstSearcher, queryAstJson, aggName, aggJson)
     val numFfiKeyColumns = columnNames.count(n => n == "key" || n.startsWith("key_"))
 
     // Native multi-split merge via merge_fruits
@@ -429,9 +429,9 @@ class MultiSplitGroupByAggregateColumnarReader(
     val needsPipeKeySplitting = isMultiKey && numFfiKeyColumns < dataGroupByCols.length
 
     if (needsPipeKeySplitting) {
-      U.assembleGroupByBatchWithCompoundKeys(ffiBatch, columnNames, dataGroupByCols.length, aggExprs, dataGroupByCols, schema)
+      U.assembleGroupByBatchWithCompoundKeys(ffiBatch, columnNames, dataGroupByCols.length, aggExprs, dataGroupByCols, schema, columnTypes)
     } else {
-      U.assembleGroupByBatch(ffiBatch, numFfiKeyColumns, columnNames, aggExprs, dataGroupByCols, schema)
+      U.assembleGroupByBatch(ffiBatch, numFfiKeyColumns, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
     }
   }
 
@@ -490,12 +490,12 @@ class MultiSplitGroupByAggregateColumnarReader(
     val aggJson = helper.buildAggJson(aggName, bucketAgg)
 
     val firstSearcher = searchers.get(0)
-    val (_, columnNames, _) = helper.querySchema(firstSearcher, queryAstJson, aggName, aggJson)
+    val (_, columnNames, columnTypes, _) = helper.querySchema(firstSearcher, queryAstJson, aggName, aggJson)
 
     // Native multi-split merge via merge_fruits
     val ffiBatch = helper.executeMultiSplit(cacheManager, searchers, queryAstJson, aggName, aggJson)
 
     val dataGroupByCols = partition.groupByColumns.filterNot(partition.partitionColumns.contains)
-    U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema)
+    U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
   }
 }
