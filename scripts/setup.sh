@@ -337,6 +337,21 @@ install_linux() {
         esac
         ok "Protobuf compiler installed"
     fi
+
+    # --- OpenSSL dev headers + pkg-config (required by Rust openssl-sys crate) ---
+    info "Ensuring OpenSSL development headers and pkg-config are installed..."
+    case "$pkg_mgr" in
+        apt-get)
+            $sudo_cmd apt-get install -y libssl-dev pkg-config
+            ;;
+        dnf)
+            $sudo_cmd dnf install -y openssl-devel pkgconfig
+            ;;
+        yum)
+            $sudo_cmd yum install -y openssl-devel pkgconfig
+            ;;
+    esac
+    ok "OpenSSL dev headers and pkg-config installed"
 }
 
 # ---------------------------------------------------------------------------
