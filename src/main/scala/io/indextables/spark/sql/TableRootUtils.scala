@@ -18,6 +18,7 @@
 package io.indextables.spark.sql
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
@@ -41,6 +42,33 @@ object TableRootUtils {
   /** Extract the root name from a metadata key. */
   def extractRootName(key: String): String = key.stripPrefix(TABLE_ROOT_PREFIX)
 
+  /** Valid pattern for table root designator names. */
+  val DESIGNATOR_NAME_PATTERN = "[a-zA-Z0-9_-]+"
+
+  /** Validate a designator name, throwing IllegalArgumentException if invalid. */
+  def validateDesignatorName(name: String): Unit = {
+    if (!name.matches(DESIGNATOR_NAME_PATTERN)) {
+      throw new IllegalArgumentException(
+        s"Invalid table root name '$name': must contain only letters, digits, hyphens, and underscores"
+      )
+    }
+  }
+
+  /** Build a CaseInsensitiveStringMap from Spark config for transaction log access. */
+  def buildOptions(
+    sparkSession: SparkSession,
+    credentialOperation: Option[String] = None
+  ): CaseInsensitiveStringMap = {
+    val optionsMap = new java.util.HashMap[String, String]()
+    sparkSession.conf.getAll.filter(_._1.startsWith("spark.indextables.")).foreach {
+      case (k, v) => optionsMap.put(k, v)
+    }
+    credentialOperation.foreach { op =>
+      optionsMap.put("spark.indextables.databricks.credential.operation", op)
+    }
+    new CaseInsensitiveStringMap(optionsMap)
+  }
+
   /** Resolve a path-or-table-identifier string to a Hadoop Path. */
   def resolveTablePath(pathOrTable: String, sparkSession: SparkSession): Path = {
     val isCloudOrLocalPath = ProtocolNormalizer.isS3Path(pathOrTable) ||
@@ -62,7 +90,8 @@ object TableRootUtils {
           throw new IllegalArgumentException(s"Table not found: $pathOrTable")
         }
       } catch {
-        case _: Exception => new Path(pathOrTable)
+        case _: org.apache.spark.sql.catalyst.parser.ParseException =>
+          new Path(pathOrTable)
       }
     }
   }

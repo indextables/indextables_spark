@@ -135,14 +135,12 @@ class IndexTables4SparkScanBuilder(
                       }
                     designatorConfig
                       .get("spark.indextables.aws.region")
-                      .orElse(designatorConfig.get("spark.indextables.aws.region".toLowerCase))
                       .foreach { region =>
                         designatorConfig = designatorConfig +
                           ("spark.indextables.companion.parquet.aws.region" -> region)
                       }
                     designatorConfig
                       .get("spark.indextables.s3.endpoint")
-                      .orElse(designatorConfig.get("spark.indextables.s3.endpoint".toLowerCase))
                       .foreach { endpoint =>
                         designatorConfig = designatorConfig +
                           ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)
@@ -291,14 +289,12 @@ class IndexTables4SparkScanBuilder(
                   // Propagate region and endpoint from main config
                   enrichedConfig
                     .get("spark.indextables.aws.region")
-                    .orElse(enrichedConfig.get("spark.indextables.aws.region".toLowerCase))
                     .foreach { region =>
                       enrichedConfig = enrichedConfig +
                         ("spark.indextables.companion.parquet.aws.region" -> region)
                     }
                   enrichedConfig
                     .get("spark.indextables.s3.endpoint")
-                    .orElse(enrichedConfig.get("spark.indextables.s3.endpoint".toLowerCase))
                     .foreach { endpoint =>
                       enrichedConfig = enrichedConfig +
                         ("spark.indextables.companion.parquet.aws.endpoint" -> endpoint)

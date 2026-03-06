@@ -23,6 +23,7 @@ import org.apache.spark.sql.catalyst.parser.ParserUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
+import io.indextables.spark.sql.TableRootUtils
 import io.indextables.spark.sql.{
   CheckpointCommand,
   DescribeComponentSizesCommand,
@@ -720,12 +721,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val rootName = ParserUtils.string(ctx.rootName)
       val rootPath = ParserUtils.string(ctx.rootPath)
 
-      // Validate designator name: must match [a-zA-Z0-9_-]+
-      if (!rootName.matches("[a-zA-Z0-9_-]+")) {
-        throw new IllegalArgumentException(
-          s"Invalid table root name '$rootName': must contain only letters, digits, hyphens, and underscores"
-        )
-      }
+      TableRootUtils.validateDesignatorName(rootName)
 
       val tablePath = if (ctx.path != null) {
         ParserUtils.string(ctx.path)
@@ -751,12 +747,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     try {
       val rootName = ParserUtils.string(ctx.rootName)
 
-      // Validate designator name: must match [a-zA-Z0-9_-]+
-      if (!rootName.matches("[a-zA-Z0-9_-]+")) {
-        throw new IllegalArgumentException(
-          s"Invalid table root name '$rootName': must contain only letters, digits, hyphens, and underscores"
-        )
-      }
+      TableRootUtils.validateDesignatorName(rootName)
 
       val tablePath = if (ctx.path != null) {
         ParserUtils.string(ctx.path)
@@ -964,12 +955,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
           .map { entry =>
             val name = ParserUtils.string(entry.rootName)
             val path = ParserUtils.string(entry.rootPath)
-            // Validate designator name
-            if (!name.matches("[a-zA-Z0-9_-]+")) {
-              throw new IllegalArgumentException(
-                s"Invalid table root name '$name': must contain only letters, digits, hyphens, and underscores"
-              )
-            }
+            TableRootUtils.validateDesignatorName(name)
             name -> path
           }
           .toMap

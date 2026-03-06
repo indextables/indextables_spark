@@ -21,8 +21,6 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.StringType
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
@@ -56,13 +54,7 @@ case class SetTableRootCommand(
       val resolvedPath = TableRootUtils.resolveTablePath(tablePath, sparkSession)
       logger.info(s"SET TABLE ROOT '$rootName' = '$rootPath' at $resolvedPath")
 
-      // Build options map from Spark configuration
-      val optionsMap = new java.util.HashMap[String, String]()
-      sparkSession.conf.getAll.filter(_._1.startsWith("spark.indextables.")).foreach {
-        case (k, v) => optionsMap.put(k, v)
-      }
-      optionsMap.put("spark.indextables.databricks.credential.operation", "PATH_READ_WRITE")
-      val options = new CaseInsensitiveStringMap(optionsMap)
+      val options = TableRootUtils.buildOptions(sparkSession, Some("PATH_READ_WRITE"))
 
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {
@@ -81,8 +73,8 @@ case class SetTableRootCommand(
 
         // Use commitMetadataUpdate for concurrent safety — the transform is re-applied
         // on each retry after re-reading fresh metadata, so concurrent writers compose correctly.
-        val timestamp = System.currentTimeMillis().toString
         transactionLog.commitMetadataUpdate { currentMetadata =>
+          val timestamp = System.currentTimeMillis().toString
           currentMetadata.copy(configuration =
             currentMetadata.configuration +
               (TableRootUtils.rootKey(rootName)      -> rootPath) +

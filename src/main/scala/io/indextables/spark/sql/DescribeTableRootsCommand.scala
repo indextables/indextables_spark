@@ -21,8 +21,6 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.StringType
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
@@ -50,12 +48,7 @@ case class DescribeTableRootsCommand(tablePath: String) extends LeafRunnableComm
       val resolvedPath = TableRootUtils.resolveTablePath(tablePath, sparkSession)
       logger.info(s"DESCRIBE TABLE ROOTS at $resolvedPath")
 
-      // Build options map from Spark configuration
-      val optionsMap = new java.util.HashMap[String, String]()
-      sparkSession.conf.getAll.filter(_._1.startsWith("spark.indextables.")).foreach {
-        case (k, v) => optionsMap.put(k, v)
-      }
-      val options = new CaseInsensitiveStringMap(optionsMap)
+      val options = TableRootUtils.buildOptions(sparkSession, Some("PATH_READ"))
 
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {

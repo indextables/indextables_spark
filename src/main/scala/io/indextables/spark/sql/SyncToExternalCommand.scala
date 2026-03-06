@@ -960,6 +960,10 @@ case class SyncToExternalCommand(
    * @param externalStorageRoot
    *   For Iceberg: the S3 storage root from catalog. For Delta UC: the storage_location from UC API. None for
    *   path-based Delta/Parquet.
+   *
+   * Note: This method reads existing metadata and overwrites table root entries non-atomically
+   * via commitSyncActions (not commitMetadataUpdate). A concurrent SET TABLE ROOT between the
+   * metadata read and the commit could be silently overwritten. See SetTableRootCommand scaladoc.
    */
   private def buildCompanionMetadata(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
