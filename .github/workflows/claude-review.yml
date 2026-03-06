@@ -50,5 +50,8 @@ jobs:
             - Hypothetical future improvements unrelated to the PR
 
             Use inline comments for specific issues. Use a top-level summary for overall assessment.
-          claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          allowed_tools: |
+            mcp__github_inline_comment__create_inline_comment
+            Bash(gh pr comment:*)
+            Bash(gh pr diff:*)
+            Bash(gh pr view:*)
