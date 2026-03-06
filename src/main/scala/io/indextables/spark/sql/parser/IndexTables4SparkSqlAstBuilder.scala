@@ -867,6 +867,25 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
       logger.debug(s"DRY RUN flag: $dryRun")
 
+      // WITH STREAMING POLL INTERVAL <n> SECONDS|MINUTES
+      val streamingPollIntervalMs: Option[Long] = if (ctx.pollInterval != null) {
+        if (dryRun) {
+          throw new IllegalArgumentException("WITH STREAMING is not compatible with DRY RUN")
+        }
+        val n = ctx.pollInterval.getText.toLong
+        if (n <= 0) throw new IllegalArgumentException(
+          s"WITH STREAMING POLL INTERVAL must be at least 1 SECONDS (got $n)"
+        )
+        val ms = ctx.pollUnit.getText.toUpperCase match {
+          case "SECONDS" => n * 1000L
+          case "MINUTES" => n * 60L * 1000L
+        }
+        logger.debug(s"Streaming poll interval: ${n} ${ctx.pollUnit.getText} (${ms}ms)")
+        Some(ms)
+      } else {
+        None
+      }
+
       val result = SyncToExternalCommand(
         sourceFormat = sourceFormat,
         sourcePath = sourcePath,
@@ -885,7 +904,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         hashedFastfieldsExclude = hashedFastfieldsExclude,
         wherePredicates = wherePredicates,
         invalidateAllPartitions = invalidateAllPartitions,
-        dryRun = dryRun
+        dryRun = dryRun,
+        streamingPollIntervalMs = streamingPollIntervalMs
       )
       logger.debug(s"Created SyncToExternalCommand: $result")
       result

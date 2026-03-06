@@ -137,6 +137,31 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     }
   }
 
+  test("distributed Delta scan should return true current version when post-checkpoint commits exist") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_version_postchk").getAbsolutePath
+      // Step 1: create table and checkpoint (checkpoint version = 0)
+      createDeltaTable(deltaPath, numFiles = 1, rowsPerFile = 5)
+
+      // Step 2: append more data WITHOUT checkpointing (creates post-checkpoint commits)
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      // Step 3: the true current version from DeltaLogReader (reads via delta-kernel-rs)
+      val reader        = new DeltaLogReader(deltaPath, emptyCredentials)
+      val readerVersion = reader.currentVersion()
+
+      // Step 4: distributed scan must return the same true version, not the checkpoint version
+      val scanner    = new DistributedSourceScanner(spark)
+      val distResult = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+
+      distResult.version shouldBe defined
+      // This assertion would FAIL with the old code (which returned checkpoint version only).
+      // The checkpoint is at version 0; after appending, the true version is higher.
+      distResult.version.get shouldBe readerVersion
+      distResult.version.get should be > 0L
+    }
+  }
+
   test("distributed Delta scan should return correct partition columns") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta_partitioned").getAbsolutePath
@@ -186,6 +211,134 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       val distSizes  = distResult.filesRDD.map(f => f.path -> f.size).collectAsMap().toMap
 
       distSizes shouldBe singleSizes
+    }
+  }
+
+  // ─── Incremental Delta Tests (fromVersion parameter) ───
+
+  test("DistributedScanResult.isIncremental defaults to false") {
+    val sc  = spark.sparkContext
+    val result = DistributedScanResult(
+      filesRDD = sc.emptyRDD[CompanionSourceFile],
+      version = Some(5L),
+      partitionColumns = Seq.empty,
+      storageRoot = None,
+      sampleFilePath = None,
+      numDistributedParts = 0
+    )
+    result.isIncremental shouldBe false
+  }
+
+  test("DistributedScanResult.isIncremental can be set to true") {
+    val sc  = spark.sparkContext
+    val result = DistributedScanResult(
+      filesRDD = sc.emptyRDD[CompanionSourceFile],
+      version = Some(5L),
+      partitionColumns = Seq.empty,
+      storageRoot = None,
+      sampleFilePath = None,
+      numDistributedParts = 0,
+      isIncremental = true
+    )
+    result.isIncremental shouldBe true
+  }
+
+  test("scanDeltaTable with fromVersion equal to current version returns empty incremental result") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_incr_noop").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner    = new DistributedSourceScanner(spark)
+      // Full scan to learn the current version
+      val fullResult = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val currentVersion = fullResult.version.get
+
+      // Incremental scan with fromVersion == currentVersion → no new commits → empty result
+      val incrResult = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(currentVersion))
+
+      incrResult.isIncremental shouldBe true
+      incrResult.version shouldBe Some(currentVersion)
+      incrResult.filesRDD.collect() shouldBe empty
+    }
+  }
+
+  test("scanDeltaTable incremental detects new commits added after checkpoint") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_incr_postchk").getAbsolutePath
+      // Create table with checkpoint at version 0
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner     = new DistributedSourceScanner(spark)
+      val fullResult  = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val syncedVersion = fullResult.version.get
+
+      // Append more files WITHOUT checkpoint → creates post-checkpoint commits
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      // Incremental scan from the synced version should detect the new files
+      val incrResult = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(syncedVersion))
+
+      incrResult.isIncremental shouldBe true
+      incrResult.version.get should be > syncedVersion
+      // The new files are returned in the RDD
+      incrResult.filesRDD.collect() should not be empty
+    }
+  }
+
+  test("scanDeltaTable without fromVersion is not incremental") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_non_incr").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner = new DistributedSourceScanner(spark)
+      val result  = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+
+      result.isIncremental shouldBe false
+    }
+  }
+
+  test("scanDeltaTable falls back to full scan when version gap exceeds maxIncrementalCommits") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_catchup").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner       = new DistributedSourceScanner(spark)
+      val fullResult    = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val syncedVersion = fullResult.version.get
+
+      // Append 3 more commits
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 1, rowsPerFile = 5)
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 1, rowsPerFile = 5)
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 1, rowsPerFile = 5)
+
+      // Set threshold to 1 so a gap of 3 triggers fallback
+      spark.conf.set("spark.indextables.companion.sync.maxIncrementalCommits", "1")
+      try {
+        val result = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(syncedVersion))
+        // Full scan: isIncremental is false and all files are returned
+        result.isIncremental shouldBe false
+        result.filesRDD.collect() should not be empty
+      } finally {
+        spark.conf.unset("spark.indextables.companion.sync.maxIncrementalCommits")
+      }
+    }
+  }
+
+  test("scanDeltaTable incremental result has empty removedSourcePaths for append-only tables") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_incr_noremove").getAbsolutePath
+      createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val scanner       = new DistributedSourceScanner(spark)
+      val fullResult    = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val syncedVersion = fullResult.version.get
+
+      // Append-only: no remove actions, removedSourcePaths must be empty
+      appendToDeltaTableWithoutCheckpoint(deltaPath, numFiles = 2, rowsPerFile = 5)
+
+      val result = scanner.scanDeltaTable(deltaPath, emptyCredentials, fromVersion = Some(syncedVersion))
+      result.isIncremental shouldBe true
+      result.removedSourcePaths shouldBe empty
     }
   }
 
@@ -306,6 +459,28 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     // Force a checkpoint so distributed scan (which requires _last_checkpoint) can work
     val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, path)
     deltaLog.checkpoint()
+  }
+
+  /**
+   * Append rows to an existing Delta table without triggering a new checkpoint.
+   * This creates post-checkpoint commits, which is the scenario that exposes version tracking bugs.
+   */
+  private def appendToDeltaTableWithoutCheckpoint(path: String, numFiles: Int, rowsPerFile: Int): Unit = {
+    val ss = spark
+    import ss.implicits._
+    // Disable automatic checkpointing for this append
+    val deltaLog = org.apache.spark.sql.delta.DeltaLog.forTable(spark, path)
+    val data     = (1000 until 1000 + numFiles * rowsPerFile).map(i => (i.toLong, s"append_$i", i * 1.5, i % 2 == 0))
+    data
+      .toDF("id", "name", "score", "active")
+      .repartition(numFiles)
+      .write
+      .format("delta")
+      .mode("append")
+      .save(path)
+    // Explicitly do NOT checkpoint — we want post-checkpoint commits to remain
+    // Verify no new checkpoint was written (Delta checkpoints every 10 commits by default,
+    // so 2 files won't trigger one)
   }
 
   private def createParquetData(path: String, numFiles: Int): Unit = {

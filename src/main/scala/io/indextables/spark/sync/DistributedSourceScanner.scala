@@ -41,7 +41,18 @@ case class DistributedScanResult(
   storageRoot: Option[String],
   sampleFilePath: Option[String],
   numDistributedParts: Int,
-  schema: Option[StructType] = None)
+  schema: Option[StructType] = None,
+  /**
+   * True when filesRDD contains ONLY newly added files (from an incremental changeset).
+   * When true, the anti-join should be skipped — all files in the RDD are known to be new.
+   */
+  isIncremental: Boolean = false,
+  /**
+   * Source file paths removed from the source table since the last sync (Delta only).
+   * Companion splits that indexed these files must be invalidated. Empty for full-scan results
+   * and for Iceberg (Iceberg deletion tracking is a follow-up).
+   */
+  removedSourcePaths: Seq[String] = Seq.empty)
 
 /**
  * Static conversion functions used in RDD closures. These MUST be in the companion object (not instance methods) to
@@ -373,7 +384,8 @@ class DistributedSourceScanner(spark: SparkSession) {
     path: String,
     credentials: Map[String, String],
     partitionFilter: Option[PartitionFilter] = None,
-    wherePredicates: Seq[String] = Seq.empty
+    wherePredicates: Seq[String] = Seq.empty,
+    fromVersion: Option[Long] = None
   ): DistributedScanResult = {
     val deltaKernelPath = DeltaLogReader.normalizeForDeltaKernel(path)
     val deltaConfig     = DeltaLogReader.translateCredentials(credentials)
@@ -398,6 +410,17 @@ class DistributedSourceScanner(spark: SparkSession) {
       try
         Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
       catch { case _: Exception => None }
+
+    // True current version = checkpoint version + number of post-checkpoint commits.
+    // snapshotInfo.getVersion is ONLY the checkpoint version; post-checkpoint commits
+    // are tracked separately in getCommitFilePaths. Using snapshotInfo.getVersion alone
+    // would cause the streaming incremental path to miss all post-checkpoint commits.
+    val trueCurrentVersion: Long =
+      snapshotInfo.getVersion + snapshotInfo.getCommitFilePaths.size.toLong
+    assert(
+      trueCurrentVersion >= snapshotInfo.getVersion,
+      s"trueCurrentVersion ($trueCurrentVersion) must be >= checkpoint version (${snapshotInfo.getVersion})"
+    )
 
     // Build PartitionFilter from WHERE predicates using snapshot metadata.
     // This avoids calling reader.partitionColumns() which triggers the blocking listFiles() call.
@@ -434,6 +457,69 @@ class DistributedSourceScanner(spark: SparkSession) {
         s"effectiveFilter=${effectiveFilter.map(_.toJson).getOrElse("none")}, " +
         s"arrowFfiEnabled=$arrowFfiEnabled"
     )
+
+    // ── Incremental fast-path ──────────────────────────────────────────────
+    // When fromVersion is provided (streaming incremental cycle), use getChangesBetween()
+    // to read only the commit JSON files in the version range. This skips the expensive
+    // distributed checkpoint parquet reading (which reads all checkpoint parts across executors).
+    //
+    // Uses trueCurrentVersion (checkpoint + post-checkpoint count), NOT snapshotInfo.getVersion
+    // (checkpoint only). If we used the checkpoint version here and a table had post-checkpoint
+    // commits, the incremental comparison would always see "no change" and miss those commits.
+    fromVersion match {
+      case Some(fv) =>
+        if (trueCurrentVersion == fv) {
+          // No new commits since last sync — return empty incremental result.
+          logger.info(s"Delta incremental: no new commits since version $fv (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
+          val sc = spark.sparkContext
+          return DistributedScanResult(
+            filesRDD = sc.emptyRDD[CompanionSourceFile],
+            version = Some(trueCurrentVersion),
+            partitionColumns = snapshotPartCols,
+            storageRoot = None,
+            sampleFilePath = None,
+            numDistributedParts = 0,
+            schema = schemaOpt,
+            isIncremental = true
+          )
+        } else {
+          // Check whether the version gap is small enough for incremental commit-log reads.
+          // get_changes_between reads commit JSON files serially (1 GET per file). For large
+          // catch-up scenarios this is slower than a full distributed checkpoint scan.
+          val maxIncrementalCommits = scala.util.Try(
+            spark.conf.get("spark.indextables.companion.sync.maxIncrementalCommits", "100").toLong
+          ).getOrElse(100L)
+          val versionGap = trueCurrentVersion - fv
+          if (versionGap > maxIncrementalCommits) {
+            logger.warn(
+              s"Delta incremental: version gap $versionGap exceeds maxIncrementalCommits=$maxIncrementalCommits — " +
+              s"falling back to full scan (from=$fv, current=$trueCurrentVersion)"
+            )
+            // fall through to full scan below
+          } else {
+            // New commits available — read only the delta (commit JSON files from fv+1 to trueCurrentVersion).
+            // This is O(delta_commits) instead of O(checkpoint_parts + delta_commits).
+            logger.info(s"Delta incremental: reading changes from version $fv to $trueCurrentVersion (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
+            val changes      = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
+            val addedFiles   = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
+            val removedPaths = changes.getRemovedPaths.asScala.toSeq
+            logger.info(s"Delta incremental: ${addedFiles.size} added files, ${removedPaths.size} removed paths")
+            val sc           = spark.sparkContext
+            return DistributedScanResult(
+              filesRDD = sc.parallelize(addedFiles),
+              version = Some(trueCurrentVersion),
+              partitionColumns = snapshotPartCols,
+              storageRoot = None,
+              sampleFilePath = addedFiles.headOption.map(_.path),
+              numDistributedParts = 0,
+              schema = schemaOpt,
+              isIncremental = true,
+              removedSourcePaths = removedPaths
+            )
+          }
+        }
+      case None => // fall through to full scan below
+    }
 
     // Read post-checkpoint changes on driver (small: just JSON commit files after last checkpoint).
     // Pass snapshotInfo for column mapping translation of partition values.
@@ -499,7 +585,7 @@ class DistributedSourceScanner(spark: SparkSession) {
 
     DistributedScanResult(
       filesRDD = allFilesRDD,
-      version = Some(snapshotInfo.getVersion),
+      version = Some(trueCurrentVersion),
       partitionColumns = snapshotPartCols,
       storageRoot = None, // Delta uses relative paths from table root
       sampleFilePath = sampleFile,
@@ -523,21 +609,82 @@ class DistributedSourceScanner(spark: SparkSession) {
     icebergConfig: java.util.Map[String, String],
     snapshotId: Option[Long],
     partitionFilter: Option[PartitionFilter] = None,
-    wherePredicates: Seq[String] = Seq.empty
+    wherePredicates: Seq[String] = Seq.empty,
+    fromSnapshotId: Option[Long] = None
   ): DistributedScanResult = {
     logger.info(
       s"Distributed Iceberg scan: getting snapshot info for $catalogName.$namespace.$tableName" +
         partitionFilter.map(f => s" (native filter: ${f.toJson})").getOrElse("")
     )
-    val snapshotInfo = snapshotId match {
-      case Some(id) => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, id)
-      case None     => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig)
+    // For incremental scans, always get the CURRENT snapshot (not the previously-synced snapshot).
+    // fromSnapshotId is the last synced snapshot ID; snapshotId is used only for time-travel queries.
+    val snapshotInfo = if (fromSnapshotId.isDefined) {
+      IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig)
+    } else {
+      snapshotId match {
+        case Some(id) => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, id)
+        case None     => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig)
+      }
     }
 
     val manifestPaths = snapshotInfo.getManifestFilePaths.asScala.toSeq
     logger.info(
       s"Iceberg snapshot: id=${snapshotInfo.getSnapshotId}, manifests=${manifestPaths.size}"
     )
+
+    // Parse schema from snapshotInfo for propagation to incremental results.
+    // Avoids a separate IcebergTableReader.readSchema() JNI call on incremental cycles.
+    val icebergSchemaOpt: Option[StructType] = try {
+      val schemaJson = snapshotInfo.getSchemaJson
+      if (schemaJson != null && schemaJson.nonEmpty)
+        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+      else None
+    } catch { case _: Exception => None }
+
+    // ── Incremental fast-path ──────────────────────────────────────────────
+    // When fromSnapshotId is provided (streaming incremental cycle), filter manifest list
+    // to only manifests added after that snapshot. Each Iceberg snapshot records which snapshot
+    // created each manifest via addedSnapshotId — manifests from older snapshots are excluded.
+    fromSnapshotId match {
+      case Some(fsnap) =>
+        val currentSnapId = snapshotInfo.getSnapshotId
+        if (currentSnapId == fsnap) {
+          logger.info(s"Iceberg incremental: no new snapshots since $fsnap")
+          val sc = spark.sparkContext
+          return DistributedScanResult(
+            filesRDD = sc.emptyRDD[CompanionSourceFile],
+            version = Some(currentSnapId),
+            partitionColumns = Seq.empty,
+            storageRoot = None,
+            sampleFilePath = None,
+            numDistributedParts = 0,
+            schema = icebergSchemaOpt,
+            isIncremental = true
+          )
+        } else {
+          logger.info(s"Iceberg incremental: reading changes since snapshot $fsnap (current=$currentSnapId)")
+          val newEntries = IcebergTableReader
+            .getChangesSince(catalogName, namespace, tableName, icebergConfig, snapshotInfo, fsnap)
+            .asScala
+            .toSeq
+          val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
+          val partCols    = newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
+          val files       = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
+          logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
+          val sc          = spark.sparkContext
+          return DistributedScanResult(
+            filesRDD = sc.parallelize(files),
+            version = Some(currentSnapId),
+            partitionColumns = partCols,
+            storageRoot = storageRoot,
+            sampleFilePath = newEntries.headOption.map(_.getPath),
+            numDistributedParts = 0,
+            schema = icebergSchemaOpt,
+            isIncremental = true
+          )
+        }
+      case None => // fall through to full scan below
+    }
 
     // Read first manifest on driver (non-FFI) to discover storageRoot, sample file path, and partition columns.
     // Cache entries to avoid redundant JNI call.

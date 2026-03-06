@@ -83,7 +83,8 @@ case class SyncToExternalCommand(
   hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   invalidateAllPartitions: Boolean = false,
-  dryRun: Boolean)
+  dryRun: Boolean,
+  streamingPollIntervalMs: Option[Long] = None)
     extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[SyncToExternalCommand])
@@ -116,6 +117,11 @@ case class SyncToExternalCommand(
   )
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    if (streamingPollIntervalMs.isDefined) {
+      new StreamingCompanionManager(this, streamingPollIntervalMs.get).runStreaming(sparkSession)
+      return Seq.empty
+    }
+
     val startTime = System.currentTimeMillis()
     logger.info(
       s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
@@ -148,7 +154,7 @@ case class SyncToExternalCommand(
     }
   }
 
-  private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
+  private[sql] def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
     // 1. Extract merged configuration and resolve credentials for source table access
     val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
@@ -277,7 +283,9 @@ case class SyncToExternalCommand(
           case "delta" =>
             val deltaPath         = resolvedStorageLocation.getOrElse(sourcePath)
             val sourceCredentials = resolveCredentials(mergedConfigs, deltaPath)
-            scanner.scanDeltaTable(deltaPath, sourceCredentials, wherePredicates = wherePredicates)
+            scanner.scanDeltaTable(deltaPath, sourceCredentials,
+              wherePredicates = wherePredicates,
+              fromVersion = fromVersion)
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
             val (ns, tbl) = {
@@ -285,13 +293,16 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
+            // fromSnapshot means "return changes added after this snapshot" (incremental filter),
+            // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
-              fromSnapshot,
-              wherePredicates = wherePredicates
+              snapshotId = None,
+              wherePredicates = wherePredicates,
+              fromSnapshotId = fromSnapshot
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -544,15 +555,56 @@ case class SyncToExternalCommand(
           existingFiles
         }
 
-      val (rawParquetFiles, splitsToInvalidate) = distributedRDD match {
-        case Some(rdd) =>
-          // Distributed anti-join using RDDs
-          val antiJoin = new DistributedAntiJoin(sparkSession)
-          val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
-          (result.filesToIndex, result.splitsToInvalidate)
-        case None =>
-          // In-memory anti-join (fallback path)
-          computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+      val (rawParquetFiles, splitsToInvalidate) = distributedResult match {
+        case Some(dr) if dr.isIncremental =>
+          // Incremental changeset from getChangesBetween / getChangesSince.
+          // New files are guaranteed additions — anti-join is skipped for those.
+          // Removed source paths (Delta only) require finding and invalidating the companion
+          // splits that indexed them, and re-indexing any sibling files from those splits.
+          val newFiles = dr.filesRDD.collect().toSeq
+          if (newFiles.size > 10000)
+            logger.warn(
+              s"Large incremental changeset: ${newFiles.size} files collected to driver. " +
+                "Consider reducing spark.indextables.companion.stream.maxIncrementalCommits to avoid OOM."
+            )
+          if (dr.removedSourcePaths.isEmpty) {
+            logger.info(s"Incremental changeset: ${newFiles.size} new files (anti-join skipped)")
+            (newFiles, Seq.empty[AddAction])
+          } else {
+            val normalizedRemoved = dr.removedSourcePaths.map(normalizePath).toSet
+            val splitsToInvalidate = scopedExistingFiles.filter { split =>
+              split.companionSourceFiles.exists(_.exists(f => normalizedRemoved.contains(normalizePath(f))))
+            }
+            // Files from invalidated splits that are NOT in the removed set still exist in the
+            // source and must be re-indexed (their split is being removed).
+            val remainingToReindex = splitsToInvalidate
+              .flatMap { split =>
+                split.companionSourceFiles.getOrElse(Seq.empty)
+                  .filterNot(f => normalizedRemoved.contains(normalizePath(f)))
+                  .map(relPath => CompanionSourceFile(normalizePath(relPath), split.partitionValues, 0L))
+              }
+              .groupBy(f => normalizePath(f.path))
+              .map(_._2.head)
+              .toSeq
+            logger.info(
+              s"Incremental changeset: ${newFiles.size} new files, " +
+                s"${dr.removedSourcePaths.size} removed source paths, " +
+                s"${splitsToInvalidate.size} splits to invalidate, " +
+                s"${remainingToReindex.size} sibling files to re-index"
+            )
+            (newFiles ++ remainingToReindex, splitsToInvalidate)
+          }
+        case _ =>
+          distributedRDD match {
+            case Some(rdd) =>
+              // Distributed anti-join using RDDs (full-snapshot path)
+              val antiJoin = new DistributedAntiJoin(sparkSession)
+              val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
+              (result.filesToIndex, result.splitsToInvalidate)
+            case None =>
+              // In-memory anti-join (fallback path)
+              computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+          }
       }
 
       logger.info(
@@ -1292,6 +1344,84 @@ case class SyncToExternalCommand(
     sourceCredentials.get("spark.indextables.azure.accountKey").foreach(v => config.put("adls.account-key", v))
 
     config
+  }
+
+  /**
+   * Reads the last successfully synced source version from the companion index transaction log.
+   * Used by StreamingCompanionManager to resume incremental sync after a restart without
+   * performing a full anti-join scan.
+   *
+   * Returns None if the companion index does not yet exist, has never been synced, or on any error.
+   */
+  private[sql] def readLastSyncedVersionFromLog(sparkSession: SparkSession): Option[Long] = {
+    try {
+      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+      val transactionLog = TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(destPath),
+        sparkSession,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
+      )
+      try {
+        transactionLog.getMetadata().configuration
+          .get("indextables.companion.lastSyncedVersion")
+          .flatMap(v => scala.util.Try(v.toLong).toOption)
+      } catch {
+        case _: Exception => None
+      } finally {
+        transactionLog.close()
+      }
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  /**
+   * Cheap source version probe for streaming pre-poll.
+   *
+   * Delta:   1 GET (_last_checkpoint) + O(k) HEAD probes — no checkpoint parquet reads.
+   * Iceberg: 1 catalog.load_table() call — no manifest list read.
+   * Parquet / unknown: returns None.
+   * On any error: returns None so the caller falls through to executeSyncInternal.
+   *
+   * Used by StreamingCompanionManager to skip executeSyncInternal entirely on no-change polling
+   * cycles, avoiding the checkpoint parquet read that getSnapshotInfo() would otherwise trigger.
+   */
+  private[sql] def cheapSourceVersion(
+    sparkSession: SparkSession,
+    cachedBaseConfigs: Option[Map[String, String]] = None
+  ): Option[Long] = {
+    try {
+      val mergedConfigs = cachedBaseConfigs.getOrElse {
+        val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+        val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+        val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+          ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      }
+      sourceFormat match {
+        case "delta" =>
+          val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+          val kernelPath        = io.indextables.spark.sync.DeltaLogReader.normalizeForDeltaKernel(sourcePath)
+          val deltaConfig       = io.indextables.spark.sync.DeltaLogReader.translateCredentials(sourceCredentials)
+          Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
+        case "iceberg" =>
+          val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials)
+          val parts             = sourcePath.split("\\.", 2)
+          if (parts.length != 2) None
+          else {
+            val (ns, tbl) = (parts(0), parts(1))
+            Some(io.indextables.tantivy4java.iceberg.IcebergTableReader.getCurrentSnapshotId(
+              effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig))
+          }
+        case _ => None
+      }
+    } catch {
+      case _: Exception => None
+    }
   }
 
   /**
