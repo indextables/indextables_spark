@@ -37,6 +37,32 @@ import io.indextables.tantivy4java.split.SplitAggregation
  */
 object GroupByColumnarReaderUtils {
 
+  // --- Empty batch handling ---
+
+  /**
+   * Create an empty ColumnarBatch with the correct schema.
+   * Used when FFI returns 0 rows (tantivy may omit sub-aggregation columns for empty results).
+   */
+  private def createEmptyBatch(
+    numOutCols: Int,
+    groupByCols: Array[String],
+    aggExprs: Array[AggregateFunc],
+    schema: StructType
+  ): ColumnarBatch = {
+    val vectors = new Array[ColumnVector](numOutCols)
+    val numKeyColumns = groupByCols.length
+    (0 until numKeyColumns).foreach { i =>
+      val keyColName = groupByCols(i)
+      val targetType = schema.fields.find(_.name == keyColName).map(_.dataType).getOrElse(StringType)
+      vectors(i) = new OnHeapColumnVector(0, targetType)
+    }
+    aggExprs.zipWithIndex.foreach { case (aggExpr, outIdx) =>
+      val targetType = getAggOutputType(aggExpr, schema)
+      vectors(numKeyColumns + outIdx) = new OnHeapColumnVector(0, targetType)
+    }
+    new ColumnarBatch(vectors, 0)
+  }
+
   // --- Type casting ---
 
   def castColumnSafe(source: ColumnVector, targetType: DataType, numRows: Int): ColumnVector = {
@@ -133,6 +159,13 @@ object GroupByColumnarReaderUtils {
   ): ColumnarBatch = {
     val numRows  = ffiBatch.numRows()
     val numOutCols = numKeyColumns + aggExprs.length
+
+    // When FFI returns 0 rows, tantivy may omit sub-aggregation columns.
+    // Return an empty batch with the correct number of output columns.
+    if (numRows == 0) {
+      return createEmptyBatch(numOutCols, dataGroupByCols, aggExprs, schema)
+    }
+
     val vectors  = new Array[ColumnVector](numOutCols)
 
     (0 until numKeyColumns).foreach { i =>
@@ -174,6 +207,12 @@ object GroupByColumnarReaderUtils {
     schema: StructType
   ): ColumnarBatch = {
     val numRows = ffiBatch.numRows()
+
+    if (numRows == 0) {
+      val numKeyColumns = columnNames.count(n => n == "key" || n.startsWith("key_"))
+      return createEmptyBatch(Math.max(numKeyColumns, 1) + aggExprs.length, dataGroupByCols, aggExprs, schema)
+    }
+
     val isRange = columnNames.contains("from") || columnNames.contains("to")
 
     val ffiKeyIndices = columnNames.zipWithIndex.collect {
@@ -238,6 +277,11 @@ object GroupByColumnarReaderUtils {
   ): ColumnarBatch = {
     val numRows  = ffiBatch.numRows()
     val numOutCols = numOutputKeys + aggExprs.length
+
+    if (numRows == 0) {
+      return createEmptyBatch(numOutCols, dataGroupByCols, aggExprs, schema)
+    }
+
     val vectors  = new Array[ColumnVector](numOutCols)
 
     val ffiKeyIndices = columnNames.zipWithIndex.collect {
