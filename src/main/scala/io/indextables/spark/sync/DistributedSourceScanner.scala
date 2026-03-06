@@ -403,6 +403,10 @@ class DistributedSourceScanner(spark: SparkSession) {
     // would cause the streaming incremental path to miss all post-checkpoint commits.
     val trueCurrentVersion: Long =
       snapshotInfo.getVersion + snapshotInfo.getCommitFilePaths.size.toLong
+    assert(
+      trueCurrentVersion >= snapshotInfo.getVersion,
+      s"trueCurrentVersion ($trueCurrentVersion) must be >= checkpoint version (${snapshotInfo.getVersion})"
+    )
 
     // Build PartitionFilter from WHERE predicates using snapshot metadata.
     // This avoids calling reader.partitionColumns() which triggers the blocking listFiles() call.
@@ -614,6 +618,15 @@ class DistributedSourceScanner(spark: SparkSession) {
       s"Iceberg snapshot: id=${snapshotInfo.getSnapshotId}, manifests=${manifestPaths.size}"
     )
 
+    // Parse schema from snapshotInfo for propagation to incremental results.
+    // Avoids a separate IcebergTableReader.readSchema() JNI call on incremental cycles.
+    val icebergSchemaOpt: Option[StructType] = try {
+      val schemaJson = snapshotInfo.getSchemaJson
+      if (schemaJson != null && schemaJson.nonEmpty)
+        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+      else None
+    } catch { case _: Exception => None }
+
     // ── Incremental fast-path ──────────────────────────────────────────────
     // When fromSnapshotId is provided (streaming incremental cycle), filter manifest list
     // to only manifests added after that snapshot. Each Iceberg snapshot records which snapshot
@@ -631,6 +644,7 @@ class DistributedSourceScanner(spark: SparkSession) {
             storageRoot = None,
             sampleFilePath = None,
             numDistributedParts = 0,
+            schema = icebergSchemaOpt,
             isIncremental = true
           )
         } else {
@@ -651,6 +665,7 @@ class DistributedSourceScanner(spark: SparkSession) {
             storageRoot = storageRoot,
             sampleFilePath = newEntries.headOption.map(_.getPath),
             numDistributedParts = 0,
+            schema = icebergSchemaOpt,
             isIncremental = true
           )
         }

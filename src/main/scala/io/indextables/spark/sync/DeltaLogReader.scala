@@ -117,7 +117,7 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
    */
   def cheapCurrentVersion(): Long = {
     val version = DeltaTableReader.getCurrentVersion(deltaKernelPath, deltaConfig)
-    logger.info(s"Delta table at $deltaTablePath: cheap current version = $version")
+    logger.debug(s"Delta table at $deltaTablePath: cheap current version = $version")
     version
   }
 

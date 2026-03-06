@@ -54,14 +54,10 @@ private[sql] class StreamingCompanionMetrics(sparkContext: SparkContext) {
   val errorCount: LongAccumulator =
     sparkContext.longAccumulator("indextables.companion.streaming.errorCount")
 
-  def recordCycleSuccess(filesIndexed: Long, durationMs: Long): Unit = {
+  def recordCycleSuccess(filesIndexed: Long, durationMs: Long, splitsCreated: Long = 0L): Unit = {
     syncCycles.add(1)
     totalFilesIndexed.add(filesIndexed)
     totalDurationMs.add(durationMs)
-  }
-
-  def recordCycleSuccess(filesIndexed: Long, durationMs: Long, splitsCreated: Long): Unit = {
-    recordCycleSuccess(filesIndexed, durationMs)
     totalSplitsCreated.add(splitsCreated)
   }
 
