@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test-macos:
+    name: Build & Test (macOS ARM64)
+    runs-on: [self-hosted, macOS, ARM64]
+    environment: self-hosted
+    env:
+      JAVA_HOME: /opt/homebrew/opt/openjdk@11
+      PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup dependencies
+        run: ./scripts/setup.sh
+
+      - name: Build
+        run: make compile
+
+      - name: Test
+        run: make test
+
+  build-and-test-linux:
+    name: Build & Test (Linux X64)
+    runs-on: [self-hosted, Linux, X64]
+    environment: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup dependencies
+        run: ./scripts/setup.sh
+
+      - name: Build
+        run: make compile
+
+      - name: Test
+        run: make test

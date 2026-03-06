@@ -1095,10 +1095,15 @@ class IndexTables4SparkScanBuilder(
           return false
         }
 
-        // Store bucket config and accept the aggregation
+        // Store bucket config, GROUP BY columns, and accept the aggregation
+        // CRITICAL: _pushedGroupBy must be set here so that build() doesn't discard the bucket config.
+        // The filter in build() checks _pushedGroupBy.contains(bucketCfg.fieldName).
+        // We include the bucket field name plus any additional non-bucket GROUP BY columns.
+        val additionalCols = groupByExpressions.drop(1).map(extractFieldNameFromExpression)
         _bucketConfig = bucketConfig
+        _pushedGroupBy = Some(Array(bucketConfig.get.fieldName) ++ additionalCols)
         _pushedAggregation = Some(aggregation)
-        logger.info(s"BUCKET AGGREGATION: ✅ ACCEPTED - bucket aggregation will be pushed down")
+        logger.info(s"BUCKET AGGREGATION: ACCEPTED - bucket aggregation will be pushed down, groupBy=${_pushedGroupBy.get.mkString(", ")}")
         return true
       }
 

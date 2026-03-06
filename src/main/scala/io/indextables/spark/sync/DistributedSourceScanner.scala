@@ -189,15 +189,22 @@ object DistributedSourceScanner {
     val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-      val numRows = DeltaTableReader.readCheckpointPartArrowFfi(
-        kernelPath,
-        config,
-        partPath,
-        filter,
-        snapshotInfo,
-        arrayAddrs,
-        schemaAddrs
-      )
+      val numRows = try {
+        DeltaTableReader.readCheckpointPartArrowFfi(
+          kernelPath,
+          config,
+          partPath,
+          filter,
+          snapshotInfo,
+          arrayAddrs,
+          schemaAddrs
+        )
+      } catch {
+        case ex: Exception =>
+          arrays.foreach(a => try a.close() catch { case _: Exception => })
+          schemas.foreach(s => try s.close() catch { case _: Exception => })
+          throw ex
+      }
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
@@ -260,16 +267,23 @@ object DistributedSourceScanner {
     val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-      val numRows = IcebergTableReader.readManifestFileArrowFfi(
-        catalogName,
-        namespace,
-        tableName,
-        config,
-        manifestPath,
-        filter,
-        arrayAddrs,
-        schemaAddrs
-      )
+      val numRows = try {
+        IcebergTableReader.readManifestFileArrowFfi(
+          catalogName,
+          namespace,
+          tableName,
+          config,
+          manifestPath,
+          filter,
+          arrayAddrs,
+          schemaAddrs
+        )
+      } catch {
+        case ex: Exception =>
+          arrays.foreach(a => try a.close() catch { case _: Exception => })
+          schemas.foreach(s => try s.close() catch { case _: Exception => })
+          throw ex
+      }
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
