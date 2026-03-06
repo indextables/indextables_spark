@@ -185,6 +185,8 @@ class SplitReaderContext(
     }
 
     // Filter out partition-only filters (already handled by partition pruning)
+    // Then resolve partition column references in mixed filters (e.g., Or(score>250, category="A"))
+    // by evaluating them against the known partition values for this split.
     val nonPartitionFilters = if (partitionColumnNames.nonEmpty) {
       val (partitionOnly, nonPartition) =
         filters.partition(f => MixedBooleanFilter.isPartitionOnlyFilter(f, partitionColumnNames))
@@ -192,7 +194,23 @@ class SplitReaderContext(
         logger.info(
           s"Excluding ${partitionOnly.length} partition filter(s) from Tantivy query: ${partitionOnly.mkString(", ")}"
         )
-      nonPartition
+      // Resolve partition column references within remaining mixed filters
+      nonPartition.flatMap { f =>
+        resolvePartitionReferences(f) match {
+          case ResolvedTrue =>
+            logger.info(s"Filter satisfied by partition values, eliminating: $f")
+            None // Filter is always true for this split — drop it
+          case ResolvedFalse =>
+            // Filter is always false for this split — this shouldn't normally happen since
+            // partition pruning already excluded non-matching splits, but handle gracefully
+            logger.info(s"Filter contradicts partition values: $f")
+            Some(f) // Keep it — tantivy will return 0 results
+          case ResolvedFilter(resolved) =>
+            if (resolved != f)
+              logger.info(s"Simplified mixed filter: $f → $resolved")
+            Some(resolved)
+        }
+      }
     } else {
       filters
     }
@@ -242,6 +260,118 @@ class SplitReaderContext(
       new SplitMatchAllQuery()
     }
     splitQuery
+  }
+
+  /** Result of resolving partition column references within a filter. */
+  private sealed trait PartitionResolution
+  private case object ResolvedTrue extends PartitionResolution
+  private case object ResolvedFalse extends PartitionResolution
+  private case class ResolvedFilter(filter: Filter) extends PartitionResolution
+
+  /**
+    * Resolve partition column references in a filter against this split's partition values.
+    * For leaf filters on partition columns, evaluates them against the known partition values.
+    * For And/Or, recursively resolves and simplifies using boolean logic.
+    */
+  private def resolvePartitionReferences(filter: Filter): PartitionResolution = {
+    import org.apache.spark.sql.sources._
+
+    // Check if a leaf filter references only partition columns
+    def isPartitionLeaf(f: Filter): Boolean =
+      MixedBooleanFilter.isPartitionOnlyFilter(f, partitionColumnNames)
+
+    // Evaluate a partition-only leaf filter against the known partition values
+    def evaluatePartitionFilter(f: Filter): Boolean = f match {
+      case EqualTo(attr, value) =>
+        addAction.partitionValues.get(attr).exists(pv => partitionValueEquals(pv, value, attr))
+      case EqualNullSafe(attr, value) =>
+        addAction.partitionValues.get(attr).exists(pv => partitionValueEquals(pv, value, attr))
+      case In(attr, values) =>
+        addAction.partitionValues.get(attr).exists(pv => values.exists(v => partitionValueEquals(pv, v, attr)))
+      case GreaterThan(attr, value) =>
+        addAction.partitionValues.get(attr).exists(pv => partitionValueCompare(pv, value, attr) > 0)
+      case GreaterThanOrEqual(attr, value) =>
+        addAction.partitionValues.get(attr).exists(pv => partitionValueCompare(pv, value, attr) >= 0)
+      case LessThan(attr, value) =>
+        addAction.partitionValues.get(attr).exists(pv => partitionValueCompare(pv, value, attr) < 0)
+      case LessThanOrEqual(attr, value) =>
+        addAction.partitionValues.get(attr).exists(pv => partitionValueCompare(pv, value, attr) <= 0)
+      case IsNotNull(attr) =>
+        addAction.partitionValues.contains(attr)
+      case IsNull(attr) =>
+        !addAction.partitionValues.contains(attr)
+      case Not(child) =>
+        !evaluatePartitionFilter(child)
+      case _ =>
+        true // Conservative: assume true for unsupported filter types
+    }
+
+    filter match {
+      case Or(left, right) =>
+        val l = resolvePartitionReferences(left)
+        val r = resolvePartitionReferences(right)
+        (l, r) match {
+          case (ResolvedTrue, _) | (_, ResolvedTrue) => ResolvedTrue
+          case (ResolvedFalse, other)                => other
+          case (other, ResolvedFalse)                => other
+          case (ResolvedFilter(lf), ResolvedFilter(rf)) => ResolvedFilter(Or(lf, rf))
+        }
+      case And(left, right) =>
+        val l = resolvePartitionReferences(left)
+        val r = resolvePartitionReferences(right)
+        (l, r) match {
+          case (ResolvedFalse, _) | (_, ResolvedFalse) => ResolvedFalse
+          case (ResolvedTrue, other)                   => other
+          case (other, ResolvedTrue)                   => other
+          case (ResolvedFilter(lf), ResolvedFilter(rf)) => ResolvedFilter(And(lf, rf))
+        }
+      case Not(child) =>
+        resolvePartitionReferences(child) match {
+          case ResolvedTrue     => ResolvedFalse
+          case ResolvedFalse    => ResolvedTrue
+          case ResolvedFilter(f) => ResolvedFilter(Not(f))
+        }
+      case leaf if isPartitionLeaf(leaf) =>
+        if (evaluatePartitionFilter(leaf)) ResolvedTrue else ResolvedFalse
+      case other =>
+        ResolvedFilter(other)
+    }
+  }
+
+  /** Compare a partition value string with a filter value for equality. */
+  private def partitionValueEquals(partitionValue: String, filterValue: Any, attr: String): Boolean =
+    filterValue match {
+      case s: String       => partitionValue == s
+      case i: Int          => scala.util.Try(partitionValue.toInt).toOption.contains(i)
+      case l: Long         => scala.util.Try(partitionValue.toLong).toOption.contains(l)
+      case d: Double       => scala.util.Try(partitionValue.toDouble).toOption.contains(d)
+      case f: Float        => scala.util.Try(partitionValue.toFloat).toOption.contains(f)
+      case b: Boolean      => scala.util.Try(partitionValue.toBoolean).toOption.contains(b)
+      case date: java.sql.Date =>
+        scala.util.Try(java.time.LocalDate.parse(partitionValue)).toOption.exists(_.toEpochDay == date.toLocalDate.toEpochDay)
+      case ts: java.sql.Timestamp =>
+        scala.util.Try(java.time.Instant.parse(partitionValue + "Z")).toOption.exists(_.toEpochMilli == ts.getTime)
+      case _ => partitionValue == filterValue.toString
+    }
+
+  /** Compare a partition value with a filter value, returning negative/zero/positive like Comparable. */
+  private def partitionValueCompare(partitionValue: String, filterValue: Any, attr: String): Int = {
+    val fieldType = fullTableSchema.fields.find(_.name == attr).map(_.dataType)
+    fieldType match {
+      case Some(IntegerType) => scala.util.Try(partitionValue.toInt).getOrElse(0).compareTo(filterValue.asInstanceOf[Int])
+      case Some(LongType) => scala.util.Try(partitionValue.toLong).getOrElse(0L).compareTo(filterValue.asInstanceOf[Long])
+      case Some(DoubleType) => scala.util.Try(partitionValue.toDouble).getOrElse(0.0).compareTo(filterValue.asInstanceOf[Double])
+      case Some(FloatType) => scala.util.Try(partitionValue.toFloat).getOrElse(0.0f).compareTo(filterValue.asInstanceOf[Float])
+      case Some(DateType) =>
+        val pvDays = scala.util.Try(java.time.LocalDate.parse(partitionValue).toEpochDay.toInt).getOrElse(0)
+        filterValue match {
+          case d: java.sql.Date => pvDays.compareTo(d.toLocalDate.toEpochDay.toInt)
+          case s: String        => partitionValue.compareTo(s)
+          case i: Int           => pvDays.compareTo(i)
+          case _                => partitionValue.compareTo(filterValue.toString)
+        }
+      case _ => partitionValue.compareTo(filterValue.toString)
+    }
   }
 
   /** Collect batch optimization metrics delta and add to accumulator. */
