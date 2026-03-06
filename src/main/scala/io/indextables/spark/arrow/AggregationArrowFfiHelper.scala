@@ -104,12 +104,20 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     // Allocate FFI structs
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
 
-    // Execute FFI call — fills arrays/schemas with Arrow data
-    val numRows = searcher.aggregateArrowFfi(queryAstJson, aggName, aggJson, arrayAddrs, schemaAddrs)
-    logger.debug(s"Aggregation FFI returned $numRows rows")
+    try {
+      // Execute FFI call — fills arrays/schemas with Arrow data
+      val numRows = searcher.aggregateArrowFfi(queryAstJson, aggName, aggJson, arrayAddrs, schemaAddrs)
+      logger.debug(s"Aggregation FFI returned $numRows rows")
 
-    // Import into Spark ColumnarBatch
-    bridge.importAsColumnarBatch(arrays, schemas, numRows)
+      // Import into Spark ColumnarBatch (transfers ownership of arrays/schemas)
+      bridge.importAsColumnarBatch(arrays, schemas, numRows)
+    } catch {
+      case ex: Exception =>
+        // Clean up FFI structs that were not consumed by importAsColumnarBatch
+        arrays.foreach(a => try a.close() catch { case _: Exception => })
+        schemas.foreach(s => try s.close() catch { case _: Exception => })
+        throw ex
+    }
   }
 
   /**
@@ -140,14 +148,21 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     // Allocate FFI structs
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
 
-    // Execute multi-split FFI call — native merge_fruits merges across all splits
-    val numRows = cacheManager.multiSplitAggregateArrowFfi(
-      searchers, queryAstJson, aggName, aggJson, arrayAddrs, schemaAddrs
-    )
-    logger.debug(s"Multi-split aggregation FFI returned $numRows rows from ${searchers.size()} splits")
+    try {
+      // Execute multi-split FFI call — native merge_fruits merges across all splits
+      val numRows = cacheManager.multiSplitAggregateArrowFfi(
+        searchers, queryAstJson, aggName, aggJson, arrayAddrs, schemaAddrs
+      )
+      logger.debug(s"Multi-split aggregation FFI returned $numRows rows from ${searchers.size()} splits")
 
-    // Import into Spark ColumnarBatch
-    bridge.importAsColumnarBatch(arrays, schemas, numRows)
+      // Import into Spark ColumnarBatch (transfers ownership of arrays/schemas)
+      bridge.importAsColumnarBatch(arrays, schemas, numRows)
+    } catch {
+      case ex: Exception =>
+        arrays.foreach(a => try a.close() catch { case _: Exception => })
+        schemas.foreach(s => try s.close() catch { case _: Exception => })
+        throw ex
+    }
   }
 
   /**
@@ -185,73 +200,39 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     // Allocate FFI structs for all columns
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(totalCols)
 
-    // Build combined aggregation JSON (preserves ordering)
-    val combinedAggJson = buildMultiAggJson(aggregations.toSeq)
+    try {
+      // Build combined aggregation JSON (preserves ordering)
+      val combinedAggJson = buildMultiAggJson(aggregations.toSeq)
 
-    // Convert aggNames to Java List
-    val aggNames = new java.util.ArrayList[String]()
-    aggregations.foreach { case (name, _) => aggNames.add(name) }
+      // Convert aggNames to Java List
+      val aggNames = new java.util.ArrayList[String]()
+      aggregations.foreach { case (name, _) => aggNames.add(name) }
 
-    // Execute single-pass multi-agg FFI
-    val resultJson = cacheManager.multiSplitMultiAggregateArrowFfi(
-      searchers, queryAstJson, aggNames, combinedAggJson, colCounts, arrayAddrs, schemaAddrs
-    )
-    logger.debug(s"Multi-split multi-agg FFI result: $resultJson")
+      // Execute single-pass multi-agg FFI
+      val resultJson = cacheManager.multiSplitMultiAggregateArrowFfi(
+        searchers, queryAstJson, aggNames, combinedAggJson, colCounts, arrayAddrs, schemaAddrs
+      )
+      logger.debug(s"Multi-split multi-agg FFI result: $resultJson")
 
-    // Parse row counts per aggregation from result JSON: {"agg_name":rowCount,...}
-    val rowCountPattern = """"([^"]+)"\s*:\s*(\d+)""".r
-    val rowCountMap = rowCountPattern.findAllMatchIn(resultJson).map(m => m.group(1) -> m.group(2).toInt).toMap
+      // Parse row counts per aggregation from result JSON: {"agg_name":rowCount,...}
+      val rowCountPattern = """"([^"]+)"\s*:\s*(\d+)""".r
+      val rowCountMap = rowCountPattern.findAllMatchIn(resultJson).map(m => m.group(1) -> m.group(2).toInt).toMap
 
-    // Import each aggregation's columns as a separate ColumnarBatch
-    var colOffset = 0
-    aggregations.zip(aggInfos).map { case ((aggName, _), (_, numCols, _)) =>
-      val aggArrays  = arrays.slice(colOffset, colOffset + numCols)
-      val aggSchemas = schemas.slice(colOffset, colOffset + numCols)
-      val numRows    = rowCountMap.getOrElse(aggName, 0)
-      colOffset += numCols
-      bridge.importAsColumnarBatch(aggArrays, aggSchemas, numRows)
+      // Import each aggregation's columns as a separate ColumnarBatch
+      var colOffset = 0
+      aggregations.zip(aggInfos).map { case ((aggName, _), (_, numCols, _)) =>
+        val aggArrays  = arrays.slice(colOffset, colOffset + numCols)
+        val aggSchemas = schemas.slice(colOffset, colOffset + numCols)
+        val numRows    = rowCountMap.getOrElse(aggName, 0)
+        colOffset += numCols
+        bridge.importAsColumnarBatch(aggArrays, aggSchemas, numRows)
+      }
+    } catch {
+      case ex: Exception =>
+        arrays.foreach(a => try a.close() catch { case _: Exception => })
+        schemas.foreach(s => try s.close() catch { case _: Exception => })
+        throw ex
     }
-  }
-
-  /**
-   * Assemble a final ColumnarBatch matching the target Spark schema from FFI results.
-   *
-   * Handles type mismatches: tantivy4java FFI returns Float64 for all metrics and Int64 for counts, but Spark may
-   * expect IntegerType/LongType/FloatType. Creates OnHeapColumnVector copies with type casting when needed, and
-   * reorders columns to match targetSchema field order.
-   *
-   * @param ffiBatch
-   *   The raw FFI ColumnarBatch (will NOT be closed by this method)
-   * @param targetSchema
-   *   The Spark schema to conform to
-   * @param columnMapping
-   *   Maps target schema field index -> FFI batch column index
-   * @return
-   *   New ColumnarBatch matching targetSchema (caller must close both batches)
-   */
-  def assembleAggregateColumnarBatch(
-    ffiBatch: ColumnarBatch,
-    targetSchema: StructType,
-    columnMapping: Array[Int]
-  ): ColumnarBatch = {
-    val numRows = ffiBatch.numRows()
-    val vectors = new Array[ColumnVector](targetSchema.fields.length)
-
-    targetSchema.fields.zipWithIndex.foreach {
-      case (targetField, targetIdx) =>
-        val sourceIdx    = columnMapping(targetIdx)
-        val sourceColumn = ffiBatch.column(sourceIdx)
-        val targetType   = targetField.dataType
-
-        // Check if type conversion is needed
-        if (needsTypeCast(sourceColumn, targetType)) {
-          vectors(targetIdx) = castColumn(sourceColumn, targetType, numRows)
-        } else {
-          vectors(targetIdx) = sourceColumn
-        }
-    }
-
-    new ColumnarBatch(vectors, numRows)
   }
 
   /**
@@ -266,9 +247,22 @@ class AggregationArrowFfiHelper extends AutoCloseable {
    * @return
    *   Combined 1-row ColumnarBatch (caller must close)
    */
+  /**
+   * Create a single-row ColumnarBatch from multiple single-column FFI batches.
+   *
+   * @param ffiBatches
+   *   Array of 1-row ColumnarBatch results (one per aggregation expression)
+   * @param targetSchema
+   *   The Spark schema for the combined result
+   * @param arrowTypes
+   *   Arrow type names per batch (e.g., "Int64", "Float64") for schema-driven casting
+   * @return
+   *   Combined 1-row ColumnarBatch (caller must close)
+   */
   def combineSingleRowBatches(
     ffiBatches: Array[ColumnarBatch],
-    targetSchema: StructType
+    targetSchema: StructType,
+    arrowTypes: Array[String] = Array.empty
   ): ColumnarBatch = {
     require(ffiBatches.length == targetSchema.fields.length,
       s"Expected ${targetSchema.fields.length} batches but got ${ffiBatches.length}")
@@ -278,15 +272,53 @@ class AggregationArrowFfiHelper extends AutoCloseable {
       case (targetField, idx) =>
         val sourceColumn = ffiBatches(idx).column(0) // Each batch has 1 column
         val targetType   = targetField.dataType
-
-        if (needsTypeCast(sourceColumn, targetType)) {
-          vectors(idx) = castColumn(sourceColumn, targetType, 1)
-        } else {
-          vectors(idx) = sourceColumn
-        }
+        val arrowType    = if (idx < arrowTypes.length) arrowTypes(idx) else ""
+        vectors(idx) = castSingleValue(sourceColumn, targetType, arrowType)
     }
 
     new ColumnarBatch(vectors, 1)
+  }
+
+  /**
+   * Cast a single-row, single-column FFI result to the target Spark type.
+   * Uses Arrow type name for schema-driven dispatch (no exception probing).
+   */
+  private def castSingleValue(source: ColumnVector, targetType: DataType, arrowType: String): ColumnVector = {
+    val onHeap = new OnHeapColumnVector(1, targetType)
+    if (source.isNullAt(0)) {
+      onHeap.putNull(0)
+    } else {
+      val isInt64   = arrowType == "Int64"
+      val isFloat64 = arrowType == "Float64"
+
+      targetType match {
+        case LongType =>
+          if (isInt64) onHeap.putLong(0, source.getLong(0))
+          else if (isFloat64) onHeap.putLong(0, Math.round(source.getDouble(0)))
+          else onHeap.putLong(0, source.getLong(0))
+        case IntegerType =>
+          if (isInt64) onHeap.putInt(0, source.getLong(0).toInt)
+          else if (isFloat64) onHeap.putInt(0, Math.round(source.getDouble(0)).toInt)
+          else onHeap.putInt(0, source.getLong(0).toInt)
+        case DoubleType =>
+          if (isFloat64) onHeap.putDouble(0, source.getDouble(0))
+          else if (isInt64) onHeap.putDouble(0, source.getLong(0).toDouble)
+          else onHeap.putDouble(0, source.getDouble(0))
+        case FloatType =>
+          if (isFloat64) onHeap.putFloat(0, source.getDouble(0).toFloat)
+          else if (isInt64) onHeap.putFloat(0, source.getLong(0).toFloat)
+          else onHeap.putFloat(0, source.getDouble(0).toFloat)
+        case StringType =>
+          val utf8 = source.getUTF8String(0)
+          if (utf8 != null) { val bytes = utf8.getBytes; onHeap.putByteArray(0, bytes, 0, bytes.length) }
+          else onHeap.putNull(0)
+        case _ =>
+          if (isInt64) onHeap.putLong(0, source.getLong(0))
+          else if (isFloat64) onHeap.putLong(0, source.getDouble(0).toLong)
+          else onHeap.putLong(0, source.getLong(0))
+      }
+    }
+    onHeap
   }
 
   override def close(): Unit =
@@ -308,77 +340,5 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     val numCols     = columnNames.length
 
     (numCols, columnNames, columnTypes, rowCount)
-  }
-
-  private def needsTypeCast(sourceColumn: ColumnVector, targetType: DataType): Boolean =
-    // Always cast FFI Arrow columns to ensure type safety. FFI returns Float64 for all metrics
-    // (including SUM/MIN/MAX of integer fields) and Int64 for counts. Since we can't inspect
-    // the underlying Arrow vector type from ColumnVector, always create a typed OnHeapColumnVector.
-    // For 1-row aggregates and small GROUP BY results, the copy overhead is negligible.
-    true
-
-  private def castColumn(sourceColumn: ColumnVector, targetType: DataType, numRows: Int): ColumnVector = {
-    val onHeap = new OnHeapColumnVector(numRows, targetType)
-    (0 until numRows).foreach { row =>
-      if (sourceColumn.isNullAt(row)) {
-        onHeap.putNull(row)
-      } else {
-        targetType match {
-          case IntegerType =>
-            // Source is Float64 (metric) or Int64 (count) -> Int
-            val value = try sourceColumn.getLong(row).toInt
-            catch { case _: Exception => Math.round(sourceColumn.getDouble(row)).toInt }
-            onHeap.putInt(row, value)
-
-          case LongType =>
-            // Source may be Int64 (count) or Float64 (SUM of integers)
-            val value = try sourceColumn.getLong(row)
-            catch { case _: Exception => Math.round(sourceColumn.getDouble(row)) }
-            onHeap.putLong(row, value)
-
-          case FloatType =>
-            val value = try sourceColumn.getDouble(row).toFloat
-            catch { case _: Exception => sourceColumn.getFloat(row) }
-            onHeap.putFloat(row, value)
-
-          case DoubleType =>
-            // Source may be Float64 or Int64
-            val value = try sourceColumn.getDouble(row)
-            catch { case _: Exception => sourceColumn.getLong(row).toDouble }
-            onHeap.putDouble(row, value)
-
-          case StringType =>
-            val utf8 = sourceColumn.getUTF8String(row)
-            if (utf8 != null) {
-              val bytes = utf8.getBytes
-              onHeap.putByteArray(row, bytes, 0, bytes.length)
-            } else {
-              onHeap.putNull(row)
-            }
-
-          case TimestampType =>
-            // FFI returns microseconds as Int64
-            val value = try sourceColumn.getLong(row)
-            catch { case _: Exception => sourceColumn.getDouble(row).toLong }
-            onHeap.putLong(row, value)
-
-          case DateType =>
-            // FFI returns days as Int32
-            val value = try sourceColumn.getInt(row)
-            catch { case _: Exception => sourceColumn.getLong(row).toInt }
-            onHeap.putInt(row, value)
-
-          case BooleanType =>
-            val value = try sourceColumn.getLong(row) != 0
-            catch { case _: Exception => sourceColumn.getDouble(row) != 0.0 }
-            onHeap.putBoolean(row, value)
-
-          case other =>
-            logger.warn(s"Unsupported type cast target: $other, putting null")
-            onHeap.putNull(row)
-        }
-      }
-    }
-    onHeap
   }
 }

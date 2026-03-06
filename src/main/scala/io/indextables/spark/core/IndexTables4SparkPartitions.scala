@@ -213,7 +213,7 @@ class IndexTables4SparkReaderFactory(
     val enabled     = config.getOrElse(IndexTables4SparkOptions.COLUMNAR_READS_ENABLED, "true").toBoolean
     val supported   = isCompanion && enabled
     if (supported)
-      logger.info(s"Columnar reads enabled for companion partition")
+      logger.debug(s"Columnar reads enabled for companion partition")
     supported
   }
 

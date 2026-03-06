@@ -104,25 +104,49 @@ object GroupByColumnarReaderUtils {
             }
 
           case IntegerType =>
-            if (isUtf8) onHeap.putInt(row, source.getUTF8String(row).toString.toDouble.toInt)
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              try onHeap.putInt(row, str.toDouble.toInt)
+              catch { case e: NumberFormatException =>
+                throw new IllegalArgumentException(s"Cannot cast Utf8 value '$str' to IntegerType at row $row", e)
+              }
+            }
             else if (isInt64) onHeap.putInt(row, source.getLong(row).toInt)
             else if (isFloat64) onHeap.putInt(row, Math.round(source.getDouble(row)).toInt)
-            else onHeap.putInt(row, source.getLong(row).toInt) // best guess
+            else onHeap.putInt(row, source.getLong(row).toInt)
 
           case LongType =>
-            if (isUtf8) onHeap.putLong(row, source.getUTF8String(row).toString.toDouble.toLong)
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              try onHeap.putLong(row, str.toDouble.toLong)
+              catch { case e: NumberFormatException =>
+                throw new IllegalArgumentException(s"Cannot cast Utf8 value '$str' to LongType at row $row", e)
+              }
+            }
             else if (isInt64) onHeap.putLong(row, source.getLong(row))
             else if (isFloat64) onHeap.putLong(row, Math.round(source.getDouble(row)))
             else onHeap.putLong(row, source.getLong(row))
 
           case DoubleType =>
-            if (isUtf8) onHeap.putDouble(row, source.getUTF8String(row).toString.toDouble)
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              try onHeap.putDouble(row, str.toDouble)
+              catch { case e: NumberFormatException =>
+                throw new IllegalArgumentException(s"Cannot cast Utf8 value '$str' to DoubleType at row $row", e)
+              }
+            }
             else if (isFloat64) onHeap.putDouble(row, source.getDouble(row))
             else if (isInt64) onHeap.putDouble(row, source.getLong(row).toDouble)
             else onHeap.putDouble(row, source.getDouble(row))
 
           case FloatType =>
-            if (isUtf8) onHeap.putFloat(row, source.getUTF8String(row).toString.toFloat)
+            if (isUtf8) {
+              val str = source.getUTF8String(row).toString
+              try onHeap.putFloat(row, str.toFloat)
+              catch { case e: NumberFormatException =>
+                throw new IllegalArgumentException(s"Cannot cast Utf8 value '$str' to FloatType at row $row", e)
+              }
+            }
             else if (isFloat64) onHeap.putFloat(row, source.getDouble(row).toFloat)
             else if (isInt64) onHeap.putFloat(row, source.getLong(row).toFloat)
             else onHeap.putFloat(row, source.getDouble(row).toFloat)
@@ -242,14 +266,36 @@ object GroupByColumnarReaderUtils {
     val docCountIdx = if (colNameToIdx.nonEmpty) colNameToIdx.getOrElse("doc_count", numKeyColumns)
                       else numKeyColumns
 
+    // Collect sub-aggregation column indices (everything after key columns that isn't doc_count)
+    val subAggColIndices = columnNames.zipWithIndex.collect {
+      case (name, idx) if idx >= numKeyColumns && name != "doc_count" => idx
+    }
+    var subAggOffset = 0
+
     aggExprs.zipWithIndex.foreach {
       case (aggExpr, outIdx) =>
         val ffiColIdx = aggExpr match {
           case _: Count | _: CountStar => docCountIdx
-          case _: Sum => colNameToIdx.getOrElse(s"sum_$outIdx", findNextSubAggCol(colNameToIdx, docCountIdx))
-          case _: Min => colNameToIdx.getOrElse(s"min_$outIdx", findNextSubAggCol(colNameToIdx, docCountIdx))
-          case _: Max => colNameToIdx.getOrElse(s"max_$outIdx", findNextSubAggCol(colNameToIdx, docCountIdx))
-          case _      => colNameToIdx.getOrElse(s"agg_$outIdx", findNextSubAggCol(colNameToIdx, docCountIdx))
+          case _: Sum =>
+            colNameToIdx.getOrElse(s"sum_$outIdx", {
+              val idx = if (subAggOffset < subAggColIndices.length) subAggColIndices(subAggOffset) else docCountIdx + 1
+              subAggOffset += 1; idx
+            })
+          case _: Min =>
+            colNameToIdx.getOrElse(s"min_$outIdx", {
+              val idx = if (subAggOffset < subAggColIndices.length) subAggColIndices(subAggOffset) else docCountIdx + 1
+              subAggOffset += 1; idx
+            })
+          case _: Max =>
+            colNameToIdx.getOrElse(s"max_$outIdx", {
+              val idx = if (subAggOffset < subAggColIndices.length) subAggColIndices(subAggOffset) else docCountIdx + 1
+              subAggOffset += 1; idx
+            })
+          case _ =>
+            colNameToIdx.getOrElse(s"agg_$outIdx", {
+              val idx = if (subAggOffset < subAggColIndices.length) subAggColIndices(subAggOffset) else docCountIdx + 1
+              subAggOffset += 1; idx
+            })
         }
         val targetType = getAggOutputType(aggExpr, schema)
         vectors(numKeyColumns + outIdx) = castColumnSafe(ffiBatch.column(ffiColIdx), targetType, numRows, arrowTypeAt(columnTypes, ffiColIdx))
@@ -257,9 +303,6 @@ object GroupByColumnarReaderUtils {
 
     new ColumnarBatch(vectors, numRows)
   }
-
-  private def findNextSubAggCol(colNameToIdx: Map[String, Int], docCountIdx: Int): Int =
-    docCountIdx + 1
 
   /** Safe lookup into columnTypes array; returns "" if index is out of bounds. */
   private def arrowTypeAt(columnTypes: Array[String], idx: Int): String =
@@ -450,19 +493,28 @@ object GroupByColumnarReaderUtils {
     val fieldType = schema.fields.find(_.name == colName).map(_.dataType).getOrElse(StringType)
     val constVec = new ConstantColumnVector(numRows, fieldType)
     val value = partitionValues.getOrElse(colName, "")
-    fieldType match {
-      case StringType    => constVec.setUtf8String(UTF8String.fromString(value))
-      case IntegerType   => constVec.setInt(value.toInt)
-      case LongType      => constVec.setLong(value.toLong)
-      case FloatType     => constVec.setFloat(value.toFloat)
-      case DoubleType    => constVec.setDouble(value.toDouble)
-      case DateType      =>
-        val days = java.time.LocalDate.parse(value).toEpochDay.toInt
-        constVec.setInt(days)
-      case TimestampType =>
-        val micros = java.sql.Timestamp.valueOf(value).getTime * 1000L
-        constVec.setLong(micros)
-      case _             => constVec.setUtf8String(UTF8String.fromString(value))
+    try {
+      fieldType match {
+        case StringType    => constVec.setUtf8String(UTF8String.fromString(value))
+        case IntegerType   => constVec.setInt(value.toInt)
+        case LongType      => constVec.setLong(value.toLong)
+        case FloatType     => constVec.setFloat(value.toFloat)
+        case DoubleType    => constVec.setDouble(value.toDouble)
+        case DateType      =>
+          val days = java.time.LocalDate.parse(value).toEpochDay.toInt
+          constVec.setInt(days)
+        case TimestampType =>
+          val micros = java.sql.Timestamp.valueOf(value).getTime * 1000L
+          constVec.setLong(micros)
+        case _             => constVec.setUtf8String(UTF8String.fromString(value))
+      }
+    } catch {
+      case e: NumberFormatException =>
+        throw new IllegalArgumentException(
+          s"Cannot parse partition value '$value' for column '$colName' as $fieldType", e)
+      case e: java.time.format.DateTimeParseException =>
+        throw new IllegalArgumentException(
+          s"Cannot parse partition value '$value' for column '$colName' as $fieldType", e)
     }
     constVec
   }

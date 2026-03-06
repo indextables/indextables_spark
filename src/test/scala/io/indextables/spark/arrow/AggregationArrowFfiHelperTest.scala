@@ -17,8 +17,6 @@
 
 package io.indextables.spark.arrow
 
-import org.apache.spark.sql.types._
-
 import io.indextables.tantivy4java.aggregation._
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -165,26 +163,6 @@ class AggregationArrowFfiHelperTest extends AnyFunSuite with Matchers {
       result._2 shouldBe empty
       result._3 shouldBe empty
       result._4 shouldBe 0
-    } finally
-      helper.close()
-  }
-
-  // ===== Type casting tests =====
-
-  test("castColumn converts Float64 to IntegerType") {
-    val helper = new AggregationArrowFfiHelper()
-    try {
-      val method = classOf[AggregationArrowFfiHelper].getDeclaredMethod(
-        "needsTypeCast",
-        classOf[org.apache.spark.sql.vectorized.ColumnVector],
-        classOf[DataType]
-      )
-      method.setAccessible(true)
-
-      // DoubleType and LongType should not need cast (they match FFI output)
-      // IntegerType, FloatType etc. should need cast
-      // We can't easily test with null ColumnVector, so just verify the logic
-      assert(true) // Placeholder - real cast testing done in integration tests
     } finally
       helper.close()
   }

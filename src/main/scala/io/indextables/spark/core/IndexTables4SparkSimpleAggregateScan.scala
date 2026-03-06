@@ -416,7 +416,7 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
 
   override def supportColumnarReads(partition: org.apache.spark.sql.connector.read.InputPartition): Boolean = {
     if (arrowFfiEnabled)
-      logger.info("SIMPLE AGGREGATE READER FACTORY: Columnar reads enabled via Arrow FFI aggregation")
+      logger.debug("SIMPLE AGGREGATE READER FACTORY: Columnar reads enabled via Arrow FFI aggregation")
     arrowFfiEnabled
   }
 

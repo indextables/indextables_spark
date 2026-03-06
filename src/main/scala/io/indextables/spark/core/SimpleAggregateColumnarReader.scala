@@ -125,30 +125,35 @@ class SimpleAggregateColumnarReader(
         // Check for zero-count (empty split)
         if (hasZeroCount(ffiBatches)) {
           logger.debug(s"SimpleAggregateColumnarReader: no matching docs in split ${partition.split.path}")
-          ffiBatches.foreach(_.close())
           batch = null
           return
         }
 
         // Assemble combined batch matching readSchema
         val readSchema = createSimpleAggregateReadSchema()
-        batch = helper.combineSingleRowBatches(ffiBatches, readSchema)
+        val arrowTypes = deriveArrowTypes()
+        batch = helper.combineSingleRowBatches(ffiBatches, readSchema, arrowTypes)
         logger.debug(s"SimpleAggregateColumnarReader: assembled batch with ${readSchema.fields.length} columns (single-pass)")
 
-      } catch {
-        case ex: Exception =>
-          ffiBatches.foreach(b => try b.close() catch { case _: Exception => })
-          throw ex
+      } finally {
+        ffiBatches.foreach(b => try b.close() catch { case _: Exception => })
       }
 
     } catch {
       case e: IllegalArgumentException => throw e
       case e: io.indextables.spark.exceptions.IndexQueryParseException => throw e
       case e: Exception =>
-        logger.error(s"SimpleAggregateColumnarReader: failed for split ${partition.split.path}", e)
-        batch = null
+        throw new RuntimeException(
+          s"SimpleAggregateColumnarReader: failed for split ${partition.split.path}", e)
     }
   }
+
+  private def deriveArrowTypes(): Array[String] =
+    partition.aggregation.aggregateExpressions.map {
+      case _: Count | _: CountStar => "Int64"
+      case _: Sum | _: Min | _: Max => "Float64"
+      case _ => ""
+    }
 
   private def buildQueryAstJson(splitSearchEngine: SplitSearchEngine): String = {
     // Strip partition filters
@@ -398,30 +403,35 @@ class MultiSplitSimpleAggregateColumnarReader(
         // Check for zero-count
         if (hasZeroCount(ffiBatches)) {
           logger.debug(s"MultiSplitSimpleAggregateColumnarReader: no matching docs across ${partition.splits.length} splits")
-          ffiBatches.foreach(_.close())
           batch = null
           return
         }
 
         // Assemble combined batch matching readSchema
         val readSchema = createSimpleAggregateReadSchema()
-        batch = helper.combineSingleRowBatches(ffiBatches, readSchema)
+        val arrowTypes = deriveArrowTypes()
+        batch = helper.combineSingleRowBatches(ffiBatches, readSchema, arrowTypes)
         logger.debug(s"MultiSplitSimpleAggregateColumnarReader: assembled batch with ${readSchema.fields.length} columns from ${partition.splits.length} splits (single-pass)")
 
-      } catch {
-        case ex: Exception =>
-          ffiBatches.foreach(b => try b.close() catch { case _: Exception => })
-          throw ex
+      } finally {
+        ffiBatches.foreach(b => try b.close() catch { case _: Exception => })
       }
 
     } catch {
       case e: IllegalArgumentException => throw e
       case e: io.indextables.spark.exceptions.IndexQueryParseException => throw e
       case e: Exception =>
-        logger.error(s"MultiSplitSimpleAggregateColumnarReader: failed", e)
-        batch = null
+        throw new RuntimeException(
+          s"MultiSplitSimpleAggregateColumnarReader: failed for ${partition.splits.length} splits", e)
     }
   }
+
+  private def deriveArrowTypes(): Array[String] =
+    partition.aggregation.aggregateExpressions.map {
+      case _: Count | _: CountStar => "Int64"
+      case _: Sum | _: Min | _: Max => "Float64"
+      case _ => ""
+    }
 
   private def buildQueryAstJson(splitSearchEngine: SplitSearchEngine): String = {
     val nonPartitionPushedFilters = if (partition.partitionColumns.nonEmpty && partition.pushedFilters.nonEmpty) {
