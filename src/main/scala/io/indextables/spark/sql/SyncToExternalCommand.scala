@@ -563,6 +563,11 @@ case class SyncToExternalCommand(
           // Removed source paths (Delta only) require finding and invalidating the companion
           // splits that indexed them, and re-indexing any sibling files from those splits.
           val newFiles = dr.filesRDD.collect().toSeq
+          if (newFiles.size > 10000)
+            logger.warn(
+              s"Large incremental changeset: ${newFiles.size} files collected to driver. " +
+                "Consider reducing spark.indextables.companion.stream.maxIncrementalCommits to avoid OOM."
+            )
           if (dr.removedSourcePaths.isEmpty) {
             logger.info(s"Incremental changeset: ${newFiles.size} new files (anti-join skipped)")
             (newFiles, Seq.empty[AddAction])
@@ -1395,13 +1400,18 @@ case class SyncToExternalCommand(
    * Used by StreamingCompanionManager to skip executeSyncInternal entirely on no-change polling
    * cycles, avoiding the checkpoint parquet read that getSnapshotInfo() would otherwise trigger.
    */
-  private[sql] def cheapSourceVersion(sparkSession: SparkSession): Option[Long] = {
+  private[sql] def cheapSourceVersion(
+    sparkSession: SparkSession,
+    cachedBaseConfigs: Option[Map[String, String]] = None
+  ): Option[Long] = {
     try {
-      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
-      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
-        ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      val mergedConfigs = cachedBaseConfigs.getOrElse {
+        val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+        val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+        val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+          ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      }
       sourceFormat match {
         case "delta" =>
           val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)

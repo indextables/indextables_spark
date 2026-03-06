@@ -970,6 +970,9 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
           throw new IllegalArgumentException("WITH STREAMING is not compatible with DRY RUN")
         }
         val n = ctx.pollInterval.getText.toLong
+        if (n <= 0) throw new IllegalArgumentException(
+          s"WITH STREAMING POLL INTERVAL must be at least 1 SECONDS (got $n)"
+        )
         val ms = ctx.pollUnit.getText.toUpperCase match {
           case "SECONDS" => n * 1000L
           case "MINUTES" => n * 60L * 1000L

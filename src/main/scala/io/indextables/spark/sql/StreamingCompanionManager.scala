@@ -20,6 +20,8 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
 
+import io.indextables.spark.util.ConfigNormalization
+
 /**
  * Manages the streaming companion sync loop for BUILD INDEXTABLES COMPANION ... WITH STREAMING.
  *
@@ -72,6 +74,18 @@ private[sql] class StreamingCompanionManager(
 
     val metrics = new StreamingCompanionMetrics(sparkSession.sparkContext)
 
+    // Pre-compute merged configs once — reused every poll cycle by cheapSourceVersion.
+    // Avoids re-reading SparkConf/HadoopConf on every cycle (O(1) map lookup instead of reflection).
+    val cachedBaseConfigs: Option[Map[String, String]] = try {
+      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      Some(
+        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+          ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      )
+    } catch { case _: Exception => None }
+
     // Attempt to resume from the last committed source version in the companion transaction log.
     // On a clean first run this returns None and a full sync is performed.
     // On restart after an outage this skips the full anti-join and resumes incrementally.
@@ -102,9 +116,10 @@ private[sql] class StreamingCompanionManager(
       // Iceberg: 1 catalog.load_table() call, no manifest list read.
       // Parquet / unknown: returns None — fall through to executeSyncInternal.
       // If the probe throws for any reason, returns None and falls through to full sync.
-      val cheapVersion     = command.cheapSourceVersion(sparkSession)
+      val cheapVersion     = command.cheapSourceVersion(sparkSession, cachedBaseConfigs)
       val versionUnchanged = cheapVersion.exists(cv => lastSyncedVersion.contains(cv))
       var hadError         = false
+      var nextSleepMs      = pollIntervalMs
 
       if (versionUnchanged) {
         // ── No-change path ─────────────────────────────────────────────────────────────────────
@@ -186,10 +201,14 @@ private[sql] class StreamingCompanionManager(
             hadError = true
             consecutiveErrors += 1
             metrics.recordCycleError()
+            nextSleepMs = math.min(
+              pollIntervalMs * math.pow(errorBackoffMultiplier.toDouble, consecutiveErrors).toLong,
+              pollIntervalMs * 10L
+            )
             logger.error(
               s"[IndextablesCompanionStream] ERROR in sync cycle #$cycle " +
                 s"($consecutiveErrors/$maxConsecutiveErrors consecutive errors, " +
-                s"will retry in ${pollIntervalMs * errorBackoffMultiplier / 1000}s): ${e.getMessage}",
+                s"will retry in ${nextSleepMs / 1000}s): ${e.getMessage}",
               e
             )
             if (consecutiveErrors >= maxConsecutiveErrors) {
@@ -201,8 +220,7 @@ private[sql] class StreamingCompanionManager(
         }
       }
 
-      val sleepMs = if (hadError) pollIntervalMs * errorBackoffMultiplier else pollIntervalMs
-      waitForNextCycle(sleepMs)
+      waitForNextCycle(nextSleepMs)
     }
 
     val uptimeSec = (System.currentTimeMillis() - streamStart) / 1000
