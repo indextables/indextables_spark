@@ -186,6 +186,11 @@ check_protoc() {
     command -v protoc &>/dev/null
 }
 
+# Check if OpenSSL dev headers and pkg-config are available
+check_openssl_dev() {
+    command -v pkg-config &>/dev/null && pkg-config --exists openssl 2>/dev/null
+}
+
 # Check if tantivy4java JAR exists in local Maven cache
 check_tantivy4java() {
     local jar_path
@@ -280,6 +285,15 @@ install_linux() {
         fi
     fi
 
+    # Helper: run apt-get update once before the first apt install
+    local apt_updated=false
+    ensure_apt_updated() {
+        if [[ "$pkg_mgr" == "apt-get" ]] && [[ "$apt_updated" == false ]]; then
+            $sudo_cmd apt-get update -qq
+            apt_updated=true
+        fi
+    }
+
     # --- Java 11 ---
     if check_java; then
         ok "Java $REQUIRED_JAVA_MAJOR already installed"
@@ -287,7 +301,7 @@ install_linux() {
         info "Installing OpenJDK $REQUIRED_JAVA_MAJOR..."
         case "$pkg_mgr" in
             apt-get)
-                $sudo_cmd apt-get update -qq
+                ensure_apt_updated
                 $sudo_cmd apt-get install -y openjdk-11-jdk
                 ;;
             dnf)
@@ -307,6 +321,7 @@ install_linux() {
         info "Installing Maven..."
         case "$pkg_mgr" in
             apt-get)
+                ensure_apt_updated
                 $sudo_cmd apt-get install -y maven
                 ;;
             dnf)
@@ -326,6 +341,7 @@ install_linux() {
         info "Installing protobuf compiler..."
         case "$pkg_mgr" in
             apt-get)
+                ensure_apt_updated
                 $sudo_cmd apt-get install -y protobuf-compiler
                 ;;
             dnf)
@@ -336,6 +352,26 @@ install_linux() {
                 ;;
         esac
         ok "Protobuf compiler installed"
+    fi
+
+    # --- OpenSSL dev headers + pkg-config (required by Rust openssl-sys crate) ---
+    if check_openssl_dev; then
+        ok "OpenSSL dev headers and pkg-config already installed"
+    else
+        info "Installing OpenSSL development headers and pkg-config..."
+        case "$pkg_mgr" in
+            apt-get)
+                ensure_apt_updated
+                $sudo_cmd apt-get install -y libssl-dev pkg-config
+                ;;
+            dnf)
+                $sudo_cmd dnf install -y openssl-devel pkgconfig
+                ;;
+            yum)
+                $sudo_cmd yum install -y openssl-devel pkgconfig
+                ;;
+        esac
+        ok "OpenSSL dev headers and pkg-config installed"
     fi
 }
 

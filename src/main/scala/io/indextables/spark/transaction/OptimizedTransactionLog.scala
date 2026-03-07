@@ -624,6 +624,287 @@ class OptimizedTransactionLog(
   }
 
   /**
+   * Commits a metadata-only update with concurrent safety by re-reading metadata on each retry.
+   *
+   * Unlike writeActionsWithRetry which freezes the action payload across retries, this method re-reads the current
+   * metadata and re-applies the transform function on every attempt. This prevents concurrent metadata writers from
+   * silently overwriting each other's changes.
+   *
+   * For the JSON format, this uses a custom retry loop with ifNotExists writes. For the Avro state format, this
+   * invalidates caches, re-reads metadata, applies the transform, and delegates to writeActionsToAvroState which
+   * handles its own internal retry. The metadata is read fresh just before the Avro write, narrowing the race window.
+   *
+   * @param transform
+   *   function that receives current metadata and returns updated metadata
+   * @return
+   *   The transaction version number
+   * @throws TransactionConflictException
+   *   if all retry attempts are exhausted
+   */
+  override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long = {
+    if (isAvroFormatEnabled()) {
+      return commitMetadataUpdateAvro(transform)
+    }
+    commitMetadataUpdateJson(transform)
+  }
+
+  /**
+   * Avro path for commitMetadataUpdate. Invalidates caches, re-reads metadata, applies the transform, and delegates to
+   * writeActionsToAvroState. The metadata is re-read fresh just before the write to narrow the race window. The Avro
+   * state writer handles its own internal retry for version conflicts.
+   */
+  private def commitMetadataUpdateAvro(transform: MetadataAction => MetadataAction): Long = {
+    val timestamp = System.currentTimeMillis()
+
+    // Invalidate caches to ensure we read the absolute latest metadata from the Avro state
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    enhancedCache.invalidateLastCheckpointInfo(tablePath.toString)
+    invalidateSchemaRegistry()
+    currentSnapshot.set(None)
+
+    logger.info(s"commitMetadataUpdateAvro: writing metadata update via Avro state path with transform")
+
+    // Build a metadata transform function for the Avro state writer that operates on
+    // the JSON-encoded metadata. On each retry attempt, the state writer re-reads the
+    // base state and calls this transform with the base state's metadata, ensuring
+    // concurrent writers' changes are incorporated.
+    val metadataTransform: Option[String] => Option[String] = { baseMetadataJson =>
+      val baseMetadata = baseMetadataJson
+        .flatMap { json =>
+          scala.util.Try {
+            val tree         = JsonUtil.mapper.readTree(json)
+            val metaDataNode = if (tree.has("metaData")) tree.get("metaData") else tree
+            JsonUtil.mapper.treeToValue(metaDataNode, classOf[MetadataAction])
+          }.toOption
+        }
+        .getOrElse(getMetadata())
+
+      val updatedMetadata = transform(baseMetadata)
+      val node            = JsonUtil.mapper.createObjectNode()
+      node.set[com.fasterxml.jackson.databind.JsonNode]("metaData", JsonUtil.mapper.valueToTree(updatedMetadata))
+      Some(JsonUtil.mapper.writeValueAsString(node))
+    }
+
+    // Build compaction config from options
+    val compactionConfig = io.indextables.spark.transaction.avro.CompactionConfig(
+      tombstoneThreshold =
+        Option(options.get(io.indextables.spark.transaction.avro.StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_KEY))
+          .map(_.toDouble)
+          .getOrElse(io.indextables.spark.transaction.avro.StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT),
+      maxManifests = Option(options.get(io.indextables.spark.transaction.avro.StateConfig.COMPACTION_MAX_MANIFESTS_KEY))
+        .map(_.toInt)
+        .getOrElse(io.indextables.spark.transaction.avro.StateConfig.COMPACTION_MAX_MANIFESTS_DEFAULT),
+      largeRemoveThreshold =
+        Option(options.get(io.indextables.spark.transaction.avro.StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_KEY))
+          .map(_.toInt)
+          .getOrElse(io.indextables.spark.transaction.avro.StateConfig.COMPACTION_LARGE_REMOVE_THRESHOLD_DEFAULT),
+      forceCompaction = false
+    )
+
+    // Use INCREMENTAL write with metadataTransform — the state writer re-reads base state
+    // and re-applies the transform on each retry, so concurrent metadata changes compose.
+    val writeResult = stateWriter.writeIncrementalWithRetry(
+      newFiles = Seq.empty,
+      removedPaths = Set.empty,
+      schemaRegistry = Map.empty,
+      compactionConfig = compactionConfig,
+      metadata = None,
+      metadataTransform = Some(metadataTransform)
+    )
+
+    // Update _last_checkpoint to point to new Avro state
+    val actualVersion = writeResult.version
+    val manifestIO    = io.indextables.spark.transaction.avro.StateManifestIO(cloudProvider)
+    val stateDir      = manifestIO.formatStateDir(actualVersion)
+
+    val actualStateDir = s"${transactionLogPath.toString}/$stateDir"
+    val stateManifest  = scala.util.Try(manifestIO.readStateManifest(actualStateDir)).toOption
+    val totalFiles     = stateManifest.map(_.numFiles).getOrElse(0L)
+    val totalBytes     = stateManifest.map(_.totalBytes).getOrElse(0L)
+
+    val lastCheckpointInfo = LastCheckpointInfo(
+      version = actualVersion,
+      size = totalFiles,
+      sizeInBytes = totalBytes,
+      numFiles = totalFiles,
+      createdTime = timestamp,
+      parts = None,
+      checkpointId = None,
+      format = Some(io.indextables.spark.transaction.avro.StateConfig.Format.AVRO_STATE),
+      stateDir = Some(stateDir)
+    )
+
+    val lastCheckpointJson = JsonUtil.mapper.writeValueAsString(lastCheckpointInfo)
+    manifestIO.writeLastCheckpointIfNewer(
+      transactionLogPath.toString,
+      actualVersion,
+      lastCheckpointJson
+    )
+
+    // Invalidate caches post-write
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    enhancedCache.invalidateLastCheckpointInfo(tablePath.toString)
+    invalidateSchemaRegistry()
+    currentSnapshot.set(None)
+
+    // Update version counter to track Avro state versions
+    versionCounter.updateAndGet(current => math.max(current, actualVersion))
+
+    // Store retry metrics
+    lastRetryMetrics = Some(
+      TxRetryMetrics(
+        attemptsMade = writeResult.attempts,
+        conflictsEncountered = if (writeResult.conflictDetected) writeResult.attempts - 1 else 0,
+        finalVersion = actualVersion,
+        conflictedVersions = Seq.empty
+      )
+    )
+
+    logger.info(
+      s"Metadata update written at Avro state version $actualVersion with $totalFiles total files"
+    )
+
+    // Re-cache metadata after write
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after commitMetadataUpdateAvro: ${e.getMessage}", e)
+    }
+
+    actualVersion
+  }
+
+  /** JSON path for commitMetadataUpdate with custom retry loop that re-reads metadata on each attempt. */
+  private def commitMetadataUpdateJson(transform: MetadataAction => MetadataAction): Long = {
+    val retryConfig         = getRetryConfig()
+    var attempt             = 1
+    var lastConflictVersion = -1L
+    val conflictedVersions  = scala.collection.mutable.ListBuffer[Long]()
+
+    while (attempt <= retryConfig.maxAttempts) {
+      // Invalidate caches before each retry attempt to ensure fresh metadata reads
+      if (attempt > 1) {
+        enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+        invalidateSchemaRegistry()
+        currentSnapshot.set(None)
+        refreshVersionCounterFromDisk()
+      }
+
+      // Re-read metadata fresh on EACH attempt to capture concurrent changes
+      val currentMetadata      = getMetadata()
+      val updatedMetadata      = transform(currentMetadata)
+      val actions: Seq[Action] = Seq(updatedMetadata)
+
+      val version = if (attempt == 1) {
+        getNextVersion()
+      } else {
+        versionCounter.incrementAndGet()
+      }
+
+      val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
+      val versionFilePath = versionFile.toString
+
+      logger.debug(s" Metadata update: writing version $version to $versionFilePath (attempt $attempt)")
+
+      // Apply schema deduplication fresh on each attempt
+      val (deduplicatedActions, metadataUpdate) = applySchemaDeduplicationForWrite(actions)
+
+      val actionsToWrite = metadataUpdate match {
+        case Some(schemaUpdatedMetadata) =>
+          deduplicatedActions.map {
+            case _: MetadataAction => schemaUpdatedMetadata
+            case other             => other
+          }
+        case None =>
+          deduplicatedActions
+      }
+
+      val codec           = getCompressionCodec()
+      val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+
+      val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
+        actions = actionsToWrite,
+        cloudProvider = cloudProvider,
+        path = versionFilePath,
+        codec = codec,
+        ifNotExists = true
+      )
+
+      if (writeSucceeded) {
+        // Success - update caches
+        metadataUpdate.foreach { um =>
+          val newSchemas = SchemaDeduplication.extractSchemaRegistry(um.configuration)
+          updateSchemaRegistry(newSchemas)
+        }
+
+        Thread.sleep(10) // File system consistency delay
+
+        // Update caches with the new metadata
+        enhancedCache.putVersionActions(tablePath.toString, version, actionsToWrite)
+        actionsToWrite.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
+          enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
+        }
+
+        // Create checkpoint if needed
+        checkpoint.foreach { cp =>
+          if (cp.shouldCreateCheckpoint(version)) {
+            try createCheckpointOptimized(version)
+            catch { case e: Exception => logger.warn(s"Failed to create checkpoint at version $version", e) }
+          }
+        }
+
+        lastRetryMetrics = Some(
+          TxRetryMetrics(
+            attemptsMade = attempt,
+            conflictsEncountered = attempt - 1,
+            finalVersion = version,
+            conflictedVersions = conflictedVersions.toSeq
+          )
+        )
+
+        if (attempt > 1) {
+          logger.info(
+            s"Metadata update written to version $version$compressionInfo after $attempt attempts (conflict on version $lastConflictVersion)"
+          )
+        } else {
+          logger.info(s"Metadata update written to version $version$compressionInfo")
+        }
+
+        return version
+      }
+
+      // Conflict - retry with fresh metadata on next iteration
+      lastConflictVersion = version
+      conflictedVersions += version
+      logger.warn(
+        s"Concurrent write conflict at version $version during metadata update (attempt $attempt/${retryConfig.maxAttempts}). " +
+          "Will re-read metadata and retry."
+      )
+
+      if (attempt < retryConfig.maxAttempts) {
+        val delay = calculateRetryDelay(attempt, retryConfig)
+        Thread.sleep(delay)
+      }
+
+      attempt += 1
+    }
+
+    // Post-write: invalidate caches so subsequent reads see the new metadata
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
+    currentSnapshot.set(None)
+
+    throw new TransactionConflictException(
+      s"Failed to write metadata update after ${retryConfig.maxAttempts} attempts. " +
+        s"Last conflicted version: $lastConflictVersion.",
+      lastConflictVersion,
+      retryConfig.maxAttempts
+    )
+  }
+
+  /**
    * Commits remove actions to mark files as logically deleted with retry on concurrent conflict.
    *
    * Remove operations are idempotent.

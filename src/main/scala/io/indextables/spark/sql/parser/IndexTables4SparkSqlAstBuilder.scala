@@ -23,6 +23,7 @@ import org.apache.spark.sql.catalyst.parser.ParserUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
+import io.indextables.spark.sql.TableRootUtils
 import io.indextables.spark.sql.{
   CheckpointCommand,
   DescribeComponentSizesCommand,
@@ -32,6 +33,7 @@ import io.indextables.spark.sql.{
   DescribePrewarmJobsCommand,
   DescribeStateCommand,
   DescribeStorageStatsCommand,
+  DescribeTableRootsCommand,
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
   FlushDiskCacheCommand,
@@ -41,8 +43,10 @@ import io.indextables.spark.sql.{
   PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand,
+  SetTableRootCommand,
   SyncToExternalCommand,
   TruncateTimeTravelCommand,
+  UnsetTableRootCommand,
   WaitForPrewarmJobsCommand
 }
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
@@ -710,6 +714,81 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     }
   }
 
+  override def visitSetTableRoot(ctx: SetTableRootContext): LogicalPlan = {
+    logger.debug(s"visitSetTableRoot called with context: $ctx")
+
+    try {
+      val rootName = ParserUtils.string(ctx.rootName)
+      val rootPath = ParserUtils.string(ctx.rootPath)
+
+      TableRootUtils.validateDesignatorName(rootName)
+
+      val tablePath = if (ctx.path != null) {
+        ParserUtils.string(ctx.path)
+      } else if (ctx.table != null) {
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException("SET TABLE ROOT requires AT path or table")
+      }
+
+      logger.debug(s"Creating SetTableRootCommand: rootName=$rootName, rootPath=$rootPath, tablePath=$tablePath")
+      SetTableRootCommand(rootName, rootPath, tablePath)
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitSetTableRoot: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitUnsetTableRoot(ctx: UnsetTableRootContext): LogicalPlan = {
+    logger.debug(s"visitUnsetTableRoot called with context: $ctx")
+
+    try {
+      val rootName = ParserUtils.string(ctx.rootName)
+
+      TableRootUtils.validateDesignatorName(rootName)
+
+      val tablePath = if (ctx.path != null) {
+        ParserUtils.string(ctx.path)
+      } else if (ctx.table != null) {
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException("UNSET TABLE ROOT requires AT path or table")
+      }
+
+      logger.debug(s"Creating UnsetTableRootCommand: rootName=$rootName, tablePath=$tablePath")
+      UnsetTableRootCommand(rootName, tablePath)
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitUnsetTableRoot: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitDescribeTableRoots(ctx: DescribeTableRootsContext): LogicalPlan = {
+    logger.debug(s"visitDescribeTableRoots called with context: $ctx")
+
+    try {
+      val tablePath = if (ctx.path != null) {
+        ParserUtils.string(ctx.path)
+      } else if (ctx.table != null) {
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException("DESCRIBE TABLE ROOTS requires AT path or table")
+      }
+
+      logger.debug(s"Creating DescribeTableRootsCommand: tablePath=$tablePath")
+      DescribeTableRootsCommand(tablePath)
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitDescribeTableRoots: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
   override def visitSyncToExternal(ctx: SyncToExternalContext): LogicalPlan = {
     logger.debug(s"visitSyncToExternal called with context: $ctx")
 
@@ -867,6 +946,24 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
       logger.debug(s"DRY RUN flag: $dryRun")
 
+      // TABLE ROOTS clause
+      val tableRoots: Map[String, String] = if (ctx.tableRootList() != null) {
+        ctx
+          .tableRootList()
+          .tableRootEntry()
+          .asScala
+          .map { entry =>
+            val name = ParserUtils.string(entry.rootName)
+            val path = ParserUtils.string(entry.rootPath)
+            TableRootUtils.validateDesignatorName(name)
+            name -> path
+          }
+          .toMap
+      } else {
+        Map.empty
+      }
+      logger.debug(s"Table roots: $tableRoots")
+
       val result = SyncToExternalCommand(
         sourceFormat = sourceFormat,
         sourcePath = sourcePath,
@@ -885,6 +982,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         hashedFastfieldsExclude = hashedFastfieldsExclude,
         wherePredicates = wherePredicates,
         invalidateAllPartitions = invalidateAllPartitions,
+        tableRoots = tableRoots,
         dryRun = dryRun
       )
       logger.debug(s"Created SyncToExternalCommand: $result")
