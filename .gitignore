@@ -22,6 +22,9 @@ release.properties
 .DS_Store
 Thumbs.db
 
+# Local-only working files
+.claude/BACKLOG.md
+
 # Scala
 *.class
 *.log
