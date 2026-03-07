@@ -31,6 +31,8 @@ jobs:
     name: Build & Test (Linux X64)
     runs-on: [self-hosted, Linux, X64]
     environment: self-hosted
+    env:
+      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
 
     steps:
       - name: Checkout
