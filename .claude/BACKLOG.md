@@ -372,7 +372,6 @@ Moved to Completed.
 | IT-026 | Schema evolution | Column addition, type changes, removal |
 | IT-027 | Iceberg interop | Cross-format compatibility layer |
 | IT-028 | Hudi interop | Cross-format compatibility layer |
-| IT-058 | Arrow FFI columnar aggregation in companion mode | Enable `supportColumnarReads()` for aggregate scans in companion mode. Guard added in PR #219 fix is precautionary — columnar readers already propagate companion config and handle partition column injection. Needs integration tests across HYBRID/PARQUET_ONLY/DISABLED fast-field modes. |
 
 ---
 
