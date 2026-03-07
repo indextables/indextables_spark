@@ -98,8 +98,15 @@ statement
         (FROM SNAPSHOT fromSnapshot=INTEGER_VALUE)?
         (WHERE whereClause=predicateToken)?
         (INVALIDATE ALL PARTITIONS)?
+        (TABLE ROOTS '(' tableRootList ')')?
         AT LOCATION destPath=STRING
         (DRY RUN)?                                            #syncToExternal
+    | SET indexTablesKeyword TABLE ROOT rootName=STRING '=' rootPath=STRING
+        AT (path=STRING | table=qualifiedName)                #setTableRoot
+    | UNSET indexTablesKeyword TABLE ROOT rootName=STRING
+        AT (path=STRING | table=qualifiedName)                #unsetTableRoot
+    | DESCRIBE indexTablesKeyword TABLE ROOTS
+        AT (path=STRING | table=qualifiedName)                #describeTableRoots
     | .*?                                                       #passThrough
     ;
 
@@ -125,6 +132,14 @@ indexingModeEntry
 
 stringList
     : STRING (',' STRING)*
+    ;
+
+tableRootList
+    : tableRootEntry (',' tableRootEntry)*
+    ;
+
+tableRootEntry
+    : rootName=STRING '=' rootPath=STRING
     ;
 
 // Non-greedy match for WHERE predicate text. ANTLR's .*? stops at the first
@@ -158,6 +173,7 @@ nonReserved
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT | COMPONENT | SIZES
     | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
     | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE | INVALIDATE
+    | SET | UNSET | TABLE | ROOT | ROOTS
     ;
 
 // Keywords (case-insensitive)
@@ -248,6 +264,11 @@ TYPE: [Tt][Yy][Pp][Ee];
 WAREHOUSE: [Ww][Aa][Rr][Ee][Hh][Oo][Uu][Ss][Ee];
 HASHED: [Hh][Aa][Ss][Hh][Ee][Dd];
 EXCLUDE: [Ee][Xx][Cc][Ll][Uu][Dd][Ee];
+SET: [Ss][Ee][Tt];
+UNSET: [Uu][Nn][Ss][Ee][Tt];
+TABLE: [Tt][Aa][Bb][Ll][Ee];
+ROOT: [Rr][Oo][Oo][Tt];
+ROOTS: [Rr][Oo][Oo][Tt][Ss];
 
 // Literals
 STRING

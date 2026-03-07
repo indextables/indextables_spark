@@ -83,6 +83,7 @@ case class SyncToExternalCommand(
   hashedFastfieldsExclude: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   invalidateAllPartitions: Boolean = false,
+  tableRoots: Map[String, String] = Map.empty,
   dryRun: Boolean)
     extends LeafRunnableCommand {
 
@@ -959,6 +960,10 @@ case class SyncToExternalCommand(
    * @param externalStorageRoot
    *   For Iceberg: the S3 storage root from catalog. For Delta UC: the storage_location from UC API. None for
    *   path-based Delta/Parquet.
+   *
+   * Note: This method reads existing metadata and overwrites table root entries non-atomically
+   * via commitSyncActions (not commitMetadataUpdate). A concurrent SET TABLE ROOT between the
+   * metadata read and the commit could be silently overwritten. See SetTableRootCommand scaladoc.
    */
   private def buildCompanionMetadata(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
@@ -1007,7 +1012,13 @@ case class SyncToExternalCommand(
             Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
           else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
                                 Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
-                              else Map.empty)
+                              else Map.empty) ++ tableRoots.flatMap {
+      case (name, path) =>
+        Map(
+          TableRootUtils.rootKey(name)      -> path,
+          TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
+        )
+    }
     existingMetadata.copy(configuration = companionConfig)
   }
 

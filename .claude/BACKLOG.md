@@ -1,5 +1,36 @@
 # IndexTables4Spark Development Backlog
 
+## Session Carryover (2026-03-03)
+
+Items requiring attention in the next session. Remove entries as they are addressed.
+
+### Open PRs Awaiting Action
+- **PR #191** (DRAFT): Document companion/sync feature — branch `docs/it011-companion-sync-feature`. IT-011 content complete; PR needs to be taken out of draft and reviewed.
+- **PR #184** (OPEN): Rewrite table-protocol.md for V4 Avro state — branch `docs/table-protocol-v4-rewrite-175`. IT-043 marked complete; PR awaiting Scott's review.
+- **IT-055 PR** (NEW): Multi-region table roots — branch `feature/multi-region-table-roots`. Ready for review.
+
+### Incomplete Acceptance Criteria on Merged Items
+- **IT-036** (PR #173 merged): Two items remain unchecked — "Follow-up posted to GitHub issue #85" and "Full test suite validation." Both are verification/admin tasks, not code work.
+
+### Needs Evaluation Queue (5 items, no adversarial analysis done)
+- **IT-037** (#146): Text/JSON exists queries broken in companion splits — initial signal High (bug)
+- **IT-038** (#133): Replace indexquery with textsearch/fieldmatch — initial signal Medium (breaking API)
+- **IT-039** (#129): Structured streaming support — initial signal Medium (overlaps IT-013)
+- **IT-040** (#140): Fast fields GROUP BY guidance — initial signal Low-Medium (UX/docs)
+- **IT-041** (#10): Scala compiler warnings cleanup — initial signal Low (tech debt)
+
+### Ready to Work (no blockers)
+- **IT-057**: Concurrent-safe metadata-only transaction log writes — Medium priority (discovered during IT-055)
+- **IT-056**: exact_only IndexQuery validation remainder — Medium priority
+- **IT-012**: Fix deprecated config in features.md — Medium, quick fix
+- **IT-013**: Document IP address fields and structured streaming — Medium
+
+### Blocked (Upstream) — Monitor Only
+- IT-048–053 (Arrow FFI roadmap): All blocked on tantivy4java #100–#106
+- IT-054 (Streaming sync): Blocked on tantivy4java #107
+
+---
+
 ## Blocking
 
 ### ~~IT-001: OOM running full test suite via `mvn test`~~ **DONE**
@@ -71,13 +102,13 @@ Moved to Completed.
 **Acceptance Criteria**:
 - [x] Adversarial analysis complete
 - [x] Priority assigned
-- [ ] Follow-up posted to GitHub issue #85 (pending Scott's review of PR #173)
+- [ ] Follow-up posted to GitHub issue #85
 - [x] Fix implemented in `PartitionPredicateUtils.resolveExpression`
 - [x] MergeSplitsCommand duplicate code consolidated
 - [x] Regression tests with multi-digit numeric partition values (27 unit + 3 integration)
 - [x] All 7 affected call sites updated
 - [ ] Full test suite validation
-- **PR**: [#173](https://github.com/indextables/indextables_spark/pull/173) — awaiting Scott's review
+- **PR**: [#173](https://github.com/indextables/indextables_spark/pull/173) — **MERGED** (2026-02-22)
 
 ---
 
@@ -159,32 +190,14 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 - [ ] Priority assigned
 - [ ] Follow-up posted to GitHub issue #10
 
-### IT-044: Testing excellence — fix exception-swallowing tests (Phase 0A)
-**Type**: Tech Debt / Test Quality
-**Priority**: Medium
-**Analysis**: [.claude/artifacts/testing-excellence-review.md](artifacts/testing-excellence-review.md)
-**Description**: StorageErrorHandlingTest had 7 tests using try/catch patterns that passed regardless of behavior. Root cause: `count()` bypasses split files via TransactionLogCountScan aggregate pushdown, and JVM-wide caches retain stale data from writes. Tests appeared to "handle errors gracefully" but tested nothing. SizeParsingTest had 1 edge-case test with weak assertions.
-**Acceptance Criteria**:
-- [x] Root cause identified (aggregate pushdown + cache masking)
-- [x] Actual runtime behavior verified (all corruption scenarios throw exceptions, no partial results)
-- [x] Tests rewritten with `select().collect()`, cache clearing, and `intercept[]` assertions
-- [x] Peer review completed (2 iterations)
-- [x] All 14 tests pass (12 StorageErrorHandlingTest + 2 SizeParsingTest)
+### ~~IT-044: Testing excellence — fix exception-swallowing tests (Phase 0A)~~ **DONE**
+Moved to Completed.
 
-### IT-045: setup.sh builds tantivy at wrong revision
-**Type**: Bug
-**Priority**: Medium
-**Description**: `scripts/setup.sh` advances tantivy one commit past pinned rev (4b6d7d49 → 696b8477), which introduces a `BucketResult::Filter` variant that quickwit-query doesn't handle. Causes 3 Rust compilation errors (E0605, E0308, E0004). Workaround: build manually with exact pinned rev.
-**Acceptance Criteria**:
-- [x] setup.sh uses exact pinned rev without +1 advancement
-- [ ] Build succeeds on clean checkout (needs verification on clean machine)
+### ~~IT-045: setup.sh builds tantivy at wrong revision~~ **DONE**
+Moved to Completed.
 
-### IT-046: SyncToExternalCommand compile error on main
-**Type**: Bug
-**Priority**: High
-**Description**: `SyncToExternalCommand.scala:426` passes `sourceSchema` (StructType) where `applyWhereFilter` expects `Option[StructType]`. Pre-existing on main, blocks compilation.
-**Acceptance Criteria**:
-- [x] Fixed: wrapped in `Some(sourceSchema)`
+### ~~IT-046: SyncToExternalCommand compile error on main~~ **DONE**
+Moved to Completed.
 
 ### IT-047: Avro state format corruption tests (coverage gap)
 **Type**: Tech Debt / Test Quality
@@ -192,6 +205,151 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 **Description**: StorageErrorHandlingTest only tests JSON format transaction log corruption. Avro is the default since Protocol V4 and is more representative of production. Discovered during adversarial review of IT-044.
 **Acceptance Criteria**:
 - [ ] Equivalent corruption tests for Avro state format
+
+---
+
+## Blocked (Upstream)
+
+Items with fully specified designs from Scott. Blocked on tantivy4java upstream dependencies. No adversarial analysis needed — project owner authored and prioritized.
+
+### Arrow FFI Performance Migration
+
+Systematic replacement of per-row/per-field JNI with zero-copy Arrow FFI across all code paths. Companion reads already use Arrow FFI (shipped in v0.5.2/v0.5.3). This roadmap extends the pattern to all remaining paths.
+
+#### P0 (Prerequisites / Safety Gates)
+
+### IT-048: Integrate Spark TaskMemoryManager with tantivy4java native memory
+**GitHub**: [#206](https://github.com/indextables/indextables_spark/issues/206)
+**Type**: Enhancement
+**Priority**: P0 (prerequisite for safe production use of all FFI features)
+**Upstream**: tantivy4java [#105](https://github.com/indextables/tantivy4java/issues/105)
+**Description**: Bridge Spark's `TaskMemoryManager` with tantivy4java's native memory pool, following DataFusion Comet's pattern. Gives Spark visibility into native memory, prevents OOM from untracked off-heap allocations. Creates `IndexTablesNativeMemoryAccountant` Java class with per-task lifecycle.
+**Key Files**: New `IndexTablesNativeMemoryAccountant.java`; modify `SplitReaderContext`, `ArrowFfiBridge`, `WorkerLocalSplitMerger`, `IndexTables4SparkDataWriter`
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#105 landed
+- [ ] `IndexTablesNativeMemoryAccountant` integrated with TaskMemoryManager
+- [ ] Per-task lifecycle with leak detection
+- [ ] Metrics in `DESCRIBE INDEXTABLES ENVIRONMENT`
+- [ ] Test coverage
+
+### IT-049: Integrate native transaction log state reader (Arrow FFI)
+**GitHub**: [#201](https://github.com/indextables/indextables_spark/issues/201)
+**Type**: Enhancement
+**Priority**: P0
+**Upstream**: tantivy4java [#100](https://github.com/indextables/tantivy4java/issues/100)
+**Description**: Replace JVM-side Avro manifest reading with single native call to tantivy4java's `TransactionLogReader`, receiving materialized state as Arrow columnar batches via FFI. Eliminates per-manifest GZIP decompression and Avro deserialization on the driver. Expected 2-5x faster cold startup on large tables.
+**Key Files**: Modify `TransactionLog.scala`, `AvroManifestReader.scala`, `StateManifestIO.scala`; reuse `ArrowFfiBridge`
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#100 landed
+- [ ] Native state read path with feature flag
+- [ ] Correctness parity with JVM reader
+- [ ] Benchmark on tables with 100/1000/5000+ splits
+
+### IT-050: Extend Arrow FFI columnar reads to standard (non-companion) read path
+**GitHub**: [#202](https://github.com/indextables/indextables_spark/issues/202)
+**Type**: Enhancement
+**Priority**: P0
+**Upstream**: tantivy4java [#101](https://github.com/indextables/tantivy4java/issues/101)
+**Description**: Use `docBatchArrowFfi` for standard IndexTables reads (not just companion mode). Eliminates per-document JNI overhead. Expected 30-60% faster reads for wide schemas and large result sets.
+**Key Files**: Modify `SplitSearchEngine.scala`, `IndexTables4SparkPartitionReader.scala`, `IndexTables4SparkMultiSplitPartitionReader.scala`; potentially new columnar reader
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#101 landed
+- [ ] Arrow FFI read path with feature flag
+- [ ] Correctness parity across all field types including JSON
+- [ ] LIMIT pushdown still works with columnar batches
+- [ ] Benchmark on wide schemas and large result sets
+
+#### P1 (Performance Improvements)
+
+### IT-051: Arrow FFI columnar ingestion on write path
+**GitHub**: [#199](https://github.com/indextables/indextables_spark/issues/199), [#204](https://github.com/indextables/indextables_spark/issues/204)
+**Type**: Enhancement
+**Priority**: P1
+**Upstream**: tantivy4java [#103](https://github.com/indextables/tantivy4java/issues/103)
+**Description**: Send data to tantivy4java as Arrow columnar batches on the write path, replacing per-row JNI document construction. Rust handles partition routing from full batches. Developer guide available in tantivy4java repo. Expected 20-40% faster write throughput.
+**Key Files**: New `IndexTables4SparkColumnarDataWriter`; modify `IndexTables4SparkWriterFactory`; reuse `ArrowFfiBridge`
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#103 landed
+- [ ] `DataWriter[ColumnarBatch]` implementation with feature flag
+- [ ] Write + read roundtrip correctness for all field types
+- [ ] Optimized write (shuffle) compatibility
+- [ ] Benchmark: narrow (5 cols) vs wide (30+ cols) schemas
+
+### IT-052: Arrow FFI for aggregate pushdown
+**GitHub**: [#207](https://github.com/indextables/indextables_spark/issues/207)
+**Type**: Enhancement
+**Priority**: P1
+**Upstream**: tantivy4java [#106](https://github.com/indextables/tantivy4java/issues/106)
+**Description**: Use Arrow FFI to receive aggregation results from tantivy4java, replacing per-aggregation JNI object extraction. Optionally batch aggregations across multiple splits. Expected 10-50x fewer JNI crossings for bucket aggregations.
+**Key Files**: Modify `IndexTables4SparkSimpleAggregateScan.scala`, `SplitSearchEngine.scala`; reuse `ArrowFfiBridge`
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#106 landed
+- [ ] Arrow FFI aggregate path for all aggregation types
+- [ ] NULL handling verified
+- [ ] Benchmark: bucket aggregations (365 daily buckets × 5 metrics)
+
+### IT-053: Native data skipping and partition pruning via PartitionFilter
+**GitHub**: [#203](https://github.com/indextables/indextables_spark/issues/203)
+**Type**: Enhancement
+**Priority**: P1
+**Upstream**: tantivy4java [#102](https://github.com/indextables/tantivy4java/issues/102)
+**Description**: Move partition pruning and column-statistics-based data skipping from JVM driver to native Rust code. Ideally done after IT-049 (native tx log reader) so pruning happens during state materialization. Expected 5-10x faster scan planning on highly-partitioned tables.
+**Key Files**: Modify `PartitionPruning.scala`, `SparkPredicateToPartitionFilter.scala`, `IndexTables4SparkScan.scala`
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#102 landed
+- [ ] Native pruning correctness parity with JVM
+- [ ] All filter types: equality, range, IN, IS NULL, IS NOT NULL, AND, OR, NOT
+- [ ] Benchmark on 100/500/1000+ partition tables
+
+---
+
+## High (New)
+
+### IT-054: Streaming companion sync
+**GitHub**: [#208](https://github.com/indextables/indextables_spark/issues/208)
+**Type**: Enhancement
+**Priority**: P1 (Scott)
+**Upstream**: tantivy4java [#107](https://github.com/indextables/tantivy4java/issues/107) (lightweight version-change detection)
+**Description**: Add `WITH STREAMING` option to `BUILD INDEXTABLES COMPANION` that continuously monitors the source table and automatically triggers incremental sync. Blocking command with polling loop, Spark UI metrics, and graceful shutdown. Supports Delta version tracking, Iceberg snapshot tracking, and Parquet directory fingerprinting.
+**Key Files**: New `CompanionStreamingSyncManager.scala`, `StreamingSyncMetrics.scala`; modify `SyncToExternalCommand.scala`, SQL parser
+**Acceptance Criteria**:
+- [ ] Upstream tantivy4java#107 landed
+- [ ] `WITH STREAMING [POLL INTERVAL]` SQL syntax
+- [ ] Polling loop with version-change detection per source format
+- [ ] Metrics and observability (Spark UI, structured logging)
+- [ ] Graceful shutdown on interrupt/cancel
+- [ ] Failure recovery with exponential backoff
+- [ ] Resume from `lastSyncedVersion` across sessions
+- [ ] Integration tests with background thread + Delta writes
+
+### ~~IT-055: Multi-region table roots for companion splits~~ **DONE**
+Moved to Completed.
+
+---
+
+## Medium (New)
+
+### IT-057: Concurrent-safe metadata-only transaction log writes
+**Type**: Tech Debt / Correctness
+**Priority**: Medium
+**Description**: Discovered during IT-055 adversarial review. `commitSyncActions` → `writeActionsWithRetry` does not re-read metadata between retry attempts. For metadata-only operations like SET/UNSET TABLE ROOT, concurrent writers can silently overwrite each other's changes. The fix is to add a `commitMetadataUpdate(transform: MetadataAction => MetadataAction)` method that re-reads metadata on each retry, or implement a manual compare-and-swap loop at the command level.
+**Affected Commands**: `SetTableRootCommand`, `UnsetTableRootCommand`
+**Acceptance Criteria**:
+- [ ] Concurrent SET TABLE ROOT operations preserve both writers' root entries
+- [ ] Test with parallel metadata writes
+- [ ] No regression in existing commitSyncActions callers
+
+### IT-056: exact_only IndexQuery validation (remainder)
+**GitHub**: [#186](https://github.com/indextables/indextables_spark/issues/186)
+**Type**: Enhancement
+**Priority**: Medium
+**Description**: Range filter validation for `exact_only` fields already shipped (PR #188, commit 4876a42). Remaining work: validate IndexQuery wildcard/range patterns on `exact_only` fields before they reach the native layer. Best-effort pattern detection for `*`, `?`, `[... TO ...]` in query text. Currently these produce cryptic JNI errors after exhausting Spark task retries.
+**Key Files**: Modify `IndexingModes.scala` (add `supportsWildcardQuery`), IndexQuery filter path
+**Acceptance Criteria**:
+- [ ] Wildcard IndexQuery on `exact_only` returns clear error message
+- [ ] Range IndexQuery on `exact_only` returns clear error message
+- [ ] EqualTo on `exact_only` still works (regression test)
+- [ ] Range/wildcard on `text_*` fields still work (regression test)
 
 ---
 
@@ -240,4 +398,6 @@ Items imported from GitHub issues. Each requires adversarial analysis before pri
 | IT-044 | Fix exception-swallowing tests — Phase 0A testing excellence | 2026-02 |
 | IT-045 | Fix setup.sh tantivy pinned rev +1 bug | 2026-02 |
 | IT-046 | Fix SyncToExternalCommand compile error on main | 2026-02 |
-| IT-011 | Document companion/sync feature | 2026-02 |
+| IT-011 | Document companion/sync feature ([PR #191](https://github.com/indextables/indextables_spark/pull/191)) | 2026-02 |
+| IT-036 | Partition predicate numeric comparisons ([PR #173](https://github.com/indextables/indextables_spark/pull/173)) | 2026-02 |
+| IT-055 | Multi-region table roots for companion splits ([#179](https://github.com/indextables/indextables_spark/issues/179)) | 2026-03 |
