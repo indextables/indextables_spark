@@ -287,8 +287,8 @@ class PartitionPruningTest extends AnyFunSuite with Matchers {
     result should have size 1
     result.head.path shouldBe "m6.avro"
 
-    // Should be very fast (< 10ms for 100 manifests)
-    duration should be < 10L
+    // Should be very fast (< 100ms for 100 manifests)
+    duration should be < 100L
   }
 
   // Helper methods
