@@ -567,8 +567,15 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
         throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
     }
 
-  override def supportColumnarReads(partition: org.apache.spark.sql.connector.read.InputPartition): Boolean =
-    arrowFfiEnabled
+  override def supportColumnarReads(partition: org.apache.spark.sql.connector.read.InputPartition): Boolean = {
+    val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")
+    if (isCompanion) {
+      logger.debug("GROUP BY READER FACTORY: Columnar reads disabled for companion mode — falling back to InternalRow")
+      false
+    } else {
+      arrowFfiEnabled
+    }
+  }
 
   override def createColumnarReader(
     partition: org.apache.spark.sql.connector.read.InputPartition
