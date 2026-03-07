@@ -415,9 +415,15 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
     }
 
   override def supportColumnarReads(partition: org.apache.spark.sql.connector.read.InputPartition): Boolean = {
-    if (arrowFfiEnabled)
-      logger.debug("SIMPLE AGGREGATE READER FACTORY: Columnar reads enabled via Arrow FFI aggregation")
-    arrowFfiEnabled
+    val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")
+    if (isCompanion) {
+      logger.debug("SIMPLE AGGREGATE READER FACTORY: Columnar reads disabled for companion mode — falling back to InternalRow")
+      false
+    } else {
+      if (arrowFfiEnabled)
+        logger.debug("SIMPLE AGGREGATE READER FACTORY: Columnar reads enabled via Arrow FFI aggregation")
+      arrowFfiEnabled
+    }
   }
 
   override def createColumnarReader(
