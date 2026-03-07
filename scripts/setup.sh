@@ -375,6 +375,8 @@ install_linux() {
         local protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${protoc_arch}.zip"
         local protoc_tmp
         protoc_tmp=$(mktemp -d)
+        cleanup_protoc_tmp() { rm -rf "$protoc_tmp"; }
+        trap cleanup_protoc_tmp EXIT
         # Ensure unzip is available
         if ! command -v unzip &>/dev/null; then
             case "$pkg_mgr" in
@@ -388,6 +390,7 @@ install_linux() {
         $sudo_cmd install -m 755 "$protoc_tmp/protoc/bin/protoc" /usr/local/bin/protoc
         $sudo_cmd cp -r "$protoc_tmp/protoc/include/"* /usr/local/include/ 2>/dev/null || true
         rm -rf "$protoc_tmp"
+        trap - EXIT
         ok "Protobuf compiler installed: $(protoc --version)"
     fi
 
