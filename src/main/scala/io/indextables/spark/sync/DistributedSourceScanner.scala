@@ -642,9 +642,10 @@ class DistributedSourceScanner(spark: SparkSession) {
     } catch { case _: Exception => None }
 
     // ── Incremental fast-path ──────────────────────────────────────────────
-    // When fromSnapshotId is provided (streaming incremental cycle), filter manifest list
-    // to only manifests added after that snapshot. Each Iceberg snapshot records which snapshot
-    // created each manifest via addedSnapshotId — manifests from older snapshots are excluded.
+    // When fromSnapshotId is provided (streaming incremental cycle), compute new files via
+    // manifest-path set-difference (current snapshot manifests minus old snapshot manifests).
+    // Iceberg snapshot IDs are random 64-bit longs (non-monotonic), so addedSnapshotId numeric
+    // comparison is unreliable.
     fromSnapshotId match {
       case Some(fsnap) =>
         val currentSnapId = snapshotInfo.getSnapshotId
@@ -663,10 +664,21 @@ class DistributedSourceScanner(spark: SparkSession) {
           )
         } else {
           logger.info(s"Iceberg incremental: reading changes since snapshot $fsnap (current=$currentSnapId)")
-          val newEntries = IcebergTableReader
-            .getChangesSince(catalogName, namespace, tableName, icebergConfig, snapshotInfo, fsnap)
-            .asScala
+          // Use path-based set-difference instead of addedSnapshotId comparison, because Iceberg
+          // snapshot IDs are random 64-bit longs (non-monotonic) — numeric comparison is incorrect.
+          val oldManifestPaths: Set[String] = {
+            val oldInfo = IcebergTableReader.getSnapshotInfo(
+              catalogName, namespace, tableName, icebergConfig, fsnap)
+            oldInfo.getManifestFilePaths.asScala.toSet
+          }
+          val newManifestPaths = snapshotInfo.getManifestFilePaths.asScala
+            .filterNot(oldManifestPaths.contains)
             .toSeq
+          val newEntries = newManifestPaths.flatMap { manifestPath =>
+            IcebergTableReader
+              .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+              .asScala
+          }.toSeq
           val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
           val partCols    = newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
           val files       = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
