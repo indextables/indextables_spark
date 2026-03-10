@@ -240,9 +240,8 @@ class StreamingCompanionIcebergEndToEndTest
 
         configureSparkForEmbeddedCatalog(server)
 
-        val command = makeIcebergCommand(indexPath)
-        val manager = new StreamingCompanionManager(command, pollIntervalMs = 2000L)
-        val thread  = new Thread(() => manager.runStreaming(spark))
+        val command = makeIcebergCommand(indexPath).copy(streamingPollIntervalMs = Some(2000L))
+        val thread  = new Thread(() => command.run(spark))
         thread.setDaemon(true)
         thread.start()
 
@@ -304,7 +303,7 @@ class StreamingCompanionIcebergEndToEndTest
         val command = makeIcebergCommand(indexPath)
 
         // Run one direct sync to establish a known 2-row baseline with snapshot 1 persisted.
-        command.executeSyncInternal(spark, System.currentTimeMillis())
+        command.run(spark)
         countCompanionRows(indexPath) shouldBe 2
 
         // Snapshot 2: 1 more row — NOT covered by the direct sync above.
@@ -313,8 +312,8 @@ class StreamingCompanionIcebergEndToEndTest
 
         // Start streaming: it reads the persisted lastSyncedVersion (snapshot 1) and runs an
         // incremental cycle for snapshot 2 instead of re-indexing all data.
-        val manager = new StreamingCompanionManager(command, pollIntervalMs = 2000L)
-        val thread  = new Thread(() => manager.runStreaming(spark))
+        val streamingCommand = command.copy(streamingPollIntervalMs = Some(2000L))
+        val thread           = new Thread(() => streamingCommand.run(spark))
         thread.setDaemon(true)
         thread.start()
 

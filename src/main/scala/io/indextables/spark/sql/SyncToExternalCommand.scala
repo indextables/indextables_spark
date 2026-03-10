@@ -119,7 +119,18 @@ case class SyncToExternalCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     if (streamingPollIntervalMs.isDefined) {
-      new StreamingCompanionManager(this, streamingPollIntervalMs.get).runStreaming(sparkSession)
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = { (spark, cycleStart, lastSyncedVersion) =>
+        val cycleCommand = lastSyncedVersion match {
+          case Some(v) if sourceFormat == "delta" =>
+            copy(fromVersion = Some(v), streamingPollIntervalMs = None)
+          case Some(v) if sourceFormat == "iceberg" =>
+            copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
+          case _ =>
+            copy(streamingPollIntervalMs = None)
+        }
+        cycleCommand.executeSyncInternal(spark, cycleStart)
+      }
+      new StreamingCompanionManager(this, streamingPollIntervalMs.get, syncFn).runStreaming(sparkSession)
       return Seq.empty
     }
 
@@ -155,7 +166,7 @@ case class SyncToExternalCommand(
     }
   }
 
-  private[sql] def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
+  private def executeSyncInternal(sparkSession: SparkSession, startTime: Long): Seq[Row] = {
     // 1. Extract merged configuration and resolve credentials for source table access
     val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
@@ -562,7 +573,7 @@ case class SyncToExternalCommand(
           // New files are guaranteed additions — anti-join is skipped for those.
           // Removed source paths (Delta only) require finding and invalidating the companion
           // splits that indexed them, and re-indexing any sibling files from those splits.
-          val newFiles = dr.filesRDD.collect().toSeq
+          val newFiles = dr.driverFiles.getOrElse(dr.filesRDD.collect().toSeq)
           if (newFiles.size > 10000)
             logger.warn(
               s"Large incremental changeset: ${newFiles.size} files collected to driver. " +
@@ -1380,12 +1391,16 @@ case class SyncToExternalCommand(
           .get("indextables.companion.lastSyncedVersion")
           .flatMap(v => scala.util.Try(v.toLong).toOption)
       } catch {
-        case _: Exception => None
+        case e: Exception =>
+          logger.debug(s"[IndextablesCompanion] readLastSyncedVersionFromLog: inner error reading metadata (returning None): ${e.getMessage}")
+          None
       } finally {
         transactionLog.close()
       }
     } catch {
-      case _: Exception => None
+      case e: Exception =>
+        logger.debug(s"[IndextablesCompanion] readLastSyncedVersionFromLog: error opening transaction log (returning None, expected on first run): ${e.getMessage}")
+        None
     }
   }
 
@@ -1431,7 +1446,9 @@ case class SyncToExternalCommand(
         case _ => None
       }
     } catch {
-      case _: Exception => None
+      case e: Exception =>
+        logger.debug(s"[IndextablesCompanion] cheapSourceVersion($sourceFormat): caught exception, returning None: ${e.getMessage}")
+        None
     }
   }
 

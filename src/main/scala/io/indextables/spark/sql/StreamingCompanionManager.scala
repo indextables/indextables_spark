@@ -17,7 +17,7 @@
 
 package io.indextables.spark.sql
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Row, SparkSession}
 import org.slf4j.LoggerFactory
 
 import io.indextables.spark.util.ConfigNormalization
@@ -32,9 +32,8 @@ import io.indextables.spark.util.ConfigNormalization
  *        Iceberg: 1 catalog.load_table() call, no manifest list read.
  *        Parquet: no probe available, always falls through to step 2.
  *      If the source version is unchanged since the last sync, the full sync is skipped entirely.
- *   2. If changed (or no cheap probe available), executeSyncInternal is called with the last
- *      known source version as fromVersion/fromSnapshot so the underlying scanner uses an
- *      incremental changeset instead of a full anti-join.
+ *   2. If changed (or no cheap probe available), syncFn is called with the last known source
+ *      version so the underlying scanner uses an incremental changeset instead of a full anti-join.
  *
  * Stops when:
  *   - The calling thread is interrupted (Ctrl+C, notebook cancel, sparkContext.cancelAllJobs())
@@ -48,7 +47,8 @@ import io.indextables.spark.util.ConfigNormalization
  */
 private[sql] class StreamingCompanionManager(
   command: SyncToExternalCommand,
-  pollIntervalMs: Long
+  pollIntervalMs: Long,
+  syncFn: (SparkSession, Long, Option[Long]) => Seq[Row]
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[StreamingCompanionManager])
@@ -159,8 +159,7 @@ private[sql] class StreamingCompanionManager(
         )
 
         try {
-          val cycleCommand = buildCycleCommand(lastSyncedVersion)
-          val rows         = cycleCommand.executeSyncInternal(sparkSession, cycleStart)
+          val rows = syncFn(sparkSession, cycleStart, lastSyncedVersion)
 
           consecutiveErrors = 0
 
@@ -201,10 +200,10 @@ private[sql] class StreamingCompanionManager(
             hadError = true
             consecutiveErrors += 1
             metrics.recordCycleError()
-            nextSleepMs = math.min(
-              pollIntervalMs * math.pow(errorBackoffMultiplier.toDouble, consecutiveErrors).toLong,
-              pollIntervalMs * 10L
-            )
+            val rawBackoff = math.min(
+              math.pow(errorBackoffMultiplier.toDouble, consecutiveErrors), 10.0
+            ) * pollIntervalMs
+            nextSleepMs = math.min(rawBackoff.toLong, pollIntervalMs * 10L)
             logger.error(
               s"[IndextablesCompanionStream] ERROR in sync cycle #$cycle " +
                 s"($consecutiveErrors/$maxConsecutiveErrors consecutive errors, " +
@@ -230,21 +229,6 @@ private[sql] class StreamingCompanionManager(
         s"${metrics.errorCount.value} errors | Uptime: ${uptimeSec}s"
     )
   }
-
-  /**
-   * Build the command for one sync cycle. On incremental cycles, injects the last source version
-   * as fromVersion (Delta) or fromSnapshot (Iceberg). streamingPollIntervalMs is cleared so that
-   * executeSyncInternal is called directly and does not recurse into streaming dispatch.
-   */
-  private def buildCycleCommand(lastSyncedVersion: Option[Long]): SyncToExternalCommand =
-    lastSyncedVersion match {
-      case Some(v) if command.sourceFormat == "delta" =>
-        command.copy(fromVersion = Some(v), streamingPollIntervalMs = None)
-      case Some(v) if command.sourceFormat == "iceberg" =>
-        command.copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
-      case _ =>
-        command.copy(streamingPollIntervalMs = None)
-    }
 
   private def waitForNextCycle(sleepMs: Long): Unit =
     try {

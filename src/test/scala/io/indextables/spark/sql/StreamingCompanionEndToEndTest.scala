@@ -157,9 +157,8 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
         .write.format("delta").save(deltaPath)
 
       // Step 2: Launch streaming sync with a 2-second poll interval.
-      val command = makeDeltaCommand(deltaPath, indexPath)
-      val manager = new StreamingCompanionManager(command, pollIntervalMs = 2000L)
-      val thread  = new Thread(() => manager.runStreaming(spark))
+      val command = makeDeltaCommand(deltaPath, indexPath).copy(streamingPollIntervalMs = Some(2000L))
+      val thread  = new Thread(() => command.run(spark))
       thread.setDaemon(true)
       thread.start()
 
@@ -221,7 +220,7 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       // Run one sync directly (not via streaming) so the companion has exactly 2 rows
       // and the persisted lastSyncedVersion is set to version 0.  This avoids the
       // timing race of interrupting a streaming thread at the right moment.
-      command.executeSyncInternal(spark, System.currentTimeMillis())
+      command.run(spark)
       countCompanionRows(indexPath) shouldBe 2
 
       // Append charlie (Delta version 1) — the direct sync didn't cover this.
@@ -232,8 +231,8 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       // Start a streaming session.  readLastSyncedVersionFromLog reads version 0 from the
       // companion log, so the session resumes incrementally rather than re-indexing
       // the 2 already-indexed rows.
-      val manager = new StreamingCompanionManager(command, pollIntervalMs = 2000L)
-      val thread  = new Thread(() => manager.runStreaming(spark))
+      val streamingCommand = command.copy(streamingPollIntervalMs = Some(2000L))
+      val thread           = new Thread(() => streamingCommand.run(spark))
       thread.setDaemon(true)
       thread.start()
 

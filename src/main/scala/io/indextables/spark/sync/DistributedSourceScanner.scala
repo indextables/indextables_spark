@@ -52,7 +52,13 @@ case class DistributedScanResult(
    * Companion splits that indexed these files must be invalidated. Empty for full-scan results
    * and for Iceberg (Iceberg deletion tracking is a follow-up).
    */
-  removedSourcePaths: Seq[String] = Seq.empty)
+  removedSourcePaths: Seq[String] = Seq.empty,
+  /**
+   * Files already available on the driver (incremental paths only). When set, the consumer
+   * in SyncToExternalCommand skips the RDD collect() call entirely. Avoids a parallelize →
+   * collect roundtrip for small incremental changesets that fit comfortably in driver memory.
+   */
+  driverFiles: Option[Seq[CompanionSourceFile]] = None)
 
 /**
  * Static conversion functions used in RDD closures. These MUST be in the companion object (not instance methods) to
@@ -514,7 +520,8 @@ class DistributedSourceScanner(spark: SparkSession) {
               numDistributedParts = 0,
               schema = schemaOpt,
               isIncremental = true,
-              removedSourcePaths = removedPaths
+              removedSourcePaths = removedPaths,
+              driverFiles = Some(addedFiles)
             )
           }
         }
@@ -674,6 +681,21 @@ class DistributedSourceScanner(spark: SparkSession) {
           val newManifestPaths = snapshotInfo.getManifestFilePaths.asScala
             .filterNot(oldManifestPaths.contains)
             .toSeq
+
+          // Check whether the manifest delta is small enough for incremental driver-side reads.
+          // For large catch-up scenarios a full distributed scan is faster.
+          val maxIncrementalManifests = scala.util.Try(
+            spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
+          ).getOrElse(50)
+          if (newManifestPaths.size > maxIncrementalManifests) {
+            logger.warn(
+              s"Iceberg incremental: new manifest count ${newManifestPaths.size} exceeds " +
+              s"maxIncrementalManifests=$maxIncrementalManifests — " +
+              s"falling back to full scan (from=$fsnap, current=$currentSnapId)"
+            )
+            // fall through to full scan below
+          } else {
+
           val newEntries = newManifestPaths.flatMap { manifestPath =>
             IcebergTableReader
               .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
@@ -692,9 +714,11 @@ class DistributedSourceScanner(spark: SparkSession) {
             sampleFilePath = newEntries.headOption.map(_.getPath),
             numDistributedParts = 0,
             schema = icebergSchemaOpt,
-            isIncremental = true
+            isIncremental = true,
+            driverFiles = Some(files)
           )
-        }
+          } // end else (incremental path — newManifestPaths.size <= maxIncrementalManifests)
+        } // end else (currentSnapId != fsnap)
       case None => // fall through to full scan below
     }
 

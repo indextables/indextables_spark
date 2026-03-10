@@ -48,13 +48,21 @@ import org.apache.iceberg.rest.CatalogHandlers
  */
 class EmbeddedIcebergRestServer(val warehouseDir: String) extends AutoCloseable {
 
-  private val mapper: ObjectMapper = {
+  private val mapper: ObjectMapper = try {
     // RESTObjectMapper is package-private in iceberg-core; access via reflection to get
     // the same fully-configured ObjectMapper that the real Iceberg REST server uses.
     val clazz  = Class.forName("org.apache.iceberg.rest.RESTObjectMapper")
     val method = clazz.getDeclaredMethod("mapper")
     method.setAccessible(true)
     method.invoke(null).asInstanceOf[ObjectMapper]
+  } catch {
+    case e: Exception =>
+      throw new RuntimeException(
+        s"Failed to access Iceberg RESTObjectMapper via reflection. " +
+          s"This class is package-private in iceberg-core and may have changed in a newer version. " +
+          s"Check that iceberg-core is on the classpath and the mapper() method still exists.",
+        e
+      )
   }
 
   /**

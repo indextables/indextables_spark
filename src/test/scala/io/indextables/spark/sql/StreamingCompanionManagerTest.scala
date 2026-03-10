@@ -75,7 +75,10 @@ class StreamingCompanionManagerTest extends TestBase {
 
     // Long poll interval so the thread spends most of its time in Thread.sleep,
     // giving the interrupt a reliable target.
-    val manager = new StreamingCompanionManager(makeCommand(sourceDir, indexDir), pollIntervalMs = 60000L)
+    // syncFn always throws to simulate the empty-source-dir failure and trigger the error backoff sleep.
+    val syncFn: (org.apache.spark.sql.SparkSession, Long, Option[Long]) => Seq[org.apache.spark.sql.Row] =
+      (_, _, _) => throw new IllegalStateException("simulated sync failure: no files in source dir")
+    val manager = new StreamingCompanionManager(makeCommand(sourceDir, indexDir), pollIntervalMs = 60000L, syncFn)
     val thread  = new Thread(() => manager.runStreaming(spark))
     thread.setDaemon(true)
     thread.start()

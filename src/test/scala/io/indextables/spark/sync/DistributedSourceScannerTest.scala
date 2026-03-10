@@ -162,6 +162,30 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     }
   }
 
+  test("distributed Delta scan returns correct trueCurrentVersion when table is at checkpoint version with no post-checkpoint commits") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta_at_checkpoint").getAbsolutePath
+      // Create table at version 0 with a checkpoint at version 0 (no post-checkpoint commits).
+      // trueCurrentVersion = checkpoint version (0) + 0 post-checkpoint commits = 0.
+      // This verifies the formula snapshotInfo.getVersion + getCommitFilePaths.size
+      // returns the correct value even when there are no post-checkpoint commits.
+      createDeltaTable(deltaPath, numFiles = 3, rowsPerFile = 5)  // creates checkpoint at version 0
+
+      val reader   = new DeltaLogReader(deltaPath, emptyCredentials)
+      val expected = reader.currentVersion()  // should be 0
+      expected shouldBe 0L
+
+      val scanner = new DistributedSourceScanner(spark)
+      val result  = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+
+      result.version shouldBe defined
+      // trueCurrentVersion must equal the checkpoint version when no post-checkpoint commits exist.
+      // This would equal snapshotInfo.getVersion alone, so 0 + 0 = 0.
+      result.version.get shouldBe 0L
+      result.filesRDD.collect().size shouldBe 3
+    }
+  }
+
   test("distributed Delta scan should return correct partition columns") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta_partitioned").getAbsolutePath
