@@ -287,8 +287,10 @@ object SyncTaskExecutor {
     } else if (sourcePath.startsWith("abfss://") || sourcePath.startsWith("wasbs://")) {
       downloadFromAzure(sourcePath, destFile, storageConfig)
     } else {
-      // Local filesystem copy
-      val sourceFile = new File(sourcePath)
+      // Local filesystem copy — path may be a plain path or a file:// URI (Iceberg uses file:// URIs)
+      val localPath  = if (sourcePath.startsWith("file:")) new java.net.URI(sourcePath).getPath
+                       else sourcePath
+      val sourceFile = new File(localPath)
       Files.copy(sourceFile.toPath, destFile.toPath, StandardCopyOption.REPLACE_EXISTING)
       sourceFile.length()
     }

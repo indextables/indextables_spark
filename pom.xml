@@ -286,6 +286,21 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Iceberg core: InMemoryCatalog + CatalogHandlers for embedded REST server in tests -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-core</artifactId>
+            <version>1.6.1</version>
+            <scope>test</scope>
+            <exclusions>
+                <!-- Let Spark's bundled Guava win on the test classpath -->
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
     </dependencies>
 
     <build>
