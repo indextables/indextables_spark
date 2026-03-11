@@ -82,6 +82,9 @@ object SyncTaskExecutor {
    *   SyncTaskResult with the AddAction and metrics
    */
   def execute(group: SyncIndexingGroup, config: SyncConfig): SyncTaskResult = {
+    // Initialize native memory pool before any tantivy4java native calls
+    io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
+
     val startTime = System.currentTimeMillis()
     val tempDir   = createTempDir()
     logger.info(

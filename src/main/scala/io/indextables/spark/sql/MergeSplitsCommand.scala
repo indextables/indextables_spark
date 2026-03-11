@@ -1629,6 +1629,8 @@ object MergeSplitsExecutor {
     awsConfig: SerializableAwsConfig,
     azureConfig: SerializableAzureConfig
   ): MergeResult = {
+    io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
+
     val startTime = System.currentTimeMillis()
     val logger    = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 

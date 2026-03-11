@@ -197,6 +197,7 @@ spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
 spark.indextables.cache.disk.writeQueue.mode: "size" (options: fragment, size)
 spark.indextables.cache.disk.writeQueue.capacity: "1G" (size mode: byte limit e.g. "500M", "2G"; fragment mode: slot count e.g. "32")
 spark.indextables.cache.disk.dropWritesWhenFull: true (drop query-path writes instead of blocking)
+spark.indextables.cache.disk.writeQueue.maxBudget: "0" (default: 0 = auto, 8x initial queue capacity)
 spark.indextables.cache.coalesceMaxGap: "512K" (default: 512KB, max gap between parquet byte ranges to coalesce)
 ```
 
@@ -259,6 +260,22 @@ spark.indextables.purge.parallelism: <auto>
 spark.indextables.purge.maxFilesToDelete: 1000000
 spark.indextables.purge.deleteRetries: 3
 ```
+
+## Native Memory Integration
+
+Bridges tantivy4java's native (Rust) memory allocations with Spark's unified memory manager, giving Spark visibility and control over native memory usage (index writers, merge buffers, caches).
+
+**Prerequisites:** Requires `spark.memory.offHeap.enabled=true` and a non-zero `spark.memory.offHeap.size`. Without these, native memory requests receive 0-byte grants and allocations proceed untracked.
+
+```scala
+spark.indextables.native.memory.enabled: true (default: true, set false to use tantivy4java's unlimited pool)
+
+// Required Spark settings for native memory tracking:
+spark.memory.offHeap.enabled: true
+spark.memory.offHeap.size: "4g" (recommended: 2-4x the largest writer heap or merge heap)
+```
+
+Use `DESCRIBE INDEXTABLES ENVIRONMENT` to verify native memory integration is active (`native_memory.configured = true`) and monitor usage (`native_memory.peak_bytes`, `native_memory.used_bytes`).
 
 ## Companion Sync Configuration
 
