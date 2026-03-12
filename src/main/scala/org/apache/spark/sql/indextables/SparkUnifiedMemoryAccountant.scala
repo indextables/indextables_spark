@@ -70,15 +70,21 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
     val tc = resolveConsumer()
     if (tc == null) return // No task context — nothing to release against
     val newUsed = tc.used.addAndGet(-bytes)
-    if (newUsed < 0) {
-      // Should not happen after tantivy4java 0.32.5 bug fix (release capped to granted),
-      // but guard defensively.
+    // Cap release to what Spark actually granted to avoid driving the pool counter
+    // below its true floor. Should not happen after tantivy4java 0.32.5 bug fix
+    // (release capped to granted in JvmMemoryPool), but guard defensively.
+    val toRelease = if (newUsed < 0) {
       logger.warn(
         s"Native memory used counter went negative ($newUsed) after releasing $bytes bytes. " +
           "Clamping to 0.")
       tc.used.set(0)
+      bytes + newUsed // == previousUsed, the amount Spark actually granted
+    } else {
+      bytes
     }
-    tc.tmm.releaseExecutionMemory(bytes, tc.consumer)
+    if (toRelease > 0) {
+      tc.tmm.releaseExecutionMemory(toRelease, tc.consumer)
+    }
   }
 
   private def resolveConsumer(): TaskConsumer = {

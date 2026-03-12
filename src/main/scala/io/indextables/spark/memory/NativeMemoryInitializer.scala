@@ -45,6 +45,8 @@ object NativeMemoryInitializer {
    * accountant can resolve the task's TaskMemoryManager.
    *
    * Safe to call from multiple threads — only the first call configures the pool.
+   * The `spark.indextables.native.memory.enabled` config is read once on first call;
+   * subsequent config changes have no effect (tantivy4java's pool uses a Rust OnceLock).
    */
   def ensureInitialized(): Unit = {
     if (!initialized) synchronized {

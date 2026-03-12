@@ -135,7 +135,12 @@ case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
             }.toSeq
             baseRows ++ categoryRows
           } catch {
-            case _: Exception => Seq.empty[Row]
+            case _: IllegalStateException | _: UnsatisfiedLinkError =>
+              // Expected: native library not loaded or pool not yet configured
+              Seq.empty[Row]
+            case e: Exception =>
+              logger.warn("Failed to collect native memory stats for DESCRIBE ENVIRONMENT", e)
+              Seq.empty[Row]
           }
 
           (sparkRows ++ hadoopRows ++ nativeMemoryRows).iterator

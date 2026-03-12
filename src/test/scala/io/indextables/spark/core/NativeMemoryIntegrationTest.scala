@@ -297,10 +297,9 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
     stats.getPeakBytes should be > 0L
   }
 
-  test("native memory integration should be disabled when configured off") {
-    // This tests the config flag — in a fresh JVM, setting enabled=false would skip setAccountant.
-    // Since we share a JVM and the pool is already configured (OnceLock), we verify the config
-    // key is respected by NativeMemoryInitializer.
+  test("NATIVE_MEMORY_ENABLED_KEY should have correct config key string") {
+    // Verifies the constant value. Behavioral testing of the disabled path requires a
+    // separate JVM (OnceLock prevents re-initialization within the same process).
     val key = io.indextables.spark.memory.NativeMemoryInitializer.NATIVE_MEMORY_ENABLED_KEY
     key shouldBe "spark.indextables.native.memory.enabled"
   }
