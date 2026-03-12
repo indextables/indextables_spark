@@ -185,6 +185,8 @@ object ConfigUtils {
       diskCacheManifestSyncInterval = getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt),
       diskCacheWriteQueueMode = getConfigOption("spark.indextables.cache.disk.writeQueue.mode"),
       diskCacheWriteQueueCapacity = getConfigOption("spark.indextables.cache.disk.writeQueue.capacity"),
+      diskCacheMaxWriteQueueBudget = getConfigOption("spark.indextables.cache.disk.writeQueue.maxBudget")
+        .map(SplitCacheConfig.parseSizeString),
       diskCacheDropWritesWhenFull = getConfigOption("spark.indextables.cache.disk.dropWritesWhenFull").map(_.toBoolean),
       // Parquet coalesce configuration
       coalesceMaxGap = getConfigOption("spark.indextables.cache.coalesceMaxGap")

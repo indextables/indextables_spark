@@ -357,6 +357,10 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def diskCacheWriteQueueCapacity: Option[String] =
     Option(options.get("spark.indextables.cache.disk.writeQueue.capacity"))
 
+  /** Max write queue memory budget cap. Supports "8G", "16G" formats. Default: 8x initial queue size (0 = default). */
+  def diskCacheMaxWriteQueueBudget: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.writeQueue.maxBudget"))
+
   /** Drop query-path writes when queue is full instead of blocking. Default: true. */
   def diskCacheDropWritesWhenFull: Option[Boolean] =
     Option(options.get("spark.indextables.cache.disk.dropWritesWhenFull")).map(_.toBoolean)
@@ -536,5 +540,6 @@ object IndexTables4SparkOptions {
   val DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
   val DISK_CACHE_WRITE_QUEUE_MODE       = "spark.indextables.cache.disk.writeQueue.mode"
   val DISK_CACHE_WRITE_QUEUE_CAPACITY   = "spark.indextables.cache.disk.writeQueue.capacity"
+  val DISK_CACHE_WRITE_QUEUE_MAX_BUDGET = "spark.indextables.cache.disk.writeQueue.maxBudget"
   val DISK_CACHE_DROP_WRITES_WHEN_FULL  = "spark.indextables.cache.disk.dropWritesWhenFull"
 }

@@ -178,6 +178,7 @@ class IndexTables4SparkArrowDataWriter(
   /** Initialize the native split writer on first write. */
   private def ensureInitialized(): Unit =
     if (!initialized) {
+      io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
       val schemaAddr      = bridge.exportSchema()
       val fieldConfigJson = buildFieldConfigJson()
       val maxDocs         = maxRowsPerSplit.getOrElse(0L)
