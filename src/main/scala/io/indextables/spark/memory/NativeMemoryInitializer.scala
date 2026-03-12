@@ -52,18 +52,26 @@ object NativeMemoryInitializer {
     if (!initialized) synchronized {
       if (!initialized) {
         val enabled = isEnabled
-        if (enabled) {
-          // Warn if off-heap memory is not enabled — without it, all acquireExecutionMemory
-          // calls return 0 and native allocations proceed untracked.
-          checkOffHeapEnabled()
-
+        if (enabled && isOffHeapConfigured) {
           val accountant = new org.apache.spark.sql.indextables.SparkUnifiedMemoryAccountant()
           val success = NativeMemoryManager.setAccountant(accountant)
           if (success) {
-            logger.info("Native memory pool initialized with Spark unified memory manager")
+            val env = org.apache.spark.SparkEnv.get
+            val poolSize = if (env != null) env.conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / 1024 / 1024 else 0
+            logger.info(s"Native memory pool initialized with Spark unified memory manager (${poolSize}MB off-heap)")
           } else {
             logger.debug("Native memory pool already configured (another thread initialized first)")
           }
+        } else if (enabled) {
+          // Off-heap not configured — skip accountant so tantivy4java uses its default
+          // unlimited pool. Setting the accountant without off-heap would cause all
+          // acquireExecutionMemory calls to return 0, and tantivy4java's fail-fast
+          // paths (Arrow FFI writer, merge) would throw RuntimeException.
+          logger.info(
+            "Native memory integration skipped: spark.memory.offHeap.enabled=false or " +
+              "spark.memory.offHeap.size=0. tantivy4java will use its default unlimited pool. " +
+              "Set spark.memory.offHeap.enabled=true and spark.memory.offHeap.size (e.g., '4g') " +
+              "to enable Spark-managed native memory.")
         } else {
           logger.info("Native memory integration disabled via {}", NATIVE_MEMORY_ENABLED_KEY)
         }
@@ -81,25 +89,13 @@ object NativeMemoryInitializer {
     env.conf.getBoolean(NATIVE_MEMORY_ENABLED_KEY, defaultValue = true)
   }
 
-  private def checkOffHeapEnabled(): Unit = {
+  /** Check if Spark's off-heap memory is properly configured (enabled + non-zero size). */
+  private def isOffHeapConfigured: Boolean = {
     val env = org.apache.spark.SparkEnv.get
-    if (env == null) return
+    if (env == null) return false // No SparkEnv — can't verify, skip accountant
     val offHeapEnabled = env.conf.getBoolean("spark.memory.offHeap.enabled", defaultValue = false)
-    if (!offHeapEnabled) {
-      logger.warn(
-        "Native memory integration is enabled but spark.memory.offHeap.enabled=false. " +
-          "All native memory requests will receive 0-byte grants. " +
-          "Set spark.memory.offHeap.enabled=true and spark.memory.offHeap.size to a " +
-          "non-zero value (e.g., '4g') for Spark to manage native memory allocations.")
-    } else {
-      val offHeapSize = env.conf.getSizeAsBytes("spark.memory.offHeap.size", "0")
-      if (offHeapSize <= 0) {
-        logger.warn(
-          "Native memory integration is enabled and spark.memory.offHeap.enabled=true, " +
-            "but spark.memory.offHeap.size is 0. Set it to a non-zero value (e.g., '4g').")
-      } else {
-        logger.info(s"Off-heap memory pool: ${offHeapSize / 1024 / 1024}MB available for native allocations")
-      }
-    }
+    if (!offHeapEnabled) return false
+    val offHeapSize = env.conf.getSizeAsBytes("spark.memory.offHeap.size", "0")
+    offHeapSize > 0
   }
 }
