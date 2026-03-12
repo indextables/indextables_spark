@@ -104,6 +104,9 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
       return null
     }
     val taskId = ctx.taskAttemptId()
+    // Note: addTaskCompletionListener registers cleanup before computeIfAbsent inserts the
+    // entry into the map. This is safe because the current thread IS the task thread —
+    // the task cannot complete while we're inside computeIfAbsent on that same thread.
     consumers.computeIfAbsent(taskId, _ => {
       val tmm = ctx.taskMemoryManager()
       val tc  = new TaskConsumer(tmm, taskId)
