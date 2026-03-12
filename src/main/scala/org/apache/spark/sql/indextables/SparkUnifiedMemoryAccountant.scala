@@ -77,7 +77,11 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
       logger.warn(
         s"Native memory used counter went negative ($newUsed) after releasing $bytes bytes. " +
           "Clamping to 0.")
-      tc.used.set(0)
+      // CAS loop: only reset to 0 if no concurrent acquire has already corrected it
+      var prev = newUsed
+      while (prev < 0 && !tc.used.compareAndSet(prev, 0)) {
+        prev = tc.used.get()
+      }
       bytes + newUsed // == previousUsed, the amount Spark actually granted
     } else {
       bytes
