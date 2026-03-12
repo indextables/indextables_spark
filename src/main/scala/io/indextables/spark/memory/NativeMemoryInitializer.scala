@@ -49,12 +49,6 @@ object NativeMemoryInitializer {
   def ensureInitialized(): Unit = {
     if (!initialized) synchronized {
       if (!initialized) {
-        // Ensure the native library is loaded before calling NativeMemoryManager.
-        // Tantivy.class static init extracts the .dylib/.so from the jar and calls System.load().
-        // NativeMemoryManager's own static init uses System.loadLibrary() which won't find the
-        // jar-embedded library — loading Tantivy first ensures the native symbols are available.
-        Class.forName("io.indextables.tantivy4java.core.Tantivy")
-
         val enabled = isEnabled
         if (enabled) {
           // Warn if off-heap memory is not enabled — without it, all acquireExecutionMemory

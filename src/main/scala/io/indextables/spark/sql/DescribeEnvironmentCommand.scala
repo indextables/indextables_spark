@@ -128,9 +128,9 @@ case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
               Row(host, "worker", "native_memory", "native_memory.granted_bytes",
                 stats.getGrantedBytes.toString)
             )
-            val categoryRows = stats.getCategoryBreakdown.asScala.map {
+            val categoryRows = stats.getCategoryPeakBreakdown.asScala.map {
               case (category, bytes) =>
-                Row(host, "worker", "native_memory", s"native_memory.category.$category",
+                Row(host, "worker", "native_memory", s"native_memory.category_peak.$category",
                   bytes.toString)
             }.toSeq
             baseRows ++ categoryRows

@@ -69,37 +69,28 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
   override def releaseMemory(bytes: Long): Unit = {
     val tc = resolveConsumer()
     if (tc == null) return // No task context — nothing to release against
-    // Cap release to what Spark actually granted. tantivy4java may request to release
-    // more than was acquired (best-effort pattern: Spark grants partial, Rust uses full).
-    val currentUsed = tc.used.get()
-    val toRelease   = math.min(bytes, currentUsed)
-    if (toRelease > 0) {
-      tc.used.addAndGet(-toRelease)
-      tc.tmm.releaseExecutionMemory(toRelease, tc.consumer)
+    val newUsed = tc.used.addAndGet(-bytes)
+    if (newUsed < 0) {
+      // Should not happen after tantivy4java 0.32.5 bug fix (release capped to granted),
+      // but guard defensively.
+      logger.warn(
+        s"Native memory used counter went negative ($newUsed) after releasing $bytes bytes. " +
+          "Clamping to 0.")
+      tc.used.set(0)
     }
-    if (bytes > currentUsed) {
-      logger.debug(
-        s"Native release of $bytes bytes exceeds tracked usage of $currentUsed bytes " +
-          "(partial grant). Released $toRelease to Spark.")
-    }
+    tc.tmm.releaseExecutionMemory(bytes, tc.consumer)
   }
 
   private def resolveConsumer(): TaskConsumer = {
     val ctx = TaskContext.get()
     if (ctx == null) {
-      // Shutdown hooks (e.g., SplitCacheManager cleanup) release memory outside task context.
-      // This is expected and not a bug — demote to debug for shutdown threads.
-      val threadName = Thread.currentThread().getName
-      if (threadName.contains("Shutdown") || threadName.contains("shutdown")) {
-        logger.debug(
-          s"Native memory release on shutdown thread '$threadName' outside task context — " +
-            "memory will be reclaimed by process exit.")
-      } else {
-        logger.error(
-          "Native memory acquire/release called outside Spark task context. " +
-            "This is a bug — all native allocations must occur on a task thread.",
-          new IllegalStateException("No TaskContext"))
-      }
+      // tantivy4java 0.32.5+ calls NativeMemoryManager.shutdown() before the
+      // SplitCacheManager shutdown hook, so this path should only be hit for
+      // genuinely unexpected non-task-thread allocations.
+      logger.error(
+        "Native memory acquire/release called outside Spark task context. " +
+          "This is a bug — all native allocations must occur on a task thread.",
+        new IllegalStateException("No TaskContext"))
       return null
     }
     val taskId = ctx.taskAttemptId()

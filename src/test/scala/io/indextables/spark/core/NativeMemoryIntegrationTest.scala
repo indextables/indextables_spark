@@ -129,15 +129,15 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
     val oldPeak = NativeMemoryManager.resetPeak()
     oldPeak should be >= 0L
 
-    // Category breakdown should return a valid map. If tantivy4java exposes per-category
-    // stats through getCategoryBreakdown(), verify "index_writer" is present.
-    val stats     = NativeMemoryManager.getStats()
-    val breakdown = stats.getCategoryBreakdown
-    breakdown should not be null
+    // Category peak breakdown should include "index_writer" from the Arrow FFI write path
+    val stats         = NativeMemoryManager.getStats()
+    val peakBreakdown = stats.getCategoryPeakBreakdown
+    peakBreakdown should not be null
+    peakBreakdown.asScala should contain key "index_writer"
 
-    info(s"Category breakdown:")
-    breakdown.asScala.foreach { case (category, bytes) =>
-      info(s"  $category: $bytes bytes")
+    info(s"Category peak breakdown:")
+    peakBreakdown.asScala.foreach { case (category, bytes) =>
+      info(s"  $category: $bytes bytes (peak)")
     }
   }
 
@@ -171,6 +171,12 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
     // configured should be "true" since we wrote data (triggers init)
     val configuredRow = nativeMemoryRows.find(_.getString(3) == "native_memory.configured")
     configuredRow.get.getString(4) shouldBe "true"
+
+    // Category peak breakdown should include index_writer
+    val categoryPeakRows = nativeMemoryRows.filter(_.getString(3).startsWith("native_memory.category_peak."))
+    assert(categoryPeakRows.nonEmpty, "DESCRIBE ENVIRONMENT should include category peak rows")
+    val categoryNames = categoryPeakRows.map(_.getString(3).stripPrefix("native_memory.category_peak.")).toSet
+    assert(categoryNames.contains("index_writer"), "Should have index_writer category peak")
   }
 
   test("native memory pool should track read path operations") {
