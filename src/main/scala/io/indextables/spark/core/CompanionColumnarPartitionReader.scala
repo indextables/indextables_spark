@@ -157,10 +157,16 @@ class ColumnarPartitionReader(
     if (streamingSession == null) {
       val splitQuery = ctx.buildSplitQuery(splitSearchEngine)
       val queryAstJson = splitQuery.toQueryAstJson()
-      streamingSession = searcher.startStreamingRetrieval(queryAstJson, dataFieldNames: _*)
+      val typeHints = buildTypeHints()
+      streamingSession = if (typeHints != null) {
+        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, typeHints)
+      } else {
+        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames: _*)
+      }
       logger.info(
         s"Streaming: started session for ${addAction.path}, " +
-          s"columnCount=${streamingSession.getColumnCount}, effectiveLimit=$effectiveLimit"
+          s"columnCount=${streamingSession.getColumnCount}, effectiveLimit=$effectiveLimit" +
+          (if (typeHints != null) s", typeHints=${typeHints.length / 2} fields" else "")
       )
     }
 
@@ -298,6 +304,35 @@ class ColumnarPartitionReader(
       createConstantColumnVector(strVal, field.dataType, numRows)
     }
     new ColumnarBatch(vectors, numRows)
+  }
+
+  /**
+   * Build Arrow type hints for non-companion splits where tantivy's internal types (i64, f64) may
+   * differ from the Spark schema types (Int32, Float32, etc.). Returns null for companion splits
+   * since parquet preserves original types.
+   */
+  private def buildTypeHints(): Array[String] = {
+    val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")
+    if (isCompanion) return null
+
+    // Build alternating [fieldName, arrowType] pairs for fields that need narrowing
+    val hints = scala.collection.mutable.ArrayBuffer[String]()
+    readSchema.fields.foreach { field =>
+      if (!partitionColumnNames.contains(field.name)) {
+        val hint = field.dataType match {
+          case IntegerType => "i32"
+          case ShortType   => "i16"
+          case ByteType    => "i8"
+          case FloatType   => "f32"
+          case _           => null // Default Arrow type is correct
+        }
+        if (hint != null) {
+          hints += field.name
+          hints += hint
+        }
+      }
+    }
+    if (hints.isEmpty) null else hints.toArray
   }
 
   /** Create a ConstantColumnVector for a partition column value. */
