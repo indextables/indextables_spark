@@ -91,6 +91,42 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
       )
     )
 
+    // Register indextables_matches as an alias for IndexQueryExpression
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("indextables_matches"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.IndexQueryExpression",
+          "indextables_matches",
+          "indextables_matches(column, query) - Creates a MATCHES expression for the given column and query string."
+        ),
+        (children: Seq[Expression]) =>
+          if (children.length == 2) {
+            IndexQueryExpression(children(0), children(1))
+          } else {
+            throw new IllegalArgumentException("indextables_matches requires exactly 2 arguments")
+          }
+      )
+    )
+
+    // Register indextables_matches_all as an alias for IndexQueryAllExpression
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("indextables_matches_all"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.IndexQueryAllExpression",
+          "indextables_matches_all",
+          "indextables_matches_all(query) - Creates a MATCHES expression for searching across all fields."
+        ),
+        (children: Seq[Expression]) =>
+          if (children.length == 1) {
+            IndexQueryAllExpression(children(0))
+          } else {
+            throw new IllegalArgumentException("indextables_matches_all requires exactly 1 argument")
+          }
+      )
+    )
+
     // Register V2 IndexQuery expression conversion rule in resolution phase
     // This runs during analysis, before scan planning
     extensions.injectResolutionRule(session => V2IndexQueryExpressionRule)

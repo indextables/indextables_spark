@@ -43,7 +43,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Purge operations**: SQL-based cleanup (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
 - **Cache prewarming**: SQL-based (`PREWARM INDEXTABLES CACHE`) and read-time
-- **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'`)
+- **MATCHES operator**: Full-text search (`content MATCHES 'query'`, `* MATCHES 'query'`; legacy `indexquery`/`indexqueryall` still supported)
 - **V2 DataSource API**: Recommended for partition column indexing
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown
@@ -56,7 +56,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 ## Field Types
 
 - **String** (default): Exact matching, full filter pushdown (`===`, `>`, `<`, `IN`, etc.)
-- **Text**: Full-text search via IndexQuery only. Configure: `spark.indextables.indexing.typemap.text: "field1,field2"`
+- **Text**: Full-text search via MATCHES operator (or legacy IndexQuery). Configure: `spark.indextables.indexing.typemap.text: "field1,field2"`
 - **JSON**: Automatic for Struct/Array/Map types. Mode: `spark.indextables.indexing.json.mode: "full"` (default) or `"minimal"`
 - **Fast fields** (for aggregations): `spark.indextables.indexing.fastfields: "score,timestamp"`
 
@@ -98,9 +98,10 @@ val df = spark.read.format("io.indextables.provider.IndexTablesProvider").load("
 // Standard filters (pushed down for string fields)
 df.filter($"title" === "exact title").show()
 
-// IndexQuery (for text fields) - use SQL syntax
+// Full-text search (for text fields) - use SQL syntax
 df.createOrReplaceTempView("documents")
-spark.sql("SELECT * FROM documents WHERE content indexquery 'machine learning'").show()
+spark.sql("SELECT * FROM documents WHERE content MATCHES 'machine learning'").show()
+spark.sql("SELECT * FROM documents WHERE * MATCHES 'machine learning'").show()  // all fields
 
 // Aggregations (pushed down to tantivy)
 df.agg(count("*"), sum("score"), avg("score")).show()

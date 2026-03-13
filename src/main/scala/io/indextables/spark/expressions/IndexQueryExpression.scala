@@ -45,11 +45,11 @@ case class IndexQueryExpression(
   // This ensures the V2IndexQueryExpressionRule gets a chance to process it
   override lazy val deterministic: Boolean = false
 
-  override def prettyName: String = "indexquery"
+  override def prettyName: String = "matches"
 
-  override def sql: String = s"(${left.sql} indexquery ${right.sql})"
+  override def sql: String = s"(${left.sql} MATCHES ${right.sql})"
 
-  override def toString: String = s"($left indexquery $right)"
+  override def toString: String = s"($left MATCHES $right)"
 
   // For pushdown, we primarily care about the structure, not evaluation
   override def nullSafeEval(leftValue: Any, rightValue: Any): Any =
@@ -90,7 +90,7 @@ case class IndexQueryExpression(
     val rightCheck = right.dataType match {
       case StringType => TypeCheckResult.TypeCheckSuccess
       case _ =>
-        TypeCheckResult.TypeCheckFailure(s"Right side of indexquery must be a string literal, got ${right.dataType}")
+        TypeCheckResult.TypeCheckFailure(s"Right side of MATCHES must be a string literal, got ${right.dataType}")
     }
 
     rightCheck

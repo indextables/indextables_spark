@@ -146,7 +146,7 @@ object ExpressionUtils {
   def validateIndexQueryExpression(expr: IndexQueryExpression): Either[String, Unit] = {
     val columnCheck = expr.getColumnName match {
       case Some(_) => scala.util.Right(())
-      case None    => scala.util.Left(s"Invalid column reference in indexquery: ${expr.left}")
+      case None    => scala.util.Left(s"Invalid column reference in MATCHES expression: ${expr.left}")
     }
 
     if (columnCheck.isLeft) return columnCheck
@@ -154,7 +154,7 @@ object ExpressionUtils {
     val queryCheck = expr.getQueryString match {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_)                       => scala.util.Left("Query string cannot be empty")
-      case None                          => scala.util.Left(s"Invalid query string in indexquery: ${expr.right}")
+      case None                          => scala.util.Left(s"Invalid query string in MATCHES expression: ${expr.right}")
     }
 
     queryCheck
@@ -165,7 +165,7 @@ object ExpressionUtils {
     val queryCheck = expr.getQueryString match {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_)                       => scala.util.Left("Query string cannot be empty")
-      case None                          => scala.util.Left(s"Invalid query string in indexqueryall: ${expr.child}")
+      case None                          => scala.util.Left(s"Invalid query string in MATCHES expression: ${expr.child}")
     }
 
     queryCheck

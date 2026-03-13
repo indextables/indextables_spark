@@ -42,11 +42,11 @@ case class IndexQueryAllExpression(child: Expression) extends UnaryExpression wi
   // This ensures the V2IndexQueryExpressionRule gets a chance to process it
   override lazy val deterministic: Boolean = false
 
-  override def prettyName: String = "indexqueryall"
+  override def prettyName: String = "matches_all"
 
-  override def sql: String = s"indexqueryall(${child.sql})"
+  override def sql: String = s"(* MATCHES ${child.sql})"
 
-  override def toString: String = s"indexqueryall($child)"
+  override def toString: String = s"(* MATCHES $child)"
 
   // For pushdown, we primarily care about the structure, not evaluation
   override def nullSafeEval(input: Any): Any =
@@ -81,7 +81,7 @@ case class IndexQueryAllExpression(child: Expression) extends UnaryExpression wi
       case StringType => TypeCheckResult.TypeCheckSuccess
       case _ =>
         TypeCheckResult.TypeCheckFailure(
-          s"indexqueryall function requires a string literal argument, got ${child.dataType}"
+          s"MATCHES (all-fields) requires a string literal argument, got ${child.dataType}"
         )
     }
 
