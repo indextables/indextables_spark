@@ -64,7 +64,16 @@ class ColumnarMultiSplitPartitionReader(
     s"ColumnarMultiSplitPartitionReader created with ${addActions.length} splits, effectiveLimit=$effectiveLimit"
   )
 
+  // Track pending row count from the last get() call, applied at the start of next()
+  // to avoid double-counting if get() is called multiple times per next().
+  private var pendingRowCount = 0
+
   override def next(): Boolean = {
+    // Accumulate rows from the previous batch (set by get()) at the start of next(),
+    // ensuring double-calls to get() don't inflate totalRowsReturned.
+    totalRowsReturned += pendingRowCount
+    pendingRowCount = 0
+
     if (!initialized) {
       initialized = true
       logger.debug(s"ColumnarMultiSplitPartitionReader: initializing with ${addActions.length} splits")
@@ -129,7 +138,7 @@ class ColumnarMultiSplitPartitionReader(
     currentReader match {
       case Some(reader) =>
         val batch = reader.get()
-        totalRowsReturned += batch.numRows()
+        pendingRowCount = batch.numRows()
         batch
       case None =>
         throw new IllegalStateException("get() called without successful next()")

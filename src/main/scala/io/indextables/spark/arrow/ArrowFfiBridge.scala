@@ -131,10 +131,14 @@ class ArrowFfiBridge extends AutoCloseable {
           importedVectors += new ArrowColumnVector(fieldVector)
       }
       logger.debug(s"Imported ${importedVectors.size} Arrow vectors (streaming) with $numRows rows")
-      // Close previous streaming provider before replacing it (its vectors were already closed
-      // when the previous ColumnarBatch was closed by the reader's closePreviousBatch()).
-      closeCurrentStreamingProvider()
+      // Replace provider: assign new before closing old so batchProvider is safe if close throws.
+      // The old provider's vectors were already closed by the reader's closePreviousBatch().
+      val oldProvider = currentStreamingProvider
       currentStreamingProvider = batchProvider
+      if (oldProvider != null) {
+        try oldProvider.close()
+        catch { case _: Exception => }
+      }
       new ColumnarBatch(importedVectors.toArray, numRows)
     } catch {
       case ex: Exception =>

@@ -174,8 +174,7 @@ class IndexTables4SparkReaderFactory(
         "Ensure spark.indextables.read.columnar.enabled is not set to false."
     )
 
-  override def supportColumnarReads(partition: InputPartition): Boolean =
-    config.getOrElse(IndexTables4SparkOptions.COLUMNAR_READS_ENABLED, "true").toBoolean
+  override def supportColumnarReads(partition: InputPartition): Boolean = true
 
   override def createColumnarReader(partition: InputPartition): PartitionReader[ColumnarBatch] =
     partition match {

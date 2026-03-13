@@ -344,7 +344,9 @@ class SplitReaderContext(
       case date: java.sql.Date =>
         scala.util.Try(java.time.LocalDate.parse(partitionValue)).toOption.exists(_.toEpochDay == date.toLocalDate.toEpochDay)
       case ts: java.sql.Timestamp =>
-        scala.util.Try(java.time.Instant.parse(partitionValue + "Z")).toOption.exists(_.toEpochMilli == ts.getTime)
+        scala.util.Try(java.time.Instant.parse(partitionValue))
+          .orElse(scala.util.Try(java.time.Instant.parse(partitionValue + "Z")))
+          .toOption.exists(_.toEpochMilli == ts.getTime)
       case _ => partitionValue == filterValue.toString
     }
 

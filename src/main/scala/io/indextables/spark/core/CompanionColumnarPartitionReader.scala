@@ -87,6 +87,7 @@ class ColumnarPartitionReader(
   private var splitSearchEngine: SplitSearchEngine = _
   private var initialized                          = false
   private var initFailed                           = false
+  private var initException: Throwable             = _
 
   // Streaming state
   private var currentBatch: ColumnarBatch                      = _
@@ -101,7 +102,7 @@ class ColumnarPartitionReader(
   // tantivy component pre-warming path used by the old row-based reader.
   private def initialize(): Unit =
     if (!initialized) {
-      if (initFailed) throw new IOException(s"Columnar reader previously failed to initialize for ${addAction.path}")
+      if (initFailed) throw new IOException(s"Columnar reader previously failed to initialize for ${addAction.path}", initException)
       try {
         splitSearchEngine = ctx.createSplitSearchEngine()
         initialized = true
@@ -113,6 +114,7 @@ class ColumnarPartitionReader(
         case ex: Exception =>
           logger.error(s"Failed to initialize columnar reader for ${addAction.path}", ex)
           initFailed = true
+          initException = ex
           throw new IOException(s"Failed to initialize columnar reader: ${ex.getMessage}", ex)
       }
     }
