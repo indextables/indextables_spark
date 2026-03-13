@@ -99,7 +99,7 @@ class BatchMetricsBehaviorTest extends TestBase {
     }
   }
 
-  test("limit(1) x5 - each query should have zero metrics (below threshold)") {
+  test("limit(1) x5 - each query should have minimal metrics") {
     info("\n=== LIMIT(1) x5 - USING getMetricsDelta() ===")
 
     for (i <- 1 to 5) {
@@ -114,8 +114,12 @@ class BatchMetricsBehaviorTest extends TestBase {
       info(s"Query $i: ${result.length} rows")
       printMetrics("  DELTA", delta)
 
-      // Below 50-doc threshold, no batch optimization should occur
-      assert(delta.totalOperations == 0, s"Expected 0 ops for limit(1), got ${delta.totalOperations}")
+      assert(result.length == 1, s"Expected 1 row, got ${result.length}")
+      // Streaming path with maxDocs=1: the native layer processes exactly 1 doc and
+      // records metrics for that work. The old 50-doc threshold (which skipped batch
+      // optimization for small results) does not apply to the streaming path.
+      assert(delta.totalOperations <= 1, s"Expected at most 1 op for limit(1), got ${delta.totalOperations}")
+      assert(delta.totalDocuments <= 1, s"Expected at most 1 doc for limit(1), got ${delta.totalDocuments}")
       info("")
     }
   }

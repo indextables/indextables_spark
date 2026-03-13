@@ -158,14 +158,15 @@ class ColumnarPartitionReader(
       val splitQuery = ctx.buildSplitQuery(splitSearchEngine)
       val queryAstJson = splitQuery.toQueryAstJson()
       val typeHints = buildTypeHints()
-      streamingSession = if (typeHints != null) {
-        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, typeHints)
+      val maxDocs = if (effectiveLimit == Int.MaxValue) -1 else effectiveLimit
+      streamingSession = if (typeHints != null || maxDocs > 0) {
+        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, typeHints, maxDocs)
       } else {
         searcher.startStreamingRetrieval(queryAstJson, dataFieldNames: _*)
       }
       logger.info(
         s"Streaming: started session for ${addAction.path}, " +
-          s"columnCount=${streamingSession.getColumnCount}, effectiveLimit=$effectiveLimit" +
+          s"columnCount=${streamingSession.getColumnCount}, effectiveLimit=$effectiveLimit, maxDocs=$maxDocs" +
           (if (typeHints != null) s", typeHints=${typeHints.length / 2} fields" else "")
       )
     }
