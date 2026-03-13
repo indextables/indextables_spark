@@ -973,6 +973,122 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
     }
   }
 
+  test("INDEXING MODES ipaddress field supports CIDR query via indexquery") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  ip STRING
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'server1', '192.168.1.1'),
+                   |  (2, 'server2', '192.168.1.2'),
+                   |  (3, 'server3', '192.168.1.10'),
+                   |  (4, 'server4', '10.0.0.1'),
+                   |  (5, 'server5', '10.0.0.2')
+                   |""".stripMargin)
+
+      val syncResult = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('ip': 'ipaddress')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .load(indexPath)
+      df.createOrReplaceTempView("ip_cidr_companion_test")
+
+      // CIDR /24 matches all three 192.168.1.x entries
+      val cidrResult = spark
+        .sql("SELECT id FROM ip_cidr_companion_test WHERE ip indexquery '192.168.1.0/24'")
+        .collect()
+      cidrResult.length shouldBe 3
+      cidrResult.map(_.getInt(0)).toSet shouldBe Set(1, 2, 3)
+
+      // CIDR /8 matches all 10.x.x.x entries
+      val cidr8Result = spark
+        .sql("SELECT id FROM ip_cidr_companion_test WHERE ip indexquery '10.0.0.0/8'")
+        .collect()
+      cidr8Result.length shouldBe 2
+      cidr8Result.map(_.getInt(0)).toSet shouldBe Set(4, 5)
+
+      // CIDR and explicit range produce identical results
+      val explicitResult = spark
+        .sql(
+          "SELECT id FROM ip_cidr_companion_test WHERE ip indexquery '[192.168.1.0 TO 192.168.1.255]'"
+        )
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+
+      cidrResult.map(_.getInt(0)).toSet shouldBe explicitResult
+    }
+  }
+
+  test("INDEXING MODES ipaddress field supports wildcard query via indexquery") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      spark.sql(s"""CREATE TABLE delta.`$deltaPath` (
+                   |  id INT,
+                   |  name STRING,
+                   |  ip STRING
+                   |) USING DELTA""".stripMargin)
+
+      spark.sql(s"""INSERT INTO delta.`$deltaPath` VALUES
+                   |  (1, 'server1', '192.168.1.1'),
+                   |  (2, 'server2', '192.168.1.2'),
+                   |  (3, 'server3', '192.168.1.10'),
+                   |  (4, 'server4', '10.0.0.1'),
+                   |  (5, 'server5', '10.0.0.2')
+                   |""".stripMargin)
+
+      val syncResult = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('ip': 'ipaddress')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      syncResult.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .load(indexPath)
+      df.createOrReplaceTempView("ip_wildcard_companion_test")
+
+      // Wildcard last octet matches all 192.168.1.x entries
+      val wildcardResult = spark
+        .sql("SELECT id FROM ip_wildcard_companion_test WHERE ip indexquery '192.168.1.*'")
+        .collect()
+      wildcardResult.length shouldBe 3
+      wildcardResult.map(_.getInt(0)).toSet shouldBe Set(1, 2, 3)
+
+      // Wildcard and CIDR return identical results
+      val cidrResult = spark
+        .sql("SELECT id FROM ip_wildcard_companion_test WHERE ip indexquery '192.168.1.0/24'")
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+
+      wildcardResult.map(_.getInt(0)).toSet shouldBe cidrResult
+
+      // Multi-octet wildcard matches 10.x.x.x entries
+      val multiWildcardResult = spark
+        .sql("SELECT id FROM ip_wildcard_companion_test WHERE ip indexquery '10.0.*.*'")
+        .collect()
+      multiWildcardResult.length shouldBe 2
+      multiWildcardResult.map(_.getInt(0)).toSet shouldBe Set(4, 5)
+    }
+  }
+
   test("INDEXING MODES json field supports nested field filter pushdown") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
