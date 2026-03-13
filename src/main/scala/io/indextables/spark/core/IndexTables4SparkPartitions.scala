@@ -17,7 +17,6 @@
 
 package io.indextables.spark.core
 
-import java.io.IOException
 import java.util.UUID
 
 import scala.jdk.CollectionConverters._
@@ -32,11 +31,8 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.filters.MixedBooleanFilter
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.prewarm.PreWarmManager
-import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
-import io.indextables.spark.storage.SplitCacheConfig
+import io.indextables.spark.search.TantivySearchEngine
 import io.indextables.spark.transaction.{AddAction, PartitionUtils}
 import io.indextables.spark.util.StatisticsCalculator
 import org.slf4j.LoggerFactory
@@ -173,49 +169,13 @@ class IndexTables4SparkReaderFactory(
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkReaderFactory])
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] =
-    partition match {
-      case multi: IndexTables4SparkMultiSplitInputPartition =>
-        logger.info(
-          s"Creating multi-split reader for partition ${multi.partitionId} with ${multi.addActions.length} splits"
-        )
-        new IndexTables4SparkMultiSplitPartitionReader(
-          multi.addActions,
-          readSchema,
-          multi.fullTableSchema,
-          multi.filters,
-          multi.limit.orElse(limit),
-          config,
-          tablePath,
-          multi.indexQueryFilters,
-          metricsAccumulator
-        )
+    throw new UnsupportedOperationException(
+      "Row-based reads are no longer supported. " +
+        "Ensure spark.indextables.read.columnar.enabled is not set to false."
+    )
 
-      case single: IndexTables4SparkInputPartition =>
-        logger.info(s"Creating reader for partition ${single.partitionId}")
-        new IndexTables4SparkPartitionReader(
-          single.addAction,
-          readSchema,
-          single.fullTableSchema,
-          single.filters,
-          single.limit.orElse(limit),
-          config,
-          tablePath,
-          single.indexQueryFilters,
-          metricsAccumulator
-        )
-
-      case other =>
-        throw new IllegalArgumentException(s"Unexpected partition type: ${other.getClass}")
-    }
-
-  override def supportColumnarReads(partition: InputPartition): Boolean = {
-    val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")
-    val enabled     = config.getOrElse(IndexTables4SparkOptions.COLUMNAR_READS_ENABLED, "true").toBoolean
-    val supported   = isCompanion && enabled
-    if (supported)
-      logger.debug(s"Columnar reads enabled for companion partition")
-    supported
-  }
+  override def supportColumnarReads(partition: InputPartition): Boolean =
+    config.getOrElse(IndexTables4SparkOptions.COLUMNAR_READS_ENABLED, "true").toBoolean
 
   override def createColumnarReader(partition: InputPartition): PartitionReader[ColumnarBatch] =
     partition match {
@@ -223,7 +183,7 @@ class IndexTables4SparkReaderFactory(
         logger.info(
           s"Creating columnar multi-split reader for partition ${multi.partitionId} with ${multi.addActions.length} splits"
         )
-        new CompanionColumnarMultiSplitPartitionReader(
+        new ColumnarMultiSplitPartitionReader(
           multi.addActions,
           readSchema,
           multi.fullTableSchema,
@@ -237,7 +197,7 @@ class IndexTables4SparkReaderFactory(
 
       case single: IndexTables4SparkInputPartition =>
         logger.info(s"Creating columnar reader for partition ${single.partitionId}")
-        new CompanionColumnarPartitionReader(
+        new ColumnarPartitionReader(
           single.addAction,
           readSchema,
           single.fullTableSchema,
@@ -252,394 +212,6 @@ class IndexTables4SparkReaderFactory(
       case other =>
         throw new IllegalArgumentException(s"Unexpected partition type for columnar read: ${other.getClass}")
     }
-}
-
-class IndexTables4SparkPartitionReader(
-  addAction: AddAction,
-  readSchema: StructType,
-  fullTableSchema: StructType, // Full table schema for type lookup (filters may reference non-projected columns)
-  filters: Array[Filter],
-  limit: Option[Int] = None,
-  config: Map[String, String], // Direct config instead of broadcast
-  tablePath: Path,
-  indexQueryFilters: Array[Any] = Array.empty,
-  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
-    extends PartitionReader[InternalRow] {
-
-  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
-
-  private val ctx = new SplitReaderContext(
-    addAction,
-    readSchema,
-    fullTableSchema,
-    filters,
-    limit,
-    config,
-    tablePath,
-    indexQueryFilters,
-    metricsAccumulator
-  )
-
-  private def effectiveLimit = ctx.effectiveLimit
-
-  private var splitSearchEngine: SplitSearchEngine  = _
-  private var resultIterator: Iterator[InternalRow] = Iterator.empty
-  private var initialized                           = false
-
-  private def initialize(): Unit =
-    if (!initialized) {
-      try {
-        // Check if pre-warm is enabled and try to join warmup future
-        joinPrewarmIfEnabled()
-
-        splitSearchEngine = ctx.createSplitSearchEngine()
-
-        // Log the filters and limit
-        logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
-        logger.info(
-          s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}"
-        )
-        logger.info(s"  - Limit: $effectiveLimit")
-
-        val splitQuery = ctx.buildSplitQuery(splitSearchEngine)
-
-        // Push down SplitQuery and limit to split searcher
-        val searchResults = splitSearchEngine.search(splitQuery, limit = effectiveLimit)
-
-        // For companion splits, partition column values are NOT stored in the parquet data
-        // (Delta/Iceberg store them in directory paths). Inject from AddAction.partitionValues.
-        resultIterator = injectPartitionValuesIfNeeded(searchResults)
-
-        initialized = true
-        if (logger.isDebugEnabled)
-          logger.debug(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', queryAstJson='${splitQuery.toQueryAstJson()}', limit=$effectiveLimit, results=${searchResults.length}")
-        else
-          logger.info(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', limit=$effectiveLimit, results=${searchResults.length}")
-
-      } catch {
-        case ex: Exception =>
-          logger.error(s"Failed to initialize reader for ${addAction.path}", ex)
-          // Set safe default for resultIterator to prevent NPE in next() calls
-          resultIterator = Iterator.empty
-          initialized = true
-          // Still throw the exception to signal the failure
-          throw new IOException(s"Failed to read Tantivy index: ${ex.getMessage}", ex)
-      }
-    }
-
-  override def next(): Boolean =
-    try {
-      initialize()
-      if (resultIterator != null) {
-        resultIterator.hasNext
-      } else {
-        false
-      }
-    } catch {
-      case ex: Exception =>
-        logger.error(s"Error in next() for ${addAction.path}", ex)
-        // Re-throw the exception to ensure the task fails rather than silently skipping data
-        throw new RuntimeException(s"Failed to read partition for ${addAction.path}: ${ex.getMessage}", ex)
-    }
-
-  override def get(): InternalRow =
-    if (resultIterator != null) {
-      resultIterator.next()
-    } else {
-      throw new IllegalStateException(s"No data available for ${addAction.path}")
-    }
-
-  override def close(): Unit = {
-    ctx.collectMetricsDelta()
-    ctx.reportBytesRead()
-
-    if (splitSearchEngine != null) {
-      try
-        splitSearchEngine.close()
-      catch {
-        case ex: Exception =>
-          // Log but don't rethrow - close() should be idempotent and not fail the task
-          logger.warn(s"Error closing splitSearchEngine for ${addAction.path}", ex)
-      }
-    }
-  }
-
-  /** Check if pre-warm is enabled and try to join warmup future. */
-  private def joinPrewarmIfEnabled(): Unit = {
-    val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
-    if (isPreWarmEnabled) {
-      val allFilters   = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-      val queryHash    = generateQueryHash(allFilters)
-      val warmupJoined = PreWarmManager.joinWarmupFuture(addAction.path, queryHash, isPreWarmEnabled)
-      if (warmupJoined) {
-        logger.info(s"Successfully joined warmup future for split: ${addAction.path}")
-      }
-    }
-  }
-
-  /** Generate a consistent hash for the query filters to identify warmup futures. */
-  private def generateQueryHash(allFilters: Array[Any]): String = {
-    val filterString = allFilters.map(_.toString).mkString("|")
-    java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
-  }
-
-  /** Inject partition column values from AddAction metadata into InternalRows.
-    *
-    * Partition columns are not stored in tantivy split files — their values live in
-    * AddAction.partitionValues (derived from directory paths). This method injects those
-    * values into the InternalRow at the correct schema positions so that Spark post-filters
-    * (e.g., In/IsIn on partition columns) see the actual values instead of NULL.
-    */
-  private def injectPartitionValuesIfNeeded(searchResults: Array[InternalRow]): Iterator[InternalRow] = {
-    if (addAction.partitionValues.nonEmpty) {
-      val partitionIndices = readSchema.fields.zipWithIndex.collect {
-        case (field, idx) if addAction.partitionValues.contains(field.name) =>
-          (idx, field.dataType, addAction.partitionValues(field.name))
-      }
-      if (partitionIndices.nonEmpty) {
-        logger.info(s"Injecting ${partitionIndices.length} partition column value(s) from AddAction metadata")
-        searchResults.iterator.map { row =>
-          val values = row.toSeq(readSchema).toArray
-          partitionIndices.foreach {
-            case (idx, dataType, strVal) =>
-              values(idx) = convertPartitionValue(strVal, dataType)
-          }
-          InternalRow.fromSeq(values)
-        }
-      } else {
-        searchResults.iterator
-      }
-    } else {
-      searchResults.iterator
-    }
-  }
-
-  /** Convert a partition value string to the appropriate Spark internal representation. */
-  private def convertPartitionValue(value: String, dataType: org.apache.spark.sql.types.DataType): Any = {
-    import org.apache.spark.sql.types._
-    import org.apache.spark.unsafe.types.UTF8String
-    if (value == null) return null
-    try
-      dataType match {
-        case StringType  => UTF8String.fromString(value)
-        case IntegerType => value.toInt
-        case LongType    => value.toLong
-        case DoubleType  => value.toDouble
-        case FloatType   => value.toFloat
-        case BooleanType => value.toBoolean
-        case ShortType   => value.toShort
-        case ByteType    => value.toByte
-        case DateType    =>
-          // Spark stores DateType as Int (days since epoch 1970-01-01)
-          java.time.LocalDate.parse(value).toEpochDay.toInt
-        case TimestampType =>
-          // Spark stores TimestampType as Long (microseconds since epoch)
-          val instant = if (value.contains("T")) {
-            java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant
-          } else if (value.contains(" ")) {
-            // Space-separated format: "2024-01-01 15:00:00"
-            java.time.LocalDateTime.parse(value.replace(" ", "T")).atZone(java.time.ZoneOffset.UTC).toInstant
-          } else {
-            java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-          }
-          instant.getEpochSecond * 1000000L + instant.getNano / 1000L
-        case _ => UTF8String.fromString(value) // fallback: treat as string
-      }
-    catch {
-      case e: Exception =>
-        throw new IllegalArgumentException(
-          s"Failed to convert partition value '$value' to $dataType: ${e.getMessage}",
-          e
-        )
-    }
-  }
-}
-
-/**
- * PartitionReader that processes multiple splits sequentially. Stops early if pushed limit is satisfied before querying
- * all splits.
- *
- * This reader iterates through multiple splits, maintaining running state to:
- *   - Track total rows returned across all splits
- *   - Apply remaining limit to each subsequent split
- *   - Skip remaining splits once limit is satisfied (early termination)
- *   - Close each split's search engine before moving to the next
- *
- * @param addActions
- *   Multiple splits to process
- * @param readSchema
- *   Schema for reading data
- * @param fullTableSchema
- *   Full table schema for type lookup
- * @param filters
- *   Pushed-down filters to apply
- * @param limit
- *   Optional pushed-down limit
- * @param config
- *   Configuration options
- * @param tablePath
- *   Base table path for resolving relative paths
- * @param indexQueryFilters
- *   IndexQuery filters for full-text search
- * @param metricsAccumulator
- *   Optional accumulator for batch optimization metrics
- */
-class IndexTables4SparkMultiSplitPartitionReader(
-  addActions: Seq[AddAction],
-  readSchema: StructType,
-  fullTableSchema: StructType,
-  filters: Array[Filter],
-  limit: Option[Int] = None,
-  config: Map[String, String],
-  tablePath: Path,
-  indexQueryFilters: Array[Any] = Array.empty,
-  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
-    extends PartitionReader[InternalRow] {
-
-  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkMultiSplitPartitionReader])
-
-  // Calculate effective limit: use pushed limit, then configurable default, then hardcoded fallback
-  private val configuredDefaultLimit: Int = config
-    .get("spark.indextables.read.defaultLimit")
-    .flatMap(s => scala.util.Try(s.toInt).toOption)
-    .getOrElse(250)
-  private val effectiveLimit: Int = limit.getOrElse(configuredDefaultLimit)
-
-  // Multi-split iteration state
-  private var currentSplitIndex                                       = 0
-  private var currentReader: Option[IndexTables4SparkPartitionReader] = None
-  private var totalRowsReturned                                       = 0L
-  private var initialized                                             = false
-
-  // Capture baseline metrics at partition reader creation for delta computation
-  private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =
-    if (metricsAccumulator.isDefined) {
-      io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
-    } else {
-      io.indextables.spark.storage.BatchOptMetrics.empty
-    }
-
-  logger.info(s"MultiSplitPartitionReader created with ${addActions.length} splits, effectiveLimit=$effectiveLimit")
-
-  override def next(): Boolean = {
-    if (!initialized) {
-      initialized = true
-      logger.debug(s"MultiSplitPartitionReader: initializing with ${addActions.length} splits")
-    }
-
-    // Check if current reader has more rows
-    if (currentReader.exists(_.next())) {
-      return true
-    }
-
-    // Close current reader before moving to next
-    closeCurrentReader()
-
-    // Check if we've satisfied the limit (safe Long subtraction avoids Int overflow)
-    val remainingLimit = math.max(0L, effectiveLimit.toLong - totalRowsReturned).toInt
-    if (remainingLimit <= 0) {
-      logger.debug(
-        s"MultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), skipping remaining ${addActions.length - currentSplitIndex} splits"
-      )
-      return false
-    }
-
-    // Move to next split
-    while (currentSplitIndex < addActions.length) {
-      val addAction = addActions(currentSplitIndex)
-      currentSplitIndex += 1
-
-      logger.debug(
-        s"MultiSplitPartitionReader: initializing split $currentSplitIndex/${addActions.length}: ${addAction.path}"
-      )
-
-      // Create a new single-split reader with the remaining limit.
-      // Pass None for metricsAccumulator to child readers — the multi-split reader
-      // reports cumulative metrics from its own baseline to avoid double-counting.
-      val singleSplitReader = new IndexTables4SparkPartitionReader(
-        addAction,
-        readSchema,
-        fullTableSchema,
-        filters,
-        Some(remainingLimit),
-        config,
-        tablePath,
-        indexQueryFilters,
-        metricsAccumulator = None
-      )
-
-      currentReader = Some(singleSplitReader)
-
-      if (singleSplitReader.next()) {
-        return true
-      }
-
-      // This split had no results, close and try next
-      closeCurrentReader()
-    }
-
-    false
-  }
-
-  override def get(): InternalRow =
-    currentReader match {
-      case Some(reader) =>
-        val row = reader.get()
-        totalRowsReturned += 1
-        row
-      case None =>
-        throw new IllegalStateException("get() called without successful next()")
-    }
-
-  private def closeCurrentReader(): Unit = {
-    currentReader.foreach { reader =>
-      try
-        reader.close()
-      catch {
-        case ex: Exception =>
-          logger.warn(s"Error closing split reader: ${ex.getMessage}")
-      }
-    }
-    currentReader = None
-  }
-
-  override def close(): Unit = {
-    closeCurrentReader()
-
-    // Collect batch optimization metrics delta for this partition (all splits combined)
-    metricsAccumulator.foreach { acc =>
-      try {
-        val currentMetrics = io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
-        val delta = io.indextables.spark.storage.BatchOptMetrics(
-          totalOperations = currentMetrics.totalOperations - baselineMetrics.totalOperations,
-          totalDocuments = currentMetrics.totalDocuments - baselineMetrics.totalDocuments,
-          totalRequests = currentMetrics.totalRequests - baselineMetrics.totalRequests,
-          consolidatedRequests = currentMetrics.consolidatedRequests - baselineMetrics.consolidatedRequests,
-          bytesTransferred = currentMetrics.bytesTransferred - baselineMetrics.bytesTransferred,
-          bytesWasted = currentMetrics.bytesWasted - baselineMetrics.bytesWasted,
-          totalPrefetchDurationMs = currentMetrics.totalPrefetchDurationMs - baselineMetrics.totalPrefetchDurationMs,
-          segmentsProcessed = currentMetrics.segmentsProcessed - baselineMetrics.segmentsProcessed
-        )
-        if (delta.totalOperations > 0 || delta.totalDocuments > 0) {
-          acc.add(delta)
-          logger.debug(s"Added batch metrics delta for multi-split partition: ops=${delta.totalOperations}, docs=${delta.totalDocuments}")
-        }
-      } catch {
-        case ex: Exception =>
-          logger.warn(s"Error collecting batch optimization metrics for multi-split partition", ex)
-      }
-    }
-
-    // Report bytesRead to Spark UI for all processed splits
-    // Note: recordsRead is automatically tracked by Spark's V2 DataSourceRDD (MetricsHandler)
-    // We only report bytesRead since Spark's Hadoop filesystem callbacks don't work for our direct file reading
-    val bytesRead = addActions.take(currentSplitIndex).map(_.size).sum
-    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
-      logger.debug(s"Reported input metrics for multi-split partition: $bytesRead bytes from $currentSplitIndex splits")
-    }
-
-    logger.info(s"MultiSplitPartitionReader closed: processed $currentSplitIndex/${addActions.length} splits, returned $totalRowsReturned rows")
-  }
 }
 
 class IndexTables4SparkWriterFactory(

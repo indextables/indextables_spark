@@ -36,15 +36,15 @@ import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /**
- * Shared initialization context for split-based partition readers (both row and columnar).
+ * Shared initialization context for split-based columnar partition readers.
  *
  * Encapsulates the duplicated logic for: effective limit calculation, path resolution, cache config, companion
  * validation, path normalization, footer validation, SplitMetadata reconstruction, SplitSearchEngine creation, split
  * field name retrieval, partition filter separation, range filter stats optimization, IndexQuery cleanup, and
  * SplitQuery building.
  *
- * Both [[IndexTables4SparkPartitionReader]] and [[CompanionColumnarPartitionReader]] compose this class (has-a) rather
- * than inheriting from it, avoiding trait mixin complexity with different `PartitionReader[T]` type parameters.
+ * [[ColumnarPartitionReader]] composes this class (has-a) rather than inheriting from it, avoiding trait mixin complexity
+ * with the `PartitionReader[ColumnarBatch]` type parameter.
  */
 class SplitReaderContext(
   addAction: AddAction,
@@ -59,14 +59,8 @@ class SplitReaderContext(
 
   private val logger = LoggerFactory.getLogger(classOf[SplitReaderContext])
 
-  /** Effective limit: use pushed limit, then configurable default, then hardcoded fallback. */
-  val effectiveLimit: Int = {
-    val configuredDefault = config
-      .get("spark.indextables.read.defaultLimit")
-      .flatMap(s => scala.util.Try(s.toInt).toOption)
-      .getOrElse(250)
-    limit.getOrElse(configuredDefault)
-  }
+  val readMode: String = SplitReaderContext.resolveReadMode(config)
+  val effectiveLimit: Int = SplitReaderContext.computeEffectiveLimit(config, limit)
 
   /** Resolved file path from AddAction against table path. */
   val filePath: String = PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
@@ -536,4 +530,42 @@ class SplitReaderContext(
       case _ => false
     }
   }
+}
+
+object SplitReaderContext {
+
+  /**
+   * Resolve and validate the read mode from configuration.
+   *
+   * @return
+   *   "fast" or "complete"
+   * @throws IllegalArgumentException
+   *   if an invalid mode is configured
+   */
+  def resolveReadMode(config: Map[String, String]): String = {
+    val mode = config.getOrElse(IndexTables4SparkOptions.READ_MODE, "fast").toLowerCase
+    require(
+      mode == "fast" || mode == "complete",
+      s"Invalid ${IndexTables4SparkOptions.READ_MODE} value '$mode'. Must be 'fast' or 'complete'."
+    )
+    mode
+  }
+
+  /**
+   * Compute the effective result limit from config and any pushed limit.
+   *
+   *   - **fast** (default): pushed limit → configured `defaultLimit` → 250
+   *   - **complete**: pushed limit → Int.MaxValue (return everything)
+   */
+  def computeEffectiveLimit(config: Map[String, String], limit: Option[Int]): Int =
+    resolveReadMode(config) match {
+      case "complete" =>
+        limit.getOrElse(Int.MaxValue)
+      case _ =>
+        val configuredDefault = config
+          .get("spark.indextables.read.defaultLimit")
+          .flatMap(s => scala.util.Try(s.toInt).toOption)
+          .getOrElse(250)
+        limit.getOrElse(configuredDefault)
+    }
 }

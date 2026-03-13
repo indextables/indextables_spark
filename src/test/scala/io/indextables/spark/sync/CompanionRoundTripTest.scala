@@ -109,7 +109,7 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
     spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.read.defaultLimit", "1000")
-      .option("spark.indextables.read.columnar.enabled", "false") // Explicit row path (has Timestamp tests)
+      .option("spark.indextables.read.columnar.enabled", "true")
       .load(indexPath)
   }
 

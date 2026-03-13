@@ -528,6 +528,9 @@ object IndexTables4SparkOptions {
   val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
   val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 
+  // Read mode configuration
+  val READ_MODE = "spark.indextables.read.mode"
+
   // Columnar reads configuration
   val COLUMNAR_READS_ENABLED = "spark.indextables.read.columnar.enabled"
 

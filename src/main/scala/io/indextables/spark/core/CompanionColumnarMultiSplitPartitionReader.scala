@@ -28,12 +28,12 @@ import io.indextables.spark.transaction.AddAction
 import org.slf4j.LoggerFactory
 
 /**
- * Columnar partition reader that processes multiple companion splits sequentially. Stops early if pushed limit is
- * satisfied before querying all splits.
+ * Columnar partition reader that processes multiple splits sequentially. Stops early if pushed limit is satisfied before
+ * querying all splits.
  *
- * Columnar equivalent of IndexTables4SparkMultiSplitPartitionReader.
+ * Works for all split types (both companion and regular splits).
  */
-class CompanionColumnarMultiSplitPartitionReader(
+class ColumnarMultiSplitPartitionReader(
   addActions: Seq[AddAction],
   readSchema: StructType,
   fullTableSchema: StructType,
@@ -45,18 +45,13 @@ class CompanionColumnarMultiSplitPartitionReader(
   metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
     extends PartitionReader[ColumnarBatch] {
 
-  private val logger = LoggerFactory.getLogger(classOf[CompanionColumnarMultiSplitPartitionReader])
+  private val logger = LoggerFactory.getLogger(classOf[ColumnarMultiSplitPartitionReader])
 
-  // Calculate effective limit
-  private val configuredDefaultLimit: Int = config
-    .get("spark.indextables.read.defaultLimit")
-    .flatMap(s => scala.util.Try(s.toInt).toOption)
-    .getOrElse(250)
-  private val effectiveLimit: Int = limit.getOrElse(configuredDefaultLimit)
+  private val effectiveLimit: Int = SplitReaderContext.computeEffectiveLimit(config, limit)
 
   // Multi-split iteration state
   private var currentSplitIndex                                       = 0
-  private var currentReader: Option[CompanionColumnarPartitionReader] = None
+  private var currentReader: Option[ColumnarPartitionReader] = None
   private var totalRowsReturned                                       = 0L
   private var initialized                                             = false
 
@@ -66,13 +61,13 @@ class CompanionColumnarMultiSplitPartitionReader(
     else io.indextables.spark.storage.BatchOptMetrics.empty
 
   logger.info(
-    s"CompanionColumnarMultiSplitPartitionReader created with ${addActions.length} splits, effectiveLimit=$effectiveLimit"
+    s"ColumnarMultiSplitPartitionReader created with ${addActions.length} splits, effectiveLimit=$effectiveLimit"
   )
 
   override def next(): Boolean = {
     if (!initialized) {
       initialized = true
-      logger.debug(s"CompanionColumnarMultiSplitPartitionReader: initializing with ${addActions.length} splits")
+      logger.debug(s"ColumnarMultiSplitPartitionReader: initializing with ${addActions.length} splits")
     }
 
     // Check if current reader has more rows
@@ -87,7 +82,7 @@ class CompanionColumnarMultiSplitPartitionReader(
     val remainingLimit = math.max(0L, effectiveLimit.toLong - totalRowsReturned).toInt
     if (remainingLimit <= 0) {
       logger.debug(
-        s"CompanionColumnarMultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), " +
+        s"ColumnarMultiSplitPartitionReader: limit satisfied ($totalRowsReturned >= $effectiveLimit), " +
           s"skipping remaining ${addActions.length - currentSplitIndex} splits"
       )
       return false
@@ -99,12 +94,13 @@ class CompanionColumnarMultiSplitPartitionReader(
       currentSplitIndex += 1
 
       logger.debug(
-        s"CompanionColumnarMultiSplitPartitionReader: initializing split $currentSplitIndex/${addActions.length}: ${addAction.path}"
+        s"ColumnarMultiSplitPartitionReader: initializing split $currentSplitIndex/${addActions.length}: ${addAction.path}"
       )
 
-      // Pass None for metricsAccumulator to child readers — the multi-split reader
-      // reports cumulative metrics from its own baseline to avoid double-counting.
-      val singleSplitReader = new CompanionColumnarPartitionReader(
+      // Pass remaining limit to child for per-split early termination via streaming.
+      // Pass None for metricsAccumulator — the multi-split reader reports cumulative metrics
+      // from its own baseline to avoid double-counting.
+      val singleSplitReader = new ColumnarPartitionReader(
         addAction,
         readSchema,
         fullTableSchema,
@@ -181,7 +177,7 @@ class CompanionColumnarMultiSplitPartitionReader(
     org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)
 
     logger.info(
-      s"CompanionColumnarMultiSplitPartitionReader closed: processed $currentSplitIndex/${addActions.length} splits, returned $totalRowsReturned rows"
+      s"ColumnarMultiSplitPartitionReader closed: processed $currentSplitIndex/${addActions.length} splits, returned $totalRowsReturned rows"
     )
   }
 }
