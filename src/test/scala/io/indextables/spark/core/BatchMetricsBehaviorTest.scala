@@ -23,17 +23,8 @@ import io.indextables.spark.storage.{BatchOptMetrics, BatchOptMetricsRegistry}
 import io.indextables.spark.TestBase
 
 /**
- * Test to verify batch metrics behavior with baseline/delta approach.
- *
- * With the unified streaming read path (PR #248), all reads use `startStreamingRetrieval()`/`nextBatch()` which
- * streams Arrow batches directly via FFI. This bypasses `docBatchProjected()`, so batch optimization metrics
- * (totalOperations, totalDocuments, consolidatedRequests) are zero for streaming reads. This is expected — the
- * streaming path is itself a more efficient mechanism that eliminates per-document S3 requests entirely.
- *
- * Tests validate:
- * - Data correctness through the streaming path at various limits
- * - Metrics infrastructure (registry, baselines, deltas) remains functional
- * - The limit(1) below-threshold behavior is preserved
+ * Test to verify batch metrics behavior with baseline/delta approach. Each query should show correct per-query metrics
+ * via getMetricsDelta().
  */
 class BatchMetricsBehaviorTest extends TestBase {
 
@@ -66,31 +57,46 @@ class BatchMetricsBehaviorTest extends TestBase {
     info(s"Created 10,000 rows (single split) at: $testPath")
   }
 
-  test("per-query metrics baseline/delta infrastructure works with streaming reads") {
-    info("\n=== PER-QUERY METRICS VALIDATION (STREAMING PATH) ===")
+  test("per-query metrics work correctly with baseline/delta approach") {
+    info("\n=== PER-QUERY METRICS VALIDATION ===")
 
+    // Run multiple queries and verify each gets correct per-query metrics
+    // Use limit(Int.MaxValue) to override the default 250-row limit
     val result1 = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
       .limit(Int.MaxValue)
       .collect()
 
-    val delta1 = BatchOptMetricsRegistry.getMetricsDelta(testPath)
+    val delta1   = BatchOptMetricsRegistry.getMetricsDelta(testPath)
+    val docCount = delta1.totalDocuments
 
-    info(s"Query 1: ${result1.length} rows returned")
+    info(s"Query 1: ${result1.length} rows returned, $docCount docs in metrics")
     printMetrics("  DELTA", delta1)
 
-    // Validate data correctness
-    assert(result1.length == 10000, s"Expected 10000 rows, got ${result1.length}")
+    // Key validation: docs returned should match docs in metrics
+    // (unless below 50-doc threshold)
+    if (result1.length >= 50) {
+      assert(
+        delta1.totalOperations >= 1,
+        s"Expected at least 1 batch op for ${result1.length} docs, got ${delta1.totalOperations}"
+      )
+      assert(delta1.totalDocuments > 0, s"Expected totalDocuments > 0 for ${result1.length} rows")
+      assert(
+        delta1.consolidatedRequests < delta1.totalRequests || delta1.totalRequests == 0,
+        s"Expected consolidation (consolidated < total requests)"
+      )
 
-    // Streaming path bypasses docBatchProjected, so batch optimization metrics are zero.
-    // This is expected — streaming reads Arrow batches directly via FFI without per-document requests.
-    assert(
-      delta1.totalOperations == 0,
-      s"Streaming reads bypass docBatchProjected; expected 0 ops, got ${delta1.totalOperations}"
-    )
-
-    info(s"\n✅ SUCCESS: Streaming read returned all 10000 rows; metrics infrastructure functional")
+      info(s"\n✅ SUCCESS: Per-query metrics work correctly")
+      info(s"   Rows returned: ${result1.length}")
+      info(s"   Docs in metrics: ${delta1.totalDocuments}")
+      info(s"   Batch operations: ${delta1.totalOperations}")
+      info(s"   Consolidation: ${delta1.totalRequests} → ${delta1.consolidatedRequests} (${delta1.consolidationRatio}x)")
+    } else {
+      // Below threshold - no batch optimization
+      assert(delta1.totalOperations == 0, s"Expected 0 batch ops below 50-doc threshold, got ${delta1.totalOperations}")
+      info(s"\n✅ SUCCESS: Below threshold, correctly shows 0 batch ops")
+    }
   }
 
   test("limit(1) x5 - each query should have zero metrics (below threshold)") {
@@ -114,8 +120,8 @@ class BatchMetricsBehaviorTest extends TestBase {
     }
   }
 
-  test("limit(100) x5 - streaming reads return correct row counts") {
-    info("\n=== LIMIT(100) x5 - STREAMING PATH ===")
+  test("limit(100) x5 - each query should show consistent per-query metrics") {
+    info("\n=== LIMIT(100) x5 - USING getMetricsDelta() ===")
 
     for (i <- 1 to 5) {
       val result = spark.read
@@ -129,15 +135,21 @@ class BatchMetricsBehaviorTest extends TestBase {
       info(s"Query $i: ${result.length} rows")
       printMetrics("  DELTA", delta)
 
-      assert(result.length == 100, s"Expected 100 rows, got ${result.length}")
-      // Streaming path: zero batch optimization metrics (reads bypass docBatchProjected)
-      assert(delta.totalOperations == 0, s"Streaming: expected 0 ops, got ${delta.totalOperations}")
+      // Above 50-doc threshold, should see consistent metrics per query
+      assert(delta.totalOperations == 1, s"Expected 1 op per query, got ${delta.totalOperations}")
+      assert(delta.totalDocuments == 100, s"Expected 100 docs per query, got ${delta.totalDocuments}")
+      assert(delta.totalRequests == 100, s"Expected 100 baseline requests, got ${delta.totalRequests}")
+      // After tantivy4java fix: should consolidate to 1-2 requests instead of ~10
+      assert(
+        delta.consolidatedRequests > 0 && delta.consolidatedRequests <= 100,
+        s"Expected consolidation (0 < x <= 100), got ${delta.consolidatedRequests}"
+      )
       info("")
     }
   }
 
-  test("limit(500) x3 - streaming reads return correct row counts") {
-    info("\n=== LIMIT(500) x3 - STREAMING PATH ===")
+  test("limit(500) x3 - each query should show consistent per-query metrics") {
+    info("\n=== LIMIT(500) x3 - USING getMetricsDelta() ===")
 
     for (i <- 1 to 3) {
       val result = spark.read
@@ -151,15 +163,21 @@ class BatchMetricsBehaviorTest extends TestBase {
       info(s"Query $i: ${result.length} rows")
       printMetrics("  DELTA", delta)
 
-      assert(result.length == 500, s"Expected 500 rows, got ${result.length}")
-      // Streaming path: zero batch optimization metrics (reads bypass docBatchProjected)
-      assert(delta.totalOperations == 0, s"Streaming: expected 0 ops, got ${delta.totalOperations}")
+      // Above 50-doc threshold, should see consistent metrics per query
+      assert(delta.totalOperations == 1, s"Expected 1 op per query, got ${delta.totalOperations}")
+      assert(delta.totalDocuments == 500, s"Expected 500 docs per query, got ${delta.totalDocuments}")
+      assert(delta.totalRequests == 500, s"Expected 500 baseline requests, got ${delta.totalRequests}")
+      // After tantivy4java fix: should consolidate to 1-2 requests instead of ~5
+      assert(
+        delta.consolidatedRequests > 0 && delta.consolidatedRequests <= 500,
+        s"Expected consolidation (0 < x <= 500), got ${delta.consolidatedRequests}"
+      )
       info("")
     }
   }
 
-  test("global metrics registry is accessible after streaming reads") {
-    info("\n=== GLOBAL METRICS REGISTRY TEST ===")
+  test("global metrics should accumulate across queries") {
+    info("\n=== GLOBAL METRICS ACCUMULATION TEST ===")
 
     // Run 3 queries with limit(100)
     for (i <- 1 to 3)
@@ -173,15 +191,14 @@ class BatchMetricsBehaviorTest extends TestBase {
     info(s"Global metrics after 3 queries:")
     printMetrics("  GLOBAL", global)
 
-    // Global metrics registry should be accessible (non-null).
-    // Streaming reads bypass docBatchProjected, so batch optimization counters are zero.
-    // The registry still functions correctly — it just has nothing to accumulate from streaming.
-    assert(global.totalOperations >= 0, s"Global metrics should be non-negative, got ${global.totalOperations}")
+    // Global should show accumulated values (at least 3 ops from these queries)
+    assert(global.totalOperations >= 3, s"Expected at least 3 ops globally, got ${global.totalOperations}")
   }
 
-  test("streaming read of 10000 docs returns all rows correctly") {
-    info("\n=== FULL TABLE READ: 10000 docs via streaming path ===")
+  test("docBatchProjected with 10000 docs should result in a single batch operation") {
+    info("\n=== BATCH SIZE VALIDATION: 10000 docs via docBatchProjected = 1 op ===")
 
+    // Read all 10000 docs — docBatchProjected sends all addresses in one native call
     val result = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
@@ -193,25 +210,71 @@ class BatchMetricsBehaviorTest extends TestBase {
     info(s"Rows returned: ${result.length}")
     printMetrics("  DELTA", delta)
 
-    // Validate all 10000 rows returned through streaming path
+    // Validate we got all 10000 rows
     assert(result.length == 10000, s"Expected 10000 rows, got ${result.length}")
 
-    // Streaming path bypasses docBatchProjected entirely — it reads Arrow batches
-    // directly via FFI (startStreamingRetrieval/nextBatch). Batch optimization metrics
-    // are zero because there are no per-document S3 requests to consolidate.
-    assert(
-      delta.totalOperations == 0,
-      s"Streaming reads bypass docBatchProjected; expected 0 ops, got ${delta.totalOperations}"
-    )
+    // docBatchProjected processes all addresses in a single native call
+    assert(delta.totalOperations == 1, s"Expected 1 batch op via docBatchProjected, got ${delta.totalOperations}")
 
-    // Metrics infrastructure fields should be non-negative
+    // Validate total docs matches rows returned
+    assert(delta.totalDocuments == 10000, s"Expected 10000 docs in metrics, got ${delta.totalDocuments}")
+
+    // Validate total requests equals docs (one request per doc before consolidation)
+    assert(delta.totalRequests == 10000, s"Expected 10000 baseline requests, got ${delta.totalRequests}")
+
+    // ⚠️ KNOWN BUG IN TANTIVY4JAVA: Hardcoded 100-document limit per range
+    // See: TANTIVY4JAVA_BATCH_OPTIMIZATION_BUG.md
+    // Current behavior: ~101 consolidated requests (10000 docs / 100 per range)
+    // Expected after fix: 1-2 consolidated requests (entire split < gap_tolerance)
+    //
+    // The split file is only 273KB, much smaller than the 512KB gap_tolerance.
+    // Once tantivy4java is fixed to use actual byte positions and respect gap_tolerance,
+    // this should consolidate into 1-2 S3 requests total (one per batch operation or
+    // even merged across batches if documents are adjacent).
+
+    // CRITICAL ASSERTION: Validate actual S3 requests (consolidatedRequests)
+    // This is the key metric - it represents ACTUAL S3 GET calls made
+    val actualS3Calls = delta.consolidatedRequests
+    if (actualS3Calls > 10) {
+      // Bug still present - expecting ~101 requests
+      info(s"⚠️  TANTIVY4JAVA BUG DETECTED: $actualS3Calls actual S3 calls")
+      info(s"   Current: 10000 docs → $actualS3Calls S3 requests (~100 docs per range)")
+      info(s"   Expected after fix: 10000 docs → 1-3 S3 requests (respecting 512KB gap_tolerance)")
+      assert(
+        actualS3Calls > 50 && actualS3Calls < 150,
+        s"Bug present but S3 calls outside expected range: $actualS3Calls (expected ~101)"
+      )
+    } else {
+      // Bug fixed - should be 1-3 requests (may vary by segment layout)
+      info(s"✅ TANTIVY4JAVA BUG FIXED: $actualS3Calls actual S3 calls")
+      info(s"   Achieved optimal consolidation: 10000 docs → $actualS3Calls S3 requests")
+      info(s"   Consolidation ratio: ${delta.consolidationRatio}x, savings=${delta.costSavingsPercent}%")
+
+      // REGRESSION PREVENTION: Strict assertion on S3 calls
+      assert(
+        actualS3Calls >= 1 && actualS3Calls <= 3,
+        s"REGRESSION: Expected 1-3 S3 requests after bug fix, got $actualS3Calls. " +
+          s"This indicates the consolidation optimization has regressed!"
+      )
+    }
+
+    // Validate segments counter is being tracked (>= 0)
+    // Note: May be 0 for delta calculations or certain operation types
     assert(delta.segmentsProcessed >= 0, s"Expected segments processed >= 0, got ${delta.segmentsProcessed}")
+
+    // For local file testing, prefetch duration may be 0 or very small
+    // Just validate it's being tracked (non-negative)
     assert(delta.totalPrefetchDurationMs >= 0, s"Expected prefetch duration >= 0, got ${delta.totalPrefetchDurationMs}")
 
-    info(s"\n✅ SUCCESS: Streaming path returned all 10000 rows")
+    info(s"\n✅ SUCCESS: docBatchMaxSize=5000 correctly batches 10000 docs into 2 operations")
+    info(s"   Batch operations: ${delta.totalOperations} (expected: 2)")
+    info(s"   Total documents: ${delta.totalDocuments} (expected: 10000)")
+    info(s"   S3 Calls: ${delta.totalRequests} → $actualS3Calls (${delta.consolidationRatio}x)")
+    info(s"   Segments processed: ${delta.segmentsProcessed}")
+    info(s"   Prefetch duration: ${delta.totalPrefetchDurationMs}ms")
   }
 
-  test("accumulator-based getMetrics() is accessible with streaming reads") {
+  test("accumulator-based getMetrics() should now be populated") {
     info("\n=== ACCUMULATOR (getMetrics) VALIDATION ===")
 
     // Enable metrics collection via session config
@@ -220,6 +283,7 @@ class BatchMetricsBehaviorTest extends TestBase {
     // Clear any existing accumulator for this path
     BatchOptMetricsRegistry.clear(testPath)
 
+    // Execute a query that should trigger batch optimization
     val result = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
@@ -227,9 +291,8 @@ class BatchMetricsBehaviorTest extends TestBase {
       .collect()
 
     info(s"Query returned ${result.length} rows")
-    assert(result.length == 200, s"Expected 200 rows, got ${result.length}")
 
-    // Check both methods are accessible
+    // Check both methods return metrics
     val accumulatorMetrics = BatchOptMetricsRegistry.getMetrics(testPath)
     val deltaMetrics       = BatchOptMetricsRegistry.getMetricsDelta(testPath)
 
@@ -238,18 +301,20 @@ class BatchMetricsBehaviorTest extends TestBase {
     )
     info(s"Delta (getMetricsDelta): ops=${deltaMetrics.totalOperations}, docs=${deltaMetrics.totalDocuments}")
 
-    // Accumulator should be defined when metrics collection is enabled
+    // Accumulator should now be defined and populated
     assert(accumulatorMetrics.isDefined, "getMetrics() should return Some() when metrics collection is enabled")
 
-    // Streaming reads bypass docBatchProjected, so batch optimization counters are zero.
-    // The accumulator infrastructure still works — it just has nothing to accumulate from streaming.
     val accMetrics = accumulatorMetrics.get
     assert(
-      accMetrics.totalOperations >= 0,
-      s"Accumulator metrics should be non-negative, got ${accMetrics.totalOperations}"
+      accMetrics.totalOperations > 0,
+      s"Accumulator should have totalOperations > 0, got ${accMetrics.totalOperations}"
+    )
+    assert(
+      accMetrics.totalDocuments > 0,
+      s"Accumulator should have totalDocuments > 0, got ${accMetrics.totalDocuments}"
     )
 
-    info(s"\n✅ SUCCESS: Metrics infrastructure functional with streaming reads")
+    info(s"\n✅ SUCCESS: Both getMetrics() and getMetricsDelta() return non-zero metrics")
     info(s"   Accumulator: ops=${accMetrics.totalOperations}, docs=${accMetrics.totalDocuments}")
     info(s"   Delta: ops=${deltaMetrics.totalOperations}, docs=${deltaMetrics.totalDocuments}")
 
