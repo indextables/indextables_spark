@@ -1578,8 +1578,11 @@ object FiltersToQueryConverter {
               Some(new SplitTermQuery(attribute, convertedValue.toString))
           }
         } else {
-          // For string fields and other types, use exact term matching
-          Some(new SplitTermQuery(attribute, convertedValue.toString))
+          // For string fields and other types, use exact term matching.
+          // Pass fieldType="ipaddr" for IP_ADDR fields so tantivy4java can transparently
+          // expand CIDR/wildcard patterns (e.g. "10.0.0.0/24") to a range query.
+          Some(new SplitTermQuery(attribute, convertedValue.toString,
+            if (fieldType == FieldType.IP_ADDR) "ipaddr" else null))
         }
 
       case EqualNullSafe(attribute, value) if value != null =>
@@ -1603,7 +1606,8 @@ object FiltersToQueryConverter {
           // For STRING fields (raw tokenizer) and other non-tokenized fields, use term queries
           val termQueries = values.map { value =>
             val converted = convertSparkValueToTantivy(value, fieldType)
-            new SplitTermQuery(attribute, converted.toString)
+            new SplitTermQuery(attribute, converted.toString,
+              if (fieldType == FieldType.IP_ADDR) "ipaddr" else null)
           }.toList
 
           // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
