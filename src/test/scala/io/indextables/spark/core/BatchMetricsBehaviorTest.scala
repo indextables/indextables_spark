@@ -99,7 +99,7 @@ class BatchMetricsBehaviorTest extends TestBase {
     }
   }
 
-  test("limit(1) x5 - each query should have zero metrics (below threshold)") {
+  test("limit(1) x5 - each query should have minimal metrics") {
     info("\n=== LIMIT(1) x5 - USING getMetricsDelta() ===")
 
     for (i <- 1 to 5) {
@@ -114,8 +114,12 @@ class BatchMetricsBehaviorTest extends TestBase {
       info(s"Query $i: ${result.length} rows")
       printMetrics("  DELTA", delta)
 
-      // Below 50-doc threshold, no batch optimization should occur
-      assert(delta.totalOperations == 0, s"Expected 0 ops for limit(1), got ${delta.totalOperations}")
+      assert(result.length == 1, s"Expected 1 row, got ${result.length}")
+      // Streaming path with maxDocs=1: the native layer processes exactly 1 doc and
+      // records metrics for that work. The old 50-doc threshold (which skipped batch
+      // optimization for small results) does not apply to the streaming path.
+      assert(delta.totalOperations <= 1, s"Expected at most 1 op for limit(1), got ${delta.totalOperations}")
+      assert(delta.totalDocuments <= 1, s"Expected at most 1 doc for limit(1), got ${delta.totalDocuments}")
       info("")
     }
   }
@@ -195,10 +199,10 @@ class BatchMetricsBehaviorTest extends TestBase {
     assert(global.totalOperations >= 3, s"Expected at least 3 ops globally, got ${global.totalOperations}")
   }
 
-  test("docBatchProjected with 10000 docs should result in a single batch operation") {
-    info("\n=== BATCH SIZE VALIDATION: 10000 docs via docBatchProjected = 1 op ===")
+  test("streaming retrieval with 10000 docs should result in a single batch operation") {
+    info("\n=== BATCH SIZE VALIDATION: 10000 docs via streaming retrieval = 1 op ===")
 
-    // Read all 10000 docs — docBatchProjected sends all addresses in one native call
+    // Read all 10000 docs — streaming retrieval processes all docs in one batch
     val result = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
@@ -213,8 +217,8 @@ class BatchMetricsBehaviorTest extends TestBase {
     // Validate we got all 10000 rows
     assert(result.length == 10000, s"Expected 10000 rows, got ${result.length}")
 
-    // docBatchProjected processes all addresses in a single native call
-    assert(delta.totalOperations == 1, s"Expected 1 batch op via docBatchProjected, got ${delta.totalOperations}")
+    // Streaming retrieval processes all docs in a single batch operation
+    assert(delta.totalOperations == 1, s"Expected 1 batch op via streaming retrieval, got ${delta.totalOperations}")
 
     // Validate total docs matches rows returned
     assert(delta.totalDocuments == 10000, s"Expected 10000 docs in metrics, got ${delta.totalDocuments}")

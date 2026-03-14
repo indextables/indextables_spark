@@ -193,14 +193,14 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
 
           // Create PartitionReader - this will validate footer metadata internally
           try {
-            val partitionReader = readerFactory.createReader(serializedPartition)
+            val partitionReader = readerFactory.createColumnarReader(serializedPartition)
 
             // Read some records to validate the reader works
             var recordCount = 0
             while (partitionReader.next() && recordCount < 10) {
-              val row = partitionReader.get()
-              row should not be null
-              recordCount += 1
+              val batch = partitionReader.get()
+              batch should not be null
+              recordCount += batch.numRows()
             }
 
             partitionReader.close()
