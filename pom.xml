@@ -185,7 +185,7 @@
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.32.6</version>
+            <version>0.32.7</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 
