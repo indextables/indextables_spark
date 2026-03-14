@@ -161,8 +161,9 @@ class ColumnarPartitionReader(
       val queryAstJson = splitQuery.toQueryAstJson()
       val typeHints = buildTypeHints()
       val maxDocs = if (effectiveLimit == Int.MaxValue) -1 else effectiveLimit
+      val safeTypeHints = if (typeHints != null) typeHints else Array.empty[String]
       streamingSession = if (typeHints != null || maxDocs > 0) {
-        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, typeHints, maxDocs)
+        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, safeTypeHints, maxDocs)
       } else {
         searcher.startStreamingRetrieval(queryAstJson, dataFieldNames: _*)
       }
@@ -313,22 +314,19 @@ class ColumnarPartitionReader(
    * Build Arrow type hints for non-companion splits where tantivy's internal types (i64, f64) may
    * differ from the Spark schema types (Int32, Float32, etc.). Returns null for companion splits
    * since parquet preserves original types.
+   *
+   * Supports complex type hints (JSON format) for Struct, Array, and Map fields, which tells the
+   * native layer to produce proper Arrow Struct/List/Map vectors from JSON-serialized tantivy data.
    */
   private def buildTypeHints(): Array[String] = {
     val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")
     if (isCompanion) return null
 
-    // Build alternating [fieldName, arrowType] pairs for fields that need narrowing
+    // Build alternating [fieldName, arrowType] pairs for fields that need type mapping
     val hints = scala.collection.mutable.ArrayBuffer[String]()
     readSchema.fields.foreach { field =>
       if (!partitionColumnNames.contains(field.name)) {
-        val hint = field.dataType match {
-          case IntegerType => "i32"
-          case ShortType   => "i16"
-          case ByteType    => "i8"
-          case FloatType   => "f32"
-          case _           => null // Default Arrow type is correct
-        }
+        val hint = sparkTypeToHint(field.dataType)
         if (hint != null) {
           hints += field.name
           hints += hint
@@ -337,6 +335,49 @@ class ColumnarPartitionReader(
     }
     if (hints.isEmpty) null else hints.toArray
   }
+
+  /** Convert a top-level Spark DataType to a type hint string, or null if no hint is needed. */
+  private def sparkTypeToHint(dataType: DataType): String = dataType match {
+    case IntegerType    => "i32"
+    case ShortType      => "i16"
+    case ByteType       => "i8"
+    case FloatType      => "f32"
+    case DateType       => "date32"
+    case st: StructType => buildStructHint(st)
+    case at: ArrayType  => buildListHint(at)
+    case mt: MapType    => buildMapHint(mt)
+    case _              => null // Default Arrow type is correct (i64, f64, utf8, bool, etc.)
+  }
+
+  /** Convert a Spark DataType to a JSON type value string for use inside complex type hints. */
+  private def toJsonTypeValue(dataType: DataType): String = dataType match {
+    case StringType     => "\"string\""
+    case IntegerType    => "\"i32\""
+    case LongType       => "\"i64\""
+    case ShortType      => "\"i16\""
+    case ByteType       => "\"i8\""
+    case FloatType      => "\"f32\""
+    case DoubleType     => "\"f64\""
+    case BooleanType    => "\"bool\""
+    case DateType       => "\"date32\""
+    case TimestampType  => "\"timestamp\""
+    case st: StructType => buildStructHint(st)
+    case at: ArrayType  => buildListHint(at)
+    case mt: MapType    => buildMapHint(mt)
+    case _              => "\"string\""
+  }
+
+  /** Build struct hint using array-of-pairs format to preserve field ordering. */
+  private def buildStructHint(st: StructType): String = {
+    val fields = st.fields.map(f => s"""["${f.name}", ${toJsonTypeValue(f.dataType)}]""").mkString(", ")
+    s"""{"struct": [$fields]}"""
+  }
+
+  private def buildListHint(at: ArrayType): String =
+    s"""{"list": ${toJsonTypeValue(at.elementType)}}"""
+
+  private def buildMapHint(mt: MapType): String =
+    s"""{"map": [${toJsonTypeValue(mt.keyType)}, ${toJsonTypeValue(mt.valueType)}]}"""
 
   /** Create a ConstantColumnVector for a partition column value. */
   private def createConstantColumnVector(

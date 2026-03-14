@@ -199,10 +199,10 @@ class BatchMetricsBehaviorTest extends TestBase {
     assert(global.totalOperations >= 3, s"Expected at least 3 ops globally, got ${global.totalOperations}")
   }
 
-  test("docBatchProjected with 10000 docs should result in a single batch operation") {
-    info("\n=== BATCH SIZE VALIDATION: 10000 docs via docBatchProjected = 1 op ===")
+  test("streaming retrieval with 10000 docs should result in a single batch operation") {
+    info("\n=== BATCH SIZE VALIDATION: 10000 docs via streaming retrieval = 1 op ===")
 
-    // Read all 10000 docs — docBatchProjected sends all addresses in one native call
+    // Read all 10000 docs — streaming retrieval processes all docs in one batch
     val result = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
@@ -217,8 +217,8 @@ class BatchMetricsBehaviorTest extends TestBase {
     // Validate we got all 10000 rows
     assert(result.length == 10000, s"Expected 10000 rows, got ${result.length}")
 
-    // docBatchProjected processes all addresses in a single native call
-    assert(delta.totalOperations == 1, s"Expected 1 batch op via docBatchProjected, got ${delta.totalOperations}")
+    // Streaming retrieval processes all docs in a single batch operation
+    assert(delta.totalOperations == 1, s"Expected 1 batch op via streaming retrieval, got ${delta.totalOperations}")
 
     // Validate total docs matches rows returned
     assert(delta.totalDocuments == 10000, s"Expected 10000 docs in metrics, got ${delta.totalDocuments}")
