@@ -66,7 +66,7 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
 
   override def acquireMemory(bytes: Long): Long = {
     val tc = resolveConsumer()
-    if (tc == null) return 0 // Denied — no task context
+    if (tc == null) return 0 // No active task — deny allocation
     val acquired = tc.tmm.acquireExecutionMemory(bytes, tc.consumer)
     tc.used.addAndGet(acquired)
     acquired
@@ -113,9 +113,20 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
 
     // Async thread fallback: pick any active consumer.
     // This is hit by Rust tokio threads spawned during startStreamingRetrieval/nextBatch.
+    //
+    // Note: if multiple tasks are active, acquire and release may land on different
+    // fallback consumers. This is harmless at the pool level — completion listeners
+    // clean up each task's outstanding balance — but may trigger spurious "used counter
+    // went negative" warnings and inflate per-task accounting.
     val iter = consumers.values().iterator()
     if (iter.hasNext) {
       val fallback = iter.next()
+      // Guard against the race where the task completed between iterator snapshot and here.
+      if (!consumers.containsKey(fallback.taskId)) {
+        logger.warn(
+          "Native memory callback fallback task already completed — allocation will be untracked.")
+        return null
+      }
       logger.debug(
         "Native memory callback from non-task thread — using fallback TaskConsumer " +
           s"(taskId=${fallback.taskId})")
@@ -131,9 +142,9 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
   /** Resolve or create a TaskConsumer for the given TaskContext (must be on the task thread). */
   private def resolveFromTaskContext(ctx: TaskContext): TaskConsumer = {
     val taskId = ctx.taskAttemptId()
-    // Note: addTaskCompletionListener registers cleanup before computeIfAbsent inserts the
-    // entry into the map. This is safe because the current thread IS the task thread —
-    // the task cannot complete while we're inside computeIfAbsent on that same thread.
+    // The completion listener is registered inside the lambda, which executes before the
+    // map entry is visible to other threads. This is safe because the current thread IS
+    // the task thread — the task cannot complete while we're inside computeIfAbsent.
     consumers.computeIfAbsent(taskId, _ => {
       val tmm = ctx.taskMemoryManager()
       val tc  = new TaskConsumer(tmm, taskId)
