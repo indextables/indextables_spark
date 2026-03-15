@@ -22,19 +22,17 @@ import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
 
-import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * End-to-end streaming tests for BUILD INDEXTABLES COMPANION ... WITH STREAMING.
  *
  * Validates the full incremental sync cycle against a local Delta table:
- *   1. Initial full sync populates the companion index.
- *   2. A commit appended while the stream is running is picked up in the next cycle.
- *   3. A no-changes poll leaves the companion unmodified.
- *   4. A second new commit is picked up by a subsequent cycle.
- *   5. A restart resumes from the last synced version without re-indexing existing data.
+ *   1. Initial full sync populates the companion index. 2. A commit appended while the stream is running is picked up
+ *      in the next cycle. 3. A no-changes poll leaves the companion unmodified. 4. A second new commit is picked up by
+ *      a subsequent cycle. 5. A restart resumes from the last synced version without re-indexing existing data.
  */
 class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -105,25 +103,25 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
   /**
    * Read the companion index and return its row count.
    *
-   * Flushes the split cache before every call so each read reflects the latest on-disk state
-   * rather than a cached snapshot. Returns 0 when the index does not yet exist.
+   * Flushes the split cache before every call so each read reflects the latest on-disk state rather than a cached
+   * snapshot. Returns 0 when the index does not yet exist.
    */
   private def countCompanionRows(indexPath: String): Long = {
     flushCaches()
-    try {
+    try
       spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.read.defaultLimit", "100000")
         .load(indexPath)
         .count()
-    } catch {
+    catch {
       case _: Exception => 0L
     }
   }
 
   /**
-   * Poll `condition` every `pollMs` ms until it returns true or `timeoutMs` elapses.
-   * Returns true when the condition was satisfied within the timeout.
+   * Poll `condition` every `pollMs` ms until it returns true or `timeoutMs` elapses. Returns true when the condition
+   * was satisfied within the timeout.
    */
   private def waitUntil(timeoutMs: Long, pollMs: Long = 500)(condition: => Boolean): Boolean = {
     val deadline = System.currentTimeMillis() + timeoutMs
@@ -136,13 +134,13 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
 
   private def makeDeltaCommand(sourcePath: String, destPath: String): SyncToExternalCommand =
     SyncToExternalCommand(
-      sourceFormat    = "delta",
-      sourcePath      = sourcePath,
-      destPath        = destPath,
-      indexingModes   = Map.empty,
-      fastFieldMode   = "HYBRID",
+      sourceFormat = "delta",
+      sourcePath = sourcePath,
+      destPath = destPath,
+      indexingModes = Map.empty,
+      fastFieldMode = "HYBRID",
       targetInputSize = None,
-      dryRun          = false
+      dryRun = false
     )
 
   // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -154,7 +152,9 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       // Step 1: Write initial Delta table (version 0, 2 rows).
       Seq((1, "alice"), (2, "bob"))
         .toDF("id", "name")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       // Step 2: Launch streaming sync with a 2-second poll interval.
       val command = makeDeltaCommand(deltaPath, indexPath).copy(streamingPollIntervalMs = Some(2000L))
@@ -164,7 +164,7 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
 
       try {
         // Step 3: Wait for the initial full sync to complete (2 rows expected).
-        val initialSynced = waitUntil(30000) { countCompanionRows(indexPath) == 2 }
+        val initialSynced = waitUntil(30000)(countCompanionRows(indexPath) == 2)
         withClue("initial full sync should complete within 30 s") {
           initialSynced shouldBe true
         }
@@ -174,10 +174,13 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
         //   and immediately runs an incremental cycle.
         Seq((3, "charlie"), (4, "dave"))
           .toDF("id", "name")
-          .write.format("delta").mode("append").save(deltaPath)
+          .write
+          .format("delta")
+          .mode("append")
+          .save(deltaPath)
 
         // Step 5: Validate the back-to-back incremental cycle indexed the 2 new rows.
-        val secondSynced = waitUntil(30000) { countCompanionRows(indexPath) == 4 }
+        val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 4)
         withClue("streaming should pick up batch 2 (4 total rows) within 30 s") {
           secondSynced shouldBe true
         }
@@ -191,10 +194,13 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
         // Step 7: Append batch 3 (Delta version 2, 1 new row).
         Seq((5, "eve"))
           .toDF("id", "name")
-          .write.format("delta").mode("append").save(deltaPath)
+          .write
+          .format("delta")
+          .mode("append")
+          .save(deltaPath)
 
         // Step 8: Validate the stream picks up batch 3 (5 total rows).
-        val thirdSynced = waitUntil(30000) { countCompanionRows(indexPath) == 5 }
+        val thirdSynced = waitUntil(30000)(countCompanionRows(indexPath) == 5)
         withClue("streaming should pick up batch 3 (5 total rows) within 30 s") {
           thirdSynced shouldBe true
         }
@@ -213,7 +219,9 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       // Write initial Delta table (version 0, 2 rows).
       Seq((1, "alice"), (2, "bob"))
         .toDF("id", "name")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       val command = makeDeltaCommand(deltaPath, indexPath)
 
@@ -226,7 +234,10 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       // Append charlie (Delta version 1) — the direct sync didn't cover this.
       Seq((3, "charlie"))
         .toDF("id", "name")
-        .write.format("delta").mode("append").save(deltaPath)
+        .write
+        .format("delta")
+        .mode("append")
+        .save(deltaPath)
 
       // Start a streaming session.  readLastSyncedVersionFromLog reads version 0 from the
       // companion log, so the session resumes incrementally rather than re-indexing
@@ -237,7 +248,7 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       thread.start()
 
       try {
-        val resumeSynced = waitUntil(30000) { countCompanionRows(indexPath) == 3 }
+        val resumeSynced = waitUntil(30000)(countCompanionRows(indexPath) == 3)
         withClue("streaming resume should index the missing commit (charlie) within 30 s") {
           resumeSynced shouldBe true
         }

@@ -47,15 +47,19 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
   }
 
   test("feature flag can be enabled") {
-    assert(AggregationArrowFfiConfig.isEnabled(
-      Map("spark.indextables.read.aggregation.arrowFfi.enabled" -> "true")
-    ))
+    assert(
+      AggregationArrowFfiConfig.isEnabled(
+        Map("spark.indextables.read.aggregation.arrowFfi.enabled" -> "true")
+      )
+    )
   }
 
   test("feature flag can be explicitly disabled") {
-    assert(!AggregationArrowFfiConfig.isEnabled(
-      Map("spark.indextables.read.aggregation.arrowFfi.enabled" -> "false")
-    ))
+    assert(
+      !AggregationArrowFfiConfig.isEnabled(
+        Map("spark.indextables.read.aggregation.arrowFfi.enabled" -> "false")
+      )
+    )
   }
 
   test("disabled feature flag uses InternalRow path without behavior change") {
@@ -67,17 +71,21 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
 
       // Write test data
       val testData = Seq(
-        ("doc1", 10), ("doc2", 20), ("doc3", 30)
+        ("doc1", 10),
+        ("doc2", 20),
+        ("doc3", 30)
       ).toDF("id", "score")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.fastfields", "score")
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .mode("overwrite")
         .save(tablePath)
 
       // Read with FFI disabled
-      val df = spark.read.format(PROVIDER)
+      val df = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
 
@@ -105,24 +113,25 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
 
       val testData = (1 to 50).map(i => (s"doc$i", i, s"category_${i % 3}")).toDF("id", "score", "category")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.fastfields", "score,category")
         .option("spark.indextables.indexing.typemap.category", "string")
         .mode("overwrite")
         .save(tablePath)
 
       // Result with FFI disabled (baseline)
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
       val disabledResult = dfDisabled.agg(count("*")).collect()(0).getLong(0)
 
       // Result with FFI enabled (default)
-      val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
+      val dfEnabled     = spark.read.format(PROVIDER).load(tablePath)
       val enabledResult = dfEnabled.agg(count("*")).collect()(0).getLong(0)
 
-      assert(disabledResult == enabledResult,
-        s"COUNT(*) mismatch: disabled=$disabledResult, enabled=$enabledResult")
+      assert(disabledResult == enabledResult, s"COUNT(*) mismatch: disabled=$disabledResult, enabled=$enabledResult")
       assert(disabledResult == 50L)
 
       deleteRecursively(tempDir)
@@ -139,24 +148,36 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
 
       val testData = (1 to 100).map(i => (s"doc$i", i)).toDF("id", "score")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(tablePath)
 
       // Baseline (disabled)
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
-      val disabledRow = dfDisabled.agg(
-        count("*"), sum("score"), min("score"), max("score")
-      ).collect()(0)
+      val disabledRow = dfDisabled
+        .agg(
+          count("*"),
+          sum("score"),
+          min("score"),
+          max("score")
+        )
+        .collect()(0)
 
       // FFI-enabled
       val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
-      val enabledRow = dfEnabled.agg(
-        count("*"), sum("score"), min("score"), max("score")
-      ).collect()(0)
+      val enabledRow = dfEnabled
+        .agg(
+          count("*"),
+          sum("score"),
+          min("score"),
+          max("score")
+        )
+        .collect()(0)
 
       assert(disabledRow.getLong(0) == enabledRow.getLong(0), "COUNT mismatch")
       assert(disabledRow.getLong(1) == enabledRow.getLong(1), "SUM mismatch")
@@ -184,31 +205,45 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
       val tablePath = tempDir.getAbsolutePath
 
       val testData = Seq(
-        ("doc1", "a", 10), ("doc2", "a", 20),
-        ("doc3", "b", 30), ("doc4", "b", 40),
+        ("doc1", "a", 10),
+        ("doc2", "a", 20),
+        ("doc3", "b", 30),
+        ("doc4", "b", 40),
         ("doc5", "c", 50)
       ).toDF("id", "category", "score")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "category,score")
         .mode("overwrite")
         .save(tablePath)
 
       // Baseline (disabled)
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
-      val disabledResults = dfDisabled.groupBy("category").count().collect()
-        .map(r => r.getString(0) -> r.getLong(1)).toMap
+      val disabledResults = dfDisabled
+        .groupBy("category")
+        .count()
+        .collect()
+        .map(r => r.getString(0) -> r.getLong(1))
+        .toMap
 
       // FFI-enabled
       val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
-      val enabledResults = dfEnabled.groupBy("category").count().collect()
-        .map(r => r.getString(0) -> r.getLong(1)).toMap
+      val enabledResults = dfEnabled
+        .groupBy("category")
+        .count()
+        .collect()
+        .map(r => r.getString(0) -> r.getLong(1))
+        .toMap
 
-      assert(disabledResults == enabledResults,
-        s"GROUP BY COUNT mismatch: disabled=$disabledResults, enabled=$enabledResults")
+      assert(
+        disabledResults == enabledResults,
+        s"GROUP BY COUNT mismatch: disabled=$disabledResults, enabled=$enabledResults"
+      )
 
       assert(enabledResults("a") == 2)
       assert(enabledResults("b") == 2)
@@ -227,31 +262,45 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
       val tablePath = tempDir.getAbsolutePath
 
       val testData = Seq(
-        ("doc1", "a", 100), ("doc2", "a", 200),
-        ("doc3", "b", 150), ("doc4", "b", 250),
+        ("doc1", "a", 100),
+        ("doc2", "a", 200),
+        ("doc3", "b", 150),
+        ("doc4", "b", 250),
         ("doc5", "c", 300)
       ).toDF("id", "team", "score")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.typemap.team", "string")
         .option("spark.indextables.indexing.fastfields", "team,score")
         .mode("overwrite")
         .save(tablePath)
 
       // Baseline
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
-      val disabledResults = dfDisabled.groupBy("team").agg(sum("score").as("total"))
-        .collect().map(r => r.getString(0) -> r.getLong(1)).toMap
+      val disabledResults = dfDisabled
+        .groupBy("team")
+        .agg(sum("score").as("total"))
+        .collect()
+        .map(r => r.getString(0) -> r.getLong(1))
+        .toMap
 
       // FFI-enabled
       val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
-      val enabledResults = dfEnabled.groupBy("team").agg(sum("score").as("total"))
-        .collect().map(r => r.getString(0) -> r.getLong(1)).toMap
+      val enabledResults = dfEnabled
+        .groupBy("team")
+        .agg(sum("score").as("total"))
+        .collect()
+        .map(r => r.getString(0) -> r.getLong(1))
+        .toMap
 
-      assert(disabledResults == enabledResults,
-        s"GROUP BY SUM mismatch: disabled=$disabledResults, enabled=$enabledResults")
+      assert(
+        disabledResults == enabledResults,
+        s"GROUP BY SUM mismatch: disabled=$disabledResults, enabled=$enabledResults"
+      )
 
       assert(enabledResults("a") == 300)
       assert(enabledResults("b") == 400)
@@ -273,20 +322,22 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
 
       val testData = (1 to 100).map(i => (s"doc$i", i, if (i <= 50) "low" else "high")).toDF("id", "score", "tier")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.typemap.tier", "string")
         .option("spark.indextables.indexing.fastfields", "score,tier")
         .mode("overwrite")
         .save(tablePath)
 
       // Baseline
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
       val disabledCount = dfDisabled.filter(col("tier") === "high").agg(count("*")).collect()(0).getLong(0)
 
       // FFI-enabled
-      val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
+      val dfEnabled    = spark.read.format(PROVIDER).load(tablePath)
       val enabledCount = dfEnabled.filter(col("tier") === "high").agg(count("*")).collect()(0).getLong(0)
 
       assert(disabledCount == enabledCount, s"Filtered COUNT mismatch: disabled=$disabledCount, enabled=$enabledCount")
@@ -308,7 +359,8 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
 
       val testData = Seq(("doc1", "a", 10)).toDF("id", "category", "score")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "category,score")
         .mode("overwrite")
@@ -336,24 +388,28 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
       val tablePath = tempDir.getAbsolutePath
 
       val testData = Seq(
-        ("doc1", "2024-01-01", 10), ("doc2", "2024-01-01", 20),
-        ("doc3", "2024-01-02", 30), ("doc4", "2024-01-02", 40)
+        ("doc1", "2024-01-01", 10),
+        ("doc2", "2024-01-01", 20),
+        ("doc3", "2024-01-02", 30),
+        ("doc4", "2024-01-02", 40)
       ).toDF("id", "date", "score")
 
-      testData.write.format(PROVIDER)
+      testData.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.fastfields", "score")
         .partitionBy("date")
         .mode("overwrite")
         .save(tablePath)
 
       // Baseline
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
       val disabledTotal = dfDisabled.agg(count("*"), sum("score")).collect()(0)
 
       // FFI-enabled
-      val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
+      val dfEnabled    = spark.read.format(PROVIDER).load(tablePath)
       val enabledTotal = dfEnabled.agg(count("*"), sum("score")).collect()(0)
 
       assert(disabledTotal.getLong(0) == enabledTotal.getLong(0), "COUNT mismatch")
@@ -377,25 +433,28 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
 
       // Write in two batches to create multiple splits
       val batch1 = (1 to 50).map(i => (s"doc$i", i)).toDF("id", "score")
-      batch1.write.format(PROVIDER)
+      batch1.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(tablePath)
 
       val batch2 = (51 to 100).map(i => (s"doc$i", i)).toDF("id", "score")
-      batch2.write.format(PROVIDER)
+      batch2.write
+        .format(PROVIDER)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("append")
         .save(tablePath)
 
       // Baseline
-      val dfDisabled = spark.read.format(PROVIDER)
+      val dfDisabled = spark.read
+        .format(PROVIDER)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
       val disabledRow = dfDisabled.agg(count("*"), sum("score"), min("score"), max("score")).collect()(0)
 
       // FFI-enabled
-      val dfEnabled = spark.read.format(PROVIDER).load(tablePath)
+      val dfEnabled  = spark.read.format(PROVIDER).load(tablePath)
       val enabledRow = dfEnabled.agg(count("*"), sum("score"), min("score"), max("score")).collect()(0)
 
       assert(disabledRow.getLong(0) == enabledRow.getLong(0), "COUNT mismatch")
@@ -414,7 +473,8 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
   // ===== Helpers =====
 
   private def createSparkSession(appName: String): SparkSession =
-    SparkSession.builder()
+    SparkSession
+      .builder()
       .appName(appName)
       .master("local[*]")
       .getOrCreate()

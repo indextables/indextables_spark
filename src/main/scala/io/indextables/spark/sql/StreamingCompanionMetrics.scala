@@ -17,14 +17,14 @@
 
 package io.indextables.spark.sql
 
-import org.apache.spark.SparkContext
 import org.apache.spark.util.LongAccumulator
+import org.apache.spark.SparkContext
 
 /**
  * Spark UI accumulators for streaming companion sync observability.
  *
- * Registered with the SparkContext so values are visible in the Spark UI. All metrics are
- * cumulative across the lifetime of a streaming sync session.
+ * Registered with the SparkContext so values are visible in the Spark UI. All metrics are cumulative across the
+ * lifetime of a streaming sync session.
  *
  * Accumulators:
  *   - syncCycles: number of completed sync cycles (successful or no-op)
@@ -54,7 +54,11 @@ private[sql] class StreamingCompanionMetrics(sparkContext: SparkContext) {
   val errorCount: LongAccumulator =
     sparkContext.longAccumulator("indextables.companion.streaming.errorCount")
 
-  def recordCycleSuccess(filesIndexed: Long, durationMs: Long, splitsCreated: Long = 0L): Unit = {
+  def recordCycleSuccess(
+    filesIndexed: Long,
+    durationMs: Long,
+    splitsCreated: Long = 0L
+  ): Unit = {
     syncCycles.add(1)
     totalFilesIndexed.add(filesIndexed)
     totalDurationMs.add(durationMs)

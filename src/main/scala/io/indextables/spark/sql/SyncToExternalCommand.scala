@@ -119,16 +119,21 @@ case class SyncToExternalCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     if (streamingPollIntervalMs.isDefined) {
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = { (spark, cycleStart, lastSyncedVersion) =>
-        val cycleCommand = lastSyncedVersion match {
-          case Some(v) if sourceFormat == "delta" =>
-            copy(fromVersion = Some(v), streamingPollIntervalMs = None)
-          case Some(v) if sourceFormat == "iceberg" =>
-            copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
-          case _ =>
-            copy(streamingPollIntervalMs = None)
-        }
-        cycleCommand.executeSyncInternal(spark, cycleStart)
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = {
+        (
+          spark,
+          cycleStart,
+          lastSyncedVersion
+        ) =>
+          val cycleCommand = lastSyncedVersion match {
+            case Some(v) if sourceFormat == "delta" =>
+              copy(fromVersion = Some(v), streamingPollIntervalMs = None)
+            case Some(v) if sourceFormat == "iceberg" =>
+              copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
+            case _ =>
+              copy(streamingPollIntervalMs = None)
+          }
+          cycleCommand.executeSyncInternal(spark, cycleStart)
       }
       new StreamingCompanionManager(this, streamingPollIntervalMs.get, syncFn).runStreaming(sparkSession)
       return Seq.empty
@@ -295,9 +300,12 @@ case class SyncToExternalCommand(
           case "delta" =>
             val deltaPath         = resolvedStorageLocation.getOrElse(sourcePath)
             val sourceCredentials = resolveCredentials(mergedConfigs, deltaPath)
-            scanner.scanDeltaTable(deltaPath, sourceCredentials,
+            scanner.scanDeltaTable(
+              deltaPath,
+              sourceCredentials,
               wherePredicates = wherePredicates,
-              fromVersion = fromVersion)
+              fromVersion = fromVersion
+            )
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
             val (ns, tbl) = {
@@ -591,7 +599,8 @@ case class SyncToExternalCommand(
             // source and must be re-indexed (their split is being removed).
             val remainingToReindex = splitsToInvalidate
               .flatMap { split =>
-                split.companionSourceFiles.getOrElse(Seq.empty)
+                split.companionSourceFiles
+                  .getOrElse(Seq.empty)
                   .filterNot(f => normalizedRemoved.contains(normalizePath(f)))
                   .map(relPath => CompanionSourceFile(normalizePath(relPath), split.partitionValues, 0L))
               }
@@ -1024,9 +1033,9 @@ case class SyncToExternalCommand(
    *   For Iceberg: the S3 storage root from catalog. For Delta UC: the storage_location from UC API. None for
    *   path-based Delta/Parquet.
    *
-   * Note: This method reads existing metadata and overwrites table root entries non-atomically
-   * via commitSyncActions (not commitMetadataUpdate). A concurrent SET TABLE ROOT between the
-   * metadata read and the commit could be silently overwritten. See SetTableRootCommand scaladoc.
+   * Note: This method reads existing metadata and overwrites table root entries non-atomically via commitSyncActions
+   * (not commitMetadataUpdate). A concurrent SET TABLE ROOT between the metadata read and the commit could be silently
+   * overwritten. See SetTableRootCommand scaladoc.
    */
   private def buildCompanionMetadata(
     transactionLog: io.indextables.spark.transaction.TransactionLog,
@@ -1369,13 +1378,12 @@ case class SyncToExternalCommand(
   }
 
   /**
-   * Reads the last successfully synced source version from the companion index transaction log.
-   * Used by StreamingCompanionManager to resume incremental sync after a restart without
-   * performing a full anti-join scan.
+   * Reads the last successfully synced source version from the companion index transaction log. Used by
+   * StreamingCompanionManager to resume incremental sync after a restart without performing a full anti-join scan.
    *
    * Returns None if the companion index does not yet exist, has never been synced, or on any error.
    */
-  private[sql] def readLastSyncedVersionFromLog(sparkSession: SparkSession): Option[Long] = {
+  private[sql] def readLastSyncedVersionFromLog(sparkSession: SparkSession): Option[Long] =
     try {
       val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
       val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
@@ -1386,39 +1394,38 @@ case class SyncToExternalCommand(
         sparkSession,
         new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
       )
-      try {
-        transactionLog.getMetadata().configuration
+      try
+        transactionLog
+          .getMetadata()
+          .configuration
           .get("indextables.companion.lastSyncedVersion")
           .flatMap(v => scala.util.Try(v.toLong).toOption)
-      } catch {
+      catch {
         case e: Exception =>
           logger.debug(s"[IndextablesCompanion] readLastSyncedVersionFromLog: inner error reading metadata (returning None): ${e.getMessage}")
           None
-      } finally {
+      } finally
         transactionLog.close()
-      }
     } catch {
       case e: Exception =>
         logger.debug(s"[IndextablesCompanion] readLastSyncedVersionFromLog: error opening transaction log (returning None, expected on first run): ${e.getMessage}")
         None
     }
-  }
 
   /**
    * Cheap source version probe for streaming pre-poll.
    *
-   * Delta:   1 GET (_last_checkpoint) + O(k) HEAD probes — no checkpoint parquet reads.
-   * Iceberg: 1 catalog.load_table() call — no manifest list read.
-   * Parquet / unknown: returns None.
-   * On any error: returns None so the caller falls through to executeSyncInternal.
+   * Delta: 1 GET (_last_checkpoint) + O(k) HEAD probes — no checkpoint parquet reads. Iceberg: 1 catalog.load_table()
+   * call — no manifest list read. Parquet / unknown: returns None. On any error: returns None so the caller falls
+   * through to executeSyncInternal.
    *
-   * Used by StreamingCompanionManager to skip executeSyncInternal entirely on no-change polling
-   * cycles, avoiding the checkpoint parquet read that getSnapshotInfo() would otherwise trigger.
+   * Used by StreamingCompanionManager to skip executeSyncInternal entirely on no-change polling cycles, avoiding the
+   * checkpoint parquet read that getSnapshotInfo() would otherwise trigger.
    */
   private[sql] def cheapSourceVersion(
     sparkSession: SparkSession,
     cachedBaseConfigs: Option[Map[String, String]] = None
-  ): Option[Long] = {
+  ): Option[Long] =
     try {
       val mergedConfigs = cachedBaseConfigs.getOrElse {
         val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
@@ -1440,17 +1447,20 @@ case class SyncToExternalCommand(
           if (parts.length != 2) None
           else {
             val (ns, tbl) = (parts(0), parts(1))
-            Some(io.indextables.tantivy4java.iceberg.IcebergTableReader.getCurrentSnapshotId(
-              effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig))
+            Some(
+              io.indextables.tantivy4java.iceberg.IcebergTableReader
+                .getCurrentSnapshotId(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig)
+            )
           }
         case _ => None
       }
     } catch {
       case e: Exception =>
-        logger.debug(s"[IndextablesCompanion] cheapSourceVersion($sourceFormat): caught exception, returning None: ${e.getMessage}")
+        logger.debug(
+          s"[IndextablesCompanion] cheapSourceVersion($sourceFormat): caught exception, returning None: ${e.getMessage}"
+        )
         None
     }
-  }
 
   /**
    * Resolve credentials for a given storage path. Returns a flat map of credential properties suitable for immediate

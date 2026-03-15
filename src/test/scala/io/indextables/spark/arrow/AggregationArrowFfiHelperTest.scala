@@ -126,7 +126,8 @@ class AggregationArrowFfiHelperTest extends AnyFunSuite with Matchers {
     val helper = new AggregationArrowFfiHelper()
     try {
       // parseSchemaJson is package-private (private[arrow])
-      val json   = """{"columns":[{"name":"key","type":"Utf8"},{"name":"doc_count","type":"Int64"},{"name":"sum_0","type":"Float64"}],"row_count":42}"""
+      val json =
+        """{"columns":[{"name":"key","type":"Utf8"},{"name":"doc_count","type":"Int64"},{"name":"sum_0","type":"Float64"}],"row_count":42}"""
       val result = helper.parseSchemaJson(json)
 
       result._1 shouldBe 3

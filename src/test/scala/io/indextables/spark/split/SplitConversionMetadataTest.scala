@@ -76,7 +76,7 @@ class SplitConversionMetadataTest extends TestBase {
     //   TANT path: part-NNNNN-N-UUID.split
     //   Arrow FFI path: part-UUID.split (Rust-generated)
     // UUID format: 8-4-4-4-12 hex digits
-    val uuidPattern = """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
+    val uuidPattern  = """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
     val splitPattern = s"""^part-(?:\\d+-\\d+-)?$uuidPattern\\.split$$""".r
 
     splitFiles.foreach { f =>

@@ -66,19 +66,20 @@ object ArrowFfiWriteConfig {
   val KEY_ENABLED    = "spark.indextables.write.arrowFfi.enabled"
   val KEY_BATCH_SIZE = "spark.indextables.write.arrowFfi.batchSize"
   // Shared with TANT batch path — both write paths use the same heap size config
-  val KEY_HEAP_SIZE  = "spark.indextables.indexWriter.heapSize"
+  val KEY_HEAP_SIZE = "spark.indextables.indexWriter.heapSize"
 
   // Default values
-  val DEFAULT_ENABLED: Boolean  = true
-  val DEFAULT_BATCH_SIZE: Int   = 8192
-  val DEFAULT_HEAP_SIZE: Long   = 256L * 1024 * 1024 // 256MB
+  val DEFAULT_ENABLED: Boolean = true
+  val DEFAULT_BATCH_SIZE: Int  = 8192
+  val DEFAULT_HEAP_SIZE: Long  = 256L * 1024 * 1024 // 256MB
 
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 
   def fromOptions(options: CaseInsensitiveStringMap): ArrowFfiWriteConfig = {
     val enabled   = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
     val batchSize = getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
-    val heapSize  = getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
+    val heapSize =
+      getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
 
     val config = ArrowFfiWriteConfig(
       enabled = enabled,
@@ -153,7 +154,8 @@ object ArrowFfiWriteConfig {
   private def parseSize(value: String): Long = {
     val trimmed = value.trim.toUpperCase
     if (trimmed.matches("\\d+[KMGT]?")) {
-      val (numberPart, suffix) = if (trimmed.last.isLetter) (trimmed.dropRight(1), trimmed.last.toString) else (trimmed, "")
+      val (numberPart, suffix) =
+        if (trimmed.last.isLetter) (trimmed.dropRight(1), trimmed.last.toString) else (trimmed, "")
       val baseValue = numberPart.toLong
       suffix match {
         case "K" => baseValue * 1024L

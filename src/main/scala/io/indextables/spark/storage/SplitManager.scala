@@ -452,7 +452,7 @@ case class SplitCacheConfig(
   diskCacheWriteQueueMode: Option[String] = None,      // "fragment" or "size" (default: size)
   diskCacheWriteQueueCapacity: Option[String] = None,  // Fragment: slot count; Size: byte limit ("1G")
   diskCacheDropWritesWhenFull: Option[Boolean] = None, // Drop query-path writes when full (default: true)
-  diskCacheMaxWriteQueueBudget: Option[Long] = None,  // Max write queue memory budget cap (0 = 8x initial)
+  diskCacheMaxWriteQueueBudget: Option[Long] = None,   // Max write queue memory budget cap (0 = 8x initial)
   // Parquet coalesce configuration
   coalesceMaxGap: Option[Long] = None, // Max gap between byte ranges to coalesce (default: 512KB)
   // Companion mode (parquet companion splits)

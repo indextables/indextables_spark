@@ -19,22 +19,22 @@ package io.indextables.spark.core
 
 import java.nio.file.Files
 
-import io.indextables.tantivy4java.memory.NativeMemoryManager
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.SparkSession
+
+import io.indextables.tantivy4java.memory.NativeMemoryManager
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import scala.jdk.CollectionConverters._
-
 /**
- * Integration tests verifying that tantivy4java's unified memory pool is wired into
- * Spark's unified memory manager via SparkUnifiedMemoryAccountant.
+ * Integration tests verifying that tantivy4java's unified memory pool is wired into Spark's unified memory manager via
+ * SparkUnifiedMemoryAccountant.
  *
- * Uses a dedicated SparkSession with off-heap memory enabled, since our MemoryConsumer
- * uses MemoryMode.OFF_HEAP and Spark requires `spark.memory.offHeap.enabled=true` with
- * a non-zero `spark.memory.offHeap.size` for off-heap allocations to succeed.
+ * Uses a dedicated SparkSession with off-heap memory enabled, since our MemoryConsumer uses MemoryMode.OFF_HEAP and
+ * Spark requires `spark.memory.offHeap.enabled=true` with a non-zero `spark.memory.offHeap.size` for off-heap
+ * allocations to succeed.
  */
 class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -136,8 +136,9 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
     peakBreakdown.asScala should contain key "index_writer"
 
     info(s"Category peak breakdown:")
-    peakBreakdown.asScala.foreach { case (category, bytes) =>
-      info(s"  $category: $bytes bytes (peak)")
+    peakBreakdown.asScala.foreach {
+      case (category, bytes) =>
+        info(s"  $category: $bytes bytes (peak)")
     }
   }
 
@@ -156,9 +157,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
 
     val nativeMemoryRows = result.filter(_.getString(2) == "native_memory")
     info(s"Found ${nativeMemoryRows.length} native_memory rows in DESCRIBE ENVIRONMENT output:")
-    nativeMemoryRows.foreach { row =>
-      info(s"  ${row.getString(3)} = ${row.getString(4)}")
-    }
+    nativeMemoryRows.foreach(row => info(s"  ${row.getString(3)} = ${row.getString(4)}"))
 
     assert(nativeMemoryRows.nonEmpty, "DESCRIBE ENVIRONMENT should include native_memory rows")
 
@@ -267,7 +266,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
     val tablePath = s"file://$tempDir/native_memory_merge_test"
 
     // Write multiple batches to create multiple splits
-    for (i <- 0 until 3) {
+    for (i <- 0 until 3)
       spark
         .range(i * 100, (i + 1) * 100)
         .selectExpr("id", "CAST(id AS STRING) as text")
@@ -275,7 +274,6 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 0) "overwrite" else "append")
         .save(tablePath)
-    }
 
     NativeMemoryManager.resetPeak()
 
@@ -283,11 +281,10 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
     // Off-heap pool is 2GB, merge requests 3x default heap (3GB) which exceeds pool.
     // Reduce merge heap so it fits: 256MB * 3 = 768MB < 2GB pool.
     spark.conf.set("spark.indextables.merge.heapSize", "256m")
-    try {
+    try
       spark.sql(s"MERGE SPLITS '$tablePath'")
-    } finally {
+    finally
       spark.conf.unset("spark.indextables.merge.heapSize")
-    }
 
     assert(NativeMemoryManager.isConfigured(), "Native memory pool should be configured after merge")
 

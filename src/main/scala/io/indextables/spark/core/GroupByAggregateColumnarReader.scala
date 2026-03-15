@@ -17,10 +17,10 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.ColumnarBatch
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.arrow.AggregationArrowFfiHelper
 import io.indextables.spark.expressions.{BucketAggregationConfig, DateHistogramConfig, HistogramConfig, RangeConfig}
@@ -32,8 +32,8 @@ import org.slf4j.LoggerFactory
 /**
  * Columnar partition reader for GROUP BY aggregations using Arrow FFI.
  *
- * Handles single-column terms, multi-column terms (FR-1), bucket aggregations (DateHistogram, Histogram, Range),
- * bucket + nested terms (FR-2), and partition-only GROUP BY. Returns results as ColumnarBatch directly from Arrow FFI.
+ * Handles single-column terms, multi-column terms (FR-1), bucket aggregations (DateHistogram, Histogram, Range), bucket
+ * + nested terms (FR-2), and partition-only GROUP BY. Returns results as ColumnarBatch directly from Arrow FFI.
  */
 class GroupByAggregateColumnarReader(
   partition: IndexTables4SparkGroupByAggregatePartition,
@@ -41,13 +41,13 @@ class GroupByAggregateColumnarReader(
   schema: StructType)
     extends PartitionReader[ColumnarBatch] {
 
-  private val logger      = LoggerFactory.getLogger(classOf[GroupByAggregateColumnarReader])
-  private val helper      = new AggregationArrowFfiHelper()
+  private val logger               = LoggerFactory.getLogger(classOf[GroupByAggregateColumnarReader])
+  private val helper               = new AggregationArrowFfiHelper()
   private var batch: ColumnarBatch = _
-  private var consumed    = false
-  private var initialized = false
+  private var consumed             = false
+  private var initialized          = false
 
-  private val U = GroupByColumnarReaderUtils
+  private val U        = GroupByColumnarReaderUtils
   private val aggExprs = partition.aggregation.aggregateExpressions
 
   override def next(): Boolean = {
@@ -101,8 +101,11 @@ class GroupByAggregateColumnarReader(
       val searcher = splitSearchEngine.getSplitSearcher()
 
       val queryAstJson = U.buildQueryAstJson(
-        partition.pushedFilters, partition.indexQueryFilters,
-        partition.partitionColumns, splitSearchEngine, partition.config
+        partition.pushedFilters,
+        partition.indexQueryFilters,
+        partition.partitionColumns,
+        splitSearchEngine,
+        partition.config
       )
 
       // Dispatch based on bucket config
@@ -113,14 +116,15 @@ class GroupByAggregateColumnarReader(
           batch = executeTermsAggregation(searcher, queryAstJson, cacheConfig)
       }
 
-      logger.debug(s"GroupByAggregateColumnarReader: ${if (batch != null) batch.numRows() else 0} rows from split ${partition.split.path}")
+      logger.debug(
+        s"GroupByAggregateColumnarReader: ${if (batch != null) batch.numRows() else 0} rows from split ${partition.split.path}"
+      )
 
     } catch {
-      case e: IllegalArgumentException => throw e
+      case e: IllegalArgumentException                                 => throw e
       case e: io.indextables.spark.exceptions.IndexQueryParseException => throw e
       case e: Exception =>
-        throw new RuntimeException(
-          s"GroupByAggregateColumnarReader: failed for split ${partition.split.path}", e)
+        throw new RuntimeException(s"GroupByAggregateColumnarReader: failed for split ${partition.split.path}", e)
     }
   }
 
@@ -129,7 +133,7 @@ class GroupByAggregateColumnarReader(
     queryAstJson: String,
     cacheConfig: io.indextables.spark.storage.SplitCacheConfig
   ): ColumnarBatch = {
-    val allGroupByColumns = partition.groupByColumns
+    val allGroupByColumns                       = partition.groupByColumns
     val (partitionGroupByCols, dataGroupByCols) = allGroupByColumns.partition(partition.partitionColumns.contains)
 
     // Handle all-partition GROUP BY: run metric aggregations via FFI, wrap with partition key columns
@@ -149,30 +153,44 @@ class GroupByAggregateColumnarReader(
     }
 
     // Execute via FFI
-    val aggJson  = helper.buildAggJson(aggName, termsAgg)
+    val aggJson                          = helper.buildAggJson(aggName, termsAgg)
     val (_, columnNames, columnTypes, _) = helper.querySchema(searcher, queryAstJson, aggName, aggJson)
-    val ffiBatch = helper.executeSingleSplit(searcher, queryAstJson, aggName, aggJson)
+    val ffiBatch                         = helper.executeSingleSplit(searcher, queryAstJson, aggName, aggJson)
 
     try {
-      val isMultiKey = dataGroupByCols.length > 1
-      val numFfiKeyColumns = columnNames.count(n => n == "key" || n.startsWith("key_"))
+      val isMultiKey            = dataGroupByCols.length > 1
+      val numFfiKeyColumns      = columnNames.count(n => n == "key" || n.startsWith("key_"))
       val needsPipeKeySplitting = isMultiKey && numFfiKeyColumns < dataGroupByCols.length
 
       val assembled = if (needsPipeKeySplitting) {
-        U.assembleGroupByBatchWithCompoundKeys(ffiBatch, columnNames, dataGroupByCols.length, aggExprs, dataGroupByCols, schema, columnTypes)
+        U.assembleGroupByBatchWithCompoundKeys(
+          ffiBatch,
+          columnNames,
+          dataGroupByCols.length,
+          aggExprs,
+          dataGroupByCols,
+          schema,
+          columnTypes
+        )
       } else {
         U.assembleGroupByBatch(ffiBatch, numFfiKeyColumns, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
       }
 
       if (partitionGroupByCols.nonEmpty) {
-        U.injectPartitionColumns(assembled, allGroupByColumns, dataGroupByCols, partitionGroupByCols,
-          partition.splitPartitionValues, aggExprs, schema)
+        U.injectPartitionColumns(
+          assembled,
+          allGroupByColumns,
+          dataGroupByCols,
+          partitionGroupByCols,
+          partition.splitPartitionValues,
+          aggExprs,
+          schema
+        )
       } else {
         assembled
       }
-    } finally {
+    } finally
       ffiBatch.close()
-    }
   }
 
   private def executePartitionOnlyAggregation(
@@ -182,12 +200,13 @@ class GroupByAggregateColumnarReader(
     allGroupByColumns: Array[String]
   ): ColumnarBatch = {
     val fastFields = io.indextables.spark.transaction.EnhancedTransactionLogCache
-      .getDocMappingMetadata(partition.split).fastFields
+      .getDocMappingMetadata(partition.split)
+      .fastFields
 
     val aggregations = U.buildPartitionOnlyAggregations(aggExprs, fastFields, partition.schema)
 
     val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
-    val searchers = new java.util.ArrayList[io.indextables.tantivy4java.split.SplitSearcher]()
+    val searchers    = new java.util.ArrayList[io.indextables.tantivy4java.split.SplitSearcher]()
     searchers.add(searcher)
 
     val ffiBatches = helper.executeMultiSplitMultiAgg(cacheManager, searchers, queryAstJson, aggregations)
@@ -200,7 +219,7 @@ class GroupByAggregateColumnarReader(
     queryAstJson: String,
     bucketConfig: BucketAggregationConfig
   ): ColumnarBatch = {
-    val aggName = "bucket_agg"
+    val aggName                  = "bucket_agg"
     val additionalGroupByColumns = partition.groupByColumns.drop(1)
 
     val bucketAgg = bucketConfig match {
@@ -246,16 +265,15 @@ class GroupByAggregateColumnarReader(
         agg.asInstanceOf[io.indextables.tantivy4java.split.SplitAggregation]
     }
 
-    val aggJson = helper.buildAggJson(aggName, bucketAgg)
+    val aggJson                          = helper.buildAggJson(aggName, bucketAgg)
     val (_, columnNames, columnTypes, _) = helper.querySchema(searcher, queryAstJson, aggName, aggJson)
-    val ffiBatch = helper.executeSingleSplit(searcher, queryAstJson, aggName, aggJson)
+    val ffiBatch                         = helper.executeSingleSplit(searcher, queryAstJson, aggName, aggJson)
 
     try {
       val dataGroupByCols = partition.groupByColumns.filterNot(partition.partitionColumns.contains)
       U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
-    } finally {
+    } finally
       ffiBatch.close()
-    }
   }
 
   private def createCacheConfig(): io.indextables.spark.storage.SplitCacheConfig =
@@ -268,8 +286,8 @@ class GroupByAggregateColumnarReader(
 /**
  * Columnar partition reader for multi-split GROUP BY aggregations using Arrow FFI.
  *
- * Uses native `SplitCacheManager.multiSplitAggregateArrowFfi()` which searches each split,
- * merges intermediate results via native `merge_fruits()`, and exports merged Arrow data.
+ * Uses native `SplitCacheManager.multiSplitAggregateArrowFfi()` which searches each split, merges intermediate results
+ * via native `merge_fruits()`, and exports merged Arrow data.
  */
 class MultiSplitGroupByAggregateColumnarReader(
   partition: IndexTables4SparkMultiSplitGroupByAggregatePartition,
@@ -277,13 +295,13 @@ class MultiSplitGroupByAggregateColumnarReader(
   schema: StructType)
     extends PartitionReader[ColumnarBatch] {
 
-  private val logger      = LoggerFactory.getLogger(classOf[MultiSplitGroupByAggregateColumnarReader])
-  private val helper      = new AggregationArrowFfiHelper()
+  private val logger               = LoggerFactory.getLogger(classOf[MultiSplitGroupByAggregateColumnarReader])
+  private val helper               = new AggregationArrowFfiHelper()
   private var batch: ColumnarBatch = _
-  private var consumed    = false
-  private var initialized = false
+  private var consumed             = false
+  private var initialized          = false
 
-  private val U = GroupByColumnarReaderUtils
+  private val U        = GroupByColumnarReaderUtils
   private val aggExprs = partition.aggregation.aggregateExpressions
 
   override def next(): Boolean = {
@@ -320,17 +338,24 @@ class MultiSplitGroupByAggregateColumnarReader(
       val searchers = new java.util.ArrayList[io.indextables.tantivy4java.split.SplitSearcher]()
       partition.splits.foreach { split =>
         val resolvedPath = PathResolutionUtils.resolveSplitPathAsString(
-          split.path, partition.tablePath.toString
+          split.path,
+          partition.tablePath.toString
         )
         val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
-          resolvedPath, partition.config
+          resolvedPath,
+          partition.config
         )
         val splitMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(
-          split, partition.tablePath.toString
+          split,
+          partition.tablePath.toString
         )
         val options = Some(IndexTables4SparkOptions(partition.config))
         val engine = SplitSearchEngine.fromSplitFileWithMetadata(
-          partition.schema, splitPath, splitMetadata, cacheConfig, options
+          partition.schema,
+          splitPath,
+          splitMetadata,
+          cacheConfig,
+          options
         )
         searchers.add(engine.getSplitSearcher())
       }
@@ -338,26 +363,35 @@ class MultiSplitGroupByAggregateColumnarReader(
       // Build query from filters using first split's engine
       val firstSplit = partition.splits.head
       val firstResolvedPath = PathResolutionUtils.resolveSplitPathAsString(
-        firstSplit.path, partition.tablePath.toString
+        firstSplit.path,
+        partition.tablePath.toString
       )
       val firstSplitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
-        firstResolvedPath, partition.config
+        firstResolvedPath,
+        partition.config
       )
       val firstMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(
-        firstSplit, partition.tablePath.toString
+        firstSplit,
+        partition.tablePath.toString
       )
       val firstEngine = SplitSearchEngine.fromSplitFileWithMetadata(
-        partition.schema, firstSplitPath, firstMetadata, cacheConfig,
+        partition.schema,
+        firstSplitPath,
+        firstMetadata,
+        cacheConfig,
         Some(IndexTables4SparkOptions(partition.config))
       )
       val queryAstJson = U.buildQueryAstJson(
-        partition.pushedFilters, partition.indexQueryFilters,
-        partition.partitionColumns, firstEngine, partition.config
+        partition.pushedFilters,
+        partition.indexQueryFilters,
+        partition.partitionColumns,
+        firstEngine,
+        partition.config
       )
 
       // Dispatch based on bucket config vs terms aggregation
       val allGroupByColumns = partition.groupByColumns
-      val dataGroupByCols = allGroupByColumns.filterNot(partition.partitionColumns.contains)
+      val dataGroupByCols   = allGroupByColumns.filterNot(partition.partitionColumns.contains)
 
       if (dataGroupByCols.isEmpty) {
         batch = executePartitionOnlyAggregation(cacheManager, searchers, queryAstJson, allGroupByColumns)
@@ -375,20 +409,31 @@ class MultiSplitGroupByAggregateColumnarReader(
       val partitionGroupByCols = allGroupByColumns.filter(partition.partitionColumns.contains)
       if (partitionGroupByCols.nonEmpty) {
         val partitionValues = Option(partition.splits.head.partitionValues).getOrElse(Map.empty[String, String])
-        batch = U.injectPartitionColumns(ffiBatch, allGroupByColumns, dataGroupByCols, partitionGroupByCols,
-          partitionValues, aggExprs, schema)
+        batch = U.injectPartitionColumns(
+          ffiBatch,
+          allGroupByColumns,
+          dataGroupByCols,
+          partitionGroupByCols,
+          partitionValues,
+          aggExprs,
+          schema
+        )
       } else {
         batch = ffiBatch
       }
 
-      logger.debug(s"MultiSplitGroupByAggregateColumnarReader: ${if (batch != null) batch.numRows() else 0} rows from ${partition.splits.length} splits")
+      logger.debug(
+        s"MultiSplitGroupByAggregateColumnarReader: ${if (batch != null) batch.numRows() else 0} rows from ${partition.splits.length} splits"
+      )
 
     } catch {
-      case e: IllegalArgumentException => throw e
+      case e: IllegalArgumentException                                 => throw e
       case e: io.indextables.spark.exceptions.IndexQueryParseException => throw e
       case e: Exception =>
         throw new RuntimeException(
-          s"MultiSplitGroupByAggregateColumnarReader: failed for ${partition.splits.length} splits", e)
+          s"MultiSplitGroupByAggregateColumnarReader: failed for ${partition.splits.length} splits",
+          e
+        )
     }
   }
 
@@ -400,10 +445,11 @@ class MultiSplitGroupByAggregateColumnarReader(
   ): ColumnarBatch = {
     val partitionValues = Option(partition.splits.head.partitionValues).getOrElse(Map.empty[String, String])
     val fastFields = io.indextables.spark.transaction.EnhancedTransactionLogCache
-      .getDocMappingMetadata(partition.splits.head).fastFields
+      .getDocMappingMetadata(partition.splits.head)
+      .fastFields
 
     val aggregations = U.buildPartitionOnlyAggregations(aggExprs, fastFields, partition.schema)
-    val ffiBatches = helper.executeMultiSplitMultiAgg(cacheManager, searchers, queryAstJson, aggregations)
+    val ffiBatches   = helper.executeMultiSplitMultiAgg(cacheManager, searchers, queryAstJson, aggregations)
 
     U.assemblePartitionOnlyBatch(ffiBatches, allGroupByColumns, partitionValues, aggExprs, schema)
   }
@@ -426,25 +472,32 @@ class MultiSplitGroupByAggregateColumnarReader(
 
     val aggJson = helper.buildAggJson(aggName, termsAgg)
 
-    val firstSearcher = searchers.get(0)
+    val firstSearcher                    = searchers.get(0)
     val (_, columnNames, columnTypes, _) = helper.querySchema(firstSearcher, queryAstJson, aggName, aggJson)
-    val numFfiKeyColumns = columnNames.count(n => n == "key" || n.startsWith("key_"))
+    val numFfiKeyColumns                 = columnNames.count(n => n == "key" || n.startsWith("key_"))
 
     // Native multi-split merge via merge_fruits
     val ffiBatch = helper.executeMultiSplit(cacheManager, searchers, queryAstJson, aggName, aggJson)
 
     try {
-      val isMultiKey = dataGroupByCols.length > 1
+      val isMultiKey            = dataGroupByCols.length > 1
       val needsPipeKeySplitting = isMultiKey && numFfiKeyColumns < dataGroupByCols.length
 
       if (needsPipeKeySplitting) {
-        U.assembleGroupByBatchWithCompoundKeys(ffiBatch, columnNames, dataGroupByCols.length, aggExprs, dataGroupByCols, schema, columnTypes)
+        U.assembleGroupByBatchWithCompoundKeys(
+          ffiBatch,
+          columnNames,
+          dataGroupByCols.length,
+          aggExprs,
+          dataGroupByCols,
+          schema,
+          columnTypes
+        )
       } else {
         U.assembleGroupByBatch(ffiBatch, numFfiKeyColumns, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
       }
-    } finally {
+    } finally
       ffiBatch.close()
-    }
   }
 
   private def executeBucketAggregation(
@@ -453,7 +506,7 @@ class MultiSplitGroupByAggregateColumnarReader(
     queryAstJson: String,
     bucketConfig: BucketAggregationConfig
   ): ColumnarBatch = {
-    val aggName = "bucket_agg"
+    val aggName                  = "bucket_agg"
     val additionalGroupByColumns = partition.groupByColumns.drop(1)
 
     val bucketAgg = bucketConfig match {
@@ -501,7 +554,7 @@ class MultiSplitGroupByAggregateColumnarReader(
 
     val aggJson = helper.buildAggJson(aggName, bucketAgg)
 
-    val firstSearcher = searchers.get(0)
+    val firstSearcher                    = searchers.get(0)
     val (_, columnNames, columnTypes, _) = helper.querySchema(firstSearcher, queryAstJson, aggName, aggJson)
 
     // Native multi-split merge via merge_fruits
@@ -510,8 +563,7 @@ class MultiSplitGroupByAggregateColumnarReader(
     try {
       val dataGroupByCols = partition.groupByColumns.filterNot(partition.partitionColumns.contains)
       U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema, columnTypes)
-    } finally {
+    } finally
       ffiBatch.close()
-    }
   }
 }

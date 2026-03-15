@@ -102,7 +102,8 @@ class ColumnarPartitionReader(
   // tantivy component pre-warming path used by the old row-based reader.
   private def initialize(): Unit =
     if (!initialized) {
-      if (initFailed) throw new IOException(s"Columnar reader previously failed to initialize for ${addAction.path}", initException)
+      if (initFailed)
+        throw new IOException(s"Columnar reader previously failed to initialize for ${addAction.path}", initException)
       try {
         splitSearchEngine = ctx.createSplitSearchEngine()
         initialized = true
@@ -144,8 +145,8 @@ class ColumnarPartitionReader(
 
   /**
    * Streaming path: uses startStreamingRetrieval()/nextBatch() for all companion reads with data columns. Returns
-   * batches of ~128K rows with bounded ~24MB memory. Stops when the stream is exhausted or effectiveLimit rows have been
-   * returned.
+   * batches of ~128K rows with bounded ~24MB memory. Stops when the stream is exhausted or effectiveLimit rows have
+   * been returned.
    */
   private def nextStreaming(searcher: SplitSearcher, numCols: Int): Boolean = {
     // Check if we've already satisfied the limit
@@ -157,10 +158,10 @@ class ColumnarPartitionReader(
 
     // Start streaming session on first call
     if (streamingSession == null) {
-      val splitQuery = ctx.buildSplitQuery(splitSearchEngine)
-      val queryAstJson = splitQuery.toQueryAstJson()
-      val typeHints = buildTypeHints()
-      val maxDocs = if (effectiveLimit == Int.MaxValue) -1 else effectiveLimit
+      val splitQuery    = ctx.buildSplitQuery(splitSearchEngine)
+      val queryAstJson  = splitQuery.toQueryAstJson()
+      val typeHints     = buildTypeHints()
+      val maxDocs       = if (effectiveLimit == Int.MaxValue) -1 else effectiveLimit
       val safeTypeHints = if (typeHints != null) typeHints else Array.empty[String]
       streamingSession = if (typeHints != null || maxDocs > 0) {
         searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, safeTypeHints, maxDocs)
@@ -178,9 +179,9 @@ class ColumnarPartitionReader(
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
 
     val rows =
-      try {
+      try
         streamingSession.nextBatch(arrayAddrs, schemaAddrs)
-      } catch {
+      catch {
         case ex: Exception =>
           cleanupFfiStructs(arrays, schemas)
           throw ex
@@ -212,7 +213,7 @@ class ColumnarPartitionReader(
     partitionOnlyConsumed = true
     finished = true
 
-    val splitQuery = ctx.buildSplitQuery(splitSearchEngine)
+    val splitQuery   = ctx.buildSplitQuery(splitSearchEngine)
     val searchResult = searcher.search(splitQuery, effectiveLimit)
     try {
       val numHits = searchResult.getHits.size()
@@ -311,12 +312,11 @@ class ColumnarPartitionReader(
   }
 
   /**
-   * Build Arrow type hints for non-companion splits where tantivy's internal types (i64, f64) may
-   * differ from the Spark schema types (Int32, Float32, etc.). Returns null for companion splits
-   * since parquet preserves original types.
+   * Build Arrow type hints for non-companion splits where tantivy's internal types (i64, f64) may differ from the Spark
+   * schema types (Int32, Float32, etc.). Returns null for companion splits since parquet preserves original types.
    *
-   * Supports complex type hints (JSON format) for Struct, Array, and Map fields, which tells the
-   * native layer to produce proper Arrow Struct/List/Map vectors from JSON-serialized tantivy data.
+   * Supports complex type hints (JSON format) for Struct, Array, and Map fields, which tells the native layer to
+   * produce proper Arrow Struct/List/Map vectors from JSON-serialized tantivy data.
    */
   private def buildTypeHints(): Array[String] = {
     val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")

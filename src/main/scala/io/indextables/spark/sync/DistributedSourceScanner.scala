@@ -43,20 +43,20 @@ case class DistributedScanResult(
   numDistributedParts: Int,
   schema: Option[StructType] = None,
   /**
-   * True when filesRDD contains ONLY newly added files (from an incremental changeset).
-   * When true, the anti-join should be skipped — all files in the RDD are known to be new.
+   * True when filesRDD contains ONLY newly added files (from an incremental changeset). When true, the anti-join should
+   * be skipped — all files in the RDD are known to be new.
    */
   isIncremental: Boolean = false,
   /**
-   * Source file paths removed from the source table since the last sync (Delta only).
-   * Companion splits that indexed these files must be invalidated. Empty for full-scan results
-   * and for Iceberg (Iceberg deletion tracking is a follow-up).
+   * Source file paths removed from the source table since the last sync (Delta only). Companion splits that indexed
+   * these files must be invalidated. Empty for full-scan results and for Iceberg (Iceberg deletion tracking is a
+   * follow-up).
    */
   removedSourcePaths: Seq[String] = Seq.empty,
   /**
-   * Files already available on the driver (incremental paths only). When set, the consumer
-   * in SyncToExternalCommand skips the RDD collect() call entirely. Avoids a parallelize →
-   * collect roundtrip for small incremental changesets that fit comfortably in driver memory.
+   * Files already available on the driver (incremental paths only). When set, the consumer in SyncToExternalCommand
+   * skips the RDD collect() call entirely. Avoids a parallelize → collect roundtrip for small incremental changesets
+   * that fit comfortably in driver memory.
    */
   driverFiles: Option[Seq[CompanionSourceFile]] = None)
 
@@ -206,22 +206,29 @@ object DistributedSourceScanner {
     val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-      val numRows = try {
-        DeltaTableReader.readCheckpointPartArrowFfi(
-          kernelPath,
-          config,
-          partPath,
-          filter,
-          snapshotInfo,
-          arrayAddrs,
-          schemaAddrs
-        )
-      } catch {
-        case ex: Exception =>
-          arrays.foreach(a => try a.close() catch { case _: Exception => })
-          schemas.foreach(s => try s.close() catch { case _: Exception => })
-          throw ex
-      }
+      val numRows =
+        try
+          DeltaTableReader.readCheckpointPartArrowFfi(
+            kernelPath,
+            config,
+            partPath,
+            filter,
+            snapshotInfo,
+            arrayAddrs,
+            schemaAddrs
+          )
+        catch {
+          case ex: Exception =>
+            arrays.foreach(a =>
+              try a.close()
+              catch { case _: Exception => }
+            )
+            schemas.foreach(s =>
+              try s.close()
+              catch { case _: Exception => }
+            )
+            throw ex
+        }
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
@@ -284,23 +291,30 @@ object DistributedSourceScanner {
     val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-      val numRows = try {
-        IcebergTableReader.readManifestFileArrowFfi(
-          catalogName,
-          namespace,
-          tableName,
-          config,
-          manifestPath,
-          filter,
-          arrayAddrs,
-          schemaAddrs
-        )
-      } catch {
-        case ex: Exception =>
-          arrays.foreach(a => try a.close() catch { case _: Exception => })
-          schemas.foreach(s => try s.close() catch { case _: Exception => })
-          throw ex
-      }
+      val numRows =
+        try
+          IcebergTableReader.readManifestFileArrowFfi(
+            catalogName,
+            namespace,
+            tableName,
+            config,
+            manifestPath,
+            filter,
+            arrayAddrs,
+            schemaAddrs
+          )
+        catch {
+          case ex: Exception =>
+            arrays.foreach(a =>
+              try a.close()
+              catch { case _: Exception => }
+            )
+            schemas.foreach(s =>
+              try s.close()
+              catch { case _: Exception => }
+            )
+            throw ex
+        }
       if (numRows == 0) {
         arrays.foreach(_.close())
         schemas.foreach(_.close())
@@ -492,25 +506,28 @@ class DistributedSourceScanner(spark: SparkSession) {
           // Check whether the version gap is small enough for incremental commit-log reads.
           // get_changes_between reads commit JSON files serially (1 GET per file). For large
           // catch-up scenarios this is slower than a full distributed checkpoint scan.
-          val maxIncrementalCommits = scala.util.Try(
-            spark.conf.get("spark.indextables.companion.sync.maxIncrementalCommits", "100").toLong
-          ).getOrElse(100L)
+          val maxIncrementalCommits = scala.util
+            .Try(
+              spark.conf.get("spark.indextables.companion.sync.maxIncrementalCommits", "100").toLong
+            )
+            .getOrElse(100L)
           val versionGap = trueCurrentVersion - fv
           if (versionGap > maxIncrementalCommits) {
             logger.warn(
               s"Delta incremental: version gap $versionGap exceeds maxIncrementalCommits=$maxIncrementalCommits — " +
-              s"falling back to full scan (from=$fv, current=$trueCurrentVersion)"
+                s"falling back to full scan (from=$fv, current=$trueCurrentVersion)"
             )
             // fall through to full scan below
           } else {
             // New commits available — read only the delta (commit JSON files from fv+1 to trueCurrentVersion).
             // This is O(delta_commits) instead of O(checkpoint_parts + delta_commits).
             logger.info(s"Delta incremental: reading changes from version $fv to $trueCurrentVersion (checkpoint=${snapshotInfo.getVersion}, postCheckpointCommits=${snapshotInfo.getCommitFilePaths.size})")
-            val changes      = DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
+            val changes =
+              DeltaTableReader.getChangesBetween(deltaKernelPath, deltaConfig, fv, trueCurrentVersion, snapshotInfo)
             val addedFiles   = changes.getAddedFiles.asScala.map(deltaEntryToCompanionFile).toSeq
             val removedPaths = changes.getRemovedPaths.asScala.toSeq
             logger.info(s"Delta incremental: ${addedFiles.size} added files, ${removedPaths.size} removed paths")
-            val sc           = spark.sparkContext
+            val sc = spark.sparkContext
             return DistributedScanResult(
               filesRDD = sc.parallelize(addedFiles),
               version = Some(trueCurrentVersion),
@@ -641,12 +658,13 @@ class DistributedSourceScanner(spark: SparkSession) {
 
     // Parse schema from snapshotInfo for propagation to incremental results.
     // Avoids a separate IcebergTableReader.readSchema() JNI call on incremental cycles.
-    val icebergSchemaOpt: Option[StructType] = try {
-      val schemaJson = snapshotInfo.getSchemaJson
-      if (schemaJson != null && schemaJson.nonEmpty)
-        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
-      else None
-    } catch { case _: Exception => None }
+    val icebergSchemaOpt: Option[StructType] =
+      try {
+        val schemaJson = snapshotInfo.getSchemaJson
+        if (schemaJson != null && schemaJson.nonEmpty)
+          Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+        else None
+      } catch { case _: Exception => None }
 
     // ── Incremental fast-path ──────────────────────────────────────────────
     // When fromSnapshotId is provided (streaming incremental cycle), compute new files via
@@ -674,8 +692,7 @@ class DistributedSourceScanner(spark: SparkSession) {
           // Use path-based set-difference instead of addedSnapshotId comparison, because Iceberg
           // snapshot IDs are random 64-bit longs (non-monotonic) — numeric comparison is incorrect.
           val oldManifestPaths: Set[String] = {
-            val oldInfo = IcebergTableReader.getSnapshotInfo(
-              catalogName, namespace, tableName, icebergConfig, fsnap)
+            val oldInfo = IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, fsnap)
             oldInfo.getManifestFilePaths.asScala.toSet
           }
           val newManifestPaths = snapshotInfo.getManifestFilePaths.asScala
@@ -684,41 +701,44 @@ class DistributedSourceScanner(spark: SparkSession) {
 
           // Check whether the manifest delta is small enough for incremental driver-side reads.
           // For large catch-up scenarios a full distributed scan is faster.
-          val maxIncrementalManifests = scala.util.Try(
-            spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
-          ).getOrElse(50)
+          val maxIncrementalManifests = scala.util
+            .Try(
+              spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
+            )
+            .getOrElse(50)
           if (newManifestPaths.size > maxIncrementalManifests) {
             logger.warn(
               s"Iceberg incremental: new manifest count ${newManifestPaths.size} exceeds " +
-              s"maxIncrementalManifests=$maxIncrementalManifests — " +
-              s"falling back to full scan (from=$fsnap, current=$currentSnapId)"
+                s"maxIncrementalManifests=$maxIncrementalManifests — " +
+                s"falling back to full scan (from=$fsnap, current=$currentSnapId)"
             )
             // fall through to full scan below
           } else {
 
-          val newEntries = newManifestPaths.flatMap { manifestPath =>
-            IcebergTableReader
-              .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
-              .asScala
-          }.toSeq
-          val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
-          val partCols    = newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
-          val files       = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
-          logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
-          val sc          = spark.sparkContext
-          return DistributedScanResult(
-            filesRDD = sc.parallelize(files),
-            version = Some(currentSnapId),
-            partitionColumns = partCols,
-            storageRoot = storageRoot,
-            sampleFilePath = newEntries.headOption.map(_.getPath),
-            numDistributedParts = 0,
-            schema = icebergSchemaOpt,
-            isIncremental = true,
-            driverFiles = Some(files)
-          )
+            val newEntries = newManifestPaths.flatMap { manifestPath =>
+              IcebergTableReader
+                .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+                .asScala
+            }.toSeq
+            val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
+            val partCols =
+              newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
+            val files = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
+            logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
+            val sc = spark.sparkContext
+            return DistributedScanResult(
+              filesRDD = sc.parallelize(files),
+              version = Some(currentSnapId),
+              partitionColumns = partCols,
+              storageRoot = storageRoot,
+              sampleFilePath = newEntries.headOption.map(_.getPath),
+              numDistributedParts = 0,
+              schema = icebergSchemaOpt,
+              isIncremental = true,
+              driverFiles = Some(files)
+            )
           } // end else (incremental path — newManifestPaths.size <= maxIncrementalManifests)
-        } // end else (currentSnapId != fsnap)
+        }   // end else (currentSnapId != fsnap)
       case None => // fall through to full scan below
     }
 

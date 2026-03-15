@@ -28,8 +28,8 @@ import io.indextables.spark.transaction.AddAction
 import org.slf4j.LoggerFactory
 
 /**
- * Columnar partition reader that processes multiple splits sequentially. Stops early if pushed limit is satisfied before
- * querying all splits.
+ * Columnar partition reader that processes multiple splits sequentially. Stops early if pushed limit is satisfied
+ * before querying all splits.
  *
  * Works for all split types (both companion and regular splits).
  */
@@ -50,10 +50,10 @@ class ColumnarMultiSplitPartitionReader(
   private val effectiveLimit: Int = SplitReaderContext.computeEffectiveLimit(config, limit)
 
   // Multi-split iteration state
-  private var currentSplitIndex                                       = 0
+  private var currentSplitIndex                              = 0
   private var currentReader: Option[ColumnarPartitionReader] = None
-  private var totalRowsReturned                                       = 0L
-  private var initialized                                             = false
+  private var totalRowsReturned                              = 0L
+  private var initialized                                    = false
 
   // Capture baseline metrics
   private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =

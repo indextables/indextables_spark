@@ -116,32 +116,34 @@ case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
           }
 
           // Build rows for native memory stats
-          val nativeMemoryRows = try {
-            val stats = io.indextables.tantivy4java.memory.NativeMemoryManager.getStats()
-            val baseRows = Seq(
-              Row(host, "worker", "native_memory", "native_memory.configured",
-                io.indextables.tantivy4java.memory.NativeMemoryManager.isConfigured().toString),
-              Row(host, "worker", "native_memory", "native_memory.used_bytes",
-                stats.getUsedBytes.toString),
-              Row(host, "worker", "native_memory", "native_memory.peak_bytes",
-                stats.getPeakBytes.toString),
-              Row(host, "worker", "native_memory", "native_memory.granted_bytes",
-                stats.getGrantedBytes.toString)
-            )
-            val categoryRows = stats.getCategoryPeakBreakdown.asScala.map {
-              case (category, bytes) =>
-                Row(host, "worker", "native_memory", s"native_memory.category_peak.$category",
-                  bytes.toString)
-            }.toSeq
-            baseRows ++ categoryRows
-          } catch {
-            case _: IllegalStateException | _: UnsatisfiedLinkError =>
-              // Expected: native library not loaded or pool not yet configured
-              Seq.empty[Row]
-            case e: Exception =>
-              logger.warn("Failed to collect native memory stats for DESCRIBE ENVIRONMENT", e)
-              Seq.empty[Row]
-          }
+          val nativeMemoryRows =
+            try {
+              val stats = io.indextables.tantivy4java.memory.NativeMemoryManager.getStats()
+              val baseRows = Seq(
+                Row(
+                  host,
+                  "worker",
+                  "native_memory",
+                  "native_memory.configured",
+                  io.indextables.tantivy4java.memory.NativeMemoryManager.isConfigured().toString
+                ),
+                Row(host, "worker", "native_memory", "native_memory.used_bytes", stats.getUsedBytes.toString),
+                Row(host, "worker", "native_memory", "native_memory.peak_bytes", stats.getPeakBytes.toString),
+                Row(host, "worker", "native_memory", "native_memory.granted_bytes", stats.getGrantedBytes.toString)
+              )
+              val categoryRows = stats.getCategoryPeakBreakdown.asScala.map {
+                case (category, bytes) =>
+                  Row(host, "worker", "native_memory", s"native_memory.category_peak.$category", bytes.toString)
+              }.toSeq
+              baseRows ++ categoryRows
+            } catch {
+              case _: IllegalStateException | _: UnsatisfiedLinkError =>
+                // Expected: native library not loaded or pool not yet configured
+                Seq.empty[Row]
+              case e: Exception =>
+                logger.warn("Failed to collect native memory stats for DESCRIBE ENVIRONMENT", e)
+                Seq.empty[Row]
+            }
 
           (sparkRows ++ hadoopRows ++ nativeMemoryRows).iterator
         }

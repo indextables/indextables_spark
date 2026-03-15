@@ -384,7 +384,7 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
   indexQueryFilters: Array[Any] = Array.empty)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
+  private val logger          = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
   private val arrowFfiEnabled = io.indextables.spark.arrow.AggregationArrowFfiConfig.isEnabled(config)
 
   logger.debug(s"SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled")
@@ -429,7 +429,9 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
         new MultiSplitSimpleAggregateColumnarReader(multiSplitPartition, sparkSession)
 
       case simpleAggPartition: IndexTables4SparkSimpleAggregatePartition =>
-        logger.info(s"SIMPLE AGGREGATE READER FACTORY: Creating columnar reader for split ${simpleAggPartition.split.path}")
+        logger.info(
+          s"SIMPLE AGGREGATE READER FACTORY: Creating columnar reader for split ${simpleAggPartition.split.path}"
+        )
         new SimpleAggregateColumnarReader(simpleAggPartition, sparkSession)
 
       case other =>
