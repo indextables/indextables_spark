@@ -220,7 +220,10 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     // Verify that min equals max for uniform columns
     assert(minVals("name") == "SameName" && maxVals("name") == "SameName", "Uniform string column should have min=max")
     assert(minVals("age") == "30" && maxVals("age") == "30", "Uniform int column should have min=max")
-    assert(minVals("salary").toDouble == 75000.0 && maxVals("salary").toDouble == 75000.0, "Uniform double column should have min=max")
+    assert(
+      minVals("salary").toDouble == 75000.0 && maxVals("salary").toDouble == 75000.0,
+      "Uniform double column should have min=max"
+    )
     assert(
       minVals("department") == "Engineering" && maxVals("department") == "Engineering",
       "Uniform string column should have min=max"

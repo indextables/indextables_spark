@@ -21,11 +21,10 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
-
 import org.apache.hadoop.conf.Configuration
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.hadoop.HadoopCatalog
 import org.apache.iceberg.rest.CatalogHandlers
@@ -34,42 +33,41 @@ import org.apache.iceberg.rest.CatalogHandlers
  * Lightweight embedded Iceberg REST catalog server for integration tests.
  *
  * <p>Uses {@link HadoopCatalog} backed by the local filesystem and the JDK's built-in
- * {@code com.sun.net.httpserver.HttpServer} (no Docker, no MinIO, no Jetty required). The warehouse
- * is rooted at a local temp directory so all manifest and data files are written to disk and
- * readable by the Rust JNI via the {@code file://} scheme, which is included in
- * {@code iceberg = "0.8"}'s default features.
+ * {@code com.sun.net.httpserver.HttpServer} (no Docker, no MinIO, no Jetty required). The warehouse is rooted at a
+ * local temp directory so all manifest and data files are written to disk and readable by the Rust JNI via the
+ * {@code file://} scheme, which is included in {@code iceberg = "0.8"} 's default features.
  *
- * <p>Only read-path REST endpoints are implemented (GET). Writes happen directly against
- * {@link #catalog} via the Iceberg Java API, so the streaming sync's read path sees the latest
- * snapshots without going through HTTP.
+ * <p>Only read-path REST endpoints are implemented (GET). Writes happen directly against {@link #catalog} via the
+ * Iceberg Java API, so the streaming sync's read path sees the latest snapshots without going through HTTP.
  *
  * @param warehouseDir
  *   Absolute local directory to use as the Iceberg warehouse root.
  */
 class EmbeddedIcebergRestServer(val warehouseDir: String) extends AutoCloseable {
 
-  private val mapper: ObjectMapper = try {
-    // RESTObjectMapper is package-private in iceberg-core; access via reflection to get
-    // the same fully-configured ObjectMapper that the real Iceberg REST server uses.
-    val clazz  = Class.forName("org.apache.iceberg.rest.RESTObjectMapper")
-    val method = clazz.getDeclaredMethod("mapper")
-    method.setAccessible(true)
-    method.invoke(null).asInstanceOf[ObjectMapper]
-  } catch {
-    case e: Exception =>
-      throw new RuntimeException(
-        s"Failed to access Iceberg RESTObjectMapper via reflection. " +
-          s"This class is package-private in iceberg-core and may have changed in a newer version. " +
-          s"Check that iceberg-core is on the classpath and the mapper() method still exists.",
-        e
-      )
-  }
+  private val mapper: ObjectMapper =
+    try {
+      // RESTObjectMapper is package-private in iceberg-core; access via reflection to get
+      // the same fully-configured ObjectMapper that the real Iceberg REST server uses.
+      val clazz  = Class.forName("org.apache.iceberg.rest.RESTObjectMapper")
+      val method = clazz.getDeclaredMethod("mapper")
+      method.setAccessible(true)
+      method.invoke(null).asInstanceOf[ObjectMapper]
+    } catch {
+      case e: Exception =>
+        throw new RuntimeException(
+          s"Failed to access Iceberg RESTObjectMapper via reflection. " +
+            s"This class is package-private in iceberg-core and may have changed in a newer version. " +
+            s"Check that iceberg-core is on the classpath and the mapper() method still exists.",
+          e
+        )
+    }
 
   /**
    * Backing catalog. Use directly to create tables and commit snapshots in tests.
    *
-   * <p>{@link HadoopCatalog} writes every metadata file (version JSON, manifest lists, manifests)
-   * to the real filesystem so the Rust JNI can read them directly via {@code file://} URIs.
+   * <p>{@link HadoopCatalog} writes every metadata file (version JSON, manifest lists, manifests) to the real
+   * filesystem so the Rust JNI can read them directly via {@code file://} URIs.
    */
   val catalog: HadoopCatalog =
     new HadoopCatalog(new Configuration(), s"file://$warehouseDir")
@@ -97,7 +95,7 @@ class EmbeddedIcebergRestServer(val warehouseDir: String) extends AutoCloseable 
 
   private class RestHandler extends HttpHandler {
 
-    override def handle(ex: HttpExchange): Unit = {
+    override def handle(ex: HttpExchange): Unit =
       try {
         val path   = ex.getRequestURI.getPath
         val method = ex.getRequestMethod
@@ -142,12 +140,16 @@ class EmbeddedIcebergRestServer(val warehouseDir: String) extends AutoCloseable 
         reply(ex, status, body)
       } catch {
         case e: Exception =>
-          val msg = s"""{"error":{"message":"${e.getMessage.replace("\"", "'")}","type":"RuntimeException","code":500}}"""
+          val msg =
+            s"""{"error":{"message":"${e.getMessage.replace("\"", "'")}","type":"RuntimeException","code":500}}"""
           reply(ex, 500, msg)
       }
-    }
 
-    private def reply(ex: HttpExchange, status: Int, json: String): Unit = {
+    private def reply(
+      ex: HttpExchange,
+      status: Int,
+      json: String
+    ): Unit = {
       val bytes = json.getBytes(StandardCharsets.UTF_8)
       ex.getResponseHeaders.set("Content-Type", "application/json")
       ex.sendResponseHeaders(status, bytes.length)

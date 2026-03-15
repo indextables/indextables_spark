@@ -21,6 +21,7 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.StringType
+
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 

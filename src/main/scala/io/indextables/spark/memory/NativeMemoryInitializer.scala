@@ -21,13 +21,11 @@ import io.indextables.tantivy4java.memory.NativeMemoryManager
 import org.slf4j.LoggerFactory
 
 /**
- * Singleton that initializes tantivy4java's native memory pool with Spark's
- * unified memory manager. Call [[ensureInitialized]] from any executor code
- * path — it is idempotent after the first successful call.
+ * Singleton that initializes tantivy4java's native memory pool with Spark's unified memory manager. Call
+ * [[ensureInitialized]] from any executor code path — it is idempotent after the first successful call.
  *
- * The accountant is process-global (tantivy4java uses a Rust OnceLock), but
- * [[SparkUnifiedMemoryAccountant]] dispatches each acquire/release to the
- * current thread's TaskContext, so memory is correctly charged per-task.
+ * The accountant is process-global (tantivy4java uses a Rust OnceLock), but [[SparkUnifiedMemoryAccountant]] dispatches
+ * each acquire/release to the current thread's TaskContext, so memory is correctly charged per-task.
  */
 object NativeMemoryInitializer {
 
@@ -41,23 +39,24 @@ object NativeMemoryInitializer {
   /**
    * Initialize the native memory pool with Spark's unified memory manager.
    *
-   * Must be called while a TaskContext is active on the current thread so the
-   * accountant can resolve the task's TaskMemoryManager.
+   * Must be called while a TaskContext is active on the current thread so the accountant can resolve the task's
+   * TaskMemoryManager.
    *
-   * Safe to call from multiple threads — only the first call configures the pool.
-   * The `spark.indextables.native.memory.enabled` config is read once on first call;
-   * subsequent config changes have no effect (tantivy4java's pool uses a Rust OnceLock).
+   * Safe to call from multiple threads — only the first call configures the pool. The
+   * `spark.indextables.native.memory.enabled` config is read once on first call; subsequent config changes have no
+   * effect (tantivy4java's pool uses a Rust OnceLock).
    */
-  def ensureInitialized(): Unit = {
+  def ensureInitialized(): Unit =
     if (!initialized) synchronized {
       if (!initialized) {
         val enabled = isEnabled
         if (enabled && isOffHeapConfigured) {
           val accountant = new org.apache.spark.sql.indextables.SparkUnifiedMemoryAccountant()
-          val success = NativeMemoryManager.setAccountant(accountant)
+          val success    = NativeMemoryManager.setAccountant(accountant)
           if (success) {
             val env = org.apache.spark.SparkEnv.get
-            val poolSize = if (env != null) env.conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / 1024 / 1024 else 0
+            val poolSize =
+              if (env != null) env.conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / 1024 / 1024 else 0
             logger.info(s"Native memory pool initialized with Spark unified memory manager (${poolSize}MB off-heap)")
           } else {
             logger.debug("Native memory pool already configured (another thread initialized first)")
@@ -71,14 +70,14 @@ object NativeMemoryInitializer {
             "Native memory integration skipped: spark.memory.offHeap.enabled=false or " +
               "spark.memory.offHeap.size=0. tantivy4java will use its default unlimited pool. " +
               "Set spark.memory.offHeap.enabled=true and spark.memory.offHeap.size (e.g., '4g') " +
-              "to enable Spark-managed native memory.")
+              "to enable Spark-managed native memory."
+          )
         } else {
           logger.info("Native memory integration disabled via {}", NATIVE_MEMORY_ENABLED_KEY)
         }
         initialized = true
       }
     }
-  }
 
   private def isEnabled: Boolean = {
     val env = org.apache.spark.SparkEnv.get

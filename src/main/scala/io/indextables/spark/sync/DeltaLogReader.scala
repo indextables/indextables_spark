@@ -112,8 +112,8 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
   /**
    * Get the current (latest) version of the Delta table via a cheap HEAD-probe scan.
    *
-   * Cost: 1 GET (_last_checkpoint) + O(k) HEAD probes. No parquet reads.
-   * Use this instead of currentVersion() when you only need the version number.
+   * Cost: 1 GET (_last_checkpoint) + O(k) HEAD probes. No parquet reads. Use this instead of currentVersion() when you
+   * only need the version number.
    */
   def cheapCurrentVersion(): Long = {
     val version = DeltaTableReader.getCurrentVersion(deltaKernelPath, deltaConfig)

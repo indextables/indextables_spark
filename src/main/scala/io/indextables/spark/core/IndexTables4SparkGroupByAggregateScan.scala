@@ -411,10 +411,14 @@ class IndexTables4SparkGroupByAggregateBatch(
         case (host, hostSplits) =>
           val groupedSplits = if (partitionGroupByCols.nonEmpty) {
             // Sub-group by partition values so splits from different partitions aren't merged
-            hostSplits.groupBy { split =>
-              val pv = Option(split.partitionValues).getOrElse(Map.empty[String, String])
-              partitionGroupByCols.map(col => pv.getOrElse(col, "")).mkString("|")
-            }.values.flatMap(_.grouped(splitsPerTask)).toSeq
+            hostSplits
+              .groupBy { split =>
+                val pv = Option(split.partitionValues).getOrElse(Map.empty[String, String])
+                partitionGroupByCols.map(col => pv.getOrElse(col, "")).mkString("|")
+              }
+              .values
+              .flatMap(_.grouped(splitsPerTask))
+              .toSeq
           } else {
             hostSplits.grouped(splitsPerTask).toSeq
           }
@@ -535,10 +539,12 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
   bucketConfig: Option[BucketAggregationConfig] = None)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
+  private val logger          = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
   private val arrowFfiEnabled = io.indextables.spark.arrow.AggregationArrowFfiConfig.isEnabled(config)
 
-  logger.debug(s"GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled")
+  logger.debug(
+    s"GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled"
+  )
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =

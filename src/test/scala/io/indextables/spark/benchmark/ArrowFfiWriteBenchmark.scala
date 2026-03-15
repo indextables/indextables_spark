@@ -19,10 +19,10 @@ package io.indextables.spark.benchmark
 
 import java.io.File
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.write.ArrowFfiWriteConfig
-
 import org.apache.spark.sql.DataFrame
+
+import io.indextables.spark.write.ArrowFfiWriteConfig
+import io.indextables.spark.TestBase
 
 /**
  * A/B benchmark comparing TANT batch path vs Arrow FFI path on identical data. Both paths write the same dataset,
@@ -90,13 +90,13 @@ class ArrowFfiWriteBenchmark extends TestBase {
       // Timed runs: TANT batch
       val tantTimes = (1 to ITERATIONS).map { i =>
         val p = s"file://$basePath/tant_$i"
-        timed { writeData(df, p, arrowFfiEnabled = false, partitionCols) }
+        timed(writeData(df, p, arrowFfiEnabled = false, partitionCols))
       }
 
       // Timed runs: Arrow FFI
       val arrowTimes = (1 to ITERATIONS).map { i =>
         val p = s"file://$basePath/arrow_$i"
-        timed { writeData(df, p, arrowFfiEnabled = true, partitionCols) }
+        timed(writeData(df, p, arrowFfiEnabled = true, partitionCols))
       }
 
       // Data parity check
@@ -110,7 +110,7 @@ class ArrowFfiWriteBenchmark extends TestBase {
 
       results += BenchmarkResult(name, tantMedian, arrowMedian, speedup, rowCount, parity)
 
-      println(f"$name%-45s TANT: ${tantMedian}%6dms  Arrow: ${arrowMedian}%6dms  Δ: $speedup%+.1f%%  parity=$parity")
+      println(f"$name%-45s TANT: $tantMedian%6dms  Arrow: $arrowMedian%6dms  Δ: $speedup%+.1f%%  parity=$parity")
     }
 
   // ===== Benchmark Scenarios =====
@@ -235,16 +235,16 @@ class ArrowFfiWriteBenchmark extends TestBase {
   }
 
   test("benchmark: partitioned low cardinality (500K x 10 / 10p)") {
-    val cols = (1 to 9).map(i => s"CAST(id * $i AS STRING) as col$i")
+    val cols    = (1 to 9).map(i => s"CAST(id * $i AS STRING) as col$i")
     val allCols = cols :+ "CAST(id % 10 AS STRING) as part_col"
-    val df = spark.range(0, 500000).selectExpr(allCols: _*)
+    val df      = spark.range(0, 500000).selectExpr(allCols: _*)
     runBenchmark("Partitioned low card (500K x 10 / 10p)", df, partitionCols = Seq("part_col"))
   }
 
   test("benchmark: partitioned high cardinality (500K x 10 / 100p)") {
-    val cols = (1 to 8).map(i => s"CAST(id * $i AS STRING) as col$i")
+    val cols    = (1 to 8).map(i => s"CAST(id * $i AS STRING) as col$i")
     val allCols = cols ++ Seq("CAST(id % 10 AS STRING) as part_a", "CAST(id % 10 AS STRING) as part_b")
-    val df = spark.range(0, 500000).selectExpr(allCols: _*)
+    val df      = spark.range(0, 500000).selectExpr(allCols: _*)
     runBenchmark("Partitioned high card (500K x 10 / 100p)", df, partitionCols = Seq("part_a", "part_b"))
   }
 

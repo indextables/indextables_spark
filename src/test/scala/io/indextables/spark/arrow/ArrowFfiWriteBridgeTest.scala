@@ -17,15 +17,14 @@
 
 package io.indextables.spark.arrow
 
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.arrow.vector.types.{DateUnit, FloatingPointPrecision, TimeUnit}
 import org.apache.arrow.vector.types.pojo.ArrowType
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -217,13 +216,13 @@ class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
       val row = new GenericInternalRow(
         Array[Any](
           UTF8String.fromString("test"),
-          42,              // IntegerType
-          100L,            // LongType
-          3.14f,           // FloatType
-          2.718,           // DoubleType
-          true,            // BooleanType
-          1000000L,        // TimestampType (micros since epoch)
-          19000,           // DateType (days since epoch)
+          42,                  // IntegerType
+          100L,                // LongType
+          3.14f,               // FloatType
+          2.718,               // DoubleType
+          true,                // BooleanType
+          1000000L,            // TimestampType (micros since epoch)
+          19000,               // DateType (days since epoch)
           Array[Byte](1, 2, 3) // BinaryType
         )
       )
@@ -382,11 +381,11 @@ class ArrowFfiWriteBridgeTest extends AnyFunSuite with Matchers {
   test("exportBatch throws on empty batch") {
     val schema = new StructType().add("name", StringType)
     val bridge = new ArrowFfiWriteBridge(schema, batchSize = 100)
-    try {
+    try
       an[IllegalStateException] should be thrownBy {
         bridge.exportBatch()
       }
-    } finally
+    finally
       bridge.close()
   }
 

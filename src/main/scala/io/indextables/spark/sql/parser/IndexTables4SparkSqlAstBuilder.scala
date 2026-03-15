@@ -23,7 +23,6 @@ import org.apache.spark.sql.catalyst.parser.ParserUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
-import io.indextables.spark.sql.TableRootUtils
 import io.indextables.spark.sql.{
   CheckpointCommand,
   DescribeComponentSizesCommand,
@@ -50,6 +49,7 @@ import io.indextables.spark.sql.{
   WaitForPrewarmJobsCommand
 }
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
+import io.indextables.spark.sql.TableRootUtils
 import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory
 
@@ -970,14 +970,15 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
           throw new IllegalArgumentException("WITH STREAMING is not compatible with DRY RUN")
         }
         val n = ctx.pollInterval.getText.toLong
-        if (n <= 0) throw new IllegalArgumentException(
-          s"WITH STREAMING POLL INTERVAL must be at least 1 SECONDS (got $n)"
-        )
+        if (n <= 0)
+          throw new IllegalArgumentException(
+            s"WITH STREAMING POLL INTERVAL must be at least 1 SECONDS (got $n)"
+          )
         val ms = ctx.pollUnit.getText.toUpperCase match {
           case "SECONDS" => n * 1000L
           case "MINUTES" => n * 60L * 1000L
         }
-        logger.debug(s"Streaming poll interval: ${n} ${ctx.pollUnit.getText} (${ms}ms)")
+        logger.debug(s"Streaming poll interval: $n ${ctx.pollUnit.getText} (${ms}ms)")
         Some(ms)
       } else {
         None

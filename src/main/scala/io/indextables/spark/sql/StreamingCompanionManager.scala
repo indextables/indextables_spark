@@ -18,51 +18,50 @@
 package io.indextables.spark.sql
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.slf4j.LoggerFactory
 
 import io.indextables.spark.util.ConfigNormalization
+import org.slf4j.LoggerFactory
 
 /**
  * Manages the streaming companion sync loop for BUILD INDEXTABLES COMPANION ... WITH STREAMING.
  *
- * Runs an initial full sync followed by repeated incremental cycles at the configured poll
- * interval. On each incremental cycle:
- *   1. A cheap version probe is attempted:
- *        Delta:   1 GET + O(k) HEAD probes, no parquet read.
- *        Iceberg: 1 catalog.load_table() call, no manifest list read.
- *        Parquet: no probe available, always falls through to step 2.
- *      If the source version is unchanged since the last sync, the full sync is skipped entirely.
- *   2. If changed (or no cheap probe available), syncFn is called with the last known source
- *      version so the underlying scanner uses an incremental changeset instead of a full anti-join.
+ * Runs an initial full sync followed by repeated incremental cycles at the configured poll interval. On each
+ * incremental cycle:
+ *   1. A cheap version probe is attempted: Delta: 1 GET + O(k) HEAD probes, no parquet read. Iceberg: 1
+ *      catalog.load_table() call, no manifest list read. Parquet: no probe available, always falls through to step 2.
+ *      If the source version is unchanged since the last sync, the full sync is skipped entirely. 2. If changed (or no
+ *      cheap probe available), syncFn is called with the last known source version so the underlying scanner uses an
+ *      incremental changeset instead of a full anti-join.
  *
  * Stops when:
  *   - The calling thread is interrupted (Ctrl+C, notebook cancel, sparkContext.cancelAllJobs())
  *   - sparkContext.isStopped returns true
  *   - Consecutive error limit is exceeded
  *
- * Configurable via SparkSession:
- *   spark.indextables.companion.stream.maxConsecutiveErrors  (default: 10)
- *   spark.indextables.companion.stream.errorBackoffMultiplier (default: 2)
- *   spark.indextables.companion.stream.quietPollLogInterval   (default: 10)
+ * Configurable via SparkSession: spark.indextables.companion.stream.maxConsecutiveErrors (default: 10)
+ * spark.indextables.companion.stream.errorBackoffMultiplier (default: 2)
+ * spark.indextables.companion.stream.quietPollLogInterval (default: 10)
  */
 private[sql] class StreamingCompanionManager(
   command: SyncToExternalCommand,
   pollIntervalMs: Long,
-  syncFn: (SparkSession, Long, Option[Long]) => Seq[Row]
-) {
+  syncFn: (SparkSession, Long, Option[Long]) => Seq[Row]) {
 
   private val logger = LoggerFactory.getLogger(classOf[StreamingCompanionManager])
 
   def runStreaming(sparkSession: SparkSession): Unit = {
     val maxConsecutiveErrors = sparkSession.conf
       .getOption("spark.indextables.companion.stream.maxConsecutiveErrors")
-      .map(_.toInt).getOrElse(10)
+      .map(_.toInt)
+      .getOrElse(10)
     val errorBackoffMultiplier = sparkSession.conf
       .getOption("spark.indextables.companion.stream.errorBackoffMultiplier")
-      .map(_.toLong).getOrElse(2L)
+      .map(_.toLong)
+      .getOrElse(2L)
     val quietPollLogInterval = sparkSession.conf
       .getOption("spark.indextables.companion.stream.quietPollLogInterval")
-      .map(_.toInt).getOrElse(10)
+      .map(_.toInt)
+      .getOrElse(10)
 
     val streamStart = System.currentTimeMillis()
     logger.info(
@@ -76,15 +75,16 @@ private[sql] class StreamingCompanionManager(
 
     // Pre-compute merged configs once — reused every poll cycle by cheapSourceVersion.
     // Avoids re-reading SparkConf/HadoopConf on every cycle (O(1) map lookup instead of reflection).
-    val cachedBaseConfigs: Option[Map[String, String]] = try {
-      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
-      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      Some(
-        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
-          ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
-      )
-    } catch { case _: Exception => None }
+    val cachedBaseConfigs: Option[Map[String, String]] =
+      try {
+        val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+        val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+        val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+        Some(
+          ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+            ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+        )
+      } catch { case _: Exception => None }
 
     // Attempt to resume from the last committed source version in the companion transaction log.
     // On a clean first run this returns None and a full sync is performed.
@@ -99,13 +99,13 @@ private[sql] class StreamingCompanionManager(
 
     var lastSyncedVersion: Option[Long]  = resumedVersion
     var lastCurrentVersion: Option[Long] = None
-    var consecutiveErrors  = 0
-    var cycle              = 0
-    var pollsWithNoChanges = 0
-    var lastSyncCompleteMs = 0L
-    var lastSyncDurationMs = 0L
-    var lastFilesIndexed   = 0L
-    var lastSplitsCreated  = 0L
+    var consecutiveErrors                = 0
+    var cycle                            = 0
+    var pollsWithNoChanges               = 0
+    var lastSyncCompleteMs               = 0L
+    var lastSyncDurationMs               = 0L
+    var lastFilesIndexed                 = 0L
+    var lastSplitsCreated                = 0L
 
     while (!Thread.currentThread().isInterrupted && !sparkSession.sparkContext.isStopped) {
       cycle += 1
@@ -150,7 +150,10 @@ private[sql] class StreamingCompanionManager(
         // ── Sync path ───────────────────────────────────────────────────────────────────────────
         pollsWithNoChanges = 0
         cheapVersion.foreach(cv => lastCurrentVersion = Some(cv))
-        val lagVersions = for (cur <- lastCurrentVersion; synced <- lastSyncedVersion) yield cur - synced
+        val lagVersions = for {
+          cur    <- lastCurrentVersion
+          synced <- lastSyncedVersion
+        } yield cur - synced
         logger.info(
           s"[IndextablesCompanionStream] SYNCING cycle $cycle | " +
             s"source=${command.sourcePath} (${command.sourceFormat.toUpperCase})" +
@@ -166,21 +169,23 @@ private[sql] class StreamingCompanionManager(
           // Row schema: table_path(0), source_path(1), status(2), source_version(3),
           //   splits_created(4), splits_invalidated(5), parquet_files_indexed(6),
           //   parquet_bytes_downloaded(7), split_bytes_uploaded(8), duration_ms(9), message(10)
-          val (filesIndexed, splitsCreated, durationMs) = rows.headOption.map { row =>
-            if (!row.isNullAt(3)) {
-              lastSyncedVersion  = Some(row.getLong(3))
-              lastCurrentVersion = lastSyncedVersion
+          val (filesIndexed, splitsCreated, durationMs) = rows.headOption
+            .map { row =>
+              if (!row.isNullAt(3)) {
+                lastSyncedVersion = Some(row.getLong(3))
+                lastCurrentVersion = lastSyncedVersion
+              }
+              val files  = if (!row.isNullAt(6)) row.getInt(6).toLong else 0L
+              val splits = if (!row.isNullAt(4)) row.getInt(4).toLong else 0L
+              val dur    = if (!row.isNullAt(9)) row.getLong(9) else System.currentTimeMillis() - cycleStart
+              (files, splits, dur)
             }
-            val files  = if (!row.isNullAt(6)) row.getInt(6).toLong else 0L
-            val splits = if (!row.isNullAt(4)) row.getInt(4).toLong else 0L
-            val dur    = if (!row.isNullAt(9)) row.getLong(9) else System.currentTimeMillis() - cycleStart
-            (files, splits, dur)
-          }.getOrElse((0L, 0L, System.currentTimeMillis() - cycleStart))
+            .getOrElse((0L, 0L, System.currentTimeMillis() - cycleStart))
 
           lastSyncCompleteMs = System.currentTimeMillis()
           lastSyncDurationMs = durationMs
-          lastFilesIndexed   = filesIndexed
-          lastSplitsCreated  = splitsCreated
+          lastFilesIndexed = filesIndexed
+          lastSplitsCreated = splitsCreated
 
           metrics.recordCycleSuccess(filesIndexed, durationMs, splitsCreated)
           logger.info(
@@ -201,7 +206,8 @@ private[sql] class StreamingCompanionManager(
             consecutiveErrors += 1
             metrics.recordCycleError()
             val rawBackoff = math.min(
-              math.pow(errorBackoffMultiplier.toDouble, consecutiveErrors), 10.0
+              math.pow(errorBackoffMultiplier.toDouble, consecutiveErrors),
+              10.0
             ) * pollIntervalMs
             nextSleepMs = math.min(rawBackoff.toLong, pollIntervalMs * 10L)
             logger.error(
@@ -231,9 +237,9 @@ private[sql] class StreamingCompanionManager(
   }
 
   private def waitForNextCycle(sleepMs: Long): Unit =
-    try {
+    try
       Thread.sleep(sleepMs)
-    } catch {
+    catch {
       case _: InterruptedException =>
         Thread.currentThread().interrupt()
     }

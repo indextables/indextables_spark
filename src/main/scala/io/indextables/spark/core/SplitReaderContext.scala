@@ -43,8 +43,8 @@ import org.slf4j.LoggerFactory
  * field name retrieval, partition filter separation, range filter stats optimization, IndexQuery cleanup, and
  * SplitQuery building.
  *
- * [[ColumnarPartitionReader]] composes this class (has-a) rather than inheriting from it, avoiding trait mixin complexity
- * with the `PartitionReader[ColumnarBatch]` type parameter.
+ * [[ColumnarPartitionReader]] composes this class (has-a) rather than inheriting from it, avoiding trait mixin
+ * complexity with the `PartitionReader[ColumnarBatch]` type parameter.
  */
 class SplitReaderContext(
   addAction: AddAction,
@@ -59,7 +59,7 @@ class SplitReaderContext(
 
   private val logger = LoggerFactory.getLogger(classOf[SplitReaderContext])
 
-  val readMode: String = SplitReaderContext.resolveReadMode(config)
+  val readMode: String    = SplitReaderContext.resolveReadMode(config)
   val effectiveLimit: Int = SplitReaderContext.computeEffectiveLimit(config, limit)
 
   /** Resolved file path from AddAction against table path. */
@@ -257,16 +257,16 @@ class SplitReaderContext(
   }
 
   /** Result of resolving partition column references within a filter. */
-  private sealed trait PartitionResolution
-  private case object ResolvedTrue extends PartitionResolution
-  private case object ResolvedFalse extends PartitionResolution
+  sealed private trait PartitionResolution
+  private case object ResolvedTrue                  extends PartitionResolution
+  private case object ResolvedFalse                 extends PartitionResolution
   private case class ResolvedFilter(filter: Filter) extends PartitionResolution
 
   /**
-    * Resolve partition column references in a filter against this split's partition values.
-    * For leaf filters on partition columns, evaluates them against the known partition values.
-    * For And/Or, recursively resolves and simplifies using boolean logic.
-    */
+   * Resolve partition column references in a filter against this split's partition values. For leaf filters on
+   * partition columns, evaluates them against the known partition values. For And/Or, recursively resolves and
+   * simplifies using boolean logic.
+   */
   private def resolvePartitionReferences(filter: Filter): PartitionResolution = {
     import org.apache.spark.sql.sources._
 
@@ -305,24 +305,24 @@ class SplitReaderContext(
         val l = resolvePartitionReferences(left)
         val r = resolvePartitionReferences(right)
         (l, r) match {
-          case (ResolvedTrue, _) | (_, ResolvedTrue) => ResolvedTrue
-          case (ResolvedFalse, other)                => other
-          case (other, ResolvedFalse)                => other
+          case (ResolvedTrue, _) | (_, ResolvedTrue)    => ResolvedTrue
+          case (ResolvedFalse, other)                   => other
+          case (other, ResolvedFalse)                   => other
           case (ResolvedFilter(lf), ResolvedFilter(rf)) => ResolvedFilter(Or(lf, rf))
         }
       case And(left, right) =>
         val l = resolvePartitionReferences(left)
         val r = resolvePartitionReferences(right)
         (l, r) match {
-          case (ResolvedFalse, _) | (_, ResolvedFalse) => ResolvedFalse
-          case (ResolvedTrue, other)                   => other
-          case (other, ResolvedTrue)                   => other
+          case (ResolvedFalse, _) | (_, ResolvedFalse)  => ResolvedFalse
+          case (ResolvedTrue, other)                    => other
+          case (other, ResolvedTrue)                    => other
           case (ResolvedFilter(lf), ResolvedFilter(rf)) => ResolvedFilter(And(lf, rf))
         }
       case Not(child) =>
         resolvePartitionReferences(child) match {
-          case ResolvedTrue     => ResolvedFalse
-          case ResolvedFalse    => ResolvedTrue
+          case ResolvedTrue      => ResolvedFalse
+          case ResolvedFalse     => ResolvedTrue
           case ResolvedFilter(f) => ResolvedFilter(Not(f))
         }
       case leaf if isPartitionLeaf(leaf) =>
@@ -333,31 +333,48 @@ class SplitReaderContext(
   }
 
   /** Compare a partition value string with a filter value for equality. */
-  private def partitionValueEquals(partitionValue: String, filterValue: Any, attr: String): Boolean =
+  private def partitionValueEquals(
+    partitionValue: String,
+    filterValue: Any,
+    attr: String
+  ): Boolean =
     filterValue match {
-      case s: String       => partitionValue == s
-      case i: Int          => scala.util.Try(partitionValue.toInt).toOption.contains(i)
-      case l: Long         => scala.util.Try(partitionValue.toLong).toOption.contains(l)
-      case d: Double       => scala.util.Try(partitionValue.toDouble).toOption.contains(d)
-      case f: Float        => scala.util.Try(partitionValue.toFloat).toOption.contains(f)
-      case b: Boolean      => scala.util.Try(partitionValue.toBoolean).toOption.contains(b)
+      case s: String  => partitionValue == s
+      case i: Int     => scala.util.Try(partitionValue.toInt).toOption.contains(i)
+      case l: Long    => scala.util.Try(partitionValue.toLong).toOption.contains(l)
+      case d: Double  => scala.util.Try(partitionValue.toDouble).toOption.contains(d)
+      case f: Float   => scala.util.Try(partitionValue.toFloat).toOption.contains(f)
+      case b: Boolean => scala.util.Try(partitionValue.toBoolean).toOption.contains(b)
       case date: java.sql.Date =>
-        scala.util.Try(java.time.LocalDate.parse(partitionValue)).toOption.exists(_.toEpochDay == date.toLocalDate.toEpochDay)
+        scala.util
+          .Try(java.time.LocalDate.parse(partitionValue))
+          .toOption
+          .exists(_.toEpochDay == date.toLocalDate.toEpochDay)
       case ts: java.sql.Timestamp =>
-        scala.util.Try(java.time.Instant.parse(partitionValue))
+        scala.util
+          .Try(java.time.Instant.parse(partitionValue))
           .orElse(scala.util.Try(java.time.Instant.parse(partitionValue + "Z")))
-          .toOption.exists(_.toEpochMilli == ts.getTime)
+          .toOption
+          .exists(_.toEpochMilli == ts.getTime)
       case _ => partitionValue == filterValue.toString
     }
 
   /** Compare a partition value with a filter value, returning negative/zero/positive like Comparable. */
-  private def partitionValueCompare(partitionValue: String, filterValue: Any, attr: String): Int = {
+  private def partitionValueCompare(
+    partitionValue: String,
+    filterValue: Any,
+    attr: String
+  ): Int = {
     val fieldType = fullTableSchema.fields.find(_.name == attr).map(_.dataType)
     fieldType match {
-      case Some(IntegerType) => scala.util.Try(partitionValue.toInt).getOrElse(0).compareTo(filterValue.asInstanceOf[Int])
-      case Some(LongType) => scala.util.Try(partitionValue.toLong).getOrElse(0L).compareTo(filterValue.asInstanceOf[Long])
-      case Some(DoubleType) => scala.util.Try(partitionValue.toDouble).getOrElse(0.0).compareTo(filterValue.asInstanceOf[Double])
-      case Some(FloatType) => scala.util.Try(partitionValue.toFloat).getOrElse(0.0f).compareTo(filterValue.asInstanceOf[Float])
+      case Some(IntegerType) =>
+        scala.util.Try(partitionValue.toInt).getOrElse(0).compareTo(filterValue.asInstanceOf[Int])
+      case Some(LongType) =>
+        scala.util.Try(partitionValue.toLong).getOrElse(0L).compareTo(filterValue.asInstanceOf[Long])
+      case Some(DoubleType) =>
+        scala.util.Try(partitionValue.toDouble).getOrElse(0.0).compareTo(filterValue.asInstanceOf[Double])
+      case Some(FloatType) =>
+        scala.util.Try(partitionValue.toFloat).getOrElse(0.0f).compareTo(filterValue.asInstanceOf[Float])
       case Some(DateType) =>
         val pvDays = scala.util.Try(java.time.LocalDate.parse(partitionValue).toEpochDay.toInt).getOrElse(0)
         filterValue match {

@@ -30,9 +30,9 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Parity tests for bucket aggregations between Arrow FFI (columnar) and InternalRow read paths.
  *
- * Each test runs the same bucket aggregation query twice -- once with FFI enabled and once disabled --
- * then verifies the results match exactly. This ensures the FFI columnar path produces identical
- * results to the object-based InternalRow fallback path for all bucket aggregation types.
+ * Each test runs the same bucket aggregation query twice -- once with FFI enabled and once disabled -- then verifies
+ * the results match exactly. This ensures the FFI columnar path produces identical results to the object-based
+ * InternalRow fallback path for all bucket aggregation types.
  */
 class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
 
@@ -48,8 +48,8 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
       .getOrCreate()
 
   /**
-   * Write shared test data once for a given test, returning the table path.
-   * Uses optimized write to produce a single split for deterministic results.
+   * Write shared test data once for a given test, returning the table path. Uses optimized write to produce a single
+   * split for deterministic results.
    */
   private def writeTestData(spark: SparkSession): (File, String) = {
     import spark.implicits._
@@ -81,10 +81,16 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
   }
 
   /**
-   * Run a SQL query against a table loaded with the given FFI setting.
-   * Creates a temporary view with a unique name to avoid conflicts.
+   * Run a SQL query against a table loaded with the given FFI setting. Creates a temporary view with a unique name to
+   * avoid conflicts.
    */
-  private def runQuery(spark: SparkSession, tablePath: String, ffiEnabled: Boolean, viewName: String, sql: String): Array[Row] = {
+  private def runQuery(
+    spark: SparkSession,
+    tablePath: String,
+    ffiEnabled: Boolean,
+    viewName: String,
+    sql: String
+  ): Array[Row] = {
     val df = spark.read
       .format(PROVIDER)
       .option("spark.indextables.read.aggregation.arrowFfi.enabled", ffiEnabled.toString)
@@ -94,13 +100,11 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     spark.sql(sql).collect()
   }
 
-  /**
-   * Run a query with both FFI disabled and enabled, returning both result arrays.
-   */
+  /** Run a query with both FFI disabled and enabled, returning both result arrays. */
   private def runWithBothPaths(
-      spark: SparkSession,
-      tablePath: String,
-      queryTemplate: String => String
+    spark: SparkSession,
+    tablePath: String,
+    queryTemplate: String => String
   ): (Array[Row], Array[Row]) = {
     val viewDisabled = "tbl_ffi_off"
     val viewEnabled  = "tbl_ffi_on"
@@ -111,10 +115,12 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     (disabledRows, enabledRows)
   }
 
-  /**
-   * Assert that two result sets match row-by-row after sorting by the first column.
-   */
-  private def assertResultsMatch(disabledRows: Array[Row], enabledRows: Array[Row], testLabel: String): Unit = {
+  /** Assert that two result sets match row-by-row after sorting by the first column. */
+  private def assertResultsMatch(
+    disabledRows: Array[Row],
+    enabledRows: Array[Row],
+    testLabel: String
+  ): Unit = {
     withClue(s"$testLabel: row count mismatch") {
       disabledRows.length shouldBe enabledRows.length
     }
@@ -122,15 +128,18 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     val sortedDisabled = disabledRows.sortBy(_.get(0).toString)
     val sortedEnabled  = enabledRows.sortBy(_.get(0).toString)
 
-    sortedDisabled.zip(sortedEnabled).zipWithIndex.foreach { case ((rowD, rowE), idx) =>
-      withClue(s"$testLabel: column count mismatch at row $idx") {
-        rowD.length shouldBe rowE.length
-      }
-      (0 until rowD.length).foreach { col =>
-        withClue(s"$testLabel: value mismatch at row $idx, col $col: disabled=${rowD.get(col)}, enabled=${rowE.get(col)}") {
-          rowD.get(col) shouldBe rowE.get(col)
+    sortedDisabled.zip(sortedEnabled).zipWithIndex.foreach {
+      case ((rowD, rowE), idx) =>
+        withClue(s"$testLabel: column count mismatch at row $idx") {
+          rowD.length shouldBe rowE.length
         }
-      }
+        (0 until rowD.length).foreach { col =>
+          withClue(
+            s"$testLabel: value mismatch at row $idx, col $col: disabled=${rowD.get(col)}, enabled=${rowE.get(col)}"
+          ) {
+            rowD.get(col) shouldBe rowE.get(col)
+          }
+        }
     }
   }
 
@@ -141,8 +150,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     try {
       val (tempDir, tablePath) = writeTestData(spark)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT indextables_date_histogram(timestamp, '30m') as time_bucket, COUNT(*) as cnt
           FROM $viewName
           GROUP BY indextables_date_histogram(timestamp, '30m')
@@ -165,8 +176,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     try {
       val (tempDir, tablePath) = writeTestData(spark)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT indextables_histogram(price, 50.0) as price_bucket, COUNT(*) as cnt
           FROM $viewName
           GROUP BY indextables_histogram(price, 50.0)
@@ -189,8 +202,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     try {
       val (tempDir, tablePath) = writeTestData(spark)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT
             indextables_range(price, 'cheap', NULL, 50.0, 'mid', 50.0, 100.0, 'expensive', 100.0, NULL) as price_tier,
             COUNT(*) as cnt
@@ -215,8 +230,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     try {
       val (tempDir, tablePath) = writeTestData(spark)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT indextables_histogram(price, 50.0) as price_bucket, COUNT(*) as cnt, SUM(price) as total_price
           FROM $viewName
           GROUP BY indextables_histogram(price, 50.0)
@@ -239,8 +256,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     try {
       val (tempDir, tablePath) = writeTestData(spark)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT indextables_date_histogram(timestamp, '30m') as time_bucket, hostname, COUNT(*) as cnt
           FROM $viewName
           GROUP BY indextables_date_histogram(timestamp, '30m'), hostname
@@ -263,8 +282,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
     try {
       val (tempDir, tablePath) = writeTestData(spark)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT indextables_histogram(price, 50.0) as price_bucket, hostname, COUNT(*) as cnt
           FROM $viewName
           GROUP BY indextables_histogram(price, 50.0), hostname
@@ -306,8 +327,10 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
         .mode(SaveMode.Overwrite)
         .save(tablePath)
 
-      val (disabledRows, enabledRows) = runWithBothPaths(spark, tablePath, viewName =>
-        s"""
+      val (disabledRows, enabledRows) = runWithBothPaths(
+        spark,
+        tablePath,
+        viewName => s"""
           SELECT region, category, quarter, COUNT(*) as cnt, SUM(sales) as total_sales
           FROM $viewName
           GROUP BY region, category, quarter
