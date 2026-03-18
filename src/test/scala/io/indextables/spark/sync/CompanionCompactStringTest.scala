@@ -1183,7 +1183,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("should allow overriding maxHashedFastfields limit via spark property") {
+  test("should allow overriding maxAutomaticHashedFastfields limit via spark property") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_many_strings_override").getAbsolutePath
       val indexPath   = new File(tempDir, "companion_many_strings_override").getAbsolutePath
@@ -1214,7 +1214,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .parquet(parquetPath)
 
       // Override limit to 15
-      spark.conf.set("spark.indextables.companion.maxHashedFastfields", "15")
+      spark.conf.set("spark.indextables.companion.maxAutomaticHashedFastfields", "15")
       try {
         val result = spark.sql(
           s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
@@ -1222,7 +1222,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         )
         result.collect()(0).getString(2) shouldBe "success"
       } finally {
-        spark.conf.unset("spark.indextables.companion.maxHashedFastfields")
+        spark.conf.unset("spark.indextables.companion.maxAutomaticHashedFastfields")
       }
     }
   }

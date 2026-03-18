@@ -566,17 +566,17 @@ case class SyncToExternalCommand(
             !textFields.contains(field.name.toLowerCase) &&
             !partitionFieldsLower.contains(field.name.toLowerCase)
         }
-        val maxHashedFastfields = mergedConfigs
-          .get("spark.indextables.companion.maxHashedFastfields")
+        val maxAutomaticHashedFastfields = mergedConfigs
+          .get("spark.indextables.companion.maxAutomaticHashedFastfields")
           .map(_.toInt)
           .getOrElse(10)
-        if (hashableStringColumns > maxHashedFastfields) {
+        if (hashableStringColumns > maxAutomaticHashedFastfields) {
           throw new IllegalArgumentException(
             s"Source schema has $hashableStringColumns string columns that would be hashed as fast fields, " +
-              s"which exceeds the limit of $maxHashedFastfields. This can produce oversized splits with many " +
+              s"which exceeds the limit of $maxAutomaticHashedFastfields. This can produce oversized splits with many " +
               s"useless hashed columns. Use HASHED FASTFIELDS INCLUDE (...) to select specific fields, " +
               s"or HASHED FASTFIELDS EXCLUDE (...) to remove unwanted fields. " +
-              s"To override this limit, set spark.indextables.companion.maxHashedFastfields to a higher value."
+              s"To override this limit, set spark.indextables.companion.maxAutomaticHashedFastfields to a higher value."
           )
         }
       }
