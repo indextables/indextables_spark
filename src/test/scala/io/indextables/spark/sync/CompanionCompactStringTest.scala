@@ -1060,6 +1060,173 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("should fail when too many string columns would be hashed without INCLUDE/EXCLUDE") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      // Create data with 12 string columns (exceeds default limit of 10)
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "error"
+      val message = row(0).getString(10)
+      message should include("12 string columns")
+      message should include("exceeds the limit of 10")
+      message should include("HASHED FASTFIELDS INCLUDE")
+    }
+  }
+
+  test("should succeed with many string columns when INCLUDE is specified") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings_inc").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings_inc").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS INCLUDE ('s1', 's2') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("should succeed with many string columns when EXCLUDE is specified") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings_exc").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings_exc").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS EXCLUDE ('s1') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("should allow overriding maxAutomaticHashedFastfields limit via spark property") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings_override").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings_override").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      // Override limit to 15
+      spark.conf.set("spark.indextables.companion.maxAutomaticHashedFastfields", "15")
+      try {
+        val result = spark.sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"AT LOCATION '$indexPath'"
+        )
+        result.collect()(0).getString(2) shouldBe "success"
+      } finally {
+        spark.conf.unset("spark.indextables.companion.maxAutomaticHashedFastfields")
+      }
+    }
+  }
+
   test("text field should support COUNT aggregation with HYBRID fast fields") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_text_count").getAbsolutePath

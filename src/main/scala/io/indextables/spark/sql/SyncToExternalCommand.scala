@@ -555,6 +555,32 @@ case class SyncToExternalCommand(
           (Seq.empty[String], Seq.empty[String])
         }
 
+      // Safety check: fail if too many string columns would be hashed without explicit INCLUDE/EXCLUDE.
+      // When no HASHED FASTFIELDS clause is specified, tantivy4java hashes ALL string columns by default,
+      // which can produce oversized splits with many useless hashed columns.
+      if (effectiveHfInclude.isEmpty && effectiveHfExclude.isEmpty) {
+        val textFields = effectiveIndexingModes.collect { case (f, m) if m.toLowerCase == "text" => f.toLowerCase }.toSet
+        val partitionFieldsLower = partitionColumns.map(_.toLowerCase).toSet
+        val hashableStringColumns = sourceSchema.fields.count { field =>
+          field.dataType == StringType &&
+            !textFields.contains(field.name.toLowerCase) &&
+            !partitionFieldsLower.contains(field.name.toLowerCase)
+        }
+        val maxAutomaticHashedFastfields = mergedConfigs
+          .get("spark.indextables.companion.maxAutomaticHashedFastfields")
+          .map(_.toInt)
+          .getOrElse(10)
+        if (hashableStringColumns > maxAutomaticHashedFastfields) {
+          throw new IllegalArgumentException(
+            s"Source schema has $hashableStringColumns string columns that would be hashed as fast fields, " +
+              s"which exceeds the limit of $maxAutomaticHashedFastfields. This can produce oversized splits with many " +
+              s"useless hashed columns. Use HASHED FASTFIELDS INCLUDE (...) to select specific fields, " +
+              s"or HASHED FASTFIELDS EXCLUDE (...) to remove unwanted fields. " +
+              s"To override this limit, set spark.indextables.companion.maxAutomaticHashedFastfields to a higher value."
+          )
+        }
+      }
+
       // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
       // All source readers return relative paths, so the anti-join is bucket-independent
       // and works across cross-region failover (different S3 buckets, same relative paths).
