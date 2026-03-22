@@ -399,7 +399,17 @@ class ColumnarPartitionReader(
         case ShortType   => vec.setShort(value.toShort)
         case ByteType    => vec.setByte(value.toByte)
         case DateType =>
-          vec.setInt(java.time.LocalDate.parse(value).toEpochDay.toInt)
+          // Handle both ISO date strings (e.g., "2026-03-22") and epoch-day numbers
+          // (e.g., "20527" from older companion indexes). The build-side fix in
+          // DistributedSourceScanner normalizes to ISO, so try that first to avoid
+          // exception allocation on the common path.
+          val epochDay = try {
+            java.time.LocalDate.parse(value).toEpochDay.toInt // ISO date string (common case)
+          } catch {
+            case _: Exception =>
+              value.toInt // epoch day number (legacy data)
+          }
+          vec.setInt(epochDay)
         case TimestampType =>
           val instant = if (value.contains("T")) {
             java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant

@@ -136,11 +136,18 @@ class IcebergSourceReader(
 
     val root = computedStorageRoot
 
-    // Build files with absolute paths first (needed for partition value extraction)
+    // Extract DATE column names so we can convert Iceberg epoch-day partition
+    // values to ISO format (e.g., "20527" -> "2026-03-22").
+    val schemaOpt = try Some(schema()) catch { case _: Exception => None }
+    val dateColumns = DistributedSourceScanner.extractDateColumns(schemaOpt)
+
+    // Build files with absolute paths first (needed for partition value extraction).
+    // Normalize DATE partition values from Iceberg epoch days to ISO strings.
     val absoluteFiles = parquetFiles.map { entry =>
       CompanionSourceFile(
         path = entry.getPath,
-        partitionValues = entry.getPartitionValues.asScala.toMap,
+        partitionValues = DistributedSourceScanner.normalizeIcebergDatePartitions(
+          entry.getPartitionValues.asScala.toMap, dateColumns),
         size = entry.getFileSizeBytes
       )
     }
