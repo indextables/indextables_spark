@@ -694,7 +694,7 @@ class DistributedSourceScanner(spark: SparkSession) {
       try {
         val schemaJson = snapshotInfo.getSchemaJson
         if (schemaJson != null && schemaJson.nonEmpty)
-          Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+          Some(IcebergSourceReader.parseSchemaJson(schemaJson))
         else None
       } catch { case _: Exception => None }
 
