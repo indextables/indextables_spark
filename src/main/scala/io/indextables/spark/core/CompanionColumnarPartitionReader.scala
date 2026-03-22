@@ -404,7 +404,8 @@ class ColumnarPartitionReader(
           // DistributedSourceScanner normalizes to ISO, so try that first to avoid
           // exception allocation on the common path.
           val epochDay = try {
-            java.time.LocalDate.parse(value).toEpochDay.toInt // ISO date string (common case)
+            val dateStr = if (value.contains("T")) value.substring(0, 10) else value
+            java.time.LocalDate.parse(dateStr).toEpochDay.toInt // ISO date string (common case)
           } catch {
             case _: Exception =>
               value.toInt // epoch day number (legacy data)
