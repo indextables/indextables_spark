@@ -411,22 +411,27 @@ class TransactionLogGroupByCountPartitionReader(
         }
 
       case DateType =>
-        // Convert date string to days since epoch (Int) as Spark expects
+        // Handle both ISO date strings (e.g., "2026-03-22") and epoch-day numbers
+        // (e.g., "20527" from Iceberg). Try ISO first since build-side normalization
+        // makes it the common case.
         try {
           val localDate = if (value.contains("T")) {
-            // ISO datetime format - extract date part
             LocalDate.parse(value.substring(0, 10))
           } else {
-            // Simple date format YYYY-MM-DD
             LocalDate.parse(value)
           }
           localDate.toEpochDay.toInt
         } catch {
-          case e: Exception =>
-            throw new IllegalArgumentException(
-              s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e.getMessage}",
-              e
-            )
+          case _: Exception =>
+            try {
+              value.toInt // epoch day number
+            } catch {
+              case e2: NumberFormatException =>
+                throw new IllegalArgumentException(
+                  s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e2.getMessage}",
+                  e2
+                )
+            }
         }
 
       case TimestampType =>
