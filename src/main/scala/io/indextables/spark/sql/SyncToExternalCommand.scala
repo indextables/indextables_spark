@@ -821,7 +821,7 @@ case class SyncToExternalCommand(
     sparkSession: SparkSession,
     groups: Seq[SyncIndexingGroupPlan],
     syncConfig: SyncConfig,
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
@@ -1064,7 +1064,7 @@ case class SyncToExternalCommand(
    * overwritten. See SetTableRootCommand scaladoc.
    */
   private def buildCompanionMetadata(
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
     effectiveHfInclude: Seq[String],
@@ -1183,7 +1183,7 @@ case class SyncToExternalCommand(
    *   (existingFiles, isInitialSync)
    */
   private def determineSyncMode(
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     deltaSchema: org.apache.spark.sql.types.StructType,
     partitionColumns: Seq[String]
   ): (Seq[AddAction], Boolean) =

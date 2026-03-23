@@ -33,7 +33,7 @@ import io.indextables.spark.transaction.{
   AddAction,
   PartitionPredicateUtils,
   RemoveAction,
-  TransactionLog,
+  TransactionLogInterface,
   TransactionLogFactory
 }
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
@@ -412,7 +412,7 @@ case class SerializableAwsConfig(
 /** Executor for merge splits operation. Follows Delta Lake's OptimizeExecutor pattern. */
 class MergeSplitsExecutor(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   tablePath: Path,
   partitionPredicates: Seq[String],
   targetSize: Long,

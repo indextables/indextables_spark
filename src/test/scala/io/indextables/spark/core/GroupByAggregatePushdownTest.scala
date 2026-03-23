@@ -8,7 +8,7 @@ import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLogInterface}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 
@@ -112,7 +112,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
 
   // Helper methods for creating mock objects
 
-  private def createMockTransactionLog(): TransactionLog =
+  private def createMockTransactionLog(): TransactionLogInterface =
     // Create a mock transaction log that returns empty file list using factory
     TransactionLogFactory.create(new Path("/mock/path"), spark)
 }

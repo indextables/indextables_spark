@@ -239,3 +239,56 @@ case class FileStats(
   minValues: Map[String, String],
   maxValues: Map[String, String],
   nullCount: Map[String, Long])
+
+// --- Transaction log retry and conflict types ---
+
+class TransactionConflictException(
+  message: String,
+  val version: Long,
+  val attemptsMade: Int,
+  cause: Throwable = null)
+    extends RuntimeException(message, cause)
+
+case class TxRetryConfig(
+  maxAttempts: Int = 10,
+  baseDelayMs: Long = 100,
+  maxDelayMs: Long = 5000)
+
+case class TxRetryMetrics(
+  attemptsMade: Int,
+  conflictsEncountered: Int,
+  finalVersion: Long,
+  conflictedVersions: Seq[Long])
+
+// --- Cache statistics ---
+
+case class CacheStats(
+  hits: Long,
+  misses: Long,
+  hitRate: Double,
+  versionsInCache: Int,
+  expirationSeconds: Long) {
+  override def toString: String =
+    f"CacheStats(hits=$hits, misses=$misses, hitRate=${hitRate * 100}%.1f%%, " +
+      f"versionsInCache=$versionsInCache, expirationSecs=$expirationSeconds)"
+}
+
+// --- Checkpoint types ---
+
+case class LastCheckpointInfo(
+  version: Long,
+  size: Long,
+  sizeInBytes: Long,
+  numFiles: Long,
+  createdTime: Long,
+  parts: Option[Int] = None,
+  checkpointId: Option[String] = None,
+  format: Option[String] = None,
+  stateDir: Option[String] = None)
+
+case class MultiPartCheckpointManifest(
+  version: Long,
+  checkpointId: String,
+  parts: Seq[String],
+  createdTime: Long,
+  format: String = "json")

@@ -23,7 +23,7 @@ import org.apache.spark.sql.connector.write.{LogicalWriteInfo, RequiresDistribut
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.TransactionLogInterface
 import io.indextables.spark.write.{OptimizedWriteConfig, WriteSizeEstimator}
 import org.slf4j.LoggerFactory
 
@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory
  * IndexTables4SparkStandardWrite.
  */
 class IndexTables4SparkOptimizedWrite(
-  @transient transactionLog: TransactionLog,
+  @transient transactionLog: TransactionLogInterface,
   tablePath: Path,
   @transient writeInfo: LogicalWriteInfo,
   serializedOptions: Map[String, String],

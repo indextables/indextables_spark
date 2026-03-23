@@ -288,7 +288,7 @@ object PartitionPruning {
     filters: Array[Filter],
     filterCacheEnabled: Boolean
   ): Set[Map[String, String]] = {
-    implicit val ec: ExecutionContext = TransactionLogThreadPools.parallelReadThreadPool.executionContext
+    implicit val ec: ExecutionContext = ExecutionContext.global
 
     val futures = partitions.toSeq.map { partitionValues =>
       Future {

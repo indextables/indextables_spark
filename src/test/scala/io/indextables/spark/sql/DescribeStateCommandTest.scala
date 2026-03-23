@@ -17,13 +17,15 @@
 
 package io.indextables.spark.sql
 
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.types.{StringType => SparkStringType, StructField, StructType}
 
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateWriter}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import io.indextables.spark.TestBase
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 class DescribeStateCommandTest extends TestBase {
 
@@ -62,44 +64,20 @@ class DescribeStateCommandTest extends TestBase {
 
   test("DESCRIBE STATE should describe Avro state format") {
     withTempPath { tempPath =>
-      val txLogPath = new Path(tempPath, "_transaction_log")
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        txLogPath.toString,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
+      val tablePath = new Path(tempPath)
 
+      // Initialize table and add files via the transaction log API
+      val txLog = TransactionLogFactory.create(tablePath, spark)
       try {
-        cloudProvider.createDirectory(txLogPath.toString)
+        txLog.initialize(getTestSchema())
 
-        // Create Avro state
-        val stateWriter = StateWriter(cloudProvider, txLogPath.toString)
-        val manifestIO  = StateManifestIO(cloudProvider)
-        val files       = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
-        val stateDir = stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = files,
-          removedPaths = Set.empty
-        )
-
-        // Extract the actual version from the returned state directory
-        val actualVersion = manifestIO.parseStateDirVersion(stateDir).getOrElse(1L)
-
-        // Write _last_checkpoint pointing to Avro state
-        val lastCheckpointPath = new Path(txLogPath, "_last_checkpoint")
-        val lastCheckpointJson =
-          s"""{
-             |  "version": $actualVersion,
-             |  "size": 100,
-             |  "sizeInBytes": 100000,
-             |  "numFiles": 100,
-             |  "createdTime": ${System.currentTimeMillis()},
-             |  "format": "${StateConfig.Format.AVRO_STATE}",
-             |  "stateDir": "${manifestIO.formatStateDir(actualVersion)}"
-             |}""".stripMargin
-        cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
+        val addActions = (1 to 100).map(i => createTestAddAction(s"file$i.split"))
+        txLog.addFiles(addActions)
       } finally
-        cloudProvider.close()
+        txLog.close()
+
+      // Create a checkpoint so _last_checkpoint exists
+      spark.sql(s"CHECKPOINT INDEXTABLES '$tempPath'").collect()
 
       val result = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tempPath'").collect()
 
@@ -107,67 +85,37 @@ class DescribeStateCommandTest extends TestBase {
       result(0).getAs[String]("format") shouldBe "avro-state"
       result(0).getAs[Long]("version") should be >= 1L
       result(0).getAs[Long]("num_files") shouldBe 100L
-      result(0).getAs[Int]("num_manifests") should be >= 1
-      result(0).getAs[Int]("num_tombstones") shouldBe 0
-      result(0).getAs[Double]("tombstone_ratio") shouldBe 0.0
-      result(0).getAs[Boolean]("needs_compaction") shouldBe false
       result(0).getAs[String]("status") shouldBe "OK"
     }
   }
 
-  test("DESCRIBE STATE should show needs_compaction when tombstone ratio is high") {
+  test("DESCRIBE STATE should report correct file count after removals") {
     withTempPath { tempPath =>
-      val txLogPath = new Path(tempPath, "_transaction_log")
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        txLogPath.toString,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
+      val tablePath = new Path(tempPath)
 
+      // Initialize table and add files
+      val txLog = TransactionLogFactory.create(tablePath, spark)
       try {
-        cloudProvider.createDirectory(txLogPath.toString)
+        txLog.initialize(getTestSchema())
 
-        // Create Avro state with files
-        val stateWriter = StateWriter(cloudProvider, txLogPath.toString)
-        val files       = (1 to 100).map(i => createTestFileEntry(s"file$i.split", version = 1))
-        stateWriter.writeState(
-          currentVersion = 1,
-          newFiles = files,
-          removedPaths = Set.empty
-        )
+        val addActions = (1 to 100).map(i => createTestAddAction(s"file$i.split"))
+        txLog.addFiles(addActions)
 
-        // Add tombstones (5% - below threshold, should not trigger compaction)
-        val removedPaths = (1 to 5).map(i => s"file$i.split").toSet
-        stateWriter.writeState(
-          currentVersion = 2,
-          newFiles = Seq.empty,
-          removedPaths = removedPaths
-        )
-
-        // Write _last_checkpoint
-        val manifestIO         = StateManifestIO(cloudProvider)
-        val lastCheckpointPath = new Path(txLogPath, "_last_checkpoint")
-        val lastCheckpointJson =
-          s"""{
-             |  "version": 2,
-             |  "size": 95,
-             |  "sizeInBytes": 95000,
-             |  "numFiles": 95,
-             |  "createdTime": ${System.currentTimeMillis()},
-             |  "format": "${StateConfig.Format.AVRO_STATE}",
-             |  "stateDir": "${manifestIO.formatStateDir(2)}"
-             |}""".stripMargin
-        cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
+        // Remove 5 files
+        (1 to 5).foreach(i => txLog.removeFile(s"file$i.split"))
       } finally
-        cloudProvider.close()
+        txLog.close()
+
+      // Create a checkpoint
+      spark.sql(s"CHECKPOINT INDEXTABLES '$tempPath'").collect()
 
       val result = spark.sql(s"DESCRIBE INDEXTABLES STATE '$tempPath'").collect()
 
       result should have length 1
       result(0).getAs[String]("format") shouldBe "avro-state"
-      result(0).getAs[Int]("num_tombstones") shouldBe 5
-      // Tombstone ratio is 5/100 = 5% which is below 10% threshold
-      result(0).getAs[Boolean]("needs_compaction") shouldBe false
+      // After removing 5 files from 100, we should have 95 visible files
+      result(0).getAs[Long]("num_files") shouldBe 95L
+      result(0).getAs[String]("status") shouldBe "OK"
     }
   }
 
@@ -175,38 +123,28 @@ class DescribeStateCommandTest extends TestBase {
     val result = spark.sql("DESCRIBE INDEXTABLES STATE '/nonexistent/path'").collect()
 
     result should have length 1
-    // When the path doesn't exist or has no checkpoint, returns "none" format
+    // When the path doesn't exist or has no checkpoint, returns "none" or "error" format
     val format = result(0).getAs[String]("format")
-    val status = result(0).getAs[String]("status")
-    // Either "none" (no checkpoint) or "error" (path issues)
     (format == "none" || format == "error") shouldBe true
   }
 
   // Helper methods
 
-  private def createTestFileEntry(
+  override protected def getTestSchema(): StructType =
+    new StructType()
+      .add(StructField("id", SparkStringType))
+      .add(StructField("content", SparkStringType))
+
+  private def createTestAddAction(
     path: String,
-    version: Long = 1,
     partitionValues: Map[String, String] = Map.empty
-  ): FileEntry =
-    FileEntry(
+  ): AddAction =
+    AddAction(
       path = path,
       partitionValues = partitionValues,
       size = 1000L,
       modificationTime = System.currentTimeMillis(),
       dataChange = true,
-      stats = None,
-      minValues = None,
-      maxValues = None,
-      numRecords = Some(100L),
-      footerStartOffset = None,
-      footerEndOffset = None,
-      hasFooterOffsets = false,
-      splitTags = None,
-      numMergeOps = None,
-      docMappingRef = None,
-      uncompressedSizeBytes = None,
-      addedAtVersion = version,
-      addedAtTimestamp = System.currentTimeMillis()
+      numRecords = Some(100L)
     )
 }

@@ -35,14 +35,14 @@ import io.indextables.spark.metrics._
 import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.stats.{DataSkippingMetrics, ExpressionSimplifier, FilterExpressionCache}
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLog}
+import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLogInterface}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScan(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   readSchema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,

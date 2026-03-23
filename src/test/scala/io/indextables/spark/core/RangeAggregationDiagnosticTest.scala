@@ -47,12 +47,9 @@ class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers {
         .save(tablePath)
 
       // Find the split file
-      val txLog = new io.indextables.spark.transaction.TransactionLog(
+      val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
         new org.apache.hadoop.fs.Path(tablePath),
-        spark,
-        new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-          java.util.Map.of("spark.indextables.transaction.allowDirectUsage", "true")
-        )
+        spark
       )
       val splits = txLog.listFiles()
       println(s"DIAG: Found ${splits.size} splits")

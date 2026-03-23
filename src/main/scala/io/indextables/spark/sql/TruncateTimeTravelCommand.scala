@@ -27,7 +27,7 @@ import org.apache.spark.sql.types.{LongType, StringType}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{TransactionLogCheckpoint, TransactionLogFactory}
+import io.indextables.spark.transaction.{ActionJsonSerializer, TransactionLogFactory}
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import org.slf4j.LoggerFactory
 
@@ -307,26 +307,23 @@ case class TruncateTimeTravelCommand(
       val protocol = transactionLog.getProtocol()
 
       // Build complete action list for checkpoint
-      val allActions = Seq(protocol) ++ Seq(metadata) ++ allFiles
+      val allActions: Seq[io.indextables.spark.transaction.Action] = Seq(protocol) ++ Seq(metadata) ++ allFiles
 
       logger.info(s"Creating checkpoint at version $currentVersion with ${allActions.length} actions")
 
-      // Create checkpoint handler
-      val transactionLogPath = new Path(resolvedPath, "_transaction_log")
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        transactionLogPath.toString,
-        options,
-        sparkSession.sparkContext.hadoopConfiguration
-      )
+      // Create checkpoint via native TransactionLogWriter
+      val nativeTablePath = io.indextables.spark.transaction.ConfigMapper.normalizeTablePath(resolvedPath)
+      val nativeConfig    = io.indextables.spark.transaction.ConfigMapper.toNativeConfig(options)
 
-      try {
-        val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
-        checkpoint.createCheckpoint(currentVersion, allActions)
-        checkpoint.close()
-        logger.info(s"Created checkpoint at version $currentVersion")
-        currentVersion
-      } finally
-        cloudProvider.close()
+      val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
+      val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
+      val addsJson     = ActionJsonSerializer.addActionsToJson(allFiles)
+
+      io.indextables.jni.txlog.TransactionLogWriter.createCheckpoint(
+        nativeTablePath, nativeConfig, protocolJson, metadataJson, addsJson
+      )
+      logger.info(s"Created checkpoint at version $currentVersion")
+      currentVersion
     } finally
       transactionLog.close()
   }

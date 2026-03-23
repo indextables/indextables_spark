@@ -85,7 +85,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Verify initial write created many files
-    val txLog = new io.indextables.spark.transaction.OptimizedTransactionLog(
+    val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
       new org.apache.hadoop.fs.Path(tablePath),
       spark
     )
@@ -214,7 +214,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     result.count() shouldBe 100
 
     // Verify only 1 file exists (no merge occurred)
-    val txLog = new io.indextables.spark.transaction.OptimizedTransactionLog(
+    val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
       new org.apache.hadoop.fs.Path(tablePath),
       spark
     )

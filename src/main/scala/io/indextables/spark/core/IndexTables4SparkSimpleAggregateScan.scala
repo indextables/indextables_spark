@@ -37,7 +37,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.filters.MixedBooleanFilter
-import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLogInterface}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
@@ -48,7 +48,7 @@ import org.slf4j.LoggerFactory
  */
 class IndexTables4SparkSimpleAggregateScan(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
@@ -180,7 +180,7 @@ class IndexTables4SparkSimpleAggregateScan(
 /** Batch implementation for simple aggregations. */
 class IndexTables4SparkSimpleAggregateBatch(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,

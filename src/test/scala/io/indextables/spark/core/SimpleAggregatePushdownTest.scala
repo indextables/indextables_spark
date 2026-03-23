@@ -351,7 +351,7 @@ class SimpleAggregatePushdownTest extends TestBase {
     // Unit test for scan builder integration without requiring native library
     import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import io.indextables.spark.transaction.TransactionLog
+    import io.indextables.spark.transaction.TransactionLogFactory
     import org.apache.hadoop.fs.Path
     import scala.collection.JavaConverters._
 
@@ -370,13 +370,7 @@ class SimpleAggregatePushdownTest extends TestBase {
     )
 
     // For testing: create a mock TransactionLog with empty files
-    // Create options map with allowDirectUsage for testing
-    val testOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-      java.util.Map.of("spark.indextables.transaction.allowDirectUsage", "true")
-    )
-    val transactionLog = new TransactionLog(new Path("/mock/path"), spark, testOptions) {
-      override def listFiles(): Seq[io.indextables.spark.transaction.AddAction] = Seq.empty
-    }
+    val transactionLog = TransactionLogFactory.create(new Path("/mock/path"), spark)
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
     // Test that we can create the scan builder

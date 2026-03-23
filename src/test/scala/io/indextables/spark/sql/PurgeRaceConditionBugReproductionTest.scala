@@ -27,7 +27,7 @@ import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.{FileSystem, Path}
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLogInterface}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
@@ -404,7 +404,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
   // ============ Helper Methods ============
 
-  private def getTransactionLog(tablePath: String): TransactionLog = {
+  private def getTransactionLog(tablePath: String): TransactionLogInterface = {
     val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
     TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
   }

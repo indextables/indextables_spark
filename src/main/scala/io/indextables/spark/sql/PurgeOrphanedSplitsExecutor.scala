@@ -29,7 +29,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider, CloudStorageProviderFactory}
 import io.indextables.spark.transaction._
-import io.indextables.spark.transaction.compression.CompressionUtils
 import org.slf4j.LoggerFactory
 
 /**
@@ -248,7 +247,7 @@ class PurgeOrphanedSplitsExecutor(
    *   Number of transaction log files deleted (or would be deleted in DRY RUN)
    */
   private def cleanupOldTransactionLogFilesWithVersions(
-    txLog: io.indextables.spark.transaction.TransactionLog,
+    txLog: TransactionLogInterface,
     versionsToDelete: Set[Long]
   ): Long =
     try {
@@ -337,7 +336,7 @@ class PurgeOrphanedSplitsExecutor(
    * @return
    *   Number of checkpoint files deleted (or would be deleted in DRY RUN)
    */
-  private def cleanupOldCheckpointFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long =
+  private def cleanupOldCheckpointFiles(txLog: TransactionLogInterface): Long =
     try {
       import io.indextables.spark.util.JsonUtil
 
@@ -786,40 +785,10 @@ class PurgeOrphanedSplitsExecutor(
    * @return
    *   Number of manifests deleted (or would be deleted in dry-run mode)
    */
-  private def cleanupOrphanedManifests(provider: CloudStorageProvider, txLogPath: String): Long =
-    try {
-      import io.indextables.spark.transaction.avro.{GCConfig, ManifestGarbageCollector, StateConfig}
-
-      // Get GC configuration from Spark conf
-      val retentionVersions = spark.conf
-        .getOption(StateConfig.RETENTION_VERSIONS_KEY)
-        .map(_.toInt)
-        .getOrElse(StateConfig.RETENTION_VERSIONS_DEFAULT)
-      val minManifestAgeHours = spark.conf
-        .getOption(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_KEY)
-        .map(_.toInt)
-        .getOrElse(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
-
-      val gcConfig = GCConfig(
-        retentionVersions = retentionVersions,
-        minManifestAgeHours = minManifestAgeHours
-      )
-
-      val gc     = ManifestGarbageCollector(provider, txLogPath)
-      val result = gc.collectGarbage(gcConfig, dryRun)
-
-      logger.info(
-        s"Manifest GC: ${result.reachableManifests} reachable, ${result.orphanedManifests} orphaned, " +
-          s"${result.deletedManifests} deleted (dryRun=$dryRun)"
-      )
-
-      result.deletedManifests
-    } catch {
-      case e: Exception =>
-        // Don't fail the entire purge operation if manifest GC fails
-        logger.warn(s"Failed to clean up orphaned manifests: ${e.getMessage}", e)
-        0L
-    }
+  private def cleanupOrphanedManifests(provider: CloudStorageProvider, txLogPath: String): Long = {
+    logger.info("State cleanup handled by native transaction log")
+    0L
+  }
 
   /**
    * Delete a directory and all its contents recursively.
@@ -871,7 +840,7 @@ class PurgeOrphanedSplitsExecutor(
    *
    * Returns: Set of version numbers that will be deleted
    */
-  private def getTransactionLogVersionsToDelete(txLog: io.indextables.spark.transaction.TransactionLog): Set[Long] = {
+  private def getTransactionLogVersionsToDelete(txLog: TransactionLogInterface): Set[Long] = {
     val checkpointVersionOpt = txLog.getLastCheckpointVersion()
 
     checkpointVersionOpt match {
@@ -938,7 +907,7 @@ class PurgeOrphanedSplitsExecutor(
    *   The specific versions to scan (typically versions that will remain after cleanup) Returns: Seq[AddAction]
    *   containing all files that appear in any of the specified versions
    */
-  private def getAllFilesFromVersions(txLog: io.indextables.spark.transaction.TransactionLog, versionsToScan: Seq[Long])
+  private def getAllFilesFromVersions(txLog: TransactionLogInterface, versionsToScan: Seq[Long])
     : Seq[AddAction] = {
     logger.info(s"Scanning ${versionsToScan.size} transaction log versions for file references (time travel support)")
 
@@ -985,7 +954,7 @@ class PurgeOrphanedSplitsExecutor(
    *   All AddActions from retained state
    */
   private def getAllFilesFromRetainedState(
-    txLog: io.indextables.spark.transaction.TransactionLog,
+    txLog: TransactionLogInterface,
     versionsToKeep: Seq[Long]
   ): Seq[AddAction] = {
     val allFilePaths     = scala.collection.mutable.Set[String]()
@@ -1032,115 +1001,9 @@ class PurgeOrphanedSplitsExecutor(
    *   All AddActions from retained Avro state directories
    */
   private def getFilesFromAvroState(): Seq[AddAction] = {
-    import io.indextables.spark.transaction.avro.{AvroManifestReader, StateManifestIO}
-
-    val transactionLogPath = new Path(tablePath, "_transaction_log")
-
-    // Get retention configuration
-    val logRetentionDuration = txLogRetentionDuration.getOrElse {
-      spark.conf
-        .getOption("spark.indextables.logRetention.duration")
-        .map(_.toLong)
-        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
-    }
-
-    val currentTime = System.currentTimeMillis()
-
-    // Use CloudStorageProvider for multi-cloud support
-    val cloudConfigs = extractCloudStorageConfigs()
-    val optionsMap   = new java.util.HashMap[String, String]()
-    cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
-    val configOptions = new CaseInsensitiveStringMap(optionsMap)
-
-    val provider = CloudStorageProviderFactory.createProvider(
-      transactionLogPath.toString,
-      configOptions,
-      spark.sparkContext.hadoopConfiguration
-    )
-
-    try {
-      // List all files/directories in transaction log directory
-      val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
-
-      // Find Avro state directories (state-v*)
-      val stateDirectories = allFiles.filter { f =>
-        val name = new Path(f.path).getName
-        StateDirectoryPattern.findFirstIn(name).isDefined
-      }
-
-      if (stateDirectories.isEmpty) {
-        logger.debug("No Avro state directories found")
-        return Seq.empty
-      }
-
-      // Extract versions and find the latest
-      val stateVersions = stateDirectories.flatMap { f =>
-        val name = new Path(f.path).getName
-        name match {
-          case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
-          case _                                 => None
-        }
-      }
-
-      if (stateVersions.isEmpty) {
-        logger.debug("No valid Avro state versions found")
-        return Seq.empty
-      }
-
-      val latestVersion = stateVersions.map(_._1).max
-      logger.info(s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion)")
-
-      val manifestIO       = StateManifestIO(provider)
-      val manifestReader   = AvroManifestReader(provider)
-      val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
-
-      // Process state directories - always include latest, plus any within retention
-      stateVersions.foreach {
-        case (version, stateDir) =>
-          val isLatest          = version == latestVersion
-          val fileAge           = currentTime - stateDir.modificationTime
-          val isWithinRetention = fileAge <= logRetentionDuration
-          val isRetained        = isLatest || isWithinRetention
-
-          if (isRetained) {
-            try {
-              logger.debug(
-                s"Reading Avro state directory: state-v$version (latest=$isLatest, withinRetention=$isWithinRetention)"
-              )
-
-              // Strip trailing slashes to avoid double-slash paths (e.g., state-v1//_manifest.avro)
-              val stateDirPath = stateDir.path.stripSuffix("/")
-
-              // Read the state manifest
-              val stateManifest = manifestIO.readStateManifest(stateDirPath)
-
-              // Resolve manifest paths and read all file entries
-              val manifestPaths = stateManifest.manifests.map { m =>
-                manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath)
-              }
-
-              val allEntries = manifestReader.readManifestsParallel(manifestPaths)
-
-              // Apply tombstones to get live files
-              val liveEntries = manifestIO.applyTombstones(allEntries, stateManifest.tombstones)
-
-              // Convert to AddActions and add to result
-              val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
-              addActions.foreach(add => filePathToAction(add.path) = add)
-
-              logger.debug(s"Read ${liveEntries.size} live files from Avro state v$version (${allEntries.size} total, ${stateManifest.tombstones.size} tombstoned)")
-            } catch {
-              case e: Exception =>
-                logger.warn(s"Failed to read Avro state directory state-v$version: ${e.getMessage}")
-            }
-          } else {
-            logger.debug(s"Skipping old Avro state directory: state-v$version (age: ${fileAge / 1000}s)")
-          }
-      }
-
-      filePathToAction.values.toSeq
-    } finally
-      provider.close()
+    // State management is handled by native transaction log - no Avro state directories to read
+    logger.info("State cleanup handled by native transaction log")
+    Seq.empty
   }
 
   /**
@@ -1157,7 +1020,7 @@ class PurgeOrphanedSplitsExecutor(
    *   All AddActions from retained checkpoints
    */
   private def getFilesFromRetainedCheckpoints(
-    txLog: io.indextables.spark.transaction.TransactionLog
+    txLog: TransactionLogInterface
   ): Seq[AddAction] = {
     val transactionLogPath = new Path(tablePath, "_transaction_log")
 
@@ -1332,8 +1195,7 @@ class PurgeOrphanedSplitsExecutor(
     import io.indextables.spark.util.JsonUtil
 
     val rawStream           = provider.openInputStream(filePath)
-    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
-    val reader              = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val reader              = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
     val actions             = ListBuffer[Action]()
 
     try {

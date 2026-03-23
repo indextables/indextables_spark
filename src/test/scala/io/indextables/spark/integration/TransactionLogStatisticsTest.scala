@@ -23,7 +23,7 @@ import org.apache.spark.sql.{DataFrame, SaveMode}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 
@@ -34,7 +34,7 @@ import org.scalatest.BeforeAndAfterEach
 class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
 
   private var testTablePath: Path            = _
-  private var transactionLog: TransactionLog = _
+  private var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()

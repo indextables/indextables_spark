@@ -24,7 +24,7 @@ import org.apache.spark.sql.functions.{col, lit}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
@@ -38,7 +38,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsPartitionTest])
 
   var tempTablePath: String          = _
-  var transactionLog: TransactionLog = _
+  var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()

@@ -58,13 +58,13 @@ import io.indextables.spark.filters.{
   MixedSparkFilter
 }
 import io.indextables.spark.sql.TableRootUtils
-import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLogInterface}
 import io.indextables.spark.util.ProtocolNormalizer
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   options: CaseInsensitiveStringMap,
   config: Map[String, String] // Direct config instead of broadcast

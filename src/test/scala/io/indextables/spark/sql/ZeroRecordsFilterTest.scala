@@ -22,7 +22,7 @@ import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
