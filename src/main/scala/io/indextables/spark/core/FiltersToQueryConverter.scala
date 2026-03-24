@@ -1579,10 +1579,9 @@ object FiltersToQueryConverter {
           }
         } else {
           // For string fields and other types, use exact term matching.
-          // Pass fieldType="ipaddr" for IP_ADDR fields so tantivy4java can transparently
-          // expand CIDR/wildcard patterns (e.g. "10.0.0.0/24") to a range query.
-          Some(new SplitTermQuery(attribute, convertedValue.toString,
-            if (fieldType == FieldType.IP_ADDR) "ipaddr" else null))
+          // Pass fieldType.getValue() so the native layer can apply IP CIDR/wildcard expansion
+          // without a separate schema lookup — avoids a shadow string mapping contract.
+          Some(new SplitTermQuery(attribute, convertedValue.toString, fieldType.getValue()))
         }
 
       case EqualNullSafe(attribute, value) if value != null =>
@@ -1598,7 +1597,6 @@ object FiltersToQueryConverter {
             splitSearchEngine.parseQuery(queryString)
           }.toList
 
-          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
           val boolQuery = new SplitBooleanQuery()
           parseQueries.foreach(query => boolQuery.addShould(query))
           Some(boolQuery)
@@ -1606,11 +1604,9 @@ object FiltersToQueryConverter {
           // For STRING fields (raw tokenizer) and other non-tokenized fields, use term queries
           val termQueries = values.map { value =>
             val converted = convertSparkValueToTantivy(value, fieldType)
-            new SplitTermQuery(attribute, converted.toString,
-              if (fieldType == FieldType.IP_ADDR) "ipaddr" else null)
+            new SplitTermQuery(attribute, converted.toString, fieldType.getValue())
           }.toList
 
-          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
           val boolQuery = new SplitBooleanQuery()
           termQueries.foreach(query => boolQuery.addShould(query))
           Some(boolQuery)
