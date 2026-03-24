@@ -155,9 +155,12 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
     val files             = fs.listStatus(txLogPath)
     val versionPattern    = """^\d{20}\.json$""".r
     val checkpointPattern = """^\d{20}\.checkpoint.*\.json$""".r
+    val avroStatePattern  = """^state-v\d{20}$""".r
 
     val versionCount    = files.count(f => versionPattern.findFirstIn(f.getPath.getName).isDefined)
-    val checkpointCount = files.count(f => checkpointPattern.findFirstIn(f.getPath.getName).isDefined)
+    val jsonCheckpoints = files.count(f => checkpointPattern.findFirstIn(f.getPath.getName).isDefined)
+    val avroCheckpoints = files.count(f => f.isDirectory && avroStatePattern.findFirstIn(f.getPath.getName).isDefined)
+    val checkpointCount = jsonCheckpoints + avroCheckpoints
 
     (versionCount, checkpointCount)
   }
