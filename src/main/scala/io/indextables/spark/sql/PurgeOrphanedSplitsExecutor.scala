@@ -79,14 +79,19 @@ class PurgeOrphanedSplitsExecutor(
     import scala.jdk.CollectionConverters._
     import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter}
 
-    // Resolve credentials for native layer
+    // Resolve credentials for native layer — must call resolveCredentialsOnDriver to
+    // invoke custom credential providers (the native Rust layer cannot invoke Java providers)
     val cloudConfigs = extractCloudStorageConfigs()
     val txLog =
       TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
     txLog.invalidateCache()
 
     val nativeTablePath = ConfigMapper.normalizeTablePath(new Path(tablePath))
-    val nativeConfig    = ConfigMapper.toNativeConfig(new CaseInsensitiveStringMap(cloudConfigs.asJava))
+    // Resolve credentials the same way TransactionLogFactory does — invoke custom providers
+    // and inject explicit credentials for the native layer
+    val resolvedConfigs = io.indextables.spark.utils.CredentialProviderFactory
+      .resolveCredentialsOnDriver(cloudConfigs, tablePath)
+    val nativeConfig = ConfigMapper.toNativeConfig(new CaseInsensitiveStringMap(resolvedConfigs.asJava))
 
     // Compute tx log retention in milliseconds
     val txLogRetentionMs = txLogRetentionDuration.getOrElse {
