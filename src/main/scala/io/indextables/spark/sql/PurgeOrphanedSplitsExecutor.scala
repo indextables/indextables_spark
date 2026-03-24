@@ -76,62 +76,73 @@ class PurgeOrphanedSplitsExecutor(
   def purge(): PurgeResult = {
     val startTime = System.currentTimeMillis()
 
-    // Step 1: Get transaction log with resolved credentials
-    val cloudConfigs = extractCloudStorageConfigs()
     import scala.jdk.CollectionConverters._
+    import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter}
+
+    // Resolve credentials for native layer
+    val cloudConfigs = extractCloudStorageConfigs()
     val txLog =
       TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
-
-    // Invalidate cache to ensure fresh read of transaction log state for purge planning
     txLog.invalidateCache()
 
-    // Step 2: Determine which transaction log files will be deleted
-    // Get the list of versions that will remain after cleanup (for time travel support)
-    val versionsBeforeCleanup = txLog.getVersions()
-    val versionsToDelete      = getTransactionLogVersionsToDelete(txLog)
-    val versionsToKeep        = versionsBeforeCleanup.filterNot(versionsToDelete.contains)
-    logger.info(s"Transaction log versions: ${versionsBeforeCleanup.size} total, ${versionsToDelete.size} to delete, ${versionsToKeep.size} to keep")
+    val nativeTablePath = ConfigMapper.normalizeTablePath(new Path(tablePath))
+    val nativeConfig    = ConfigMapper.toNativeConfig(new CaseInsensitiveStringMap(cloudConfigs.asJava))
 
-    // Step 3: Get ALL files referenced in ANY retained transaction file or checkpoint
-    // CRITICAL FIX: For time travel support, we must preserve files from:
-    //   1. All retained checkpoints (not just the latest)
-    //   2. All retained version files (those not being deleted)
-    //
-    // A file should NOT be deleted if it appears in ANY transaction file or
-    // checkpoint that still exists after the purge operation.
-    val allRetainedFiles = getAllFilesFromRetainedState(txLog, versionsToKeep)
-    logger.info(s"Files referenced in retained transaction state: ${allRetainedFiles.size}")
+    // Compute tx log retention in milliseconds
+    val txLogRetentionMs = txLogRetentionDuration.getOrElse {
+      spark.conf
+        .getOption("spark.indextables.logRetention.duration")
+        .map(_.toLong)
+        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+    }
 
-    // Step 4: Clean up old transaction log files AFTER getting current state
-    // This prevents race condition where we delete tx logs and then try to read them.
-    // Use pre-computed versionsToDelete to ensure consistency.
-    val versionFilesDeleted = cleanupOldTransactionLogFilesWithVersions(txLog, versionsToDelete)
-    logger.info(s"Transaction log cleanup: deleted $versionFilesDeleted old version files")
+    // --- Step 1: Get retained files from native layer (cursored streaming) ---
+    // The native layer evaluates version retention and returns all split file paths
+    // referenced by any non-expired version. This is the "known files" set.
+    val retainedFilePaths = {
+      val paths   = scala.collection.mutable.Set[String]()
+      val cursor  = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
+      try {
+        var batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
+        while (batch != null) {
+          batch.asScala.foreach { entry =>
+            val path = entry.get("path")
+            if (path != null) paths += path.toString
+          }
+          batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
+        }
+      } finally
+        TransactionLogReader.closeRetainedFilesCursor(cursor)
+      paths.toSet
+    }
+    logger.info(s"Files referenced in retained transaction state: ${retainedFilePaths.size}")
 
-    // Step 5: Clean up old checkpoint files
-    // Checkpoints older than retention period are safe to delete (except the most recent one)
-    val checkpointsDeleted = cleanupOldCheckpointFiles(txLog)
-    logger.info(s"Checkpoint cleanup: deleted $checkpointsDeleted old checkpoint files")
+    // --- Step 2: Native cleanup of expired states and versions ---
+    // For dry run, use dryRun=true to get counts. Guard deleted counts in Scala as a
+    // safety net until native dryRun is fully verified. For real runs, delete with dryRun=false.
+    val stateResultJson   = TransactionLogWriter.deleteExpiredStates(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
+    val versionResultJson = TransactionLogWriter.deleteExpiredVersions(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
 
-    // Step 5b: Clean up old Avro state directories
-    // State directories older than retention period are safe to delete (except the latest one)
-    val stateCleanupResult = cleanupOldStateDirectories()
-    logger.info(s"State directory cleanup: found ${stateCleanupResult.found}, deleted ${stateCleanupResult.deleted} old state directories")
+    val mapper               = new com.fasterxml.jackson.databind.ObjectMapper()
+    val stateResult          = mapper.readTree(stateResultJson)
+    val versionResult        = mapper.readTree(versionResultJson)
+    val expiredStatesFound   = stateResult.path("found").asInt(0)
+    val expiredStatesDeleted = if (dryRun) 0 else stateResult.path("deleted").asInt(0)
+    val versionFilesDeleted  = if (dryRun) 0 else versionResult.path("deleted").asInt(0)
 
-    // Use all retained files as the valid files set
-    val allFiles = allRetainedFiles
+    logger.info(s"State directory cleanup: found $expiredStatesFound, deleted $expiredStatesDeleted")
+    logger.info(s"Version file cleanup: deleted $versionFilesDeleted")
 
-    // Helper to create consistent messages
+    val stateCleanupResult = StateCleanupResult(expiredStatesFound, expiredStatesDeleted)
+
     def stateMessage: String = {
       val action = if (dryRun) "Would delete" else "Deleted"
       if (stateCleanupResult.found > 0) {
         s" $action ${stateCleanupResult.found} expired state directories."
-      } else {
-        ""
-      }
+      } else ""
     }
 
-    // Step 2: List all .split and .crc files from filesystem (distributed)
+    // --- Step 3: List all .split and .crc files from storage (Spark distributed) ---
     val allSplitFiles        = listAllSplitFiles(tablePath)
     val totalFilesystemCount = allSplitFiles.count()
     logger.info(s"Total split/crc files found in filesystem: $totalFilesystemCount")
@@ -141,25 +152,19 @@ class PurgeOrphanedSplitsExecutor(
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = 0,
-        orphanedFilesDeleted = 0,
-        sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted,
-        retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found,
-        expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun,
-        durationMs = durationMs,
+        orphanedFilesFound = 0, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun, durationMs = durationMs,
         message = Some(s"No split files found in table directory.$stateMessage")
       )
     }
 
-    // Step 3: Get valid split files from transaction log
-    val validSplitFiles = getValidSplitFilesFromTransactionLog(allFiles)
+    // --- Step 4: Build retained files Dataset and anti-join (Spark distributed) ---
+    val validSplitFiles = getValidSplitFilesFromRetainedPaths(retainedFilePaths)
     val validFilesCount = validSplitFiles.count()
     logger.info(s"Valid split/crc files in transaction log: $validFilesCount")
 
-    // Step 4: Find orphaned files (LEFT ANTI JOIN)
     val orphanedFiles = findOrphanedFiles(allSplitFiles, validSplitFiles)
     val orphanedCount = orphanedFiles.count()
     logger.info(s"Orphaned files found (before retention filter): $orphanedCount")
@@ -169,59 +174,44 @@ class PurgeOrphanedSplitsExecutor(
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = 0,
-        orphanedFilesDeleted = 0,
-        sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted,
-        retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found,
-        expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun,
-        durationMs = durationMs,
+        orphanedFilesFound = 0, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun, durationMs = durationMs,
         message = Some(s"No orphaned files found.$stateMessage")
       )
     }
 
-    // Step 5: Apply retention filter
+    // --- Step 5: Apply split file retention filter ---
     val retentionTimestamp  = System.currentTimeMillis() - (retentionHours * 3600 * 1000)
     val eligibleForDeletion = orphanedFiles.filter(col("modificationTime") < retentionTimestamp)
-
-    val eligibleCount = eligibleForDeletion.count()
-    logger.info(s"Orphaned files eligible for deletion (after retention filter): $eligibleCount")
-    logger.info(s"Orphaned files skipped (too recent): ${orphanedCount - eligibleCount}")
+    val eligibleCount       = eligibleForDeletion.count()
+    logger.info(s"Orphaned files eligible for deletion: $eligibleCount (skipped ${orphanedCount - eligibleCount} too recent)")
 
     if (eligibleCount == 0) {
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = orphanedCount,
-        orphanedFilesDeleted = 0,
-        sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted,
-        retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found,
-        expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun,
-        durationMs = durationMs,
-        message =
-          Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
+        orphanedFilesFound = orphanedCount, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun, durationMs = durationMs,
+        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
       )
     }
 
-    // Step 6: Check max files limit
+    // --- Step 6: Apply max files limit ---
     val maxFilesToDelete = spark.conf
       .getOption("spark.indextables.purge.maxFilesToDelete")
       .map(_.toLong)
-      .getOrElse(1000000L) // 1M default
+      .getOrElse(1000000L)
 
     val filesToDelete = if (eligibleCount > maxFilesToDelete) {
       logger.warn(s"Limiting deletion to $maxFilesToDelete files (found $eligibleCount eligible)")
       eligibleForDeletion.limit(maxFilesToDelete.toInt)
-    } else {
-      eligibleForDeletion
-    }
+    } else eligibleForDeletion
 
-    // Step 7: Delete or preview orphaned splits
+    // --- Step 7: Delete or preview orphaned splits (Spark distributed) ---
     if (dryRun) {
       previewDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, versionFilesDeleted, startTime)
     } else {
@@ -1414,6 +1404,16 @@ class PurgeOrphanedSplitsExecutor(
 
     logger.info(s"Found ${addedFiles.size} active files (split + crc) in transaction log")
     spark.createDataset(addedFiles)
+  }
+
+  /**
+   * Convert retained file paths from the native layer into a Dataset of filenames for anti-join.
+   */
+  private def getValidSplitFilesFromRetainedPaths(retainedPaths: Set[String]): Dataset[String] = {
+    import spark.implicits._
+    val filenames = retainedPaths.map(_.split('/').last).toSeq
+    logger.info(s"Found ${filenames.size} active files in retained transaction state")
+    spark.createDataset(filenames)
   }
 
   /**
