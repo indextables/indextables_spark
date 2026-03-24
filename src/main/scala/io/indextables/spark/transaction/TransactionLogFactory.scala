@@ -68,11 +68,26 @@ object TransactionLogFactory {
       optionConfigs
     )
 
-    // Resolve credential provider on driver (same as read path)
+    // Resolve credentials for the native layer. The Rust txlog cannot invoke Java credential
+    // providers, so we resolve them in Scala and supply explicit credentials to the native layer.
+    // resolveCredentialsOnDriver invokes the custom provider (if configured), strips the provider
+    // class key, and injects explicit credentials. We re-add the provider class afterward so
+    // CloudStorageProvider and executors can still invoke it for fresh credential refresh.
+    val providerClassKey = "spark.indextables.aws.credentialsProviderClass"
+    val providerClassOpt = mergedConfigs.get(providerClassKey)
+      .orElse(mergedConfigs.get(providerClassKey.toLowerCase))
+
     val resolvedConfigs = io.indextables.spark.utils.CredentialProviderFactory
       .resolveCredentialsOnDriver(mergedConfigs, tablePath.toString)
 
-    val resolvedOptions = new CaseInsensitiveStringMap(resolvedConfigs.asJava)
+    // Re-add provider class if it was stripped during resolution
+    val finalConfigs = providerClassOpt match {
+      case Some(cls) if cls.nonEmpty && !resolvedConfigs.contains(providerClassKey) =>
+        resolvedConfigs + (providerClassKey -> cls)
+      case _ => resolvedConfigs
+    }
+
+    val resolvedOptions = new CaseInsensitiveStringMap(finalConfigs.asJava)
     new NativeTransactionLog(tablePath, resolvedOptions)
   }
 

@@ -39,8 +39,32 @@ object ConfigMapper {
    *   Java Map with native keys (aws_access_key_id, azure_account_name, etc.)
    */
   def toNativeConfig(options: CaseInsensitiveStringMap): java.util.Map[String, String] = {
-    val scalaMap = options.asCaseSensitiveMap().asScala.toMap
-    toNativeConfig(scalaMap)
+    // Use CaseInsensitiveStringMap.get() directly for case-insensitive key lookup.
+    // Do NOT convert via asCaseSensitiveMap() — it lowercases keys, breaking camelCase lookups.
+    val config = new java.util.HashMap[String, String]()
+
+    // AWS credentials
+    Option(options.get("spark.indextables.aws.accessKey")).foreach(v => config.put("aws_access_key_id", v))
+    Option(options.get("spark.indextables.aws.secretKey")).foreach(v => config.put("aws_secret_access_key", v))
+    Option(options.get("spark.indextables.aws.sessionToken")).foreach(v => config.put("aws_session_token", v))
+    Option(options.get("spark.indextables.aws.region")).foreach(v => config.put("aws_region", v))
+    Option(options.get("spark.indextables.aws.endpoint")).foreach(v => config.put("aws_endpoint", v))
+    Option(options.get("spark.indextables.aws.forcePathStyle")).foreach(v => config.put("aws_force_path_style", v))
+
+    // S3 endpoint/pathStyle alternate keys
+    Option(options.get("spark.indextables.s3.endpoint")).foreach { v =>
+      if (!config.containsKey("aws_endpoint")) config.put("aws_endpoint", v)
+    }
+    Option(options.get("spark.indextables.s3.pathStyleAccess")).foreach { v =>
+      if (v.toBoolean) config.put("aws_force_path_style", "true")
+    }
+
+    // Azure credentials
+    Option(options.get("spark.indextables.azure.accountName")).foreach(v => config.put("azure_account_name", v))
+    Option(options.get("spark.indextables.azure.accountKey")).foreach(v => config.put("azure_access_key", v))
+    Option(options.get("spark.indextables.azure.bearerToken")).foreach(v => config.put("azure_bearer_token", v))
+
+    config
   }
 
   /**
