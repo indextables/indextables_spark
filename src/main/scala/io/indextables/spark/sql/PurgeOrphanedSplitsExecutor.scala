@@ -980,14 +980,20 @@ class PurgeOrphanedSplitsExecutor(
     }
     logger.info(s"Found ${checkpointFiles.size} files from retained checkpoints")
 
-    // Step 3: Get AddActions from ALL retained version files
-    val versionFiles = getAllFilesFromVersions(txLog, versionsToKeep)
+    // Step 3: Get AddActions from post-checkpoint version files only.
+    // Pre-checkpoint versions are fully captured in the checkpoint state (Step 1), so
+    // scanning them would over-protect files that have since been removed (e.g., by MERGE
+    // or DROP PARTITIONS). Only post-checkpoint versions may contain state changes not yet
+    // reflected in a checkpoint.
+    val checkpointVersion = txLog.getLastCheckpointVersion().getOrElse(-1L)
+    val postCheckpointVersions = versionsToKeep.filter(_ > checkpointVersion)
+    val versionFiles = getAllFilesFromVersions(txLog, postCheckpointVersions)
     versionFiles.foreach { add =>
       allFilePaths += add.path
       // Keep the most recent AddAction for each path (for metadata like size)
       filePathToAction(add.path) = add
     }
-    logger.info(s"Found ${versionFiles.size} files from retained version files")
+    logger.info(s"Found ${versionFiles.size} files from ${postCheckpointVersions.size} post-checkpoint version files (checkpoint at v$checkpointVersion)")
 
     logger.info(s"Total unique files in retained transaction state: ${allFilePaths.size}")
     filePathToAction.values.toSeq
