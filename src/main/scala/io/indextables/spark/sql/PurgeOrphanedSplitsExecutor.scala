@@ -536,7 +536,7 @@ class PurgeOrphanedSplitsExecutor(
 
   // Regex pattern for Avro state directory detection
   // State directories have format: state-v00000000000000000100
-  private val StateDirectoryPattern = """^state-v(\d{20})$""".r
+  private val StateDirectoryPattern = """^state-v(\d+)$""".r
 
   /**
    * Clean up old Avro state directories based on retention policy.
