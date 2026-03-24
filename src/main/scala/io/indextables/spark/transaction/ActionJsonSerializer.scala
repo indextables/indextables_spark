@@ -204,9 +204,31 @@ object ActionJsonSerializer {
    * Serialize a MetadataAction to a standalone JSON string (no wrapper).
    */
   def metadataToJson(metadata: MetadataAction): String = {
-    // Reuse the jsonLine serialization and strip the wrapper
-    val node = mapper.readTree(metadataToJsonLine(metadata))
-    mapper.writeValueAsString(node.get("metaData"))
+    val node = mapper.createObjectNode()
+    node.put("id", metadata.id)
+    metadata.name.foreach(node.put("name", _))
+    metadata.description.foreach(node.put("description", _))
+
+    val formatNode = mapper.createObjectNode()
+    formatNode.put("provider", metadata.format.provider)
+    val formatOpts = mapper.createObjectNode()
+    metadata.format.options.foreach { case (k, v) => formatOpts.put(k, v) }
+    formatNode.set[ObjectNode]("options", formatOpts)
+    node.set[ObjectNode]("format", formatNode)
+
+    node.put("schemaString", metadata.schemaString)
+
+    val partArr = mapper.createArrayNode()
+    metadata.partitionColumns.foreach(partArr.add)
+    node.set[ObjectNode]("partitionColumns", partArr)
+
+    val configNode = mapper.createObjectNode()
+    metadata.configuration.foreach { case (k, v) => configNode.put(k, v) }
+    node.set[ObjectNode]("configuration", configNode)
+
+    metadata.createdTime.foreach(node.put("createdTime", _))
+
+    mapper.writeValueAsString(node)
   }
 
   private def addActionToObjectNode(a: AddAction): ObjectNode = {

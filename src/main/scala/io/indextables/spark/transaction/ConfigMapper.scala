@@ -81,28 +81,26 @@ object ConfigMapper {
   /**
    * Normalize a Hadoop Path to a string suitable for native txlog methods.
    *
-   * Converts Hadoop-style schemes (s3a://, wasbs://) to native-compatible schemes (s3://, az://).
+   * Delegates to ProtocolNormalizer for cloud scheme conversion (s3a→s3, abfss→azure, wasbs→azure),
+   * which correctly extracts container names from full Azure URLs
+   * (e.g. abfss://container@account.dfs.core.windows.net/path → azure://container/path).
+   *
+   * Also handles local paths by adding file:// scheme for native object_store.
    */
   def normalizeTablePath(path: org.apache.hadoop.fs.Path): String = {
     val pathStr = path.toString
-    if (pathStr.startsWith("s3a://")) {
-      "s3://" + pathStr.stripPrefix("s3a://")
-    } else if (pathStr.startsWith("wasbs://")) {
-      "az://" + pathStr.stripPrefix("wasbs://")
-    } else if (pathStr.startsWith("wasb://")) {
-      "az://" + pathStr.stripPrefix("wasb://")
-    } else if (pathStr.startsWith("abfss://")) {
-      "az://" + pathStr.stripPrefix("abfss://")
-    } else if (pathStr.startsWith("abfs://")) {
-      "az://" + pathStr.stripPrefix("abfs://")
-    } else if (pathStr.startsWith("file:")) {
-      // Already has file: scheme — pass through
+    if (pathStr.startsWith("file:///")) {
+      // Already has file:/// scheme — pass through
       pathStr
+    } else if (pathStr.startsWith("file:")) {
+      // Normalize file:/path or file://path to file:///path for native object_store
+      val stripped = pathStr.stripPrefix("file:").stripPrefix("//").stripPrefix("/")
+      "file:///" + stripped
     } else if (pathStr.startsWith("/")) {
       // Local absolute path — add file:// scheme for native object_store
       "file://" + pathStr
     } else {
-      pathStr
+      io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(pathStr)
     }
   }
 }

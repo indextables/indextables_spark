@@ -18,7 +18,6 @@
 package io.indextables.spark.transaction
 
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicReference
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -70,9 +69,6 @@ class NativeTransactionLog(
     config
   }
 
-  /** Cached snapshot info for repeated reads within a short window */
-  private val cachedSnapshot: AtomicReference[CachedSnapshot] = new AtomicReference(null)
-
   /** Last retry metrics from the most recent write operation */
   @volatile private var lastRetryMetrics: Option[TxRetryMetrics] = None
 
@@ -80,9 +76,7 @@ class NativeTransactionLog(
   // Lifecycle
   // ------------------------------------------------------------------------------------
 
-  override def close(): Unit = {
-    cachedSnapshot.set(null)
-  }
+  override def close(): Unit = {}
 
   override def getTablePath(): Path = tablePath
 
@@ -94,6 +88,16 @@ class NativeTransactionLog(
     initialize(schema, Seq.empty)
 
   override def initialize(schema: StructType, partitionColumns: Seq[String]): Unit = {
+    // Validate partition columns exist in schema
+    val schemaFieldNames = schema.fieldNames.toSet
+    partitionColumns.foreach { col =>
+      if (!schemaFieldNames.contains(col)) {
+        throw new IllegalArgumentException(
+          s"Partition column '$col' not found in schema. Available columns: ${schemaFieldNames.mkString(", ")}"
+        )
+      }
+    }
+
     // Idempotent: skip if already initialized
     val snapshot = getOrRefreshSnapshot()
     if (snapshot != null) {
@@ -117,7 +121,6 @@ class NativeTransactionLog(
     val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
 
     TransactionLogWriter.initializeTable(nativeTablePath, nativeConfig, protocolJson, metadataJson)
-    invalidateSnapshot()
     logger.info(s"Initialized table at $nativeTablePath with ${partitionColumns.size} partition columns")
   }
 
@@ -130,11 +133,11 @@ class NativeTransactionLog(
     val addsJson = ActionJsonSerializer.addActionsToJson(addActions)
     val result   = TransactionLogWriter.addFiles(nativeTablePath, nativeConfig, addsJson)
     recordRetryMetrics(result)
-    invalidateSnapshot()
     result.getVersion
   }
 
   override def overwriteFiles(addActions: Seq[AddAction]): Long = {
+    assertTableWritable()
     // overwriteFiles must re-read the file list on each retry attempt to capture
     // files added by concurrent writers. Use writeVersionOnce in a manual retry loop.
     val maxAttempts = options.getInt("spark.indextables.state.retry.maxAttempts", 10)
@@ -164,13 +167,11 @@ class NativeTransactionLog(
 
       if (result.getVersion >= 0) {
         lastRetryMetrics = Some(TxRetryMetrics(attempt, conflicts.size, result.getVersion, conflicts))
-        invalidateSnapshot()
         return result.getVersion
       }
 
       // Conflict — re-read and retry
       conflicts = conflicts ++ result.getConflictedVersions.asScala.map(_.toLong)
-      invalidateSnapshot()
 
       if (attempt < maxAttempts) {
         val delay = Math.min(100L * (1L << (attempt - 1)), 5000L)
@@ -186,9 +187,19 @@ class NativeTransactionLog(
   }
 
   override def removeFile(path: String, deletionTimestamp: Long): Long = {
-    val version = TransactionLogWriter.removeFile(nativeTablePath, nativeConfig, path)
-    invalidateSnapshot()
-    version
+    val removeAction = RemoveAction(
+      path = path,
+      deletionTimestamp = Some(deletionTimestamp),
+      dataChange = true,
+      extendedFileMetadata = None,
+      partitionValues = None,
+      size = None,
+      tags = None
+    )
+    val actionsJson = ActionJsonSerializer.actionsToJsonLines(Seq(removeAction))
+    val result      = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
+    recordRetryMetrics(result)
+    result.getVersion
   }
 
   override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
@@ -196,7 +207,6 @@ class NativeTransactionLog(
     val actionsJson          = ActionJsonSerializer.actionsToJsonLines(actions)
     val result               = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
     recordRetryMetrics(result)
-    invalidateSnapshot()
     result.getVersion
   }
 
@@ -209,7 +219,6 @@ class NativeTransactionLog(
     val actionsJson          = ActionJsonSerializer.actionsToJsonLines(actions)
     val result               = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
     recordRetryMetrics(result)
-    invalidateSnapshot()
     result.getVersion
   }
 
@@ -229,13 +238,11 @@ class NativeTransactionLog(
 
       if (result.getVersion >= 0) {
         lastRetryMetrics = Some(TxRetryMetrics(attempt, conflicts.size, result.getVersion, conflicts))
-        invalidateSnapshot()
         return result.getVersion
       }
 
       // Conflict — re-read metadata and retry
       conflicts = conflicts ++ result.getConflictedVersions.asScala.map(_.toLong)
-      invalidateSnapshot()
 
       if (attempt < maxAttempts) {
         val delay = Math.min(100L * (1L << (attempt - 1)), 5000L)
@@ -254,7 +261,6 @@ class NativeTransactionLog(
     val actionsJson = ActionJsonSerializer.actionsToJsonLines(removeActions)
     val result      = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
     recordRetryMetrics(result)
-    invalidateSnapshot()
     result.getVersion
   }
 
@@ -274,7 +280,6 @@ class NativeTransactionLog(
     val protocol    = ProtocolAction(effectiveReader, effectiveWriter)
     val actionsJson = ActionJsonSerializer.actionsToJsonLines(Seq(protocol))
     TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
-    invalidateSnapshot()
   }
 
   // ------------------------------------------------------------------------------------
@@ -338,8 +343,11 @@ class NativeTransactionLog(
   }
 
   override def getPartitionColumns(): Seq[String] = {
-    val metadata = getMetadata()
-    metadata.partitionColumns
+    val snapshot = getOrRefreshSnapshot()
+    if (snapshot == null) return Seq.empty
+    val metadataJson = snapshot.getMetadataJson
+    if (metadataJson == null || metadataJson.isEmpty) return Seq.empty
+    parseMetadataJson(metadataJson).partitionColumns
   }
 
   override def isPartitioned(): Boolean =
@@ -348,11 +356,11 @@ class NativeTransactionLog(
   override def getMetadata(): MetadataAction = {
     val snapshot = getOrRefreshSnapshot()
     if (snapshot == null) {
-      throw new IllegalStateException(s"Table at $nativeTablePath is not initialized")
+      throw new RuntimeException(s"No metadata found in transaction log for $nativeTablePath")
     }
     val metadataJson = snapshot.getMetadataJson
     if (metadataJson == null || metadataJson.isEmpty) {
-      throw new IllegalStateException(s"Table at $nativeTablePath has no metadata")
+      throw new RuntimeException(s"No metadata found in transaction log for $nativeTablePath")
     }
     parseMetadataJson(metadataJson)
   }
@@ -411,6 +419,8 @@ class NativeTransactionLog(
     size: Option[Long] = None,
     cooldownHours: Int = 24
   ): Long = {
+    // Check existing skip actions to increment skipCount
+    val existingCount = getSkippedFiles().filter(_.path == filePath).map(_.skipCount).sum
     val skipAction = SkipAction(
       path = filePath,
       skipTimestamp = System.currentTimeMillis(),
@@ -419,19 +429,26 @@ class NativeTransactionLog(
       partitionValues = partitionValues,
       size = size,
       retryAfter = Some(System.currentTimeMillis() + (cooldownHours * 3600 * 1000L)),
-      skipCount = 1
+      skipCount = existingCount + 1
     )
     val skipJson = ActionJsonSerializer.skipActionToJson(skipAction)
     val version  = TransactionLogWriter.skipFile(nativeTablePath, nativeConfig, skipJson)
-    invalidateSnapshot()
     version
   }
 
   override def getSkippedFiles(): Seq[SkipAction] = {
     val snapshot = getOrRefreshSnapshot()
     if (snapshot == null) return Seq.empty
+
     val postCheckpointPaths = snapshot.getPostCheckpointPaths
-    if (postCheckpointPaths.isEmpty) return Seq.empty
+    if (postCheckpointPaths.isEmpty) {
+      // No post-checkpoint version files: skip actions only exist in version files,
+      // not in checkpoint manifests. After a checkpoint, skip actions from earlier
+      // versions are no longer visible. This is acceptable because cooldown periods
+      // are short-lived and will naturally expire.
+      return Seq.empty
+    }
+
     val versionPathsJson   = mapper.writeValueAsString(postCheckpointPaths)
     val metadataConfigJson = extractMetadataConfigJson(snapshot)
     val changes            = TransactionLogReader.readPostCheckpointChanges(nativeTablePath, nativeConfig, versionPathsJson, metadataConfigJson)
@@ -454,13 +471,14 @@ class NativeTransactionLog(
   // Cache Management
   // ------------------------------------------------------------------------------------
 
-  override def invalidateCache(): Unit =
-    invalidateSnapshot()
+  override def invalidateCache(): Unit = {
+    // No-op: caching is handled entirely by the native layer's global CACHE_REGISTRY,
+    // which is automatically invalidated by write operations across all instances.
+  }
 
   override def getCacheStats(): Option[CacheStats] = {
-    val cached = cachedSnapshot.get()
-    val hits   = if (cached != null) 1L else 0L
-    Some(CacheStats(hits = hits, misses = 0, hitRate = 1.0, versionsInCache = 0, expirationSeconds = 300))
+    val expirationSecs = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)
+    Some(CacheStats(hits = 0, misses = 0, hitRate = 0.0, versionsInCache = 0, expirationSeconds = expirationSecs))
   }
 
   override def getLastRetryMetrics(): Option[TxRetryMetrics] = lastRetryMetrics
@@ -476,28 +494,20 @@ class NativeTransactionLog(
   // ------------------------------------------------------------------------------------
 
   /**
-   * Get or refresh the cached snapshot. Returns null if the table is not yet initialized
-   * (e.g., during the write path before any data is committed).
+   * Get the current snapshot from the native layer. Returns null if the table is not yet
+   * initialized (e.g., during the write path before any data is committed).
+   *
+   * Caching is handled entirely by the native layer's global CACHE_REGISTRY, which is
+   * automatically invalidated by write operations across all instances.
    */
-  private def getOrRefreshSnapshot(): TxLogSnapshotInfo = {
-    val cached = cachedSnapshot.get()
-    if (cached != null && !cached.isExpired) return cached.snapshot
-
-    val snapshot = try {
+  private def getOrRefreshSnapshot(): TxLogSnapshotInfo =
+    try {
       TransactionLogReader.getSnapshotInfo(nativeTablePath, nativeConfig)
     } catch {
       case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
         logger.debug(s"Table not yet initialized at $nativeTablePath")
-        return null
+        null
     }
-
-    val ttlMs = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L) * 1000L
-    cachedSnapshot.set(CachedSnapshot(snapshot, System.currentTimeMillis() + ttlMs))
-    snapshot
-  }
-
-  private def invalidateSnapshot(): Unit =
-    cachedSnapshot.set(null)
 
   private def recordRetryMetrics(result: WriteResult): Unit = {
     lastRetryMetrics = Some(
@@ -594,9 +604,4 @@ class NativeTransactionLog(
         }.toOption.flatten.toSeq
       }
       .toSeq
-}
-
-/** Cached snapshot with TTL expiration. */
-private[transaction] case class CachedSnapshot(snapshot: TxLogSnapshotInfo, expiresAt: Long) {
-  def isExpired: Boolean = System.currentTimeMillis() > expiresAt
 }

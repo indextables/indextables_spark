@@ -515,12 +515,15 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val beforeCount = beforeRead.count()
     assert(beforeCount > 0, "Table should have data")
 
-    // List transaction log files to verify multi-part checkpoint exists
-    val txLogPath  = new Path(s"$tablePath/_transaction_log")
-    val txLogFiles = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
+    // List transaction log files to verify checkpoint exists
+    val txLogPath    = new Path(s"$tablePath/_transaction_log")
+    val txLogEntries = fs.listStatus(txLogPath)
+    val txLogFiles   = txLogEntries.map(_.getPath.getName).toSet
 
-    // Check for checkpoint manifest (multi-part) or single-file checkpoint
-    val hasCheckpoint = txLogFiles.exists(_.endsWith(".checkpoint.json"))
+    // Check for checkpoint: JSON checkpoint files or Avro state directories (state-v{N}/)
+    val avroStateDirPat0 = """state-v\d+""".r
+    val hasCheckpoint = txLogFiles.exists(_.endsWith(".checkpoint.json")) ||
+      txLogEntries.exists(s => s.isDirectory && avroStateDirPat0.findFirstIn(s.getPath.getName).isDefined)
     assert(hasCheckpoint, "Table should have a checkpoint")
 
     // Check for part files (UUID pattern: checkpoint.<uuid>.<partnum>.json)
@@ -602,14 +605,16 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
         .save(tablePath)
     }
 
-    // List all checkpoint files after second batch
-    val secondBatchFiles   = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
-    val allCheckpointFiles = secondBatchFiles.filter(_.contains("checkpoint"))
+    // List all checkpoint files/directories after second batch
+    val secondBatchEntries = fs.listStatus(txLogPath)
+    val secondBatchNames   = secondBatchEntries.map(_.getPath.getName).toSet
+    val allCheckpointFiles = secondBatchNames.filter(_.contains("checkpoint"))
     println(s"After second batch - all checkpoint files: ${allCheckpointFiles.mkString(", ")}")
 
     // Find part files - pattern: checkpoint.<uuid>.<partnum>.json
-    val partFilePattern = """(\d+)\.checkpoint\.([a-f0-9]+)\.\d{5}\.json""".r
-    val manifestPattern = """(\d+)\.checkpoint\.json""".r
+    val partFilePattern   = """(\d+)\.checkpoint\.([a-f0-9]+)\.\d{5}\.json""".r
+    val manifestPattern   = """(\d+)\.checkpoint\.json""".r
+    val avroStateDirPat   = """state-v(\d+)""".r
 
     val partFilesByVersion = allCheckpointFiles
       .flatMap(f => partFilePattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))
@@ -621,8 +626,15 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
       .groupBy(_._1)
       .mapValues(_.map(_._2).toSet)
 
+    // Also detect Avro state directories (state-v{N}/)
+    val avroStateDirs = secondBatchEntries
+      .filter(_.isDirectory)
+      .flatMap(s => avroStateDirPat.findFirstMatchIn(s.getPath.getName).map(m => m.group(1).toLong))
+      .toSet
+
     println(s"Part files by version: $partFilesByVersion")
     println(s"Manifests by version: $manifestsByVersion")
+    println(s"Avro state dirs: $avroStateDirs")
 
     // Get all version files to set old timestamps on older transaction log files
     val allTxLogFiles = fs.listStatus(txLogPath)
@@ -641,8 +653,8 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     } else ""
     println(s"_last_checkpoint content: $lastCheckpointContent")
 
-    // Verify we have at least 2 different checkpoint versions
-    val checkpointVersions = (partFilesByVersion.keys ++ manifestsByVersion.keys).toSet
+    // Verify we have at least 2 different checkpoint versions (JSON checkpoints or Avro state dirs)
+    val checkpointVersions = (partFilesByVersion.keys ++ manifestsByVersion.keys).toSet ++ avroStateDirs
     println(s"Checkpoint versions found: $checkpointVersions")
 
     // Get the expected latest version (highest version number)

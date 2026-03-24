@@ -49,6 +49,7 @@ object AddActionConverter {
     val docMappingJson      = Option(entry.getDocMappingJson)
     val docMappingRef       = Option(entry.getDocMappingRef)
     val uncompressedSize    = if (entry.getUncompressedSizeBytes >= 0) Some(entry.getUncompressedSizeBytes) else None
+    // Native time range values are in microseconds since epoch; convert to milliseconds for Instant
     val timeRangeStart      = if (entry.getTimeRangeStart >= 0) Some(java.time.Instant.ofEpochMilli(entry.getTimeRangeStart / 1000).toString) else None
     val timeRangeEnd        = if (entry.getTimeRangeEnd >= 0) Some(java.time.Instant.ofEpochMilli(entry.getTimeRangeEnd / 1000).toString) else None
     val companionSrcFiles   = if (entry.getCompanionSourceFiles.isEmpty) None else Some(entry.getCompanionSourceFiles.asScala.toSeq)

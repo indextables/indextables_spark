@@ -960,17 +960,19 @@ class PurgeOrphanedSplitsExecutor(
     val allFilePaths     = scala.collection.mutable.Set[String]()
     val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
-    // Step 1: Get files from ALL retained Avro state directories (Protocol V4)
-    // This is the primary source of truth for tables using the Avro state format
-    val avroStateFiles = getFilesFromAvroState()
-    avroStateFiles.foreach { add =>
+    // Step 1: Get all currently-active files from the transaction log API.
+    // This is the primary source of truth — it reads from native checkpoints
+    // (Avro state format) and post-checkpoint version files, regardless of
+    // checkpoint format on disk. These files MUST be protected from deletion.
+    val currentFiles = txLog.listFiles()
+    currentFiles.foreach { add =>
       allFilePaths += add.path
       filePathToAction(add.path) = add
     }
-    logger.info(s"Found ${avroStateFiles.size} files from Avro state directories")
+    logger.info(s"Found ${currentFiles.size} files from current transaction state")
 
     // Step 2: Get files from ALL retained JSON checkpoints (legacy/fallback)
-    // This handles tables that haven't been migrated to Avro state format yet
+    // This handles tables that still have old-format checkpoint files on disk
     val checkpointFiles = getFilesFromRetainedCheckpoints(txLog)
     checkpointFiles.foreach { add =>
       allFilePaths += add.path
@@ -989,21 +991,6 @@ class PurgeOrphanedSplitsExecutor(
 
     logger.info(s"Total unique files in retained transaction state: ${allFilePaths.size}")
     filePathToAction.values.toSeq
-  }
-
-  /**
-   * Get files from all retained Avro state directories.
-   *
-   * Reads file entries from the latest Avro state directory (state-v*) and any older state directories within the
-   * retention period. This is the primary method for Protocol V4 tables that use the Avro state format.
-   *
-   * @return
-   *   All AddActions from retained Avro state directories
-   */
-  private def getFilesFromAvroState(): Seq[AddAction] = {
-    // State management is handled by native transaction log - no Avro state directories to read
-    logger.info("State cleanup handled by native transaction log")
-    Seq.empty
   }
 
   /**

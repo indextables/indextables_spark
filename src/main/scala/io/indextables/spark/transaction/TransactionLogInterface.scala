@@ -29,8 +29,7 @@ import org.apache.hadoop.fs.Path
  * simple and optimized implementations.
  *
  * Implementations:
- *   - TransactionLog: Simple sequential implementation with basic caching
- *   - OptimizedTransactionLog: Advanced implementation with parallel operations, enhanced caching, and async updates
+ *   - NativeTransactionLog: Backed by tantivy4java's native Rust txlog module via JNI
  */
 trait TransactionLogInterface extends AutoCloseable {
 

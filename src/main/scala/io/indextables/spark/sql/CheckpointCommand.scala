@@ -155,7 +155,7 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       } finally
         transactionLog.close()
     } catch {
-      case e: Exception =>
+      case scala.util.control.NonFatal(e) =>
         val errorMsg = s"Failed to create checkpoint: ${e.getMessage}"
         logger.error(errorMsg, e)
         Seq(
