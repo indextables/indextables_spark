@@ -830,4 +830,35 @@ class IpAddressFieldTest extends TestBase {
       rangeScanResult(1).getString(0) shouldBe "server4"
     }
   }
+
+  test("IP address non-contiguous wildcard is rejected via filter pushdown") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("10.0.1.1", 1),
+        ("10.0.2.1", 2),
+        ("10.5.1.1", 3)
+      ).toDF("ip", "id")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // Non-contiguous wildcard 10.*.1.* is rejected at the native layer.
+      // Collapsing to one range [10.0.1.0, 10.255.1.255] would include 10.0.2.1
+      // (wrong third octet) — a silent false positive.  tantivy4java rejects the
+      // pattern so the caller gets an explicit error rather than wrong results.
+      intercept[Exception] {
+        df.filter($"ip" === "10.*.1.*").collect()
+      }
+    }
+  }
 }

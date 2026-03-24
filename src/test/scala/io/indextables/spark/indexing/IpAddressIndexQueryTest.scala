@@ -519,4 +519,18 @@ class IpAddressIndexQueryTest extends TestBase {
     // Sum: 100 + 200 + 150 + 250 + 300 = 1000
     result(0).getAs[Long]("total") shouldBe 1000
   }
+
+  test("IP address IndexQuery - non-contiguous wildcard is rejected") {
+    val spark = this.spark
+
+    // Non-contiguous wildcard: a fixed octet (1) follows a wildcard octet (*).
+    // Collapsing to a single range [10.0.1.0, 10.255.1.255] would produce false positives
+    // (e.g. 10.0.2.5 would match despite the wrong third octet), so tantivy4java rejects
+    // the pattern entirely and the caller receives an explicit error.
+    intercept[Exception] {
+      spark
+        .sql("SELECT * FROM ip_servers WHERE ip indexquery '10.*.1.*'")
+        .collect()
+    }
+  }
 }

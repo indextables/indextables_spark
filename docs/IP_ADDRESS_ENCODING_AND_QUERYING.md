@@ -661,7 +661,7 @@ spark.sql("""SELECT * FROM t WHERE ip indexquery '"2001:db8::/32"'""")
 
 **Boundary behaviour:** Both the network address (`192.168.1.0`) and the broadcast address (`192.168.1.255`) are **included** in the range.
 
-**Non-trailing wildcards** (`10.*.1.*`) produce a single contiguous range over the first wildcard position; IPs that match the literal octets but fall inside the expanded range are over-approximated. Use explicit range queries when exact non-contiguous subnet semantics are required.
+**Non-contiguous wildcards** (e.g. `10.*.1.*`, where a fixed octet follows a wildcard octet) are **not supported** and will produce a query error. A single IP range cannot represent these semantics without false positives — `10.*.1.*` would require 256 separate ranges to be exact, and collapsing them to one range would match addresses like `10.0.2.5` that don't fit the pattern. Use explicit range queries or CIDR notation instead.
 
 ### What Is NOT Supported
 
