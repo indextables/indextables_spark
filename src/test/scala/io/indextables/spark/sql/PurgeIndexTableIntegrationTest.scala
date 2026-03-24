@@ -521,7 +521,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val txLogFiles   = txLogEntries.map(_.getPath.getName).toSet
 
     // Check for checkpoint: JSON checkpoint files or Avro state directories (state-v{N}/)
-    val avroStateDirPat0 = """state-v\d+""".r
+    val avroStateDirPat0 = """state-v\d{20}""".r
     val hasCheckpoint = txLogFiles.exists(_.endsWith(".checkpoint.json")) ||
       txLogEntries.exists(s => s.isDirectory && avroStateDirPat0.findFirstIn(s.getPath.getName).isDefined)
     assert(hasCheckpoint, "Table should have a checkpoint")
@@ -614,7 +614,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     // Find part files - pattern: checkpoint.<uuid>.<partnum>.json
     val partFilePattern   = """(\d+)\.checkpoint\.([a-f0-9]+)\.\d{5}\.json""".r
     val manifestPattern   = """(\d+)\.checkpoint\.json""".r
-    val avroStateDirPat   = """state-v(\d+)""".r
+    val avroStateDirPat   = """state-v(\d{20})""".r
 
     val partFilesByVersion = allCheckpointFiles
       .flatMap(f => partFilePattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))

@@ -93,7 +93,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Verify we have transaction log files and a checkpoint
     val txLogEntries = fs.listStatus(txLogPath)
     val filesBeforeCleanup = txLogEntries.map(_.getPath.getName).toSet
-    val avroStateDirPattern = """^state-v\d+$""".r
+    val avroStateDirPattern = """^state-v\d{20}$""".r
     val hasCheckpoint = filesBeforeCleanup.exists(_.contains(".checkpoint.json")) ||
       txLogEntries.exists(s => s.isDirectory && avroStateDirPattern.findFirstIn(s.getPath.getName).isDefined)
     assert(hasCheckpoint, "Should have checkpoint file or Avro state directory")
@@ -376,7 +376,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Also verify we have a checkpoint at version 12
     val txLogEntriesBefore = fs.listStatus(txLogPath)
     val filesBeforePurge = txLogEntriesBefore.map(_.getPath.getName).toSet
-    val avroStateDirPat = """^state-v\d+$""".r
+    val avroStateDirPat = """^state-v\d{20}$""".r
     val hasCheckpointBefore = filesBeforePurge.exists(_.contains(".checkpoint.json")) ||
       txLogEntriesBefore.exists(s => s.isDirectory && avroStateDirPat.findFirstIn(s.getPath.getName).isDefined)
     assert(hasCheckpointBefore, "Should have checkpoint file or Avro state directory")

@@ -63,7 +63,7 @@ case class TruncateTimeTravelCommand(
   private val VersionFilePattern  = """^(\d{20})\.json$""".r
   private val ManifestPattern     = """^(\d{20})\.checkpoint\.json$""".r
   private val PartFilePattern     = """^(\d{20})\.checkpoint\.([a-f0-9]+)\.(\d{5})\.json$""".r
-  private val AvroStateDirPattern = """^state-v(\d+)$""".r
+  private val AvroStateDirPattern = """^state-v(\d{20})$""".r
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("table_path", StringType)(),

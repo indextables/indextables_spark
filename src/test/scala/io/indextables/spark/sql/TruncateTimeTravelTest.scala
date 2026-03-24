@@ -93,7 +93,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     val versionPattern    = """^\d{20}\.json$""".r
     val checkpointPattern = """^\d{20}\.checkpoint.*\.json$""".r
-    val avroStatePattern  = """^state-v\d+$""".r
+    val avroStatePattern  = """^state-v\d{20}$""".r
 
     val versionCount    = files.count(f => versionPattern.findFirstIn(f.getName).isDefined)
     // Count both legacy JSON checkpoints and native Avro state directories
