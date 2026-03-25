@@ -442,22 +442,25 @@ class NativeTransactionLog(
   }
 
   override def getSkippedFiles(): Seq[SkipAction] = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return Seq.empty
+    // Use native listSkipActions which scans version files backward from latest,
+    // independent of checkpoint state. This works with checkpoint-every-write where
+    // postCheckpointPaths is always empty.
+    val cooldownMs = options.getLong("spark.indextables.skippedFiles.cooldownDuration", 24L) * 3600 * 1000
+    val nativeSkips = TransactionLogReader.listSkipActions(nativeTablePath, nativeConfig, cooldownMs)
 
-    val postCheckpointPaths = snapshot.getPostCheckpointPaths
-    if (postCheckpointPaths.isEmpty) {
-      // No post-checkpoint version files: skip actions only exist in version files,
-      // not in checkpoint manifests. After a checkpoint, skip actions from earlier
-      // versions are no longer visible. This is acceptable because cooldown periods
-      // are short-lived and will naturally expire.
-      return Seq.empty
-    }
-
-    val versionPathsJson   = mapper.writeValueAsString(postCheckpointPaths)
-    val metadataConfigJson = extractMetadataConfigJson(snapshot)
-    val changes            = TransactionLogReader.readPostCheckpointChanges(nativeTablePath, nativeConfig, versionPathsJson, metadataConfigJson)
-    AddActionConverter.toSkipActions(changes.getSkipActions)
+    import scala.jdk.CollectionConverters._
+    nativeSkips.asScala.map { s =>
+      SkipAction(
+        path = s.getPath,
+        skipTimestamp = s.getSkipTimestamp,
+        reason = Option(s.getReason).getOrElse(""),
+        operation = Option(s.getOperation).getOrElse(""),
+        partitionValues = if (s.getPartitionValues.isEmpty) None else Some(s.getPartitionValues.asScala.toMap),
+        size = if (s.getSize >= 0) Some(s.getSize) else None,
+        retryAfter = if (s.getRetryAfter > 0) Some(s.getRetryAfter) else None,
+        skipCount = s.getSkipCount
+      )
+    }.toSeq
   }
 
   override def getFilesInCooldown(): Map[String, Long] =
