@@ -128,6 +128,9 @@ class PurgeOrphanedSplitsExecutor(
     val stateResultJson   = TransactionLogWriter.deleteExpiredStates(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
     val versionResultJson = TransactionLogWriter.deleteExpiredVersions(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
 
+    // Invalidate cache after deletion so subsequent reads rebuild from current state
+    if (!dryRun) txLog.invalidateCache()
+
     val mapper               = new com.fasterxml.jackson.databind.ObjectMapper()
     val stateResult          = mapper.readTree(stateResultJson)
     val versionResult        = mapper.readTree(versionResultJson)
