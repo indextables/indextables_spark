@@ -17,9 +17,9 @@
 
 package io.indextables.spark.sync
 
-import scala.jdk.CollectionConverters._
-
 import java.time.LocalDate
+
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{DataType, DateType, StructType}
@@ -193,17 +193,18 @@ object DistributedSourceScanner {
     dateColumns: Set[String]
   ): Map[String, String] = {
     if (dateColumns.isEmpty) return partitionValues
-    partitionValues.map { case (key, value) =>
-      if (dateColumns.contains(key)) {
-        try {
-          val epochDay = value.toLong
-          key -> LocalDate.ofEpochDay(epochDay).toString
-        } catch {
-          case _: NumberFormatException => key -> value
+    partitionValues.map {
+      case (key, value) =>
+        if (dateColumns.contains(key)) {
+          try {
+            val epochDay = value.toLong
+            key -> LocalDate.ofEpochDay(epochDay).toString
+          } catch {
+            case _: NumberFormatException => key -> value
+          }
+        } else {
+          key -> value
         }
-      } else {
-        key -> value
-      }
     }
   }
 
@@ -383,7 +384,8 @@ object DistributedSourceScanner {
                 case None => absolutePath
               }
 
-              val effectivePartitionValues = resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
+              val effectivePartitionValues =
+                resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
 
               results += CompanionSourceFile(
                 path = relativePath,

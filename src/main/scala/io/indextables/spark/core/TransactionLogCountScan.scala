@@ -423,9 +423,9 @@ class TransactionLogGroupByCountPartitionReader(
           localDate.toEpochDay.toInt
         } catch {
           case _: Exception =>
-            try {
+            try
               value.toInt // epoch day number
-            } catch {
+            catch {
               case e2: NumberFormatException =>
                 throw new IllegalArgumentException(
                   s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e2.getMessage}",

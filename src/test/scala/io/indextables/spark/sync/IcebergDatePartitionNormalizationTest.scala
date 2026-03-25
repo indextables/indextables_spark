@@ -25,8 +25,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Unit tests for the Iceberg DATE partition normalization helpers in DistributedSourceScanner.
- * Covers: normalizeIcebergDatePartitions, extractDateColumns, resolvePartitionValues.
+ * Unit tests for the Iceberg DATE partition normalization helpers in DistributedSourceScanner. Covers:
+ * normalizeIcebergDatePartitions, extractDateColumns, resolvePartitionValues.
  */
 class IcebergDatePartitionNormalizationTest extends AnyFunSuite with Matchers {
 
@@ -107,11 +107,13 @@ class IcebergDatePartitionNormalizationTest extends AnyFunSuite with Matchers {
   // ── extractDateColumns ─────────────────────────────────────────────────
 
   test("extractDateColumns should extract DATE columns from mixed schema") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType),
-      StructField("dt", DateType),
-      StructField("name", StringType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType),
+        StructField("dt", DateType),
+        StructField("name", StringType)
+      )
+    )
     DistributedSourceScanner.extractDateColumns(Some(schema)) shouldBe Set("dt")
   }
 
@@ -120,27 +122,33 @@ class IcebergDatePartitionNormalizationTest extends AnyFunSuite with Matchers {
   }
 
   test("extractDateColumns should return empty set when no DATE columns exist") {
-    val schema = StructType(Seq(
-      StructField("id", IntegerType),
-      StructField("name", StringType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType),
+        StructField("name", StringType)
+      )
+    )
     DistributedSourceScanner.extractDateColumns(Some(schema)) shouldBe Set.empty
   }
 
   test("extractDateColumns should find multiple DATE columns") {
-    val schema = StructType(Seq(
-      StructField("start_date", DateType),
-      StructField("end_date", DateType),
-      StructField("name", StringType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("start_date", DateType),
+        StructField("end_date", DateType),
+        StructField("name", StringType)
+      )
+    )
     DistributedSourceScanner.extractDateColumns(Some(schema)) shouldBe Set("start_date", "end_date")
   }
 
   test("extractDateColumns should not include TimestampType columns") {
-    val schema = StructType(Seq(
-      StructField("created_at", TimestampType),
-      StructField("name", StringType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("created_at", TimestampType),
+        StructField("name", StringType)
+      )
+    )
     DistributedSourceScanner.extractDateColumns(Some(schema)) shouldBe Set.empty
   }
 

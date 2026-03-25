@@ -1221,9 +1221,8 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
             s"AT LOCATION '$indexPath'"
         )
         result.collect()(0).getString(2) shouldBe "success"
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.maxAutomaticHashedFastfields")
-      }
     }
   }
 

@@ -26,8 +26,8 @@ import org.apache.spark.sql.types._
 import io.indextables.spark.TestBase
 
 /**
- * Tests for DateType handling in TransactionLogGroupByCountPartitionReader.convertPartitionValue.
- * Covers both the ISO date string path and the epoch-day integer fallback (Commit 2).
+ * Tests for DateType handling in TransactionLogGroupByCountPartitionReader.convertPartitionValue. Covers both the ISO
+ * date string path and the epoch-day integer fallback (Commit 2).
  */
 class TransactionLogCountDatePartitionTest extends TestBase {
 
@@ -86,9 +86,11 @@ class TransactionLogCountDatePartitionTest extends TestBase {
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
       df.createOrReplaceTempView("date_group_test")
 
-      val result = spark.sql(
-        "SELECT event_date, count(*) as cnt FROM date_group_test WHERE event_date >= '2024-02-01' GROUP BY event_date"
-      ).collect()
+      val result = spark
+        .sql(
+          "SELECT event_date, count(*) as cnt FROM date_group_test WHERE event_date >= '2024-02-01' GROUP BY event_date"
+        )
+        .collect()
 
       result.length shouldBe 2
       val countMap = result.map(r => (r.getAs[Date]("event_date").toString, r.getAs[Long]("cnt"))).toMap
@@ -101,13 +103,20 @@ class TransactionLogCountDatePartitionTest extends TestBase {
 
   private lazy val convertPartitionValueMethod = {
     val m = classOf[TransactionLogGroupByCountPartitionReader].getDeclaredMethod(
-      "convertPartitionValue", classOf[String], classOf[DataType], classOf[String]
+      "convertPartitionValue",
+      classOf[String],
+      classOf[DataType],
+      classOf[String]
     )
     m.setAccessible(true)
     m
   }
 
-  private def invokeConvertPartitionValue(value: String, dataType: DataType, columnName: String): Any = {
+  private def invokeConvertPartitionValue(
+    value: String,
+    dataType: DataType,
+    columnName: String
+  ): Any = {
     val partition = TransactionLogGroupByCountPartition(
       groupedCounts = Seq.empty,
       groupByColumns = Array(columnName),

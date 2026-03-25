@@ -559,12 +559,14 @@ case class SyncToExternalCommand(
       // When no HASHED FASTFIELDS clause is specified, tantivy4java hashes ALL string columns by default,
       // which can produce oversized splits with many useless hashed columns.
       if (effectiveHfInclude.isEmpty && effectiveHfExclude.isEmpty) {
-        val textFields = effectiveIndexingModes.collect { case (f, m) if m.toLowerCase == "text" => f.toLowerCase }.toSet
+        val textFields = effectiveIndexingModes.collect {
+          case (f, m) if m.toLowerCase == "text" => f.toLowerCase
+        }.toSet
         val partitionFieldsLower = partitionColumns.map(_.toLowerCase).toSet
         val hashableStringColumns = sourceSchema.fields.count { field =>
           field.dataType == StringType &&
-            !textFields.contains(field.name.toLowerCase) &&
-            !partitionFieldsLower.contains(field.name.toLowerCase)
+          !textFields.contains(field.name.toLowerCase) &&
+          !partitionFieldsLower.contains(field.name.toLowerCase)
         }
         val maxAutomaticHashedFastfields = mergedConfigs
           .get("spark.indextables.companion.maxAutomaticHashedFastfields")

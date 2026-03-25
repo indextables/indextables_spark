@@ -23,18 +23,20 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Unit tests for the Iceberg schema parsing methods extracted to IcebergSourceReader companion object.
- * Covers: parseSchemaJson, convertIcebergSchemaToSpark, all primitive/complex type mappings, nullable semantics.
+ * Unit tests for the Iceberg schema parsing methods extracted to IcebergSourceReader companion object. Covers:
+ * parseSchemaJson, convertIcebergSchemaToSpark, all primitive/complex type mappings, nullable semantics.
  */
 class IcebergSchemaParsingTest extends AnyFunSuite with Matchers {
 
   // ── parseSchemaJson ────────────────────────────────────────────────────
 
   test("parseSchemaJson should parse Spark-format schema JSON") {
-    val original = StructType(Seq(
-      StructField("id", LongType, nullable = true),
-      StructField("name", StringType, nullable = true)
-    ))
+    val original = StructType(
+      Seq(
+        StructField("id", LongType, nullable = true),
+        StructField("name", StringType, nullable = true)
+      )
+    )
     val result = IcebergSourceReader.parseSchemaJson(original.json)
     result shouldBe original
   }
@@ -169,7 +171,7 @@ class IcebergSchemaParsingTest extends AnyFunSuite with Matchers {
         |    }
         |  }]
         |}""".stripMargin
-    val result = IcebergSourceReader.convertIcebergSchemaToSpark(json)
+    val result  = IcebergSourceReader.convertIcebergSchemaToSpark(json)
     val arrType = result.fields(0).dataType.asInstanceOf[ArrayType]
     arrType.elementType shouldBe StringType
     arrType.containsNull shouldBe true
@@ -191,7 +193,7 @@ class IcebergSchemaParsingTest extends AnyFunSuite with Matchers {
         |    }
         |  }]
         |}""".stripMargin
-    val result = IcebergSourceReader.convertIcebergSchemaToSpark(json)
+    val result  = IcebergSourceReader.convertIcebergSchemaToSpark(json)
     val mapType = result.fields(0).dataType.asInstanceOf[MapType]
     mapType.keyType shouldBe StringType
     mapType.valueType shouldBe LongType

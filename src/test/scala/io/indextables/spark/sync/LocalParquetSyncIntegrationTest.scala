@@ -799,11 +799,11 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       // This ensures different buckets have different term keys, exercising
       // the multi-bucket hash collection in collect_all_hashes_recursive.
       val data = Seq(
-        (Timestamp.valueOf("2025-06-01 08:01:00"), "INFO",  1L),
-        (Timestamp.valueOf("2025-06-01 08:05:00"), "INFO",  2L),
-        (Timestamp.valueOf("2025-06-01 08:10:00"), "WARN",  3L),
-        (Timestamp.valueOf("2025-06-01 08:16:00"), "INFO",  4L),
-        (Timestamp.valueOf("2025-06-01 08:20:00"), "WARN",  5L),
+        (Timestamp.valueOf("2025-06-01 08:01:00"), "INFO", 1L),
+        (Timestamp.valueOf("2025-06-01 08:05:00"), "INFO", 2L),
+        (Timestamp.valueOf("2025-06-01 08:10:00"), "WARN", 3L),
+        (Timestamp.valueOf("2025-06-01 08:16:00"), "INFO", 4L),
+        (Timestamp.valueOf("2025-06-01 08:20:00"), "WARN", 5L),
         (Timestamp.valueOf("2025-06-01 08:25:00"), "ERROR", 6L)
       )
       data
@@ -825,13 +825,15 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       // Multi-key bucket aggregation: DateHistogram + nested Terms on severity.
       // Before the fix, severity returned u64 hashes (e.g. "2194871672194243152")
       // instead of the actual strings.
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT indextables_date_histogram(timestamp, '15m') as bucket,
                severity, COUNT(*) as cnt
         FROM companion_bucket_multikey
         GROUP BY indextables_date_histogram(timestamp, '15m'), severity
         ORDER BY bucket, severity
-      """).collect()
+      """)
+        .collect()
 
       println(s"DateHistogram multi-key result rows: ${result.length}")
       result.foreach(r => println(s"  bucket=${r.get(0)}, severity=${r.getString(1)}, cnt=${r.getLong(2)}"))
@@ -868,11 +870,11 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       // Two string columns with different value distributions per combination:
       //   (INFO, api)x2, (INFO, web)x1, (WARN, api)x1, (WARN, web)x1, (ERROR, api)x1
       val data = Seq(
-        (1L, "INFO",  "api"),
-        (2L, "INFO",  "api"),
-        (3L, "INFO",  "web"),
-        (4L, "WARN",  "api"),
-        (5L, "WARN",  "web"),
+        (1L, "INFO", "api"),
+        (2L, "INFO", "api"),
+        (3L, "INFO", "web"),
+        (4L, "WARN", "api"),
+        (5L, "WARN", "web"),
         (6L, "ERROR", "api")
       )
       data
@@ -891,12 +893,14 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       companionDf.createOrReplaceTempView("companion_multikey_strings")
 
       // Multi-column GROUP BY without bucket function: Terms → nested Terms
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT severity, service, COUNT(*) as cnt
         FROM companion_multikey_strings
         GROUP BY severity, service
         ORDER BY severity, service
-      """).collect()
+      """)
+        .collect()
 
       println(s"Multi-column GROUP BY result rows: ${result.length}")
       result.foreach(r => println(s"  severity=${r.getString(0)}, service=${r.getString(1)}, cnt=${r.getLong(2)}"))
@@ -906,7 +910,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Both columns must contain resolved strings, not u64 hashes
       val severities = result.map(_.getString(0)).toSet
-      val services = result.map(_.getString(1)).toSet
+      val services   = result.map(_.getString(1)).toSet
       severities shouldBe Set("INFO", "WARN", "ERROR")
       services shouldBe Set("api", "web")
 
