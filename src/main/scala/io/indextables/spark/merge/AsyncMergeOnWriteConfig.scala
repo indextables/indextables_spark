@@ -163,34 +163,13 @@ object AsyncMergeOnWriteConfig {
    *   Parsed configuration
    */
   def fromOptions(options: CaseInsensitiveStringMap): AsyncMergeOnWriteConfig = {
-    val enabled      = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
-    val asyncEnabled = getBooleanOption(options, KEY_ASYNC_ENABLED, DEFAULT_ASYNC_ENABLED)
-    val batchCpuFraction = getDoubleOption(
-      options,
-      KEY_BATCH_CPU_FRACTION,
-      DEFAULT_BATCH_CPU_FRACTION,
-      minExclusive = Some(0.0),
-      maxInclusive = Some(1.0)
-    )
-    val maxConcurrentBatches = getIntOption(
-      options,
-      KEY_MAX_CONCURRENT_BATCHES,
-      DEFAULT_MAX_CONCURRENT_BATCHES,
-      mustBePositive = true
-    )
-    val minBatchesToTrigger = getIntOption(
-      options,
-      KEY_MIN_BATCHES_TO_TRIGGER,
-      DEFAULT_MIN_BATCHES_TO_TRIGGER,
-      mustBePositive = true
-    )
-    val targetSizeBytes = SizeParser.parseSize(options.getOrDefault(KEY_TARGET_SIZE, SizeParser.formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
-    val shutdownTimeoutMs = getLongOption(
-      options,
-      KEY_SHUTDOWN_TIMEOUT_MS,
-      DEFAULT_SHUTDOWN_TIMEOUT_MS,
-      mustBePositive = true
-    )
+    val enabled              = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
+    val asyncEnabled         = ConfigParsingUtils.getBooleanOption(options, KEY_ASYNC_ENABLED, DEFAULT_ASYNC_ENABLED)
+    val batchCpuFraction     = ConfigParsingUtils.getDoubleOption(options, KEY_BATCH_CPU_FRACTION, DEFAULT_BATCH_CPU_FRACTION, minExclusive = Some(0.0), maxInclusive = Some(1.0))
+    val maxConcurrentBatches = ConfigParsingUtils.getIntOption(options, KEY_MAX_CONCURRENT_BATCHES, DEFAULT_MAX_CONCURRENT_BATCHES, mustBePositive = true)
+    val minBatchesToTrigger  = ConfigParsingUtils.getIntOption(options, KEY_MIN_BATCHES_TO_TRIGGER, DEFAULT_MIN_BATCHES_TO_TRIGGER, mustBePositive = true)
+    val targetSizeBytes      = SizeParser.parseSize(options.getOrDefault(KEY_TARGET_SIZE, SizeParser.formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
+    val shutdownTimeoutMs    = ConfigParsingUtils.getLongOption(options, KEY_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS, mustBePositive = true)
 
     val config = AsyncMergeOnWriteConfig(
       enabled = enabled,
@@ -238,16 +217,5 @@ object AsyncMergeOnWriteConfig {
     ).validate()
   }
 
-  private def getBooleanOption(options: CaseInsensitiveStringMap, key: String, default: Boolean): Boolean =
-    ConfigParsingUtils.getBooleanOption(options, key, default)
-
-  private def getIntOption(options: CaseInsensitiveStringMap, key: String, default: Int, mustBePositive: Boolean = false): Int =
-    ConfigParsingUtils.getIntOption(options, key, default, mustBePositive)
-
-  private def getLongOption(options: CaseInsensitiveStringMap, key: String, default: Long, mustBePositive: Boolean = false): Long =
-    ConfigParsingUtils.getLongOption(options, key, default, mustBePositive)
-
-  private def getDoubleOption(options: CaseInsensitiveStringMap, key: String, default: Double, minExclusive: Option[Double] = None, maxInclusive: Option[Double] = None): Double =
-    ConfigParsingUtils.getDoubleOption(options, key, default, minExclusive, maxInclusive)
 
 }

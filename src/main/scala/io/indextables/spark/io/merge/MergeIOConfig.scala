@@ -83,14 +83,12 @@ object MergeIOConfig {
   /** Create configuration from a case-insensitive string map (Spark options). */
   def fromOptions(options: CaseInsensitiveStringMap): MergeIOConfig =
     MergeIOConfig(
-      maxConcurrencyPerCore = getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
-      memoryBudgetBytes = parseBytes(
-        options.getOrDefault(KEY_MEMORY_BUDGET, formatBytes(DEFAULT_MEMORY_BUDGET_BYTES))
-      ),
-      downloadRetries = getIntOption(options, KEY_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_RETRIES),
-      uploadMaxConcurrency = getIntOption(options, KEY_UPLOAD_MAX_CONCURRENCY, DEFAULT_UPLOAD_MAX_CONCURRENCY),
-      retryBaseDelayMs = getLongOption(options, KEY_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
-      retryMaxDelayMs = getLongOption(options, KEY_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS)
+      maxConcurrencyPerCore = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
+      memoryBudgetBytes = parseBytes(options.getOrDefault(KEY_MEMORY_BUDGET, formatBytes(DEFAULT_MEMORY_BUDGET_BYTES))),
+      downloadRetries = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_RETRIES),
+      uploadMaxConcurrency = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_UPLOAD_MAX_CONCURRENCY, DEFAULT_UPLOAD_MAX_CONCURRENCY),
+      retryBaseDelayMs = io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, KEY_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
+      retryMaxDelayMs = io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, KEY_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS)
     ).validate()
 
   /**
@@ -111,12 +109,6 @@ object MergeIOConfig {
       retryMaxDelayMs = get(KEY_RETRY_MAX_DELAY_MS).map(_.toLong).getOrElse(DEFAULT_RETRY_MAX_DELAY_MS)
     ).validate()
   }
-
-  private def getIntOption(options: CaseInsensitiveStringMap, key: String, default: Int): Int =
-    io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, key, default)
-
-  private def getLongOption(options: CaseInsensitiveStringMap, key: String, default: Long): Long =
-    io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, key, default)
 
   /** Parse a byte size string (e.g., "2G", "512M", "1.5G", "1024K") into bytes. */
   def parseBytes(size: String): Long =

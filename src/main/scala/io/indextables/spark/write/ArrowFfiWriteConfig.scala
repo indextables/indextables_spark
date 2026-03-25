@@ -76,10 +76,9 @@ object ArrowFfiWriteConfig {
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 
   def fromOptions(options: CaseInsensitiveStringMap): ArrowFfiWriteConfig = {
-    val enabled   = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
-    val batchSize = getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
-    val heapSize =
-      getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
+    val enabled   = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
+    val batchSize = ConfigParsingUtils.getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
+    val heapSize  = ConfigParsingUtils.getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
 
     val config = ArrowFfiWriteConfig(
       enabled = enabled,
@@ -106,12 +105,4 @@ object ArrowFfiWriteConfig {
     ).validate()
   }
 
-  private def getBooleanOption(options: CaseInsensitiveStringMap, key: String, default: Boolean): Boolean =
-    ConfigParsingUtils.getBooleanOption(options, key, default)
-
-  private def getIntOption(options: CaseInsensitiveStringMap, key: String, default: Int, mustBePositive: Boolean = false): Int =
-    ConfigParsingUtils.getIntOption(options, key, default, mustBePositive)
-
-  private def getLongOption(options: CaseInsensitiveStringMap, key: String, default: Long, mustBePositive: Boolean = false, supportSizeSuffix: Boolean = false): Long =
-    ConfigParsingUtils.getLongOption(options, key, default, mustBePositive, supportSizeSuffix)
 }

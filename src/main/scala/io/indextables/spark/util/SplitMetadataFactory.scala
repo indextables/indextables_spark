@@ -128,8 +128,8 @@ object SplitMetadataFactory {
       logger.debug(s"Using pre-computed footer offsets for ${addAction.path}: $start-$end")
       (start, end)
     } else {
-      // Use defaults when offsets not available
-      logger.debug(s"Footer offsets not in transaction log for ${addAction.path}, using defaults")
+      // Use defaults when offsets not available — warn since callers previously threw on missing offsets
+      logger.warn(s"Footer offsets not in transaction log for ${addAction.path}, using defaults (0, 0)")
       (0L, 0L)
     }
 

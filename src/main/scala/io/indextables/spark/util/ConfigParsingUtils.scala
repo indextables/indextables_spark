@@ -174,11 +174,16 @@ object ConfigParsingUtils {
 
   /** Case-insensitive lookup from a Map[String, String], filtering empty values. */
   def caseInsensitiveGet(configs: Map[String, String], key: String): Option[String] =
-    configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
+    configs
+      .get(key)
+      .orElse(configs.find(_._1.equalsIgnoreCase(key)).map(_._2))
+      .filter(_.nonEmpty)
 
   /** Case-insensitive lookup from a Map[String, String], preserving empty values. */
   def caseInsensitiveGetRaw(configs: Map[String, String], key: String): Option[String] =
-    configs.get(key).orElse(configs.get(key.toLowerCase))
+    configs
+      .get(key)
+      .orElse(configs.find(_._1.equalsIgnoreCase(key)).map(_._2))
 
   /**
    * Create a case-insensitive lookup function from a Map. Pre-lowercases keys once for efficient repeated lookups.
