@@ -853,6 +853,258 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
   }
 
+  // --- FIELDMATCH end-to-end SQL tests ---
+
+  test("End-to-end: WHERE col FIELDMATCH 'query' via spark.sql") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active"),
+        (2, "inactive"),
+        (3, "pending"),
+        (4, "active"),
+        (5, "inactive")
+      ).toDF("id", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      df.createOrReplaceTempView("fieldmatch_test_docs")
+
+      val results = spark.sql("""
+        SELECT id
+        FROM fieldmatch_test_docs
+        WHERE status FIELDMATCH 'active'
+        ORDER BY id
+      """).collect()
+
+      assert(results.length == 2, s"FIELDMATCH query should return 2 results, got ${results.length}")
+      assert(results.map(_.getInt(0)).toSeq == Seq(1, 4), "Should return ids 1 and 4")
+    }
+  }
+
+  test("End-to-end: WHERE * FIELDMATCH 'query' via spark.sql") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active"),
+        (2, "inactive"),
+        (3, "pending"),
+        (4, "active"),
+        (5, "inactive")
+      ).toDF("id", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      df.createOrReplaceTempView("star_fieldmatch_test_docs")
+
+      val results = spark.sql("""
+        SELECT id
+        FROM star_fieldmatch_test_docs
+        WHERE * FIELDMATCH 'active'
+        ORDER BY id
+      """).collect()
+
+      assert(results.length > 0, "* FIELDMATCH query should return results")
+      assert(results.map(_.getInt(0)).toSeq.contains(1), "Should include id 1 which has status=active")
+    }
+  }
+
+  test("End-to-end: FIELDMATCH in compound WHERE clauses") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation", "active", "technology"),
+        (2, "machine learning algorithms", "inactive", "ai"),
+        (3, "spark streaming tutorial", "active", "technology"),
+        (4, "deep learning neural networks", "pending", "ai"),
+        (5, "big data processing", "active", "data")
+      ).toDF("id", "title", "status", "category")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.title", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.title", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .load(tempPath)
+      df.createOrReplaceTempView("fieldmatch_compound_test")
+
+      // 1. FIELDMATCH AND standard filter
+      val andResults = spark.sql(
+        "SELECT id FROM fieldmatch_compound_test WHERE status FIELDMATCH 'active' AND category = 'technology' ORDER BY id"
+      ).collect()
+      assert(andResults.length == 2, s"Expected 2 rows (ids 1,3), got ${andResults.length}")
+      assert(andResults.map(_.getInt(0)).toSeq == Seq(1, 3), "Expected ids 1, 3")
+
+      // 2. FIELDMATCH OR FIELDMATCH
+      val orResults = spark.sql(
+        "SELECT id FROM fieldmatch_compound_test WHERE status FIELDMATCH 'active' OR status FIELDMATCH 'pending' ORDER BY id"
+      ).collect()
+      assert(orResults.length == 4, s"Expected 4 rows (ids 1,3,4,5), got ${orResults.length}")
+      assert(orResults.map(_.getInt(0)).toSeq == Seq(1, 3, 4, 5), "Expected ids 1, 3, 4, 5")
+
+      // 3. * FIELDMATCH AND standard filter
+      val starAndResults = spark.sql(
+        "SELECT id FROM fieldmatch_compound_test WHERE * FIELDMATCH 'active' AND category = 'technology' ORDER BY id"
+      ).collect()
+      assert(starAndResults.length > 0, "* FIELDMATCH AND filter should return results")
+      assert(starAndResults.map(_.getInt(0)).toSeq == Seq(1, 3), "Expected ids 1, 3")
+
+      // 4. Mixed TEXTSEARCH + FIELDMATCH
+      val mixedResults = spark.sql(
+        "SELECT id FROM fieldmatch_compound_test WHERE title TEXTSEARCH 'spark' AND status FIELDMATCH 'active' ORDER BY id"
+      ).collect()
+      assert(mixedResults.length == 2, s"Expected 2 rows (ids 1,3), got ${mixedResults.length}")
+      assert(mixedResults.map(_.getInt(0)).toSeq == Seq(1, 3), "Expected ids 1, 3")
+    }
+  }
+
+  test("FIELDMATCH should warn when no typemap configuration found at read time") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active"),
+        (2, "inactive"),
+        (3, "active")
+      ).toDF("id", "status")
+
+      // Write WITH typemap
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Read WITHOUT typemap
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("fieldmatch_no_typemap_test")
+
+      import org.apache.logging.log4j.LogManager
+      import org.apache.logging.log4j.core.{LoggerContext, Logger => Log4jLogger}
+      import org.apache.logging.log4j.core.appender.WriterAppender
+      import org.apache.logging.log4j.core.layout.PatternLayout
+      import org.apache.logging.log4j.Level
+
+      val logCtx      = LogManager.getContext(false).asInstanceOf[LoggerContext]
+      val log4jLogger = logCtx.getLogger("io.indextables.spark.core.IndexTables4SparkScanBuilder").asInstanceOf[Log4jLogger]
+      val origLevel   = log4jLogger.getLevel
+      log4jLogger.setLevel(Level.WARN)
+
+      val logOutput = new java.io.StringWriter()
+      val layout    = PatternLayout.newBuilder().withPattern("%msg%n").build()
+      val appender  = WriterAppender.createAppender(layout, null, logOutput, "test-fieldmatch-no-typemap-capture", false, true)
+      appender.start()
+      log4jLogger.addAppender(appender)
+
+      try {
+        val results = spark.sql(
+          "SELECT id FROM fieldmatch_no_typemap_test WHERE status FIELDMATCH 'active'"
+        ).collect()
+
+        val logStr = logOutput.toString
+        assert(logStr.contains("Cannot validate FIELDMATCH"), s"Expected 'Cannot validate FIELDMATCH' in log but got: $logStr")
+        assert(logStr.contains("no typemap configuration found"), s"Expected 'no typemap configuration found' in log but got: $logStr")
+
+        // Query should still execute without throwing
+        assert(results.length > 0, "FIELDMATCH should still return results even without typemap at read time")
+      } finally {
+        log4jLogger.removeAppender(appender)
+        appender.stop()
+        log4jLogger.setLevel(origLevel)
+      }
+    }
+  }
+
+  test("End-to-end 100k rows: FIELDMATCH returns correct results and matches indexquery") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val titles = Array(
+        "apache spark documentation",
+        "machine learning algorithms",
+        "big data processing pipeline",
+        "natural language processing with transformers",
+        "distributed computing fundamentals",
+        "deep learning neural networks",
+        "real-time stream processing",
+        "graph database optimization",
+        "kubernetes cluster management",
+        "cloud infrastructure automation"
+      )
+      val statuses = Array("active", "inactive", "pending", "archived", "draft")
+      val categories = Array("technology", "ai", "data", "infrastructure", "devops")
+
+      val rows = (1 to 100000).map { i =>
+        (i, titles(i % titles.length), statuses(i % statuses.length), categories(i % categories.length))
+      }
+      val testData = rows.toDF("id", "title", "status", "category")
+
+      testData.repartition(1).write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.title", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      spark.conf.set("spark.indextables.read.defaultLimit", "200000")
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("large_fieldmatch_test")
+
+      val totalCount = spark.sql("SELECT count(*) FROM large_fieldmatch_test").collect()(0).getLong(0)
+      assert(totalCount == 100000, s"Expected 100000 rows, got $totalCount")
+
+      // FIELDMATCH for 'active' — should return 20000 rows (100k / 5 statuses)
+      val fieldmatchRows = spark.sql(
+        "SELECT id FROM large_fieldmatch_test WHERE status FIELDMATCH 'active' ORDER BY id"
+      ).collect()
+      assert(fieldmatchRows.length == 20000, s"Expected 20000 rows for FIELDMATCH 'active', got ${fieldmatchRows.length}")
+
+      // Cross-check with indexquery — should return identical row ids
+      val indexqueryRows = spark.sql(
+        "SELECT id FROM large_fieldmatch_test WHERE status indexquery 'active' ORDER BY id"
+      ).collect()
+      val fieldmatchIds = fieldmatchRows.map(_.getInt(0)).toSeq
+      val indexqueryIds = indexqueryRows.map(_.getInt(0)).toSeq
+      assert(fieldmatchIds == indexqueryIds, "FIELDMATCH and indexquery must return identical rows")
+
+      spark.conf.set("spark.indextables.read.defaultLimit", "250")
+    }
+  }
+
   test("* indexqueryall should NOT warn about field type mismatches") {
     withTempPath { tempPath =>
       val spark = this.spark
