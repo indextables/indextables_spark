@@ -396,7 +396,12 @@ class NativeTransactionLog(
     }
 
     val addActions = entries.map(AddActionConverter.toAddAction).toSeq
-    Some(addActions)
+
+    // Include protocol and metadata actions alongside file entries,
+    // since checkpoint represents the complete consolidated state
+    val protocol = getProtocol()
+    val metadata = getMetadata()
+    Some(Seq(protocol, metadata) ++ addActions)
   }
 
   override def getVersions(): Seq[Long] =
