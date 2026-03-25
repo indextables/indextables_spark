@@ -89,7 +89,9 @@ case class PrewarmCacheCommand(
 
   // Credential resolution centralized in CredentialProviderFactory.resolveCredentialsOnDriver()
 
-  private val objectMapper = io.indextables.spark.util.JsonUtil.mapper
+  // Plain ObjectMapper without ScalaModule — PrewarmCacheCommand is serialized to executors,
+  // and ScalaTypeModifier is not serializable.
+  private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
 
   /**
    * Enrich a config map with companion metadata from the transaction log, mirroring ScanBuilder.effectiveConfig logic.
