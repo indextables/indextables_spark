@@ -26,7 +26,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.{LastCheckpointInfo, TransactionLogFactory}
-import io.indextables.spark.transaction.avro.{StateConfig, StateManifestIO}
 import org.slf4j.LoggerFactory
 
 /**
@@ -116,8 +115,8 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
           if (checkpointInfo.parts.isDefined) "json-multipart" else "json"
         )
 
-        if (format == StateConfig.Format.AVRO_STATE) {
-          describeAvroState(resolvedPath.toString, transactionLogPath, cloudProvider, checkpointInfo)
+        if (format == "avro-state") {
+          describeAvroState(resolvedPath.toString, transactionLogPath, cloudProvider, checkpointInfo, sparkSession)
         } else {
           describeJsonState(resolvedPath.toString, cloudProvider, checkpointInfo, format)
         }
@@ -147,45 +146,32 @@ case class DescribeStateCommand(tablePath: String) extends LeafRunnableCommand {
     resolvedPathStr: String,
     transactionLogPath: Path,
     cloudProvider: io.indextables.spark.io.CloudStorageProvider,
-    checkpointInfo: LastCheckpointInfo
+    checkpointInfo: LastCheckpointInfo,
+    sparkSession: SparkSession
   ): Seq[Row] = {
+    // With native transaction log, avro state is managed internally.
+    // Use TransactionLogInterface to get file list and basic stats.
+    val txLog = TransactionLogFactory.create(new Path(resolvedPathStr), sparkSession)
+    try {
+      val files      = txLog.listFiles()
+      val totalBytes = files.map(_.size).sum
 
-    val stateDir = checkpointInfo.stateDir.getOrElse(
-      throw new IllegalStateException("Avro state checkpoint missing stateDir")
-    )
-
-    val stateDirPath = new Path(transactionLogPath, stateDir).toString
-    val manifestIO   = StateManifestIO(cloudProvider)
-    val manifest     = manifestIO.readStateManifest(stateDirPath)
-
-    val numManifests  = manifest.manifests.size
-    val numTombstones = manifest.tombstones.size
-    val totalEntries  = manifest.manifests.map(_.numEntries).sum
-
-    val tombstoneRatio = if (totalEntries > 0) {
-      numTombstones.toDouble / totalEntries
-    } else {
-      0.0
-    }
-
-    val needsCompaction =
-      tombstoneRatio > StateConfig.COMPACTION_TOMBSTONE_THRESHOLD_DEFAULT ||
-        numManifests > StateConfig.COMPACTION_MAX_MANIFESTS_DEFAULT
-
-    Seq(
-      Row(
-        resolvedPathStr,
-        "avro-state",
-        manifest.stateVersion,
-        manifest.numFiles.toLong,
-        numManifests,
-        numTombstones,
-        tombstoneRatio,
-        manifest.totalBytes,
-        needsCompaction,
-        "OK"
+      Seq(
+        Row(
+          resolvedPathStr,
+          "avro-state",
+          checkpointInfo.version,
+          files.size.toLong,
+          0,   // num_manifests - managed by native layer
+          0,   // num_tombstones - managed by native layer
+          0.0, // tombstone_ratio
+          totalBytes,
+          false, // needs_compaction - managed by native layer
+          "OK"
+        )
       )
-    )
+    } finally
+      txLog.close()
   }
 
   private def describeJsonState(

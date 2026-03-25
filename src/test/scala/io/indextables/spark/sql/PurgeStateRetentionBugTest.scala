@@ -213,10 +213,12 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     statesBefore.foreach { stateStatus =>
       val version = stateStatus.getPath.getName.replace("state-v", "").toLong
       if (version != latestVersion) {
-        // Age this state directory
+        // Age this state directory and its contents (_manifest.avro)
         fs.setTimes(stateStatus.getPath, oldTimestamp, -1)
+        val contents = fs.listStatus(stateStatus.getPath)
+        contents.foreach(f => fs.setTimes(f.getPath, oldTimestamp, -1))
         agedCount += 1
-        println(s"Aged ${stateStatus.getPath.getName} to 25 hours ago")
+        println(s"Aged ${stateStatus.getPath.getName} to 25 hours ago (${contents.length} files inside)")
       }
     }
 

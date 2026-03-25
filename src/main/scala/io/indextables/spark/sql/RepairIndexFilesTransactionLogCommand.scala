@@ -257,15 +257,12 @@ case class RepairIndexFilesTransactionLogCommand(
 
             logger.info(s"Writing $validSplits add actions to: $version1Path")
 
-            // Use streaming write to avoid OOM for large tables with many splits
-            // This prevents StringBuilder exceeding JVM's ~2GB array size limit
-            io.indextables.spark.transaction.StreamingActionWriter.writeActionsStreaming(
-              actions = addActionsWithTruncatedStats.asInstanceOf[Seq[io.indextables.spark.transaction.Action]],
-              cloudProvider = targetCloudProvider,
-              path = version1Path.toString,
-              codec = None, // Repair command doesn't compress
-              ifNotExists = false
+            // Write add actions via native TransactionLogWriter
+            val actionsJson = io.indextables.spark.transaction.ActionJsonSerializer.actionsToJsonLines(
+              addActionsWithTruncatedStats.asInstanceOf[Seq[io.indextables.spark.transaction.Action]]
             )
+            // Write directly to the target path as a version file
+            targetCloudProvider.writeFile(version1Path.toString, actionsJson.getBytes("UTF-8"))
             logger.info("Successfully wrote add actions file")
 
             // No checkpoint needed - the transaction log is already consolidated

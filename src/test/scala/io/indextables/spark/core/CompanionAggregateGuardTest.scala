@@ -11,19 +11,16 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{MetadataAction, TransactionLog}
+import io.indextables.spark.transaction.{MetadataAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 
 /** Tests for the aggregate guard that prevents silently incorrect aggregate results when aggregate pushdown fails. */
 class CompanionAggregateGuardTest extends TestBase {
 
   private def markAsCompanionTable(testPath: String, includeSourcePath: Boolean = false): Unit = {
-    val txLog = new TransactionLog(
+    val txLog = TransactionLogFactory.create(
       new Path(testPath),
-      spark,
-      new CaseInsensitiveStringMap(
-        Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava
-      )
+      spark
     )
     try {
       val currentMetadata = txLog.getMetadata()

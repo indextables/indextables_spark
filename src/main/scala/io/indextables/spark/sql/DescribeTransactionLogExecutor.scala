@@ -59,7 +59,7 @@ class DescribeTransactionLogExecutor(
   }
 
   /** Read all transaction log versions from 0 to current. */
-  private def readAllVersions(txLog: TransactionLog): Seq[Row] = {
+  private def readAllVersions(txLog: TransactionLogInterface): Seq[Row] = {
     val versions = txLog.getVersions()
     logger.info(s"Reading all versions: ${versions.length} total versions")
 
@@ -76,7 +76,7 @@ class DescribeTransactionLogExecutor(
   }
 
   /** Read from latest checkpoint forward (more efficient for large transaction logs). */
-  private def readFromCheckpoint(txLog: TransactionLog): Seq[Row] = {
+  private def readFromCheckpoint(txLog: TransactionLogInterface): Seq[Row] = {
     val checkpointVersion = txLog.getLastCheckpointVersion()
 
     if (checkpointVersion.isEmpty) {
@@ -493,7 +493,7 @@ class DescribeTransactionLogExecutor(
     }
 
   /** Get the full path to a transaction log file. */
-  private def getLogFilePath(txLog: TransactionLog, version: Long): String = {
+  private def getLogFilePath(txLog: TransactionLogInterface, version: Long): String = {
     val txLogPath   = new Path(txLog.getTablePath(), "_transaction_log")
     val versionFile = new Path(txLogPath, f"$version%020d.json")
     versionFile.toString
@@ -505,7 +505,7 @@ class DescribeTransactionLogExecutor(
    * For multi-part checkpoints (V3), this returns the manifest path with a note indicating the number of parts. For
    * legacy single-file checkpoints, this returns the checkpoint file path.
    */
-  private def getCheckpointFilePath(txLog: TransactionLog, version: Long): String = {
+  private def getCheckpointFilePath(txLog: TransactionLogInterface, version: Long): String = {
     val txLogPath      = new Path(txLog.getTablePath(), "_transaction_log")
     val checkpointFile = new Path(txLogPath, f"$version%020d.checkpoint.json")
     val basePath       = checkpointFile.toString

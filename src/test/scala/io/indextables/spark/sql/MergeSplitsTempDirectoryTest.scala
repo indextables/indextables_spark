@@ -24,7 +24,7 @@ import org.apache.spark.sql.functions.{col, concat, lit}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
@@ -39,7 +39,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
   var tempTablePath: String          = _
   var customTempDir: String          = _
-  var transactionLog: TransactionLog = _
+  var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()

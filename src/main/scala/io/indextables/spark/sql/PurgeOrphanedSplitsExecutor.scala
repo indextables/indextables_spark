@@ -29,7 +29,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider, CloudStorageProviderFactory}
 import io.indextables.spark.transaction._
-import io.indextables.spark.transaction.compression.CompressionUtils
 import org.slf4j.LoggerFactory
 
 /**
@@ -77,62 +76,86 @@ class PurgeOrphanedSplitsExecutor(
   def purge(): PurgeResult = {
     val startTime = System.currentTimeMillis()
 
-    // Step 1: Get transaction log with resolved credentials
-    val cloudConfigs = extractCloudStorageConfigs()
     import scala.jdk.CollectionConverters._
+    import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter}
+
+    // Resolve credentials for native layer — must call resolveCredentialsOnDriver to
+    // invoke custom credential providers (the native Rust layer cannot invoke Java providers)
+    val cloudConfigs = extractCloudStorageConfigs()
     val txLog =
       TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
-
-    // Invalidate cache to ensure fresh read of transaction log state for purge planning
     txLog.invalidateCache()
 
-    // Step 2: Determine which transaction log files will be deleted
-    // Get the list of versions that will remain after cleanup (for time travel support)
-    val versionsBeforeCleanup = txLog.getVersions()
-    val versionsToDelete      = getTransactionLogVersionsToDelete(txLog)
-    val versionsToKeep        = versionsBeforeCleanup.filterNot(versionsToDelete.contains)
-    logger.info(s"Transaction log versions: ${versionsBeforeCleanup.size} total, ${versionsToDelete.size} to delete, ${versionsToKeep.size} to keep")
+    val nativeTablePath = ConfigMapper.normalizeTablePath(new Path(tablePath))
+    // Resolve credentials the same way TransactionLogFactory does — invoke custom providers
+    // and inject explicit credentials for the native layer
+    val resolvedConfigs = io.indextables.spark.utils.CredentialProviderFactory
+      .resolveCredentialsOnDriver(cloudConfigs, tablePath)
+    val nativeConfig = ConfigMapper.toNativeConfig(new CaseInsensitiveStringMap(resolvedConfigs.asJava))
 
-    // Step 3: Get ALL files referenced in ANY retained transaction file or checkpoint
-    // CRITICAL FIX: For time travel support, we must preserve files from:
-    //   1. All retained checkpoints (not just the latest)
-    //   2. All retained version files (those not being deleted)
-    //
-    // A file should NOT be deleted if it appears in ANY transaction file or
-    // checkpoint that still exists after the purge operation.
-    val allRetainedFiles = getAllFilesFromRetainedState(txLog, versionsToKeep)
-    logger.info(s"Files referenced in retained transaction state: ${allRetainedFiles.size}")
+    // Compute tx log retention in milliseconds
+    val txLogRetentionMs = txLogRetentionDuration.getOrElse {
+      spark.conf
+        .getOption("spark.indextables.logRetention.duration")
+        .map(_.toLong)
+        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+    }
 
-    // Step 4: Clean up old transaction log files AFTER getting current state
-    // This prevents race condition where we delete tx logs and then try to read them.
-    // Use pre-computed versionsToDelete to ensure consistency.
-    val versionFilesDeleted = cleanupOldTransactionLogFilesWithVersions(txLog, versionsToDelete)
-    logger.info(s"Transaction log cleanup: deleted $versionFilesDeleted old version files")
+    // --- Step 1: Get retained files from native layer (cursored streaming) ---
+    // The native layer evaluates version retention and returns all split file paths
+    // referenced by any non-expired version. This is the "known files" set.
+    val retainedFilePaths = {
+      val paths   = scala.collection.mutable.Set[String]()
+      val cursor  = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
+      try {
+        var batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
+        while (batch != null) {
+          batch.asScala.foreach { entry =>
+            val path = entry.get("path")
+            if (path != null) paths += path.toString
+          }
+          batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
+        }
+      } finally
+        TransactionLogReader.closeRetainedFilesCursor(cursor)
+      paths.toSet
+    }
+    logger.info(s"Files referenced in retained transaction state: ${retainedFilePaths.size}")
 
-    // Step 5: Clean up old checkpoint files
-    // Checkpoints older than retention period are safe to delete (except the most recent one)
-    val checkpointsDeleted = cleanupOldCheckpointFiles(txLog)
-    logger.info(s"Checkpoint cleanup: deleted $checkpointsDeleted old checkpoint files")
+    // --- Step 2: Native cleanup of expired states and versions ---
+    // For dry run, use dryRun=true to get counts. Guard deleted counts in Scala as a
+    // safety net until native dryRun is fully verified. For real runs, delete with dryRun=false.
+    val stateResultJson   = TransactionLogWriter.deleteExpiredStates(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
+    val versionResultJson = TransactionLogWriter.deleteExpiredVersions(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
 
-    // Step 5b: Clean up old Avro state directories
-    // State directories older than retention period are safe to delete (except the latest one)
-    val stateCleanupResult = cleanupOldStateDirectories()
-    logger.info(s"State directory cleanup: found ${stateCleanupResult.found}, deleted ${stateCleanupResult.deleted} old state directories")
+    // Invalidate cache after deletion so subsequent reads rebuild from current state.
+    // Invalidate both the normalized path (used by this txlog instance) and the raw path
+    // (which other txlog instances created from the original table path may use).
+    if (!dryRun) {
+      txLog.invalidateCache()
+      TransactionLogReader.invalidateCache(ConfigMapper.normalizeTablePath(new Path(tablePath)))
+    }
 
-    // Use all retained files as the valid files set
-    val allFiles = allRetainedFiles
+    val mapper               = new com.fasterxml.jackson.databind.ObjectMapper()
+    val stateResult          = mapper.readTree(stateResultJson)
+    val versionResult        = mapper.readTree(versionResultJson)
+    val expiredStatesFound   = stateResult.path("found").asInt(0)
+    val expiredStatesDeleted = if (dryRun) 0 else stateResult.path("deleted").asInt(0)
+    val versionFilesDeleted  = if (dryRun) 0 else versionResult.path("deleted").asInt(0)
 
-    // Helper to create consistent messages
+    logger.info(s"State directory cleanup: found $expiredStatesFound, deleted $expiredStatesDeleted")
+    logger.info(s"Version file cleanup: deleted $versionFilesDeleted")
+
+    val stateCleanupResult = StateCleanupResult(expiredStatesFound, expiredStatesDeleted)
+
     def stateMessage: String = {
       val action = if (dryRun) "Would delete" else "Deleted"
       if (stateCleanupResult.found > 0) {
         s" $action ${stateCleanupResult.found} expired state directories."
-      } else {
-        ""
-      }
+      } else ""
     }
 
-    // Step 2: List all .split and .crc files from filesystem (distributed)
+    // --- Step 3: List all .split and .crc files from storage (Spark distributed) ---
     val allSplitFiles        = listAllSplitFiles(tablePath)
     val totalFilesystemCount = allSplitFiles.count()
     logger.info(s"Total split/crc files found in filesystem: $totalFilesystemCount")
@@ -142,25 +165,19 @@ class PurgeOrphanedSplitsExecutor(
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = 0,
-        orphanedFilesDeleted = 0,
-        sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted,
-        retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found,
-        expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun,
-        durationMs = durationMs,
+        orphanedFilesFound = 0, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun, durationMs = durationMs,
         message = Some(s"No split files found in table directory.$stateMessage")
       )
     }
 
-    // Step 3: Get valid split files from transaction log
-    val validSplitFiles = getValidSplitFilesFromTransactionLog(allFiles)
+    // --- Step 4: Build retained files Dataset and anti-join (Spark distributed) ---
+    val validSplitFiles = getValidSplitFilesFromRetainedPaths(retainedFilePaths)
     val validFilesCount = validSplitFiles.count()
     logger.info(s"Valid split/crc files in transaction log: $validFilesCount")
 
-    // Step 4: Find orphaned files (LEFT ANTI JOIN)
     val orphanedFiles = findOrphanedFiles(allSplitFiles, validSplitFiles)
     val orphanedCount = orphanedFiles.count()
     logger.info(s"Orphaned files found (before retention filter): $orphanedCount")
@@ -170,59 +187,44 @@ class PurgeOrphanedSplitsExecutor(
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = 0,
-        orphanedFilesDeleted = 0,
-        sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted,
-        retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found,
-        expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun,
-        durationMs = durationMs,
+        orphanedFilesFound = 0, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun, durationMs = durationMs,
         message = Some(s"No orphaned files found.$stateMessage")
       )
     }
 
-    // Step 5: Apply retention filter
+    // --- Step 5: Apply split file retention filter ---
     val retentionTimestamp  = System.currentTimeMillis() - (retentionHours * 3600 * 1000)
     val eligibleForDeletion = orphanedFiles.filter(col("modificationTime") < retentionTimestamp)
-
-    val eligibleCount = eligibleForDeletion.count()
-    logger.info(s"Orphaned files eligible for deletion (after retention filter): $eligibleCount")
-    logger.info(s"Orphaned files skipped (too recent): ${orphanedCount - eligibleCount}")
+    val eligibleCount       = eligibleForDeletion.count()
+    logger.info(s"Orphaned files eligible for deletion: $eligibleCount (skipped ${orphanedCount - eligibleCount} too recent)")
 
     if (eligibleCount == 0) {
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = orphanedCount,
-        orphanedFilesDeleted = 0,
-        sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted,
-        retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found,
-        expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun,
-        durationMs = durationMs,
-        message =
-          Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
+        orphanedFilesFound = orphanedCount, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun, durationMs = durationMs,
+        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
       )
     }
 
-    // Step 6: Check max files limit
+    // --- Step 6: Apply max files limit ---
     val maxFilesToDelete = spark.conf
       .getOption("spark.indextables.purge.maxFilesToDelete")
       .map(_.toLong)
-      .getOrElse(1000000L) // 1M default
+      .getOrElse(1000000L)
 
     val filesToDelete = if (eligibleCount > maxFilesToDelete) {
       logger.warn(s"Limiting deletion to $maxFilesToDelete files (found $eligibleCount eligible)")
       eligibleForDeletion.limit(maxFilesToDelete.toInt)
-    } else {
-      eligibleForDeletion
-    }
+    } else eligibleForDeletion
 
-    // Step 7: Delete or preview orphaned splits
+    // --- Step 7: Delete or preview orphaned splits (Spark distributed) ---
     if (dryRun) {
       previewDeletion(filesToDelete, eligibleCount, orphanedCount, stateCleanupResult, versionFilesDeleted, startTime)
     } else {
@@ -248,7 +250,7 @@ class PurgeOrphanedSplitsExecutor(
    *   Number of transaction log files deleted (or would be deleted in DRY RUN)
    */
   private def cleanupOldTransactionLogFilesWithVersions(
-    txLog: io.indextables.spark.transaction.TransactionLog,
+    txLog: TransactionLogInterface,
     versionsToDelete: Set[Long]
   ): Long =
     try {
@@ -337,7 +339,7 @@ class PurgeOrphanedSplitsExecutor(
    * @return
    *   Number of checkpoint files deleted (or would be deleted in DRY RUN)
    */
-  private def cleanupOldCheckpointFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long =
+  private def cleanupOldCheckpointFiles(txLog: TransactionLogInterface): Long =
     try {
       import io.indextables.spark.util.JsonUtil
 
@@ -786,40 +788,10 @@ class PurgeOrphanedSplitsExecutor(
    * @return
    *   Number of manifests deleted (or would be deleted in dry-run mode)
    */
-  private def cleanupOrphanedManifests(provider: CloudStorageProvider, txLogPath: String): Long =
-    try {
-      import io.indextables.spark.transaction.avro.{GCConfig, ManifestGarbageCollector, StateConfig}
-
-      // Get GC configuration from Spark conf
-      val retentionVersions = spark.conf
-        .getOption(StateConfig.RETENTION_VERSIONS_KEY)
-        .map(_.toInt)
-        .getOrElse(StateConfig.RETENTION_VERSIONS_DEFAULT)
-      val minManifestAgeHours = spark.conf
-        .getOption(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_KEY)
-        .map(_.toInt)
-        .getOrElse(StateConfig.GC_MIN_MANIFEST_AGE_HOURS_DEFAULT)
-
-      val gcConfig = GCConfig(
-        retentionVersions = retentionVersions,
-        minManifestAgeHours = minManifestAgeHours
-      )
-
-      val gc     = ManifestGarbageCollector(provider, txLogPath)
-      val result = gc.collectGarbage(gcConfig, dryRun)
-
-      logger.info(
-        s"Manifest GC: ${result.reachableManifests} reachable, ${result.orphanedManifests} orphaned, " +
-          s"${result.deletedManifests} deleted (dryRun=$dryRun)"
-      )
-
-      result.deletedManifests
-    } catch {
-      case e: Exception =>
-        // Don't fail the entire purge operation if manifest GC fails
-        logger.warn(s"Failed to clean up orphaned manifests: ${e.getMessage}", e)
-        0L
-    }
+  private def cleanupOrphanedManifests(provider: CloudStorageProvider, txLogPath: String): Long = {
+    logger.info("State cleanup handled by native transaction log")
+    0L
+  }
 
   /**
    * Delete a directory and all its contents recursively.
@@ -871,7 +843,7 @@ class PurgeOrphanedSplitsExecutor(
    *
    * Returns: Set of version numbers that will be deleted
    */
-  private def getTransactionLogVersionsToDelete(txLog: io.indextables.spark.transaction.TransactionLog): Set[Long] = {
+  private def getTransactionLogVersionsToDelete(txLog: TransactionLogInterface): Set[Long] = {
     val checkpointVersionOpt = txLog.getLastCheckpointVersion()
 
     checkpointVersionOpt match {
@@ -938,7 +910,7 @@ class PurgeOrphanedSplitsExecutor(
    *   The specific versions to scan (typically versions that will remain after cleanup) Returns: Seq[AddAction]
    *   containing all files that appear in any of the specified versions
    */
-  private def getAllFilesFromVersions(txLog: io.indextables.spark.transaction.TransactionLog, versionsToScan: Seq[Long])
+  private def getAllFilesFromVersions(txLog: TransactionLogInterface, versionsToScan: Seq[Long])
     : Seq[AddAction] = {
     logger.info(s"Scanning ${versionsToScan.size} transaction log versions for file references (time travel support)")
 
@@ -985,23 +957,25 @@ class PurgeOrphanedSplitsExecutor(
    *   All AddActions from retained state
    */
   private def getAllFilesFromRetainedState(
-    txLog: io.indextables.spark.transaction.TransactionLog,
+    txLog: TransactionLogInterface,
     versionsToKeep: Seq[Long]
   ): Seq[AddAction] = {
     val allFilePaths     = scala.collection.mutable.Set[String]()
     val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
-    // Step 1: Get files from ALL retained Avro state directories (Protocol V4)
-    // This is the primary source of truth for tables using the Avro state format
-    val avroStateFiles = getFilesFromAvroState()
-    avroStateFiles.foreach { add =>
+    // Step 1: Get all currently-active files from the transaction log API.
+    // This is the primary source of truth — it reads from native checkpoints
+    // (Avro state format) and post-checkpoint version files, regardless of
+    // checkpoint format on disk. These files MUST be protected from deletion.
+    val currentFiles = txLog.listFiles()
+    currentFiles.foreach { add =>
       allFilePaths += add.path
       filePathToAction(add.path) = add
     }
-    logger.info(s"Found ${avroStateFiles.size} files from Avro state directories")
+    logger.info(s"Found ${currentFiles.size} files from current transaction state")
 
     // Step 2: Get files from ALL retained JSON checkpoints (legacy/fallback)
-    // This handles tables that haven't been migrated to Avro state format yet
+    // This handles tables that still have old-format checkpoint files on disk
     val checkpointFiles = getFilesFromRetainedCheckpoints(txLog)
     checkpointFiles.foreach { add =>
       allFilePaths += add.path
@@ -1009,138 +983,23 @@ class PurgeOrphanedSplitsExecutor(
     }
     logger.info(s"Found ${checkpointFiles.size} files from retained checkpoints")
 
-    // Step 3: Get AddActions from ALL retained version files
-    val versionFiles = getAllFilesFromVersions(txLog, versionsToKeep)
+    // Step 3: Get AddActions from post-checkpoint version files only.
+    // Pre-checkpoint versions are fully captured in the checkpoint state (Step 1), so
+    // scanning them would over-protect files that have since been removed (e.g., by MERGE
+    // or DROP PARTITIONS). Only post-checkpoint versions may contain state changes not yet
+    // reflected in a checkpoint.
+    val checkpointVersion = txLog.getLastCheckpointVersion().getOrElse(-1L)
+    val postCheckpointVersions = versionsToKeep.filter(_ > checkpointVersion)
+    val versionFiles = getAllFilesFromVersions(txLog, postCheckpointVersions)
     versionFiles.foreach { add =>
       allFilePaths += add.path
       // Keep the most recent AddAction for each path (for metadata like size)
       filePathToAction(add.path) = add
     }
-    logger.info(s"Found ${versionFiles.size} files from retained version files")
+    logger.info(s"Found ${versionFiles.size} files from ${postCheckpointVersions.size} post-checkpoint version files (checkpoint at v$checkpointVersion)")
 
     logger.info(s"Total unique files in retained transaction state: ${allFilePaths.size}")
     filePathToAction.values.toSeq
-  }
-
-  /**
-   * Get files from all retained Avro state directories.
-   *
-   * Reads file entries from the latest Avro state directory (state-v*) and any older state directories within the
-   * retention period. This is the primary method for Protocol V4 tables that use the Avro state format.
-   *
-   * @return
-   *   All AddActions from retained Avro state directories
-   */
-  private def getFilesFromAvroState(): Seq[AddAction] = {
-    import io.indextables.spark.transaction.avro.{AvroManifestReader, StateManifestIO}
-
-    val transactionLogPath = new Path(tablePath, "_transaction_log")
-
-    // Get retention configuration
-    val logRetentionDuration = txLogRetentionDuration.getOrElse {
-      spark.conf
-        .getOption("spark.indextables.logRetention.duration")
-        .map(_.toLong)
-        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
-    }
-
-    val currentTime = System.currentTimeMillis()
-
-    // Use CloudStorageProvider for multi-cloud support
-    val cloudConfigs = extractCloudStorageConfigs()
-    val optionsMap   = new java.util.HashMap[String, String]()
-    cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
-    val configOptions = new CaseInsensitiveStringMap(optionsMap)
-
-    val provider = CloudStorageProviderFactory.createProvider(
-      transactionLogPath.toString,
-      configOptions,
-      spark.sparkContext.hadoopConfiguration
-    )
-
-    try {
-      // List all files/directories in transaction log directory
-      val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
-
-      // Find Avro state directories (state-v*)
-      val stateDirectories = allFiles.filter { f =>
-        val name = new Path(f.path).getName
-        StateDirectoryPattern.findFirstIn(name).isDefined
-      }
-
-      if (stateDirectories.isEmpty) {
-        logger.debug("No Avro state directories found")
-        return Seq.empty
-      }
-
-      // Extract versions and find the latest
-      val stateVersions = stateDirectories.flatMap { f =>
-        val name = new Path(f.path).getName
-        name match {
-          case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
-          case _                                 => None
-        }
-      }
-
-      if (stateVersions.isEmpty) {
-        logger.debug("No valid Avro state versions found")
-        return Seq.empty
-      }
-
-      val latestVersion = stateVersions.map(_._1).max
-      logger.info(s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion)")
-
-      val manifestIO       = StateManifestIO(provider)
-      val manifestReader   = AvroManifestReader(provider)
-      val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
-
-      // Process state directories - always include latest, plus any within retention
-      stateVersions.foreach {
-        case (version, stateDir) =>
-          val isLatest          = version == latestVersion
-          val fileAge           = currentTime - stateDir.modificationTime
-          val isWithinRetention = fileAge <= logRetentionDuration
-          val isRetained        = isLatest || isWithinRetention
-
-          if (isRetained) {
-            try {
-              logger.debug(
-                s"Reading Avro state directory: state-v$version (latest=$isLatest, withinRetention=$isWithinRetention)"
-              )
-
-              // Strip trailing slashes to avoid double-slash paths (e.g., state-v1//_manifest.avro)
-              val stateDirPath = stateDir.path.stripSuffix("/")
-
-              // Read the state manifest
-              val stateManifest = manifestIO.readStateManifest(stateDirPath)
-
-              // Resolve manifest paths and read all file entries
-              val manifestPaths = stateManifest.manifests.map { m =>
-                manifestIO.resolveManifestPath(m, transactionLogPath.toString, stateDirPath)
-              }
-
-              val allEntries = manifestReader.readManifestsParallel(manifestPaths)
-
-              // Apply tombstones to get live files
-              val liveEntries = manifestIO.applyTombstones(allEntries, stateManifest.tombstones)
-
-              // Convert to AddActions and add to result
-              val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
-              addActions.foreach(add => filePathToAction(add.path) = add)
-
-              logger.debug(s"Read ${liveEntries.size} live files from Avro state v$version (${allEntries.size} total, ${stateManifest.tombstones.size} tombstoned)")
-            } catch {
-              case e: Exception =>
-                logger.warn(s"Failed to read Avro state directory state-v$version: ${e.getMessage}")
-            }
-          } else {
-            logger.debug(s"Skipping old Avro state directory: state-v$version (age: ${fileAge / 1000}s)")
-          }
-      }
-
-      filePathToAction.values.toSeq
-    } finally
-      provider.close()
   }
 
   /**
@@ -1157,7 +1016,7 @@ class PurgeOrphanedSplitsExecutor(
    *   All AddActions from retained checkpoints
    */
   private def getFilesFromRetainedCheckpoints(
-    txLog: io.indextables.spark.transaction.TransactionLog
+    txLog: TransactionLogInterface
   ): Seq[AddAction] = {
     val transactionLogPath = new Path(tablePath, "_transaction_log")
 
@@ -1332,8 +1191,7 @@ class PurgeOrphanedSplitsExecutor(
     import io.indextables.spark.util.JsonUtil
 
     val rawStream           = provider.openInputStream(filePath)
-    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
-    val reader              = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val reader              = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
     val actions             = ListBuffer[Action]()
 
     try {
@@ -1559,6 +1417,16 @@ class PurgeOrphanedSplitsExecutor(
 
     logger.info(s"Found ${addedFiles.size} active files (split + crc) in transaction log")
     spark.createDataset(addedFiles)
+  }
+
+  /**
+   * Convert retained file paths from the native layer into a Dataset of filenames for anti-join.
+   */
+  private def getValidSplitFilesFromRetainedPaths(retainedPaths: Set[String]): Dataset[String] = {
+    import spark.implicits._
+    val filenames = retainedPaths.map(_.split('/').last).toSeq
+    logger.info(s"Found ${filenames.size} active files in retained transaction state")
+    spark.createDataset(filenames)
   }
 
   /**

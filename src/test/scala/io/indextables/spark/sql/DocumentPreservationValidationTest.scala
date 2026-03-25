@@ -22,7 +22,7 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
@@ -38,7 +38,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
 
   private val logger                         = LoggerFactory.getLogger(classOf[DocumentPreservationValidationTest])
   private var tempTablePath: String          = _
-  private var transactionLog: TransactionLog = _
+  private var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()

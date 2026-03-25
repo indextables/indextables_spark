@@ -26,7 +26,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.core.IndexTables4SparkScan
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 
 /**
@@ -133,7 +133,7 @@ object DataSkippingDemo extends TestBase {
     println("• Statistics are automatically collected during write operations")
   }
 
-  private def demonstrateScenario1_EqualTo(transactionLog: TransactionLog): Unit = {
+  private def demonstrateScenario1_EqualTo(transactionLog: TransactionLogInterface): Unit = {
     println("\n🎯 Scenario 1: EqualTo Filter - Precise Match")
     println("Query: SELECT * FROM orders WHERE customer_id = 2500")
 
@@ -147,7 +147,7 @@ object DataSkippingDemo extends TestBase {
     println(s"   ℹ️  Customer 2500 exists only in Q3_orders.tnt4s (range 2001-3000)")
   }
 
-  private def demonstrateScenario2_Range(transactionLog: TransactionLog): Unit = {
+  private def demonstrateScenario2_Range(transactionLog: TransactionLogInterface): Unit = {
     println("\n📈 Scenario 2: Range Filter - High Value Orders")
     println("Query: SELECT * FROM orders WHERE order_amount > 1000.00")
 
@@ -161,7 +161,7 @@ object DataSkippingDemo extends TestBase {
     println(s"   ℹ️  Files with max_amount <= 1000 are automatically skipped")
   }
 
-  private def demonstrateScenario3_StringFilter(transactionLog: TransactionLog): Unit = {
+  private def demonstrateScenario3_StringFilter(transactionLog: TransactionLogInterface): Unit = {
     println("\n🌎 Scenario 3: String Filter - Regional Analysis")
     println("Query: SELECT * FROM orders WHERE region = 'Global'")
 
@@ -175,7 +175,7 @@ object DataSkippingDemo extends TestBase {
     println(s"   ℹ️  Only Special_orders.tnt4s contains Global region data")
   }
 
-  private def demonstrateScenario4_NoSkipping(transactionLog: TransactionLog): Unit = {
+  private def demonstrateScenario4_NoSkipping(transactionLog: TransactionLogInterface): Unit = {
     println("\n🚫 Scenario 4: No Skipping - Wide Range Query")
     println("Query: SELECT * FROM orders WHERE customer_id > 0")
 
@@ -189,7 +189,7 @@ object DataSkippingDemo extends TestBase {
     println(s"   ℹ️  All files contain customer_id > 0, so no files can be skipped")
   }
 
-  private def executeQuery(transactionLog: TransactionLog, filters: Array[Filter]): (Int, Int) = {
+  private def executeQuery(transactionLog: TransactionLogInterface, filters: Array[Filter]): (Int, Int) = {
     val schema = StructType(
       Array(
         StructField("customer_id", LongType, false),

@@ -24,7 +24,7 @@ import org.apache.spark.sql.types.{DateType, LongType, StringType, StructField, 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.TransactionLogInterface
 import org.slf4j.LoggerFactory
 
 /**
@@ -35,7 +35,7 @@ import org.slf4j.LoggerFactory
  */
 class TransactionLogCountScan(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
   config: Map[String, String],                  // Direct config instead of broadcast
@@ -97,7 +97,7 @@ class TransactionLogCountScan(
 /** Batch implementation for transaction log count. */
 class TransactionLogCountBatch(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
@@ -121,7 +121,7 @@ class TransactionLogCountBatch(
     }
 
   /** Compute the count from transaction log on the driver side. */
-  private def computeCountFromTransactionLog(transactionLog: TransactionLog, pushedFilters: Array[Filter]): Long =
+  private def computeCountFromTransactionLog(transactionLog: TransactionLogInterface, pushedFilters: Array[Filter]): Long =
     if (pushedFilters.isEmpty) {
       // No filters - return total count from transaction log
       transactionLog.getTotalRowCount()
@@ -189,7 +189,7 @@ class TransactionLogCountBatch(
   }
 
   /** Check if a filter is a partition filter. */
-  private def isPartitionFilter(filter: Filter, transactionLog: TransactionLog): Boolean = {
+  private def isPartitionFilter(filter: Filter, transactionLog: TransactionLogInterface): Boolean = {
     val partitionColumns  = transactionLog.getPartitionColumns()
     val referencedColumns = getFilterReferencedColumns(filter)
     referencedColumns.nonEmpty && referencedColumns.forall(partitionColumns.contains)

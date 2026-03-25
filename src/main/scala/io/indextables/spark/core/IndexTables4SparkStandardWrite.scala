@@ -28,7 +28,7 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.transaction.{AddAction, EnhancedTransactionLogCache, TransactionLogInterface}
 import org.slf4j.LoggerFactory
 
 /**
@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory
  * optimizeWrite is disabled.
  */
 class IndexTables4SparkStandardWrite(
-  @transient transactionLog: TransactionLog,
+  @transient transactionLog: TransactionLogInterface,
   tablePath: Path,
   @transient writeInfo: LogicalWriteInfo,
   serializedOptions: Map[String, String], // Use serializable Map instead of CaseInsensitiveStringMap
@@ -236,47 +236,40 @@ class IndexTables4SparkStandardWrite(
     serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
     val writeOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
 
-    // Set thread-local write options so TransactionLog can access compression settings
-    TransactionLog.setWriteOptions(writeOptions)
+    // Commit the changes to transaction log
+    if (shouldOverwrite) {
+      logger.debug(s"COMMIT DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+      val version = transactionLog.overwriteFiles(addActions)
+      logger.debug(s"COMMIT DEBUG: Overwrite completed in transaction version $version")
 
-    try {
-      // Commit the changes to transaction log
-      if (shouldOverwrite) {
-        logger.debug(s"COMMIT DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-        val version = transactionLog.overwriteFiles(addActions)
-        logger.debug(s"COMMIT DEBUG: Overwrite completed in transaction version $version")
+      // Log what's in the transaction log after this operation
+      val filesAfter = transactionLog.listFiles()
+      logger.debug(s"COMMIT DEBUG: After OVERWRITE, transaction log contains ${filesAfter.length} files:")
+      filesAfter.foreach(action => logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records"))
 
-        // Log what's in the transaction log after this operation
-        val filesAfter = transactionLog.listFiles()
-        logger.debug(s"COMMIT DEBUG: After OVERWRITE, transaction log contains ${filesAfter.length} files:")
-        filesAfter.foreach(action => logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records"))
+      logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
+    } else {
+      logger.debug(s"COMMIT DEBUG: Performing APPEND with ${addActions.length} new files")
+      // Standard append operation
+      val version = transactionLog.addFiles(addActions)
+      logger.debug(s"COMMIT DEBUG: Append completed in transaction version $version")
 
-        logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
-      } else {
-        logger.debug(s"COMMIT DEBUG: Performing APPEND with ${addActions.length} new files")
-        // Standard append operation
-        val version = transactionLog.addFiles(addActions)
-        logger.debug(s"COMMIT DEBUG: Append completed in transaction version $version")
+      // Log what's in the transaction log after this operation
+      val filesAfter = transactionLog.listFiles()
+      logger.debug(s"COMMIT DEBUG: After APPEND, transaction log contains ${filesAfter.length} files:")
+      filesAfter.foreach(action => logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records"))
 
-        // Log what's in the transaction log after this operation
-        val filesAfter = transactionLog.listFiles()
-        logger.debug(s"COMMIT DEBUG: After APPEND, transaction log contains ${filesAfter.length} files:")
-        filesAfter.foreach(action => logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records"))
+      logger.info(s"Added ${addActions.length} files in transaction version $version")
+    }
 
-        logger.info(s"Added ${addActions.length} files in transaction version $version")
-      }
+    logger.debug(s"COMMIT DEBUG: Successfully committed ${addActions.length} files")
+    logger.info(s"Successfully committed ${addActions.length} files")
 
-      logger.debug(s"COMMIT DEBUG: Successfully committed ${addActions.length} files")
-      logger.info(s"Successfully committed ${addActions.length} files")
+    // POST-COMMIT EVALUATION: Check if merge-on-write should run
+    val mergeExecuted = evaluateAndExecuteMergeOnWrite(writeOptions)
 
-      // POST-COMMIT EVALUATION: Check if merge-on-write should run
-      val mergeExecuted = evaluateAndExecuteMergeOnWrite(writeOptions)
-
-      // POST-COMMIT EVALUATION: Check if purge-on-write should run
-      evaluateAndExecutePurgeOnWrite(writeOptions, mergeWasExecuted = mergeExecuted)
-    } finally
-      // Always clear thread-local to prevent memory leaks
-      TransactionLog.clearWriteOptions()
+    // POST-COMMIT EVALUATION: Check if purge-on-write should run
+    evaluateAndExecutePurgeOnWrite(writeOptions, mergeWasExecuted = mergeExecuted)
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {

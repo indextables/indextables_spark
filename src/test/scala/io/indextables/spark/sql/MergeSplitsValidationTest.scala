@@ -24,7 +24,7 @@ import org.apache.spark.sql.functions.{col, concat, lit}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
@@ -41,7 +41,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsValidationTest])
 
   var tempTablePath: String          = _
-  var transactionLog: TransactionLog = _
+  var transactionLog: TransactionLogInterface = _
 
   /**
    * Validates that all files in the transaction log actually exist on disk/S3. This catches issues where transaction

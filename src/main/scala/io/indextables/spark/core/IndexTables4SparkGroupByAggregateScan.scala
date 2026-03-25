@@ -47,7 +47,7 @@ import io.indextables.spark.expressions.{
   RangeConfig
 }
 import io.indextables.spark.filters.MixedBooleanFilter
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.TransactionLogInterface
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
@@ -63,7 +63,7 @@ import org.slf4j.LoggerFactory
  */
 class IndexTables4SparkGroupByAggregateScan(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
@@ -301,7 +301,7 @@ class IndexTables4SparkGroupByAggregateScan(
 /** Batch implementation for GROUP BY aggregations. */
 class IndexTables4SparkGroupByAggregateBatch(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
