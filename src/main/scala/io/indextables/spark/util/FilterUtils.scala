@@ -54,4 +54,30 @@ object FilterUtils {
   /** Extract field names from multiple filters. */
   def extractFieldNames(filters: Array[Filter]): Set[String] =
     filters.flatMap(extractFieldNames).toSet
+
+  /**
+   * Extract field names only from value-bearing filters (excludes IsNull/IsNotNull).
+   *
+   * Used by removeRedundantIsNotNull to determine which fields have value constraints that imply non-null.
+   */
+  def extractValueFilterFieldNames(filter: Filter): Set[String] = filter match {
+    case EqualTo(attr, _)            => Set(attr)
+    case EqualNullSafe(attr, _)      => Set(attr)
+    case GreaterThan(attr, _)        => Set(attr)
+    case GreaterThanOrEqual(attr, _) => Set(attr)
+    case LessThan(attr, _)           => Set(attr)
+    case LessThanOrEqual(attr, _)    => Set(attr)
+    case In(attr, _)                 => Set(attr)
+    case StringStartsWith(attr, _)   => Set(attr)
+    case StringEndsWith(attr, _)     => Set(attr)
+    case StringContains(attr, _)     => Set(attr)
+    case And(left, right)            => extractValueFilterFieldNames(left) ++ extractValueFilterFieldNames(right)
+    case Or(left, right)             => extractValueFilterFieldNames(left) ++ extractValueFilterFieldNames(right)
+    case Not(child)                  => extractValueFilterFieldNames(child)
+    case _                           => Set.empty
+  }
+
+  /** Extract value-bearing field names from multiple filters. */
+  def extractValueFilterFieldNames(filters: Array[Filter]): Set[String] =
+    filters.flatMap(extractValueFilterFieldNames).toSet
 }

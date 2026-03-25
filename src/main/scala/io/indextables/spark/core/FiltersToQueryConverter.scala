@@ -139,7 +139,7 @@ object FiltersToQueryConverter {
   private[core] def removeRedundantIsNotNull(filters: Array[Filter]): Array[Filter] = {
     import org.apache.spark.sql.sources._
 
-    val attributesWithValues = io.indextables.spark.util.FilterUtils.extractFieldNames(filters)
+    val attributesWithValues = io.indextables.spark.util.FilterUtils.extractValueFilterFieldNames(filters)
 
     if (attributesWithValues.isEmpty) {
       filters
