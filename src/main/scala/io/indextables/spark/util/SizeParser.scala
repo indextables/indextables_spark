@@ -114,7 +114,7 @@ object SizeParser {
     } else if (bytes >= KB && bytes % KB == 0) {
       s"${bytes / KB}K"
     } else {
-      s"${bytes}B"
+      s"$bytes bytes"
     }
 
   /**

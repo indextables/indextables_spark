@@ -95,7 +95,7 @@ class AsyncMergeOnWriteConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("format bytes to string") {
-    io.indextables.spark.util.SizeParser.formatBytes(512L) shouldBe "512B"
+    io.indextables.spark.util.SizeParser.formatBytes(512L) shouldBe "512 bytes"
     io.indextables.spark.util.SizeParser.formatBytes(1024L) shouldBe "1K"
     io.indextables.spark.util.SizeParser.formatBytes(2L * 1024 * 1024) shouldBe "2M"
     io.indextables.spark.util.SizeParser.formatBytes(4L * 1024 * 1024 * 1024) shouldBe "4G"
