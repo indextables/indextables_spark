@@ -479,10 +479,8 @@ class NativeTransactionLog(
   // Cache Management
   // ------------------------------------------------------------------------------------
 
-  override def invalidateCache(): Unit = {
-    // No-op: caching is handled entirely by the native layer's global CACHE_REGISTRY,
-    // which is automatically invalidated by write operations across all instances.
-  }
+  override def invalidateCache(): Unit =
+    TransactionLogReader.invalidateCache(nativeTablePath)
 
   override def getCacheStats(): Option[CacheStats] = {
     val expirationSecs = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)

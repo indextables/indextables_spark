@@ -128,8 +128,13 @@ class PurgeOrphanedSplitsExecutor(
     val stateResultJson   = TransactionLogWriter.deleteExpiredStates(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
     val versionResultJson = TransactionLogWriter.deleteExpiredVersions(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
 
-    // Invalidate cache after deletion so subsequent reads rebuild from current state
-    if (!dryRun) txLog.invalidateCache()
+    // Invalidate cache after deletion so subsequent reads rebuild from current state.
+    // Invalidate both the normalized path (used by this txlog instance) and the raw path
+    // (which other txlog instances created from the original table path may use).
+    if (!dryRun) {
+      txLog.invalidateCache()
+      TransactionLogReader.invalidateCache(ConfigMapper.normalizeTablePath(new Path(tablePath)))
+    }
 
     val mapper               = new com.fasterxml.jackson.databind.ObjectMapper()
     val stateResult          = mapper.readTree(stateResultJson)
