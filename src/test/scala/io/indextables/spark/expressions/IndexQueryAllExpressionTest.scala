@@ -58,20 +58,37 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     assert(expr.nullable == false) // Predicates are typically not nullable
   }
 
-  test("IndexQueryAllExpression should have correct symbol and pretty name") {
+  test("IndexQueryAllExpression should have correct pretty name for each searchType") {
     val query = Literal(UTF8String.fromString("test"), StringType)
-    val expr  = IndexQueryAllExpression(query)
 
-    assert(expr.prettyName == "matches_all")
+    assert(IndexQueryAllExpression(query).prettyName == "indexqueryall")
+    assert(IndexQueryAllExpression(query, "textsearch").prettyName == "textsearch_all")
+    assert(IndexQueryAllExpression(query, "fieldmatch").prettyName == "fieldmatch_all")
+    assert(IndexQueryAllExpression(query, "indexqueryall").prettyName == "indexqueryall")
   }
 
-  test("IndexQueryAllExpression should generate correct SQL representation") {
+  test("IndexQueryAllExpression should generate correct SQL representation for each searchType") {
     val query = Literal(UTF8String.fromString("machine learning"), StringType)
-    val expr  = IndexQueryAllExpression(query)
 
-    val sql = expr.sql
-    assert(sql.contains("MATCHES"))
-    assert(sql.contains("'machine learning'"))
+    val defaultExpr = IndexQueryAllExpression(query)
+    assert(defaultExpr.sql.contains("INDEXQUERYALL"))
+
+    val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
+    assert(textsearchExpr.sql.contains("TEXTSEARCH"))
+
+    val fieldmatchExpr = IndexQueryAllExpression(query, "fieldmatch")
+    assert(fieldmatchExpr.sql.contains("FIELDMATCH"))
+  }
+
+  test("IndexQueryAllExpression should preserve searchType through copy") {
+    val query    = Literal(UTF8String.fromString("test"), StringType)
+    val newQuery = Literal(UTF8String.fromString("updated"), StringType)
+
+    val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
+    val updated        = textsearchExpr.copy(child = newQuery)
+
+    assert(updated.searchType == "textsearch")
+    assert(updated.getQueryString.contains("updated"))
   }
 
   test("IndexQueryAllExpression should evaluate to true by default") {
@@ -124,11 +141,16 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
 
   test("IndexQueryAllExpression toString should be human readable") {
     val query = Literal(UTF8String.fromString("test query"), StringType)
-    val expr  = IndexQueryAllExpression(query)
 
-    val str = expr.toString
-    assert(str.contains("MATCHES"))
-    assert(str.contains("test query"))
+    val defaultExpr = IndexQueryAllExpression(query)
+    assert(defaultExpr.toString.contains("INDEXQUERYALL"))
+    assert(defaultExpr.toString.contains("test query"))
+
+    val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
+    assert(textsearchExpr.toString.contains("TEXTSEARCH"))
+
+    val fieldmatchExpr = IndexQueryAllExpression(query, "fieldmatch")
+    assert(fieldmatchExpr.toString.contains("FIELDMATCH"))
   }
 
   test("IndexQueryAllExpression should handle boolean queries") {

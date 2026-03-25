@@ -43,7 +43,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Purge operations**: SQL-based cleanup (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
 - **Cache prewarming**: SQL-based (`PREWARM INDEXTABLES CACHE`) and read-time
-- **MATCHES operator**: Full-text search (`content MATCHES 'query'`, `* MATCHES 'query'`; legacy `indexquery`/`indexqueryall` still supported)
+- **TEXTSEARCH/FIELDMATCH operators**: Type-safe search (`content TEXTSEARCH 'query'` for tokenized fields, `status FIELDMATCH 'value'` for non-tokenized fields, `* TEXTSEARCH 'query'` / `* FIELDMATCH 'query'` for all fields; legacy `indexquery`/`indexqueryall` still supported without type validation)
 - **V2 DataSource API**: Recommended for partition column indexing
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown
@@ -56,7 +56,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 ## Field Types
 
 - **String** (default): Exact matching, full filter pushdown (`===`, `>`, `<`, `IN`, etc.)
-- **Text**: Full-text search via MATCHES operator (or legacy IndexQuery). Configure: `spark.indextables.indexing.typemap.text: "field1,field2"`
+- **Text**: Full-text search via TEXTSEARCH operator (or legacy IndexQuery). Configure: `spark.indextables.indexing.typemap.text: "field1,field2"`
 - **JSON**: Automatic for Struct/Array/Map types. Mode: `spark.indextables.indexing.json.mode: "full"` (default) or `"minimal"`
 - **Fast fields** (for aggregations): `spark.indextables.indexing.fastfields: "score,timestamp"`
 
@@ -100,8 +100,8 @@ df.filter($"title" === "exact title").show()
 
 // Full-text search (for text fields) - use SQL syntax
 df.createOrReplaceTempView("documents")
-spark.sql("SELECT * FROM documents WHERE content MATCHES 'machine learning'").show()
-spark.sql("SELECT * FROM documents WHERE * MATCHES 'machine learning'").show()  // all fields
+spark.sql("SELECT * FROM documents WHERE content TEXTSEARCH 'machine learning'").show()
+spark.sql("SELECT * FROM documents WHERE * TEXTSEARCH 'machine learning'").show()  // all fields
 
 // Aggregations (pushed down to tantivy)
 df.agg(count("*"), sum("score"), avg("score")).show()

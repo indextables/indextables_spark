@@ -38,9 +38,10 @@ package io.indextables.spark.filters
  */
 case class IndexQueryFilter(
   columnName: String,
-  queryString: String) {
+  queryString: String,
+  searchType: String = "indexquery") {
 
-  override def toString: String = s"IndexQuery($columnName, '$queryString')"
+  override def toString: String = s"IndexQuery[$searchType]($columnName, '$queryString')"
 
   /** References returns the set of column names that this filter references. */
   def references: Array[String] = Array(columnName)

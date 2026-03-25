@@ -38,7 +38,7 @@ class IndexQueryAllSimpleTest extends AnyFunSuite with TestBase with BeforeAndAf
     // Test basic properties
     assert(expr.getQueryString.contains("Apache AND Spark"))
     assert(expr.canPushDown)
-    assert(expr.prettyName == "matches_all")
+    assert(expr.prettyName == "indexqueryall")
     assert(expr.dataType.typeName == "boolean")
     assert(!expr.nullable)
 
@@ -190,11 +190,11 @@ class IndexQueryAllSimpleTest extends AnyFunSuite with TestBase with BeforeAndAf
     val expr  = IndexQueryAllExpression(query)
 
     val sqlString = expr.sql
-    assert(sqlString.contains("MATCHES"))
+    assert(sqlString.contains("INDEXQUERYALL"))
     assert(sqlString.contains("machine learning"))
 
     val toStringResult = expr.toString
-    assert(toStringResult.contains("MATCHES"))
+    assert(toStringResult.contains("INDEXQUERYALL"))
     assert(toStringResult.contains("machine learning"))
   }
 }
