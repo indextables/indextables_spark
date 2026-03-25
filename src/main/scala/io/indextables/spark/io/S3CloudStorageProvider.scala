@@ -761,21 +761,8 @@ class S3CloudStorageProvider(
   }
 
   /** Format bytes for human-readable output */
-  private def formatBytes(bytes: Long): String = {
-    val kb = 1024L
-    val mb = kb * 1024
-    val gb = mb * 1024
-
-    if (bytes >= gb) {
-      f"${bytes.toDouble / gb}%.2f GB"
-    } else if (bytes >= mb) {
-      f"${bytes.toDouble / mb}%.2f MB"
-    } else if (bytes >= kb) {
-      f"${bytes.toDouble / kb}%.2f KB"
-    } else {
-      s"$bytes bytes"
-    }
-  }
+  private def formatBytes(bytes: Long): String =
+    io.indextables.spark.util.SizeParser.formatBytesHuman(bytes)
 
   /**
    * Normalize path for tantivy4java compatibility. Converts s3a:// and s3n:// protocols to s3:// which tantivy4java
@@ -795,12 +782,8 @@ class S3CloudStorageProvider(
   }
 
   /** Parse S3 path into bucket and key components */
-  private def parseS3Path(path: String): (String, String) = {
-    val uri    = URI.create(path)
-    val bucket = uri.getHost
-    val key    = uri.getPath.stripPrefix("/")
-    (bucket, key)
-  }
+  private def parseS3Path(path: String): (String, String) =
+    io.indextables.spark.util.CloudPathUtils.parseS3Path(path)
 
   /**
    * Custom OutputStream for S3 that buffers content and uploads on close. Uses multipart upload for large files

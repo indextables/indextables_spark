@@ -33,7 +33,7 @@ import org.slf4j.LoggerFactory
  *
  * Tests field validation (fail-fast vs warn-skip), segment selection, and output validation.
  */
-class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
+class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheCommandTest])
 
@@ -72,13 +72,6 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   private def createTestData(numRecords: Int = 200): Unit = {
     val ss = spark
     import ss.implicits._
@@ -98,7 +91,7 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "50")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -337,7 +330,7 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       Seq((1L, "test"))
         .toDF("id", "content")
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(emptyPath)
 

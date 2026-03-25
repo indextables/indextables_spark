@@ -36,9 +36,9 @@ import org.scalatest.funsuite.AnyFunSuite
  * with a prerequisite check and will be skipped until those methods are available. The feature flag tests and config
  * tests run immediately.
  */
-class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
+class AggregationArrowFfiIntegrationTest extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
-  private val PROVIDER = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val PROVIDER = io.indextables.spark.TestBase.INDEXTABLES_FORMAT
 
   // ===== Feature flag tests =====
 
@@ -478,10 +478,4 @@ class AggregationArrowFfiIntegrationTest extends AnyFunSuite {
       .appName(appName)
       .master("local[*]")
       .getOrCreate()
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory)
-      file.listFiles().foreach(deleteRecursively)
-    file.delete()
-  }
 }

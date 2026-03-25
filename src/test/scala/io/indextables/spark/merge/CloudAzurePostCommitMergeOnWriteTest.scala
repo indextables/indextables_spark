@@ -89,7 +89,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Write with merge-on-write enabled and very low threshold to ensure merge triggers
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")            // Small target to create multiple groups
@@ -111,7 +111,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     result.count() shouldBe 2000
@@ -132,7 +132,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Write with merge-on-write enabled but very high threshold to prevent merge
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "100.0") // Very high threshold
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")
@@ -152,7 +152,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     result.count() shouldBe 100
@@ -179,7 +179,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Write with custom merge options to verify they propagate
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")
@@ -194,7 +194,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     result.count() shouldBe 500
@@ -219,7 +219,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Write with partitioning and merge-on-write
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("partition_col")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.5")
@@ -233,7 +233,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Verify data integrity and partition structure
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     result.count() shouldBe 1000
@@ -254,7 +254,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
     // First write
     val df1 = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "5.0") // Higher threshold
       .option("spark.indextables.mergeOnWrite.targetSize", "500K")
@@ -268,7 +268,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
     // Second write (append)
     val df2 = spark.range(100, 200).selectExpr("id", "CAST(id AS STRING) as text")
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "5.0")
       .option("spark.indextables.mergeOnWrite.targetSize", "500K")
@@ -282,7 +282,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
     // Third write (append) with lower threshold to trigger merge
     val df3 = spark.range(200, 300).selectExpr("id", "CAST(id AS STRING) as text")
     df3.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold
       .option("spark.indextables.mergeOnWrite.targetSize", "500K")
@@ -304,7 +304,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Verify all data is present
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     result.count() shouldBe 300
@@ -331,7 +331,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Write with merge-on-write enabled
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "500K")
@@ -344,7 +344,7 @@ class CloudAzurePostCommitMergeOnWriteTest extends CloudAzureTestBase {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     result.count() shouldBe 200

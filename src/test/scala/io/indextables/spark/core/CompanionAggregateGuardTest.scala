@@ -53,7 +53,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
@@ -62,7 +62,7 @@ class CompanionAggregateGuardTest extends TestBase {
       markAsCompanionTable(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // MIN on a non-fast TEXT field causes pushAggregation() to reject.
@@ -93,7 +93,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
@@ -101,7 +101,7 @@ class CompanionAggregateGuardTest extends TestBase {
       // Do NOT mark as companion - this is a regular table
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // MIN on a non-fast TEXT field causes pushAggregation() to reject.
@@ -128,7 +128,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
@@ -137,7 +137,7 @@ class CompanionAggregateGuardTest extends TestBase {
       markAsCompanionTable(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.read.companion.requireAggregatePushdown", "false")
         .load(testPath)
 
@@ -157,7 +157,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 100).map(i => (i.toLong, s"item$i", i * 10)).toDF("id", "name", "score")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(testPath)
@@ -165,7 +165,7 @@ class CompanionAggregateGuardTest extends TestBase {
       markAsCompanionTable(testPath, includeSourcePath = true)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // Unfiltered COUNT(*) uses TransactionLogCountScan

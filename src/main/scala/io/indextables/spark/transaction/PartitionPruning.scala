@@ -390,8 +390,8 @@ object PartitionPruning {
     true
   }
 
-  /** Evaluate a single filter against partition values. Package-private for testing. */
-  private[transaction] def evaluateFilter(partitionValues: Map[String, String], filter: Filter): Boolean =
+  /** Evaluate a single filter against partition values. Accessible within spark package for shared use. */
+  private[spark] def evaluateFilter(partitionValues: Map[String, String], filter: Filter): Boolean =
     filter match {
       case EqualTo(attribute, value) =>
         partitionValues.get(attribute) match {

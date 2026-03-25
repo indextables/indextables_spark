@@ -43,14 +43,14 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       // Should succeed - arrays are now supported via JSON fields
       noException should be thrownBy {
         dataWithArray.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tempPath)
       }
 
       // Verify we can read back the data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       result.count() shouldBe 2
@@ -73,14 +73,14 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       // Should succeed - maps are now supported via JSON fields
       noException should be thrownBy {
         dataWithMap.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tempPath)
       }
 
       // Verify we can read back the data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       result.count() shouldBe 2
@@ -103,14 +103,14 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       // Should succeed - structs are now supported via JSON fields
       noException should be thrownBy {
         dataWithStruct.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tempPath)
       }
 
       // Verify we can read back the data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       result.count() shouldBe 2
@@ -133,14 +133,14 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       // Should succeed without any exceptions
       noException should be thrownBy {
         supportedData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tempPath)
       }
 
       // Verify we can read back the data
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 1
@@ -192,14 +192,14 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       // Should succeed - complex nested types are now supported via JSON fields
       noException should be thrownBy {
         complexData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tempPath)
       }
 
       // Verify we can read back the data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       result.count() shouldBe 2

@@ -17,8 +17,8 @@
 
 package io.indextables.spark.merge
 
+import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
 import org.slf4j.LoggerFactory
 
 /**
@@ -124,7 +124,7 @@ case class AsyncMergeOnWriteConfig(
   }
 
   /** Get target size as a human-readable string (e.g., "4G"). */
-  def targetSizeString: String = AsyncMergeOnWriteConfig.formatBytes(targetSizeBytes)
+  def targetSizeString: String = io.indextables.spark.util.SizeParser.formatBytes(targetSizeBytes)
 }
 
 object AsyncMergeOnWriteConfig {
@@ -184,7 +184,7 @@ object AsyncMergeOnWriteConfig {
       DEFAULT_MIN_BATCHES_TO_TRIGGER,
       mustBePositive = true
     )
-    val targetSizeBytes = parseBytes(options.getOrDefault(KEY_TARGET_SIZE, formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
+    val targetSizeBytes = SizeParser.parseSize(options.getOrDefault(KEY_TARGET_SIZE, SizeParser.formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
     val shutdownTimeoutMs = getLongOption(
       options,
       KEY_SHUTDOWN_TIMEOUT_MS,
@@ -225,8 +225,7 @@ object AsyncMergeOnWriteConfig {
    */
   def fromMap(configs: Map[String, String]): AsyncMergeOnWriteConfig = {
     // Build a case-insensitive lookup map
-    val lowerCaseConfigs                 = configs.map { case (k, v) => k.toLowerCase -> v }
-    def get(key: String): Option[String] = lowerCaseConfigs.get(key.toLowerCase)
+    val get = ConfigParsingUtils.caseInsensitiveLookup(configs)
 
     AsyncMergeOnWriteConfig(
       enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED),
@@ -234,138 +233,21 @@ object AsyncMergeOnWriteConfig {
       batchCpuFraction = get(KEY_BATCH_CPU_FRACTION).map(_.toDouble).getOrElse(DEFAULT_BATCH_CPU_FRACTION),
       maxConcurrentBatches = get(KEY_MAX_CONCURRENT_BATCHES).map(_.toInt).getOrElse(DEFAULT_MAX_CONCURRENT_BATCHES),
       minBatchesToTrigger = get(KEY_MIN_BATCHES_TO_TRIGGER).map(_.toInt).getOrElse(DEFAULT_MIN_BATCHES_TO_TRIGGER),
-      targetSizeBytes = get(KEY_TARGET_SIZE).map(parseBytes).getOrElse(DEFAULT_TARGET_SIZE_BYTES),
+      targetSizeBytes = get(KEY_TARGET_SIZE).map(SizeParser.parseSize).getOrElse(DEFAULT_TARGET_SIZE_BYTES),
       shutdownTimeoutMs = get(KEY_SHUTDOWN_TIMEOUT_MS).map(_.toLong).getOrElse(DEFAULT_SHUTDOWN_TIMEOUT_MS)
     ).validate()
   }
 
-  private def getBooleanOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Boolean
-  ): Boolean = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try
-        value.toBoolean
-      catch {
-        case e: IllegalArgumentException =>
-          logger.warn(s"Invalid boolean value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
+  private def getBooleanOption(options: CaseInsensitiveStringMap, key: String, default: Boolean): Boolean =
+    ConfigParsingUtils.getBooleanOption(options, key, default)
 
-  private def getIntOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Int,
-    mustBePositive: Boolean = false
-  ): Int = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try {
-        val parsed = value.toInt
-        if (mustBePositive && parsed <= 0) {
-          logger.warn(s"Invalid value for $key: '$value' (must be > 0), using default: $default")
-          default
-        } else {
-          parsed
-        }
-      } catch {
-        case e: NumberFormatException =>
-          logger.warn(s"Invalid integer value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
+  private def getIntOption(options: CaseInsensitiveStringMap, key: String, default: Int, mustBePositive: Boolean = false): Int =
+    ConfigParsingUtils.getIntOption(options, key, default, mustBePositive)
 
-  private def getLongOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Long,
-    mustBePositive: Boolean = false
-  ): Long = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try {
-        val parsed = value.toLong
-        if (mustBePositive && parsed <= 0) {
-          logger.warn(s"Invalid value for $key: '$value' (must be > 0), using default: $default")
-          default
-        } else {
-          parsed
-        }
-      } catch {
-        case e: NumberFormatException =>
-          logger.warn(s"Invalid long value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
+  private def getLongOption(options: CaseInsensitiveStringMap, key: String, default: Long, mustBePositive: Boolean = false): Long =
+    ConfigParsingUtils.getLongOption(options, key, default, mustBePositive)
 
-  private def getDoubleOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Double,
-    minExclusive: Option[Double] = None,
-    maxInclusive: Option[Double] = None
-  ): Double = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try {
-        val parsed  = value.toDouble
-        val tooLow  = minExclusive.exists(min => parsed <= min)
-        val tooHigh = maxInclusive.exists(max => parsed > max)
-        if (tooLow || tooHigh) {
-          val range = (minExclusive, maxInclusive) match {
-            case (Some(min), Some(max)) => s"must be > $min and <= $max"
-            case (Some(min), None)      => s"must be > $min"
-            case (None, Some(max))      => s"must be <= $max"
-            case _                      => "out of range"
-          }
-          logger.warn(s"Invalid value for $key: '$value' ($range), using default: $default")
-          default
-        } else {
-          parsed
-        }
-      } catch {
-        case e: NumberFormatException =>
-          logger.warn(s"Invalid double value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
+  private def getDoubleOption(options: CaseInsensitiveStringMap, key: String, default: Double, minExclusive: Option[Double] = None, maxInclusive: Option[Double] = None): Double =
+    ConfigParsingUtils.getDoubleOption(options, key, default, minExclusive, maxInclusive)
 
-  /** Parse a byte size string (e.g., "2G", "512M", "1.5G", "1024K") into bytes. */
-  def parseBytes(size: String): Long = {
-    val trimmed = size.trim.toUpperCase
-    val multiplier = trimmed.last match {
-      case 'K' => 1024L
-      case 'M' => 1024L * 1024
-      case 'G' => 1024L * 1024 * 1024
-      case 'T' => 1024L * 1024 * 1024 * 1024
-      case _   => 1L
-    }
-
-    val numericPart = if (multiplier > 1) {
-      trimmed.dropRight(1).trim
-    } else {
-      trimmed
-    }
-
-    (BigDecimal(numericPart) * multiplier).toLong
-  }
-
-  /** Format bytes as a human-readable string. */
-  def formatBytes(bytes: Long): String =
-    if (bytes >= 1024L * 1024 * 1024 * 1024) s"${bytes / (1024L * 1024 * 1024 * 1024)}T"
-    else if (bytes >= 1024L * 1024 * 1024) s"${bytes / (1024L * 1024 * 1024)}G"
-    else if (bytes >= 1024L * 1024) s"${bytes / (1024L * 1024)}M"
-    else if (bytes >= 1024L) s"${bytes / 1024L}K"
-    else s"${bytes}B"
 }

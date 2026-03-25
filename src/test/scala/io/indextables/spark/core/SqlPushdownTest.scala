@@ -76,13 +76,13 @@ class SqlPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       // Create temporary view for SQL queries
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("limit_test")
 
@@ -133,12 +133,12 @@ class SqlPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("text_filter_test")
 
@@ -182,12 +182,12 @@ class SqlPushdownTest extends TestBase {
 
       // Write data
       largeData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("effectiveness_test")
 
@@ -224,12 +224,12 @@ class SqlPushdownTest extends TestBase {
       val data = spark.range(50).toDF("id")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("plan_test")
 
@@ -265,12 +265,12 @@ class SqlPushdownTest extends TestBase {
       ).toDF("id", "value")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("logging_test")
 
@@ -307,12 +307,12 @@ class SqlPushdownTest extends TestBase {
       ).toDF("id", "name", "category", "price", "organic")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("comprehensive_test")
 
@@ -370,12 +370,12 @@ class SqlPushdownTest extends TestBase {
         )
 
       largeData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .createOrReplaceTempView("performance_test")
 

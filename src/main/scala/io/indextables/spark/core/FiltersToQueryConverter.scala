@@ -139,24 +139,7 @@ object FiltersToQueryConverter {
   private[core] def removeRedundantIsNotNull(filters: Array[Filter]): Array[Filter] = {
     import org.apache.spark.sql.sources._
 
-    def getValueAttributes(f: Filter): Set[String] = f match {
-      case EqualTo(attr, _)            => Set(attr)
-      case EqualNullSafe(attr, _)      => Set(attr)
-      case GreaterThan(attr, _)        => Set(attr)
-      case GreaterThanOrEqual(attr, _) => Set(attr)
-      case LessThan(attr, _)           => Set(attr)
-      case LessThanOrEqual(attr, _)    => Set(attr)
-      case In(attr, _)                 => Set(attr)
-      case StringStartsWith(attr, _)   => Set(attr)
-      case StringEndsWith(attr, _)     => Set(attr)
-      case StringContains(attr, _)     => Set(attr)
-      case And(left, right)            => getValueAttributes(left) ++ getValueAttributes(right)
-      case Or(left, right)             => getValueAttributes(left) ++ getValueAttributes(right)
-      case Not(child)                  => getValueAttributes(child)
-      case _                           => Set.empty
-    }
-
-    val attributesWithValues = filters.flatMap(getValueAttributes).toSet
+    val attributesWithValues = io.indextables.spark.util.FilterUtils.extractFieldNames(filters)
 
     if (attributesWithValues.isEmpty) {
       filters
@@ -686,28 +669,7 @@ object FiltersToQueryConverter {
     }
 
   private def isFilterValidForSchema(filter: Filter, fieldNames: Set[String]): Boolean = {
-    import org.apache.spark.sql.sources._
-
-    def getFilterFieldNames(f: Filter): Set[String] = f match {
-      case EqualTo(attribute, _)            => Set(attribute)
-      case EqualNullSafe(attribute, _)      => Set(attribute)
-      case GreaterThan(attribute, _)        => Set(attribute)
-      case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _)           => Set(attribute)
-      case LessThanOrEqual(attribute, _)    => Set(attribute)
-      case In(attribute, _)                 => Set(attribute)
-      case IsNull(attribute)                => Set(attribute)
-      case IsNotNull(attribute)             => Set(attribute)
-      case StringStartsWith(attribute, _)   => Set(attribute)
-      case StringEndsWith(attribute, _)     => Set(attribute)
-      case StringContains(attribute, _)     => Set(attribute)
-      case And(left, right)                 => getFilterFieldNames(left) ++ getFilterFieldNames(right)
-      case Or(left, right)                  => getFilterFieldNames(left) ++ getFilterFieldNames(right)
-      case Not(child)                       => getFilterFieldNames(child)
-      case _                                => Set.empty
-    }
-
-    val filterFields = getFilterFieldNames(filter)
+    val filterFields = io.indextables.spark.util.FilterUtils.extractFieldNames(filter)
     // For nested JSON fields (e.g., "user.name"), check if the root field exists (e.g., "user")
     val isValid = filterFields.forall { fieldName =>
       if (fieldName.contains(".")) {

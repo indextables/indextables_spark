@@ -14,7 +14,7 @@ import org.scalatest.matchers.should.Matchers
  * Diagnostic test: Range aggregation works at tantivy4java level but returns NULL|6 via Spark SQL. This test isolates
  * where the bug is.
  */
-class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers {
+class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("Range aggregation directly via tantivy4java on Spark-written split") {
     val spark = SparkSession
@@ -40,7 +40,7 @@ class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers {
       val tablePath = tempDir.getAbsolutePath
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "price")
         .option("spark.indextables.write.optimizeWrite.enabled", "true")
         .mode(SaveMode.Overwrite)
@@ -118,7 +118,7 @@ class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers {
       // Now test via Spark SQL — first with FFI DISABLED to test InternalRow path
       println(s"\nDIAG: === Test via Spark SQL with FFI DISABLED (InternalRow path) ===")
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "false")
         .load(tablePath)
       df.createOrReplaceTempView("items")
@@ -144,7 +144,7 @@ class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers {
       // Now test with FFI ENABLED (columnar path)
       println(s"\nDIAG: === Test via Spark SQL with FFI ENABLED (columnar path) ===")
       val df2 = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.aggregation.arrowFfi.enabled", "true")
         .load(tablePath)
       df2.createOrReplaceTempView("items2")
@@ -173,13 +173,5 @@ class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers {
 
     } finally
       spark.stop()
-  }
-
-  private def deleteRecursively(f: java.io.File): Unit = {
-    if (f.isDirectory) {
-      val children = f.listFiles()
-      if (children != null) children.foreach(deleteRecursively)
-    }
-    f.delete()
   }
 }

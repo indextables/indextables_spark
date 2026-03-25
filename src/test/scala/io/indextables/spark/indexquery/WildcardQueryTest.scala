@@ -132,13 +132,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("trailing_wildcard_test")
@@ -167,13 +167,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("embedded_wildcard_test")
@@ -202,13 +202,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("leading_wildcard_test")
@@ -238,13 +238,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("combined_wildcard_test")
@@ -275,13 +275,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("question_wildcard_test")
@@ -310,13 +310,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("leading_question_wildcard_test")
@@ -345,14 +345,14 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("wildcard_agg_test")
@@ -393,13 +393,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("wildcard_combined_test")
@@ -430,13 +430,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("complex_boolean_wildcard_test")
@@ -471,13 +471,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("or_wildcard_test")
@@ -508,13 +508,13 @@ class WildcardQueryTest extends TestBase {
     ).toDF("id", "message", "level")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("paren_wildcard_test")

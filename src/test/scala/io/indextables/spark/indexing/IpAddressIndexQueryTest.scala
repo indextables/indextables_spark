@@ -61,7 +61,7 @@ class IpAddressIndexQueryTest extends TestBase {
 
     // Write with IP field configuration
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.ip", "ip")
       .mode("overwrite")
       .save(testDataPath)
@@ -81,7 +81,7 @@ class IpAddressIndexQueryTest extends TestBase {
 
     // Register temp view for SQL queries
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testDataPath)
 
     df.createOrReplaceTempView("ip_servers")

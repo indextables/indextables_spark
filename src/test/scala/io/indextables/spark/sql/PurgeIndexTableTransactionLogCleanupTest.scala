@@ -83,7 +83,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -142,7 +142,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -188,7 +188,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -239,7 +239,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -270,7 +270,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -290,7 +290,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -310,7 +310,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -339,7 +339,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -430,7 +430,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // STEP 5: Verify we can still READ after purging 0.json
     // The TransactionLog should now read from checkpoint to reconstruct schema and state
     val readData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .orderBy("id")
 
@@ -454,7 +454,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // STEP 6: Verify we can still WRITE (append) after purging 0.json
     val newData = Seq((13, "record_13")).toDF("id", "value")
     newData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("append")
       .save(tablePath)
 
@@ -462,7 +462,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
 
     // STEP 7: Verify the new data is readable
     val finalData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .orderBy("id")
 

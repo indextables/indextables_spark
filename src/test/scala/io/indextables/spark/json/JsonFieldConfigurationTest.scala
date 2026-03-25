@@ -64,7 +64,7 @@ class JsonFieldConfigurationTest extends TestBase {
       // Write with default mode (should be "full")
       // Note: Even with json.mode=full, we still need to explicitly configure fast fields
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age,user.salary")
         .mode("overwrite")
         .save(path)
@@ -72,7 +72,7 @@ class JsonFieldConfigurationTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with default json.mode (full)")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Simple read should work
@@ -117,7 +117,7 @@ class JsonFieldConfigurationTest extends TestBase {
       // Write with explicit "full" mode
       // Note: json.mode=full enables JSON field features, but fast fields still need explicit config
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.json.mode", "full")
         .option("spark.indextables.indexing.fastfields", "user.age,user.salary")
         .mode("overwrite")
@@ -126,7 +126,7 @@ class JsonFieldConfigurationTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with json.mode=full")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Simple read should work
@@ -171,7 +171,7 @@ class JsonFieldConfigurationTest extends TestBase {
       // Write with "minimal" mode
       // Note: minimal mode = no fast fields by default, but we can still explicitly configure them
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.json.mode", "minimal")
         .option("spark.indextables.indexing.fastfields", "user.city")
         .mode("overwrite")
@@ -180,7 +180,7 @@ class JsonFieldConfigurationTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with json.mode=minimal")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Basic COUNT should work
@@ -220,7 +220,7 @@ class JsonFieldConfigurationTest extends TestBase {
 
       // Write with uppercase "FULL" mode
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.json.mode", "FULL")
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
@@ -229,7 +229,7 @@ class JsonFieldConfigurationTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with json.mode=FULL (uppercase)")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Should work with uppercase mode value
@@ -270,7 +270,7 @@ class JsonFieldConfigurationTest extends TestBase {
 
       // Write with invalid mode value (should default to "full")
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.json.mode", "invalid_mode")
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
@@ -279,7 +279,7 @@ class JsonFieldConfigurationTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with json.mode=invalid_mode (should default to full)")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Basic count should work
@@ -323,7 +323,7 @@ class JsonFieldConfigurationTest extends TestBase {
 
       // Write with explicit full mode
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.json.mode", "full")
         .mode("overwrite")
         .save(path)
@@ -331,7 +331,7 @@ class JsonFieldConfigurationTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with json.mode=full for multiple aggregations")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Multiple aggregations on different nested fields

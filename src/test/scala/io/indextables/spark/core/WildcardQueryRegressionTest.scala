@@ -12,7 +12,7 @@ import io.indextables.spark.TestBase
  */
 class WildcardQueryRegressionTest extends TestBase {
 
-  private val format = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val format = INDEXTABLES_FORMAT
 
   test("SplitWildcardQuery with leading wildcard should match on STRING fields") {
     withTempPath { tempPath =>

@@ -78,42 +78,8 @@ class AzureCloudStorageProvider(
    *
    * Returns (containerName, blobPath)
    */
-  private def parseAzureUri(path: String): (String, String) = {
-    val uri    = new URI(path)
-    val scheme = uri.getScheme
-
-    // Validate supported Azure schemes
-    require(
-      scheme == "azure" || scheme == "wasb" || scheme == "wasbs" || scheme == "abfs" || scheme == "abfss",
-      s"Invalid Azure URI scheme: $scheme (expected: azure, wasb, wasbs, abfs, or abfss)"
-    )
-
-    val (container, blobPath) = scheme match {
-      case "azure" =>
-        // azure://container/path
-        val container = uri.getHost
-        require(container != null && container.nonEmpty, s"Invalid Azure URI - missing container: $path")
-        val blobPath = uri.getPath.stripPrefix("/")
-        (container, blobPath)
-
-      case "wasb" | "wasbs" | "abfs" | "abfss" =>
-        // wasb://container@account.blob.core.windows.net/path
-        // abfs://container@account.dfs.core.windows.net/path
-        val authority = uri.getAuthority
-        require(
-          authority != null && authority.contains("@"),
-          s"Invalid $scheme URI - expected format: $scheme://container@account.blob.core.windows.net/path"
-        )
-
-        val container = authority.split("@")(0)
-        require(container.nonEmpty, s"Invalid $scheme URI - missing container: $path")
-
-        val blobPath = uri.getPath.stripPrefix("/")
-        (container, blobPath)
-    }
-
-    (container, blobPath)
-  }
+  private def parseAzureUri(path: String): (String, String) =
+    io.indextables.spark.util.CloudPathUtils.parseAzurePath(path)
 
   /**
    * Credentials loaded from ~/.azure/credentials file Supports both account key and Service Principal (OAuth)
@@ -679,21 +645,8 @@ class AzureCloudStorageProvider(
   }
 
   /** Format bytes for human-readable output */
-  private def formatBytes(bytes: Long): String = {
-    val kb = 1024L
-    val mb = kb * 1024
-    val gb = mb * 1024
-
-    if (bytes >= gb) {
-      f"${bytes.toDouble / gb}%.2f GB"
-    } else if (bytes >= mb) {
-      f"${bytes.toDouble / mb}%.2f MB"
-    } else if (bytes >= kb) {
-      f"${bytes.toDouble / kb}%.2f KB"
-    } else {
-      s"$bytes bytes"
-    }
-  }
+  private def formatBytes(bytes: Long): String =
+    io.indextables.spark.util.SizeParser.formatBytesHuman(bytes)
 
   override def deleteFile(path: String): Boolean = {
     CloudStorageProvider.incrementDeleteFile()

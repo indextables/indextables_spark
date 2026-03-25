@@ -173,7 +173,7 @@ class CloudS3MultiDimensionalGroupByTest extends CloudS3TestBase {
     // Write test data to S3 with fast fields for aggregation
     // GROUP BY columns (region, category, status) must also be fast fields
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(getWriteOptions())
       .option("spark.indextables.indexing.fastfields", "sales,rating,region,category,status")
       .mode("overwrite")
@@ -185,7 +185,7 @@ class CloudS3MultiDimensionalGroupByTest extends CloudS3TestBase {
     println(s"📖 Reading data from S3 and performing multi-dimensional GROUP BY")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(getReadOptions())
       .load(tablePath)
 
@@ -297,7 +297,7 @@ class CloudS3MultiDimensionalGroupByTest extends CloudS3TestBase {
 
     // GROUP BY columns (category, status) must also be fast fields
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(getWriteOptions())
       .option("spark.indextables.indexing.fastfields", "value,category,status")
       .mode("overwrite")
@@ -307,7 +307,7 @@ class CloudS3MultiDimensionalGroupByTest extends CloudS3TestBase {
 
     // Read and perform 2-dimensional GROUP BY
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(getReadOptions())
       .load(tablePath)
 

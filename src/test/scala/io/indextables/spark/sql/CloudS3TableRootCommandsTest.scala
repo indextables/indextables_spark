@@ -144,7 +144,7 @@ class CloudS3TableRootCommandsTest extends CloudS3TestBase {
     val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)

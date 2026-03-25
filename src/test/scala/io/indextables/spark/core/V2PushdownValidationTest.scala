@@ -45,13 +45,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test equality predicate pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("category") === "category_a")
 
@@ -78,13 +78,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test IN predicate pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("type").isin("type_x", "type_y"))
 
@@ -110,13 +110,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test pure limit pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .limit(15)
 
@@ -140,13 +140,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test combined predicate + limit pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("group") === "group_first")
         .limit(10)
@@ -172,13 +172,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test complex AND predicate pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("range_category") === "high" && col("mod_value") === 5)
 
@@ -206,13 +206,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test NOT predicate pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(!(col("size") === "small"))
 
@@ -235,13 +235,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test numeric range predicate pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("score") >= 100 && col("score") <= 120)
 
@@ -269,13 +269,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Create query with both predicate and limit
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("status") === "milestone")
         .limit(5)
@@ -314,13 +314,13 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test pushdown with IN filter (known to work from other successful tests)
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("category").isin("type_a", "type_c"))
 
@@ -345,7 +345,7 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -354,7 +354,7 @@ class V2PushdownValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       limits.foreach { limitValue =>
         val result = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(path)
           .limit(limitValue)
 

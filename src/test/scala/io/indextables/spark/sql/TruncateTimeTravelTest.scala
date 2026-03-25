@@ -55,7 +55,7 @@ class TruncateTimeTravelTest extends TestBase {
     val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
   }
@@ -73,7 +73,7 @@ class TruncateTimeTravelTest extends TestBase {
       val data = Seq(Row(i, s"value_$i"))
       val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -134,7 +134,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Verify data integrity - all records should still be readable
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     df.count() shouldBe 15
   }
@@ -161,7 +161,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Data should still be readable
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     df.count() shouldBe 2
   }
@@ -223,7 +223,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Data should still be readable
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     df.count() shouldBe 3
   }
@@ -263,7 +263,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Get record count before truncation
     val countBefore = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -272,7 +272,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Verify record count is preserved
     val countAfter = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -296,7 +296,7 @@ class TruncateTimeTravelTest extends TestBase {
     val initialData = (1 to 10).map(i => Row(i, s"value_$i", i * 10.0))
     val initialDf   = spark.createDataFrame(spark.sparkContext.parallelize(initialData), schema)
     initialDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -305,7 +305,7 @@ class TruncateTimeTravelTest extends TestBase {
       val data = Seq(Row(i, s"value_$i", i * 10.0))
       val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -315,7 +315,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Test various queries
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Count query
@@ -383,7 +383,7 @@ class TruncateTimeTravelTest extends TestBase {
       )
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "amount,count,region")
         .partitionBy("region")
         .mode(if (i == 1) "overwrite" else "append")
@@ -392,7 +392,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Verify aggregations work BEFORE truncation
     val dfBefore = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val countBefore     = dfBefore.count()
@@ -419,7 +419,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Verify aggregations work AFTER truncation (proves fast fields preserved)
     val dfAfter = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Basic count should match
@@ -480,7 +480,7 @@ class TruncateTimeTravelTest extends TestBase {
         val data = Seq(Row(i, s"value_$i", i * 100.0))
         val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode(if (i == 1) "overwrite" else "append")
           .save(tablePath)
       }
@@ -492,7 +492,7 @@ class TruncateTimeTravelTest extends TestBase {
 
       // Get data state before truncation
       val dataBefore = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
       val countBefore = dataBefore.count()
       val sumBefore   = dataBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
@@ -516,7 +516,7 @@ class TruncateTimeTravelTest extends TestBase {
 
       // CRITICAL: Verify ALL data is still readable after truncation
       val dataAfter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val countAfter = dataAfter.count()

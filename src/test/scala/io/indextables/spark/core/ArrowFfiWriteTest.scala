@@ -22,7 +22,7 @@ import io.indextables.spark.TestBase
 
 class ArrowFfiWriteTest extends TestBase {
 
-  private val FORMAT = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val FORMAT = INDEXTABLES_FORMAT
 
   // ===== Arrow FFI (default path) =====
 

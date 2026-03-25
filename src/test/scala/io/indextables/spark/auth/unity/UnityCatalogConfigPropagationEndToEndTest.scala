@@ -139,14 +139,14 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     val df        = spark.createDataFrame(Seq((1, "test"))).toDF("id", "value")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(localPath)
 
     // Now try to read from an S3 path - this should invoke the credential provider
     val exception = intercept[Exception] {
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testS3Path)
         .collect()
     }
@@ -167,7 +167,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     val exception = intercept[Exception] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testS3Path)
     }
@@ -184,7 +184,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     for (i <- 1 to 3) {
       val df = spark.createDataFrame(Seq((i, s"value$i"))).toDF("id", "value")
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(localPath)
     }
@@ -251,7 +251,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
       .toDF("id", "date", "value")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .partitionBy("date")
       .mode("overwrite")
       .save(localPath)

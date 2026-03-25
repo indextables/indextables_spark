@@ -32,7 +32,6 @@ import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.storage.{BatchOptMetrics, BatchOptimizationMetricsAccumulator, SplitCacheConfig}
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitQuery}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /**
@@ -129,27 +128,7 @@ class SplitReaderContext(
     }
 
     // Reconstruct SplitMetadata from AddAction
-    val splitMetadata = new QuickwitSplit.SplitMetadata(
-      addAction.path.split("/").last.replace(".split", ""),
-      "tantivy4spark-index",
-      0L,
-      "tantivy4spark-source",
-      "tantivy4spark-node",
-      toLongSafeOption(addAction.numRecords),
-      toLongSafeOption(addAction.uncompressedSizeBytes),
-      addAction.timeRangeStart.map(Instant.parse).orNull,
-      addAction.timeRangeEnd.map(Instant.parse).orNull,
-      System.currentTimeMillis() / 1000,
-      "Mature",
-      addAction.splitTags.getOrElse(Set.empty[String]).asJava,
-      toLongSafeOption(addAction.footerStartOffset),
-      toLongSafeOption(addAction.footerEndOffset),
-      toLongSafeOption(addAction.deleteOpstamp),
-      addAction.numMergeOps.getOrElse(0),
-      "doc-mapping-uid",
-      addAction.docMappingJson.orNull,
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()
-    )
+    val splitMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(addAction, tablePath.toString)
 
     val options = Some(IndexTables4SparkOptions(config))
 
@@ -416,19 +395,6 @@ class SplitReaderContext(
   def reportBytesRead(): Unit = {
     val bytesRead = addAction.size
     org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)
-  }
-
-  /** Safe conversion for Option[Any] to Long to handle JSON deserialization type variations. */
-  private def toLongSafeOption(opt: Option[Any]): Long = opt match {
-    case Some(value) =>
-      value match {
-        case l: Long              => l
-        case i: Int               => i.toLong
-        case i: java.lang.Integer => i.toLong
-        case l: java.lang.Long    => l
-        case _                    => value.toString.toLong
-      }
-    case None => 0L
   }
 
   /**

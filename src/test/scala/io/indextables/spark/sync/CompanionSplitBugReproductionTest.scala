@@ -32,7 +32,7 @@ import org.scalatest.BeforeAndAfterAll
  *   1. Array[String] field returns null with "Cannot deserialize value of type LinkedHashMap" error 2. Date field
  *      throws ClassCastException 3. Any predicate returns zero rows
  */
-class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -91,13 +91,6 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       deleteRecursively(new File(path))
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   // ═══════════════════════════════════════════════════
   //  Bug #1: Array[String] field deserialization error
   // ═══════════════════════════════════════════════════
@@ -130,7 +123,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Read back companion index
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -189,7 +182,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
       // DateType expects Int (days since epoch). convertPartitionValue falls through
       // to the default case and returns UTF8String instead of Int.
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -237,7 +230,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Read without filter using COLLECT (not count) to verify actual tantivy search
       val dfNoFilter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -246,7 +239,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Read WITH equality filter on string field — should return matching rows
       val dfStringFilter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
         .filter(col("name") === "name_5")
@@ -258,7 +251,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Read WITH equality filter on numeric field
       val dfNumericFilter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
         .filter(col("id") === 5L)
@@ -270,7 +263,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Read WITH range filter
       val dfRangeFilter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
         .filter(col("id") > 15L)
@@ -317,7 +310,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Read without filter — baseline
       val dfNoFilter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -333,7 +326,7 @@ class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with B
 
       // Filter on id (long field)
       val dfIdFilter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
         .filter(col("id") === 3L)

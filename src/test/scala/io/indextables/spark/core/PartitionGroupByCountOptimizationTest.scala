@@ -30,14 +30,14 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // Write with V2 API partitioned by load_date and load_hour
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date", "load_hour")
         .mode("overwrite")
         .save(tablePath)
 
       // Read and verify partition-only GROUP BY uses transaction log
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test 1: GROUP BY both partition columns
@@ -124,13 +124,13 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       ).toDF("id", "load_date", "load_hour")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date", "load_hour")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test with partition filter
@@ -170,13 +170,13 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       ).toDF("id", "category", "load_date")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY non-partition column - should use tantivy aggregation
@@ -217,14 +217,14 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       ).toDF("id", "category", "load_date")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date")
         .option("spark.indextables.indexing.fastfields", "category")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Bug: SELECT partition_col, COUNT(col) WHERE non_partition_col='val'
@@ -266,14 +266,14 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       ).toDF("id", "category", "load_date")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date")
         .option("spark.indextables.indexing.fastfields", "category")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       println("🧪 TEST: GROUP BY load_date, COUNT(*) WHERE category='A'")
@@ -312,13 +312,13 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       ).toDF("id", "category", "load_date")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY both partition and non-partition columns

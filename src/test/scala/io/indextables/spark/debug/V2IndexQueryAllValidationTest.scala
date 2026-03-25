@@ -28,12 +28,12 @@ class V2IndexQueryAllValidationTest extends TestBase {
 
       // Write test data using V2 DataSource
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(testDataPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testDataPath)
 
       // Create temp view for SQL testing

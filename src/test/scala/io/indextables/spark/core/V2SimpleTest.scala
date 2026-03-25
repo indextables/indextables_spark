@@ -37,13 +37,13 @@ class V2SimpleTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEa
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Read using V2 API
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 3

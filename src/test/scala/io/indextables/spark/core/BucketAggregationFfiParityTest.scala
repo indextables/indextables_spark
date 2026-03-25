@@ -34,9 +34,9 @@ import org.scalatest.matchers.should.Matchers
  * the results match exactly. This ensures the FFI columnar path produces identical results to the object-based
  * InternalRow fallback path for all bucket aggregation types.
  */
-class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
+class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers with io.indextables.spark.testutils.FileCleanupHelper {
 
-  private val PROVIDER   = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val PROVIDER   = io.indextables.spark.TestBase.INDEXTABLES_FORMAT
   private val EXTENSIONS = "io.indextables.spark.extensions.IndexTables4SparkExtensions"
 
   private def createSparkSession(appName: String): SparkSession =
@@ -350,11 +350,4 @@ class BucketAggregationFfiParityTest extends AnyFunSuite with Matchers {
   }
 
   // ===== Helpers =====
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

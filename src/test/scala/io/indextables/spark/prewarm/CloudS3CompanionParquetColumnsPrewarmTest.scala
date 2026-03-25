@@ -46,7 +46,7 @@ import io.indextables.spark.CloudS3TestBase
  *   - Run with: TANTIVY4JAVA_PERFLOG=1 mvn test-compile scalatest:test \
  *     -DwildcardSuites='io.indextables.spark.prewarm.CloudS3CompanionParquetColumnsPrewarmTest'
  */
-class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
+class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val S3_BUCKET    = System.getProperty("test.s3.bucket", "test-tantivy4sparkbucket")
   private val S3_REGION    = System.getProperty("test.s3.region", "us-east-2")
@@ -137,13 +137,6 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
       }
     } finally
       super.afterAll()
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
 
   private def loadAwsCredentials(): Option[(String, String)] =
     try {
@@ -303,7 +296,7 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     println("=" * 80)
 
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -342,7 +335,7 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     prewarmResult2.show(truncate = false)
 
     val companionDf2 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -385,7 +378,7 @@ class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase {
     println("Caches flushed - NO prewarm this time")
 
     val companionDf3 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)

@@ -24,7 +24,7 @@ import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitWildcardQuery
  */
 class TantVsFfiSplitComparisonTest extends TestBase {
 
-  private val format = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val format = INDEXTABLES_FORMAT
 
   private def getTransactionLog(tablePath: String) =
     TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))

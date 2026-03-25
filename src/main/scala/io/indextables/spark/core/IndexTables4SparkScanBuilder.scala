@@ -2411,7 +2411,7 @@ object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
 
   // Shared ObjectMapper for JSON parsing (thread-safe, reusable)
-  private[core] val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+  private[core] val objectMapper = io.indextables.spark.util.JsonUtil.mapper
 
   // WeakHashMap using DataSourceV2Relation object as key
   // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning

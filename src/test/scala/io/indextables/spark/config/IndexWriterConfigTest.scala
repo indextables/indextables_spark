@@ -36,13 +36,13 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write without any custom configuration - should use defaults (100MB heap, 2 threads)
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 100
@@ -66,13 +66,13 @@ class IndexWriterConfigTest extends TestBase {
 
         // Write with custom configuration
         testData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode(SaveMode.Overwrite)
           .save(tempPath)
 
         // Read back to verify it worked
         val readData = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(tempPath)
 
         readData.count() shouldBe 100
@@ -96,7 +96,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with custom configuration via DataFrame options (highest precedence)
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB
         .option("spark.indextables.indexWriter.threads", "3")          // 3 threads
         .mode(SaveMode.Overwrite)
@@ -104,7 +104,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 100
@@ -128,7 +128,7 @@ class IndexWriterConfigTest extends TestBase {
 
         // DataFrame options should override Spark config
         testData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.heapSize", "50000000") // 50MB (overrides 200MB)
           .option("spark.indextables.indexWriter.threads", "1")         // 1 thread (overrides 4)
           .mode(SaveMode.Overwrite)
@@ -136,7 +136,7 @@ class IndexWriterConfigTest extends TestBase {
 
         // Read back to verify it worked
         val readData = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(tempPath)
 
         readData.count() shouldBe 100
@@ -160,13 +160,13 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with default batch settings
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify all documents were written correctly
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 25000
@@ -185,7 +185,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with custom batch size (smaller for testing)
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.batchSize", "100") // Small batch size
         .option("spark.indextables.indexWriter.useBatch", "true")
         .mode(SaveMode.Overwrite)
@@ -193,7 +193,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 1000
@@ -212,14 +212,14 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with batch writing disabled
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.useBatch", "false") // Disable batch writing
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 100
@@ -238,13 +238,13 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write without explicit maxBatchBufferSize - should use 90MB default
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 100
@@ -263,7 +263,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with a smaller maxBatchBufferSize to force more frequent flushes
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.maxBatchBufferSize", "1M") // 1MB - very small
         .option("spark.indextables.indexWriter.batchSize", "10000")       // Large doc count threshold
         .mode(SaveMode.Overwrite)
@@ -271,7 +271,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Read back to verify all documents were written correctly
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 500
@@ -294,7 +294,7 @@ class IndexWriterConfigTest extends TestBase {
       // Write with a small maxBatchBufferSize (2MB) but large batchSize (10000)
       // This should trigger early flushes based on buffer size, not document count
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.maxBatchBufferSize", "2M") // 2MB buffer limit
         .option("spark.indextables.indexWriter.batchSize", "10000")       // Would never trigger by count
         .mode(SaveMode.Overwrite)
@@ -302,7 +302,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Read back to verify all documents were written correctly
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 500
@@ -324,14 +324,14 @@ class IndexWriterConfigTest extends TestBase {
       // Write with default maxBatchBufferSize (90MB)
       // 50 docs * 500KB = 25MB, should work fine
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.batchSize", "100") // Small batch count
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify all documents were written correctly
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 50
@@ -349,13 +349,13 @@ class IndexWriterConfigTest extends TestBase {
 
       // Test various size formats: "50M", "50m", "51200K", "51200k"
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.maxBatchBufferSize", "50M") // 50MB
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readData.count() shouldBe 100

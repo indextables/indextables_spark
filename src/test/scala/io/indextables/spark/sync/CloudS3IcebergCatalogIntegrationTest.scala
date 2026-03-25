@@ -165,7 +165,7 @@ class CloudS3IcebergCatalogIntegrationTest extends CloudS3TestBase with IcebergT
 
     val (accessKey, secretKey) = awsCredentials.get
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -221,7 +221,7 @@ class CloudS3IcebergCatalogIntegrationTest extends CloudS3TestBase with IcebergT
     // Verify data is actually readable (proves S3 credentials worked)
     val (accessKey, secretKey) = awsCredentials.get
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -251,7 +251,7 @@ class CloudS3IcebergCatalogIntegrationTest extends CloudS3TestBase with IcebergT
 
     val (accessKey, secretKey) = awsCredentials.get
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -334,7 +334,7 @@ class CloudS3IcebergCatalogIntegrationTest extends CloudS3TestBase with IcebergT
 
     val (accessKey, secretKey) = awsCredentials.get
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)

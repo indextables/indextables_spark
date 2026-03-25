@@ -37,6 +37,7 @@ object SizeParser {
   private val KB = 1024L
   private val MB = KB * 1024
   private val GB = MB * 1024
+  private val TB = GB * 1024
 
   /**
    * Parse a size string into bytes.
@@ -56,30 +57,25 @@ object SizeParser {
     val trimmed = sizeStr.trim.toUpperCase
 
     Try {
-      // Check for unit suffixes
-      // Note: Zero with units (0K, 0M, 0G) is rejected as meaningless
-      // Pure zero ("0") is allowed for bytes
-      if (trimmed.endsWith("G")) {
-        val numberPart = trimmed.dropRight(1)
-        val value      = numberPart.toLong
-        if (value <= 0) {
-          throw new IllegalArgumentException(s"Size value must be positive when using units: $sizeStr")
-        }
-        value * GB
+      val (numberPart, multiplier) = if (trimmed.endsWith("T")) {
+        (trimmed.dropRight(1), TB)
+      } else if (trimmed.endsWith("G")) {
+        (trimmed.dropRight(1), GB)
       } else if (trimmed.endsWith("M")) {
-        val numberPart = trimmed.dropRight(1)
-        val value      = numberPart.toLong
-        if (value <= 0) {
-          throw new IllegalArgumentException(s"Size value must be positive when using units: $sizeStr")
-        }
-        value * MB
+        (trimmed.dropRight(1), MB)
       } else if (trimmed.endsWith("K")) {
-        val numberPart = trimmed.dropRight(1)
-        val value      = numberPart.toLong
+        (trimmed.dropRight(1), KB)
+      } else {
+        (trimmed, 1L)
+      }
+
+      if (multiplier > 1) {
+        // Unit suffix present - use BigDecimal to support fractional values (e.g., "1.5G")
+        val value = BigDecimal(numberPart)
         if (value <= 0) {
           throw new IllegalArgumentException(s"Size value must be positive when using units: $sizeStr")
         }
-        value * KB
+        (value * multiplier).toLong
       } else {
         // Pure number - interpret as bytes
         val value = trimmed.toLong
@@ -94,7 +90,7 @@ object SizeParser {
         size
       case Failure(ex) =>
         throw new IllegalArgumentException(
-          s"Invalid size format: '$sizeStr'. Supported formats: '123456' (bytes), '1M' (megabytes), '1G' (gigabytes)",
+          s"Invalid size format: '$sizeStr'. Supported formats: '123456' (bytes), '1K', '100M', '1G', '1T'",
           ex
         )
     }
@@ -109,14 +105,16 @@ object SizeParser {
    *   Human-readable size string
    */
   def formatBytes(bytes: Long): String =
-    if (bytes >= GB && bytes % GB == 0) {
+    if (bytes >= TB && bytes % TB == 0) {
+      s"${bytes / TB}T"
+    } else if (bytes >= GB && bytes % GB == 0) {
       s"${bytes / GB}G"
     } else if (bytes >= MB && bytes % MB == 0) {
       s"${bytes / MB}M"
     } else if (bytes >= KB && bytes % KB == 0) {
       s"${bytes / KB}K"
     } else {
-      s"$bytes bytes"
+      s"${bytes}B"
     }
 
   /**
@@ -129,4 +127,20 @@ object SizeParser {
    */
   def isValidSizeFormat(sizeStr: String): Boolean =
     Try(parseSize(sizeStr)).isSuccess
+
+  /**
+   * Format bytes into a human-readable string with decimal precision.
+   *
+   * Suitable for log messages and user-facing output (e.g., "1.50 GB", "256.00 MB").
+   */
+  def formatBytesHuman(bytes: Long): String =
+    if (bytes >= GB) {
+      f"${bytes.toDouble / GB}%.2f GB"
+    } else if (bytes >= MB) {
+      f"${bytes.toDouble / MB}%.2f MB"
+    } else if (bytes >= KB) {
+      f"${bytes.toDouble / KB}%.2f KB"
+    } else {
+      s"$bytes bytes"
+    }
 }

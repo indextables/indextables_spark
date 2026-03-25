@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
 /** Test to verify that human-readable size formats work for indexWriter.heapSize */
-class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: File       = _
@@ -37,13 +37,6 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     if (tempDir != null && tempDir.exists()) {
       deleteRecursively(tempDir)
     }
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
   }
 
   "IndexTables4Spark indexWriter.heapSize configuration" should "accept human-readable size formats" in {
@@ -83,7 +76,7 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
         // This should not throw an exception
         testDF.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.heapSize", sizeValue)
           .option("spark.indextables.indexing.typemap.content", "text")
           .mode("overwrite")
@@ -91,7 +84,7 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
         // Verify the data was written successfully
         val readBack = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .load(testPath)
 
         val count = readBack.count()
@@ -136,14 +129,14 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
         try {
           testDF.write
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
             .option("spark.indextables.indexWriter.heapSize", sizeValue)
             .option("spark.indextables.indexing.typemap.content", "text")
             .mode("overwrite")
             .save(testPath)
 
           val readBack = spark.read
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
             .load(testPath)
 
           readBack.count() shouldBe 1

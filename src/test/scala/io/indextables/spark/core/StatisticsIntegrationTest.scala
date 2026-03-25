@@ -47,13 +47,13 @@ class StatisticsIntegrationTest extends TestBase {
 
       // Write data using V2 DataSource API
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
 
       // Read back using V2 API and verify statistics are available
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Force the query plan to be created, which should trigger statistics estimation
@@ -91,13 +91,13 @@ class StatisticsIntegrationTest extends TestBase {
 
       // Write empty data
       emptyData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
 
       // Read back and verify no errors
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val result = readDf.collect()
@@ -131,13 +131,13 @@ class StatisticsIntegrationTest extends TestBase {
       val tablePath = path.toString
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
 
       // Read with filter - statistics should reflect the filtered dataset
       val filteredDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
         .filter("category = 'even'")
 

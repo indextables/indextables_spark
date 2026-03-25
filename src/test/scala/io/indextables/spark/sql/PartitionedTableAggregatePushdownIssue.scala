@@ -63,7 +63,7 @@ class PartitionedTableAggregatePushdownIssue
       ).toDF("load_date", "load_hour", "id", "content", "score")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date", "load_hour")
         .option("spark.indextables.indexing.fastfields", "score,load_date,load_hour")
         .mode("overwrite")
@@ -73,7 +73,7 @@ class PartitionedTableAggregatePushdownIssue
       // Read the table
       println("\n2. Reading partitioned table...")
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
       println("✅ Table loaded successfully")
 
@@ -130,7 +130,7 @@ class PartitionedTableAggregatePushdownIssue
       ).toDF("load_date", "load_hour", "id", "content", "score")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date", "load_hour")
         .option("spark.indextables.indexing.fastfields", "score,load_date,load_hour")
         .mode("overwrite")
@@ -140,7 +140,7 @@ class PartitionedTableAggregatePushdownIssue
       // Read the table
       println("\n2. Reading partitioned table...")
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
       println("✅ Table loaded successfully")
 

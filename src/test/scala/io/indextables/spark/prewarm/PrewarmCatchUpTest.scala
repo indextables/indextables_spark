@@ -35,7 +35,7 @@ import org.slf4j.LoggerFactory
  *   1. Prewarm state is tracked per split 2. New hosts trigger catch-up prewarming 3. New splits discovered in
  *      transaction log trigger catch-up 4. State tracking is consistent across operations
  */
-class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
+class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCatchUpTest])
 
@@ -92,13 +92,6 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   private def createTestData(numRecords: Int = 200): Unit = {
     val ss = spark
     import ss.implicits._
@@ -118,7 +111,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "50")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -284,7 +277,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Read data - should check for catch-up needs
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count = df.count()
@@ -303,7 +296,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     spark.conf.set("spark.indextables.prewarm.catchUpNewHosts", "false")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count = df.count()
@@ -331,7 +324,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
       .toDF("id", "title", "content", "category", "score")
 
     newData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "25")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -346,7 +339,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Read should detect new splits and trigger catch-up
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count = df.count()

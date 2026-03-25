@@ -32,7 +32,7 @@ import org.scalatest.matchers.should.Matchers
  * Tests for bucket aggregation functions (DateHistogram, Histogram, Range). These functions enable time-series analysis
  * and numeric distribution analysis using tantivy4java's bucket aggregation capabilities.
  */
-class BucketAggregationTest extends AnyFunSuite with Matchers {
+class BucketAggregationTest extends AnyFunSuite with Matchers with io.indextables.spark.testutils.FileCleanupHelper {
 
   def createTestSession(): SparkSession =
     SparkSession
@@ -65,7 +65,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data with fast fields for aggregation
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "price,quantity")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
@@ -74,7 +74,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Read back the data
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test histogram aggregation with interval of 50
@@ -150,7 +150,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data with fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "event_time,value")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
@@ -159,7 +159,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Read back the data
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test date histogram aggregation with 1-day interval
@@ -214,7 +214,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data with fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "price")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
@@ -223,7 +223,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Read back the data
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test range aggregation with custom buckets:
@@ -280,7 +280,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data with fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "price,quantity")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
@@ -289,7 +289,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Read back the data
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test histogram aggregation with SUM sub-aggregation
@@ -335,12 +335,5 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
     } finally
       spark.stop()
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
   }
 }

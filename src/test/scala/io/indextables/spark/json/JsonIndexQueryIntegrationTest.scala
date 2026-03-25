@@ -57,7 +57,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       // Write with "text" type for the json_content field
       // This enables full-text search with IndexQuery on JSON string content
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.json_content", "text") // Configure as text for IndexQuery
         .mode("overwrite")
         .save(path)
@@ -66,7 +66,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
 
       // Read back and create temp view for SQL queries
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       df.createOrReplaceTempView("json_documents")
@@ -196,7 +196,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
 
       // Write with text type for IndexQuery support
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.json_data", "text")
         .mode("overwrite")
         .save(path)
@@ -204,7 +204,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       println(s"✅ Wrote ${testData.count()} documents with special characters")
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       df.createOrReplaceTempView("special_docs")
@@ -267,14 +267,14 @@ class JsonIndexQueryIntegrationTest extends TestBase {
 
         // Write with TEXT type (for IndexQuery - tokenized search)
         testData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.indexing.typemap.json_field", "text") // TEXT type enables IndexQuery
           .mode("overwrite")
           .save(jsonPath)
 
         // Write with STRING type (for exact matching - default)
         testData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.indexing.typemap.json_field", "string") // STRING type (default)
           .mode("overwrite")
           .save(stringPath)
@@ -283,14 +283,14 @@ class JsonIndexQueryIntegrationTest extends TestBase {
 
         // Read TEXT-indexed data
         val textDf = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(jsonPath)
 
         textDf.createOrReplaceTempView("text_docs")
 
         // Read STRING-indexed data
         val stringDf = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(stringPath)
 
         stringDf.createOrReplaceTempView("string_docs")
@@ -378,14 +378,14 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       // Write with Struct field - automatically converted to JSON
       // Note: For Struct fields, we need to reference the JSON-serialized version
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       println(s"✅ Wrote ${df.count()} documents with Struct fields")
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("struct_docs")

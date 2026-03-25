@@ -290,8 +290,7 @@ class IcebergSourceReader(
    * "fields":[{"name":"...", "type":"long", "nullable":true, "metadata":{}}]}
    */
   private def convertIcebergSchemaToSpark(schemaJson: String): StructType = {
-    import com.fasterxml.jackson.databind.ObjectMapper
-    val mapper = new ObjectMapper()
+    val mapper = io.indextables.spark.util.JsonUtil.mapper
     val root   = mapper.readTree(schemaJson)
     val fields = root.get("fields")
 

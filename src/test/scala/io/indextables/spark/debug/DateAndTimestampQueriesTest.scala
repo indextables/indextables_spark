@@ -31,16 +31,7 @@ import io.indextables.spark.TestBase
  * Isolated test for the failing "should handle date and timestamp queries" test. This helps debug date/timestamp type
  * conversions and query handling.
  */
-class DateAndTimestampQueriesTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class DateAndTimestampQueriesTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   private def createDateTimeTestDataFrame(): DataFrame = {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
@@ -96,7 +87,7 @@ class DateAndTimestampQueriesTest extends TestBase {
       // Write data
       println("💾 Writing data...")
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -105,7 +96,7 @@ class DateAndTimestampQueriesTest extends TestBase {
       // Read the data back
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println(s"📊 Read back ${readData.count()} rows")

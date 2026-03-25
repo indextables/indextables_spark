@@ -17,8 +17,9 @@
 
 package io.indextables.spark.transaction
 
-import com.fasterxml.jackson.databind.{ObjectMapper, SerializationFeature}
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
+import io.indextables.spark.util.JsonUtil
 
 /**
  * Serializes Scala Action types to JSON formats expected by the native tantivy4java transaction log
@@ -31,11 +32,7 @@ import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
  */
 object ActionJsonSerializer {
 
-  private val mapper: ObjectMapper = {
-    val m = new ObjectMapper()
-    m.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false)
-    m
-  }
+  private val mapper = JsonUtil.mapper
 
   /**
    * Serialize a sequence of AddActions to a JSON array string for `TransactionLogWriter.addFiles()`.
@@ -51,7 +48,21 @@ object ActionJsonSerializer {
    */
   def protocolToJsonLine(protocol: ProtocolAction): String = {
     val wrapper = mapper.createObjectNode()
-    val node    = mapper.createObjectNode()
+    wrapper.set[ObjectNode]("protocol", protocolToObjectNode(protocol))
+    mapper.writeValueAsString(wrapper)
+  }
+
+  /**
+   * Serialize a MetadataAction to a JSON-lines entry: `{"metaData":{...}}`.
+   */
+  def metadataToJsonLine(metadata: MetadataAction): String = {
+    val wrapper = mapper.createObjectNode()
+    wrapper.set[ObjectNode]("metaData", metadataToObjectNode(metadata))
+    mapper.writeValueAsString(wrapper)
+  }
+
+  private def protocolToObjectNode(protocol: ProtocolAction): ObjectNode = {
+    val node = mapper.createObjectNode()
     node.put("minReaderVersion", protocol.minReaderVersion)
     node.put("minWriterVersion", protocol.minWriterVersion)
     protocol.readerFeatures.foreach { features =>
@@ -64,16 +75,11 @@ object ActionJsonSerializer {
       features.foreach(arr.add)
       node.set[ObjectNode]("writerFeatures", arr)
     }
-    wrapper.set[ObjectNode]("protocol", node)
-    mapper.writeValueAsString(wrapper)
+    node
   }
 
-  /**
-   * Serialize a MetadataAction to a JSON-lines entry: `{"metaData":{...}}`.
-   */
-  def metadataToJsonLine(metadata: MetadataAction): String = {
-    val wrapper = mapper.createObjectNode()
-    val node    = mapper.createObjectNode()
+  private def metadataToObjectNode(metadata: MetadataAction): ObjectNode = {
+    val node = mapper.createObjectNode()
     node.put("id", metadata.id)
     metadata.name.foreach(node.put("name", _))
     metadata.description.foreach(node.put("description", _))
@@ -96,9 +102,7 @@ object ActionJsonSerializer {
     node.set[ObjectNode]("configuration", configNode)
 
     metadata.createdTime.foreach(node.put("createdTime", _))
-
-    wrapper.set[ObjectNode]("metaData", node)
-    mapper.writeValueAsString(wrapper)
+    node
   }
 
   /**
@@ -183,53 +187,14 @@ object ActionJsonSerializer {
   /**
    * Serialize a ProtocolAction to a standalone JSON string (no wrapper).
    */
-  def protocolToJson(protocol: ProtocolAction): String = {
-    val node = mapper.createObjectNode()
-    node.put("minReaderVersion", protocol.minReaderVersion)
-    node.put("minWriterVersion", protocol.minWriterVersion)
-    protocol.readerFeatures.foreach { features =>
-      val arr = mapper.createArrayNode()
-      features.foreach(arr.add)
-      node.set[ObjectNode]("readerFeatures", arr)
-    }
-    protocol.writerFeatures.foreach { features =>
-      val arr = mapper.createArrayNode()
-      features.foreach(arr.add)
-      node.set[ObjectNode]("writerFeatures", arr)
-    }
-    mapper.writeValueAsString(node)
-  }
+  def protocolToJson(protocol: ProtocolAction): String =
+    mapper.writeValueAsString(protocolToObjectNode(protocol))
 
   /**
    * Serialize a MetadataAction to a standalone JSON string (no wrapper).
    */
-  def metadataToJson(metadata: MetadataAction): String = {
-    val node = mapper.createObjectNode()
-    node.put("id", metadata.id)
-    metadata.name.foreach(node.put("name", _))
-    metadata.description.foreach(node.put("description", _))
-
-    val formatNode = mapper.createObjectNode()
-    formatNode.put("provider", metadata.format.provider)
-    val formatOpts = mapper.createObjectNode()
-    metadata.format.options.foreach { case (k, v) => formatOpts.put(k, v) }
-    formatNode.set[ObjectNode]("options", formatOpts)
-    node.set[ObjectNode]("format", formatNode)
-
-    node.put("schemaString", metadata.schemaString)
-
-    val partArr = mapper.createArrayNode()
-    metadata.partitionColumns.foreach(partArr.add)
-    node.set[ObjectNode]("partitionColumns", partArr)
-
-    val configNode = mapper.createObjectNode()
-    metadata.configuration.foreach { case (k, v) => configNode.put(k, v) }
-    node.set[ObjectNode]("configuration", configNode)
-
-    metadata.createdTime.foreach(node.put("createdTime", _))
-
-    mapper.writeValueAsString(node)
-  }
+  def metadataToJson(metadata: MetadataAction): String =
+    mapper.writeValueAsString(metadataToObjectNode(metadata))
 
   private def addActionToObjectNode(a: AddAction): ObjectNode = {
     val node = mapper.createObjectNode()
@@ -294,4 +259,28 @@ object ActionJsonSerializer {
 
     node
   }
+
+  /**
+   * Parse a single action from a JSON node containing an action type discriminator.
+   *
+   * Handles: protocol, metaData, add, remove, skip, mergeskip.
+   *
+   * @return
+   *   Some(Action) if recognized, None otherwise
+   */
+  def parseActionFromJsonNode(jsonNode: JsonNode): Option[Action] =
+    if (jsonNode.has("protocol")) {
+      Some(mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction]))
+    } else if (jsonNode.has("metaData")) {
+      Some(mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
+    } else if (jsonNode.has("add")) {
+      Some(mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
+    } else if (jsonNode.has("remove")) {
+      Some(mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
+    } else if (jsonNode.has("skip") || jsonNode.has("mergeskip")) {
+      val skipNode = if (jsonNode.has("skip")) jsonNode.get("skip") else jsonNode.get("mergeskip")
+      Some(mapper.treeToValue(skipNode, classOf[SkipAction]))
+    } else {
+      None
+    }
 }

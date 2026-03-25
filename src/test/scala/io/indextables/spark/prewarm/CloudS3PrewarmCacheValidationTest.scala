@@ -47,7 +47,7 @@ import io.indextables.tantivy4java.split.SplitCacheManager
  *   - AWS credentials in ~/.aws/credentials file
  *   - Bucket configured via system property or default: test-tantivy4sparkbucket
  */
-class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
+class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val S3_BUCKET    = System.getProperty("test.s3.bucket", "test-tantivy4sparkbucket")
   private val S3_REGION    = System.getProperty("test.s3.region", "us-east-2")
@@ -121,13 +121,6 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
       }
     } finally
       super.afterAll()
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
 
   /** List all files in the disk cache directory for debugging. */
   private def listDiskCacheContents(label: String): Unit = {
@@ -215,7 +208,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     testData
       .coalesce(2) // Create 2 splits for better test coverage
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -279,7 +272,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     listDiskCacheContents("BEFORE QUERIES (should match AFTER PREWARM)")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -396,7 +389,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -433,7 +426,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
 
     // Execute a range query on 'score' - should hit cache
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -466,7 +459,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     testData
       .coalesce(2)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -522,7 +515,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -544,7 +537,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
 
     // Execute queries WITHOUT prewarm - these should access S3
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -598,7 +591,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -647,7 +640,7 @@ class CloudS3PrewarmCacheValidationTest extends CloudS3TestBase {
     // Now run aggregations - these should NOT access S3
     // Use a single DataFrame and run pushed-down aggregations
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)

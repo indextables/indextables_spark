@@ -532,7 +532,7 @@ class CloudS3CustomCredentialProviderIntegrationTest extends CloudS3TestBase {
     // Write first batch
     println(s"📝 Writing batch 1...")
     data1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(mergeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -540,7 +540,7 @@ class CloudS3CustomCredentialProviderIntegrationTest extends CloudS3TestBase {
     // Write second batch (append mode to create more split files)
     println(s"📝 Writing batch 2...")
     data2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(mergeOptions)
       .mode("append")
       .save(tablePath)
@@ -548,7 +548,7 @@ class CloudS3CustomCredentialProviderIntegrationTest extends CloudS3TestBase {
     // Write third batch (append mode to create more split files)
     println(s"📝 Writing batch 3...")
     data3.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(mergeOptions)
       .mode("append")
       .save(tablePath)
@@ -623,7 +623,7 @@ class CloudS3CustomCredentialProviderIntegrationTest extends CloudS3TestBase {
     )
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 

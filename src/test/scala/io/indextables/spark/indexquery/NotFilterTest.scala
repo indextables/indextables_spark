@@ -23,7 +23,7 @@ class NotFilterTest extends TestBase {
 
     // Write with mixed field types
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.name", "text")       // tokenized for IndexQuery
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .option("spark.indextables.indexing.fastfields", "price")        // enable range queries on price
@@ -32,7 +32,7 @@ class NotFilterTest extends TestBase {
 
     // Read and create temp view
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("products")

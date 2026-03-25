@@ -48,7 +48,7 @@ import org.scalatest.BeforeAndAfterAll
  * unmodified.</li> <li>A second new snapshot is picked up by a subsequent cycle.</li> <li>A restart resumes from the
  * last synced snapshot without re-indexing existing data.</li> </ol>
  */
-class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -100,11 +100,6 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
       deleteRecursively(root)
   }
 
-  private def deleteRecursively(f: File): Unit = {
-    if (f.isDirectory) Option(f.listFiles()).foreach(_.foreach(deleteRecursively))
-    f.delete()
-  }
-
   private def flushCaches(): Unit = {
     import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
     GlobalSplitCacheManager.flushAllCaches()
@@ -115,7 +110,7 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
     flushCaches()
     try
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "100000")
         .load(indexPath)
         .count()

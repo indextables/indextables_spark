@@ -32,7 +32,7 @@ import io.indextables.spark.TestBase
  */
 class StringPatternPushdownTest extends TestBase {
 
-  private val format = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val format = INDEXTABLES_FORMAT
 
   // Helper to create test data with string fields for pattern matching
   private def createPatternTestData() = {

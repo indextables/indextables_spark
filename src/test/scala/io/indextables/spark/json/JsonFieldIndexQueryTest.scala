@@ -51,7 +51,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       // Write with "json" type to enable JSON field indexing
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.user_data", "json") // Index as JSON field
         .mode("overwrite")
         .save(path)
@@ -60,7 +60,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       // Read back and create temp view
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       df.createOrReplaceTempView("users")
@@ -151,7 +151,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       // Write with json type
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.val_field", "json")
         .mode("overwrite")
         .save(path)
@@ -159,7 +159,7 @@ class JsonFieldIndexQueryTest extends TestBase {
       println(s"✅ Wrote ${testData.count()} documents with val_field as JSON")
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       df.createOrReplaceTempView("test_data")
@@ -245,7 +245,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       // Write with json type
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.product_info", "json")
         .mode("overwrite")
         .save(path)
@@ -253,7 +253,7 @@ class JsonFieldIndexQueryTest extends TestBase {
       println(s"✅ Wrote ${testData.count()} products with JSON indexing")
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       df.createOrReplaceTempView("products")
@@ -324,7 +324,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       // Write with json type
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.settings", "json")
         .mode("overwrite")
         .save(path)
@@ -332,7 +332,7 @@ class JsonFieldIndexQueryTest extends TestBase {
       println(s"✅ Wrote ${testData.count()} configuration documents")
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       df.createOrReplaceTempView("configs")

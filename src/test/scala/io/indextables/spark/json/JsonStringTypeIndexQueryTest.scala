@@ -65,7 +65,7 @@ class JsonStringTypeIndexQueryTest extends TestBase {
 
       // Write - Struct types are automatically indexed as JSON
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -73,7 +73,7 @@ class JsonStringTypeIndexQueryTest extends TestBase {
 
       // Read back
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("test_data")
@@ -134,12 +134,12 @@ class JsonStringTypeIndexQueryTest extends TestBase {
       )
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("users")
@@ -202,12 +202,12 @@ class JsonStringTypeIndexQueryTest extends TestBase {
       )
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("products")

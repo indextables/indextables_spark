@@ -33,7 +33,7 @@ import org.scalatest.BeforeAndAfterAll
  * column + an indexquery condition on a text field, all rows in the first partition are returned instead of only the
  * matching rows.
  */
-class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -83,13 +83,6 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
       GlobalSplitCacheManager.flushAllCaches()
       DriverSplitLocalityManager.clear()
     } catch { case _: Exception => }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
 
   /**
    * Creates a Delta table with two partition columns (year, month), a text content field, and several other data
@@ -148,7 +141,7 @@ class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers wit
 
       // Read companion
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 

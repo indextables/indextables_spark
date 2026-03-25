@@ -54,7 +54,7 @@ object LogQueryTest {
 
       // Load the dataset
       val logData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(outputPath)
 
       // Cache the dataset to memory for consistent query performance

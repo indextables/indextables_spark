@@ -36,7 +36,7 @@ import org.scalatest.matchers.should.Matchers
  * Spark requires `spark.memory.offHeap.enabled=true` with a non-zero `spark.memory.offHeap.size` for off-heap
  * allocations to succeed.
  */
-class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
+class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
   protected var tempDir: String     = _
@@ -81,11 +81,6 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       deleteRecursively(new java.io.File(tempDir))
     }
 
-  private def deleteRecursively(file: java.io.File): Unit = {
-    if (file.isDirectory) file.listFiles().foreach(deleteRecursively)
-    file.delete()
-  }
-
   test("native memory pool should be configured after write operation") {
     val tablePath = s"file://$tempDir/native_memory_test"
 
@@ -94,7 +89,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       .range(0, 100)
       .selectExpr("id", "CAST(id AS STRING) as text")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -121,7 +116,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       .range(0, 100)
       .selectExpr("id", "CAST(id AS STRING) as text")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -149,7 +144,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       .range(0, 10)
       .selectExpr("id", "CAST(id AS STRING) as text")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -186,7 +181,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       .range(0, 100)
       .selectExpr("id", "CAST(id AS STRING) as text")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -194,7 +189,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
 
     // Read path — triggers NativeMemoryInitializer via GlobalSplitCacheManager
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val rows = df.filter("id > 50").collect()
@@ -214,7 +209,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       .range(0, 100)
       .selectExpr("id", "CAST(id AS STRING) as text")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -222,7 +217,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
 
     // Simple aggregate pushdown — triggers SimpleAggregateColumnarReader
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val count = df.count()
@@ -241,7 +236,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
       .range(0, 100)
       .selectExpr("id", "CAST(id % 10 AS STRING) as category", "CAST(id AS DOUBLE) as score")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(tablePath)
@@ -250,7 +245,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
 
     // Group-by aggregate — triggers GroupByAggregateColumnarReader
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val result = df.groupBy("category").count().collect()
@@ -271,7 +266,7 @@ class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeA
         .range(i * 100, (i + 1) * 100)
         .selectExpr("id", "CAST(id AS STRING) as text")
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 0) "overwrite" else "append")
         .save(tablePath)
 

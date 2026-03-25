@@ -31,7 +31,6 @@ import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.storage.{DriverSplitLocalityManager, SplitCacheConfig}
 import io.indextables.spark.transaction.AddAction
 import io.indextables.spark.util.ConfigUtils
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitSearcher
 import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
 import org.slf4j.LoggerFactory
@@ -577,51 +576,7 @@ object PreWarmManager {
       )
     }
 
-    // Handle potential Integer/Long type conversion from JSON deserialization
-    def safeLong(opt: Option[Any], fieldName: String): Long = opt match {
-      case Some(value) =>
-        value match {
-          case i if i.isInstanceOf[Integer] => i.asInstanceOf[Integer].toLong
-          case l if l.isInstanceOf[Long]    => l.asInstanceOf[Long]
-          case other                        => other.asInstanceOf[Number].longValue()
-        }
-      case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
-    }
-
-    // Safe conversion functions for Option[Any] to Long
-    def toLongSafeOption(opt: Option[Any]): Long = opt match {
-      case Some(value) =>
-        value match {
-          case l: Long              => l
-          case i: Int               => i.toLong
-          case i: java.lang.Integer => i.toLong
-          case l: java.lang.Long    => l
-          case _                    => value.toString.toLong
-        }
-      case None => 0L
-    }
-
-    val splitMetadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
-      addAction.path.split("/").last.replace(".split", ""),         // splitId from filename
-      "tantivy4spark-index",                                        // indexUid (NEW - required)
-      0L,                                                           // partitionId (NEW - required)
-      "tantivy4spark-source",                                       // sourceId (NEW - required)
-      "tantivy4spark-node",                                         // nodeId (NEW - required)
-      toLongSafeOption(addAction.numRecords),                       // numDocs
-      toLongSafeOption(addAction.uncompressedSizeBytes),            // uncompressedSizeBytes
-      addAction.timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
-      addAction.timeRangeEnd.map(java.time.Instant.parse).orNull,   // timeRangeEnd
-      System.currentTimeMillis() / 1000,                            // createTimestamp (NEW - required)
-      "Mature",                                                     // maturity (NEW - required)
-      addAction.splitTags.getOrElse(Set.empty[String]).asJava,      // tags
-      safeLong(addAction.footerStartOffset, "footerStartOffset"),   // footerStartOffset
-      safeLong(addAction.footerEndOffset, "footerEndOffset"),       // footerEndOffset
-      toLongSafeOption(addAction.deleteOpstamp),                    // deleteOpstamp
-      addAction.numMergeOps.getOrElse(0),                           // numMergeOps (Int is OK for this field)
-      "doc-mapping-uid",                                            // docMappingUid (NEW - required)
-      addAction.docMappingJson.orNull,                              // docMappingJson (MOVED - for performance)
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
-    )
+    val splitMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(addAction, filePath)
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }
 

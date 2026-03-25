@@ -30,7 +30,7 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for DistributedSourceScanner — verifies that distributed Delta and Parquet scans produce the same file set as
  * the existing single-call readers.
  */
-class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -74,13 +74,6 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       f(path)
     finally
       deleteRecursively(new File(path))
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   private val emptyCredentials: Map[String, String] = Map.empty

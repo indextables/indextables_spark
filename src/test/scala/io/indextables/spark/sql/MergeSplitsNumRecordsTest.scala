@@ -33,7 +33,7 @@ import org.scalatest.BeforeAndAfterEach
  * Integration test to validate that merge operations correctly populate the numRecords field in transaction log
  * AddAction from tantivy4java metadata
  */
-class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: File       = _
@@ -64,13 +64,6 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   "MergeSplitsCommand" should "correctly populate numRecords field in transaction log from tantivy4java metadata" in {
     val tablePath = new File(tempDir, "merge_numrecords_test").getAbsolutePath
 
@@ -96,7 +89,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch1DF  = spark.createDataFrame(batch1RDD, schema)
 
     batch1DF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -110,7 +103,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch2DF  = spark.createDataFrame(batch2RDD, schema)
 
     batch2DF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
@@ -125,7 +118,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch3DF  = spark.createDataFrame(batch3RDD, schema)
 
     batch3DF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
@@ -140,14 +133,14 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch4DF  = spark.createDataFrame(batch4RDD, schema)
 
     batch4DF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Read back to verify we have all 8 records
-    val beforeMerge = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeMerge = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val recordCount = beforeMerge.count()
     recordCount shouldBe 8
 
@@ -213,7 +206,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     println(s"✅ Created ${addActionsBeforeMerge.length} separate files ready for merging")
 
     // Verify data integrity
-    val dataCheck = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val dataCheck = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val actualRecordCount = dataCheck.count()
 
     println(s"Actual record count: $actualRecordCount")
@@ -245,7 +238,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val testData    = spark.createDataFrame(testDataRDD, schema)
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)

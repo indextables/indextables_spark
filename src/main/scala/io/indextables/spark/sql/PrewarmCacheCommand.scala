@@ -89,7 +89,7 @@ case class PrewarmCacheCommand(
 
   // Credential resolution centralized in CredentialProviderFactory.resolveCredentialsOnDriver()
 
-  private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+  private val objectMapper = io.indextables.spark.util.JsonUtil.mapper
 
   /**
    * Enrich a config map with companion metadata from the transaction log, mirroring ScanBuilder.effectiveConfig logic.

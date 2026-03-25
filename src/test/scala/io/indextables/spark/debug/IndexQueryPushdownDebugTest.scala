@@ -67,12 +67,12 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     // Write to IndexTables4Spark format
     val tantivyPath = testDataPath + "/indexquery_debug_data"
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tantivyPath)
 
     // Read back the data
-    val tantivyDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tantivyPath)
+    val tantivyDF = spark.read.format(INDEXTABLES_FORMAT).load(tantivyPath)
 
     println("Data read back from IndexTables4Spark:")
     tantivyDF.show(false)
@@ -139,9 +139,9 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     val df       = spark.createDataFrame(testData).toDF("id", "content")
 
     val tantivyPath = testDataPath + "/pushdown_debug"
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tantivyPath)
+    df.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(tantivyPath)
 
-    val tantivyDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tantivyPath)
+    val tantivyDF = spark.read.format(INDEXTABLES_FORMAT).load(tantivyPath)
 
     // Create IndexQueryExpression
     val expr = IndexQueryExpression(

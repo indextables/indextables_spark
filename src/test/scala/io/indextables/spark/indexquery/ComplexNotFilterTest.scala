@@ -27,14 +27,14 @@ class ComplexNotFilterTest extends TestBase {
 
     // Write with default field types (no fast fields for price to test proper fallback)
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.name", "text")
       .mode("overwrite")
       .save(testPath)
 
     // Read and create temp view
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("products")

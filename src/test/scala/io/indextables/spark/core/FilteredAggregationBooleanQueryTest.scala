@@ -18,7 +18,7 @@ import org.scalatest.funsuite.AnyFunSuite
  * Test filtered aggregations using SplitBooleanQuery (the query type actually used in production). This tests the REAL
  * code path that's failing.
  */
-class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
+class FilteredAggregationBooleanQueryTest extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("Filtered StatsAggregation with SplitBooleanQuery") {
     val tempDir = Files.createTempDirectory("tantivy-boolean-query-agg").toFile
@@ -140,12 +140,5 @@ class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
 
     } finally
       searcher.close()
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles.foreach(deleteRecursively)
-    }
-    file.delete()
   }
 }

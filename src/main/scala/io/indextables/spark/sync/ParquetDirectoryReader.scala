@@ -275,8 +275,7 @@ class ParquetDirectoryReader(
    */
   private def extractSparkSchemaFromMetadata(schemaJson: String): Option[StructType] =
     try {
-      import com.fasterxml.jackson.databind.ObjectMapper
-      val mapper   = new ObjectMapper()
+      val mapper   = io.indextables.spark.util.JsonUtil.mapper
       val root     = mapper.readTree(schemaJson)
       val metadata = root.get("metadata")
       if (metadata != null) {
@@ -298,8 +297,7 @@ class ParquetDirectoryReader(
    * "int64", "nullable": ...}]} Spark format: {"type": "struct", "fields": [{"name": "...", "type": "long", ...}]}
    */
   private def convertArrowSchemaToSpark(schemaJson: String): StructType = {
-    import com.fasterxml.jackson.databind.ObjectMapper
-    val mapper = new ObjectMapper()
+    val mapper = io.indextables.spark.util.JsonUtil.mapper
     val root   = mapper.readTree(schemaJson)
     val fields = root.get("fields")
 

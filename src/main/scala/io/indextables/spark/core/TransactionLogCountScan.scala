@@ -196,87 +196,13 @@ class TransactionLogCountBatch(
   }
 
   /** Get columns referenced by a filter. */
-  private def getFilterReferencedColumns(filter: Filter): Set[String] = {
-    import org.apache.spark.sql.sources._
-    filter match {
-      case EqualTo(attribute, _)            => Set(attribute)
-      case EqualNullSafe(attribute, _)      => Set(attribute)
-      case GreaterThan(attribute, _)        => Set(attribute)
-      case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _)           => Set(attribute)
-      case LessThanOrEqual(attribute, _)    => Set(attribute)
-      case In(attribute, _)                 => Set(attribute)
-      case IsNull(attribute)                => Set(attribute)
-      case IsNotNull(attribute)             => Set(attribute)
-      case StringStartsWith(attribute, _)   => Set(attribute)
-      case StringEndsWith(attribute, _)     => Set(attribute)
-      case StringContains(attribute, _)     => Set(attribute)
-      case And(left, right)                 => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Or(left, right)                  => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Not(child)                       => getFilterReferencedColumns(child)
-      case _                                => Set.empty[String]
-    }
-  }
+  private def getFilterReferencedColumns(filter: Filter): Set[String] =
+    io.indextables.spark.util.FilterUtils.extractFieldNames(filter)
 
-  /** Check if a file matches the given partition filters. */
+  /** Check if a file matches the given partition filters. Delegates to PartitionPruning.evaluateFilter. */
   private def matchesPartitionFilters(file: io.indextables.spark.transaction.AddAction, filters: Array[Filter]): Boolean =
-    if (filters.isEmpty) {
-      true
-    } else {
-      // We need partition columns for this, but we can't access transaction log here easily
-      // Let's implement a simple match logic for now
-      filters.forall(matchesFilter(file, _))
-    }
-
-  /** Check if a file matches a single filter. */
-  private def matchesFilter(file: io.indextables.spark.transaction.AddAction, filter: Filter): Boolean = {
-    import org.apache.spark.sql.sources._
-    filter match {
-      case EqualTo(attribute, value) =>
-        file.partitionValues.get(attribute).contains(value.toString)
-      case EqualNullSafe(attribute, value) =>
-        file.partitionValues.get(attribute).contains(value.toString)
-      case GreaterThan(attribute, value) =>
-        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) > 0)
-      case GreaterThanOrEqual(attribute, value) =>
-        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) >= 0)
-      case LessThan(attribute, value) =>
-        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) < 0)
-      case LessThanOrEqual(attribute, value) =>
-        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) <= 0)
-      case In(attribute, values) =>
-        file.partitionValues.get(attribute).exists(v => values.map(_.toString).contains(v))
-      case IsNull(attribute) =>
-        !file.partitionValues.contains(attribute) || file.partitionValues.get(attribute).isEmpty
-      case IsNotNull(attribute) =>
-        file.partitionValues.get(attribute).nonEmpty
-      case And(left, right) =>
-        matchesFilter(file, left) && matchesFilter(file, right)
-      case Or(left, right) =>
-        matchesFilter(file, left) || matchesFilter(file, right)
-      case Not(child) =>
-        !matchesFilter(file, child)
-      case _ =>
-        // Log warning for unhandled filters instead of silently including
-        logger.warn(
-          s"TRANSACTION LOG: Unhandled filter type: ${filter.getClass.getSimpleName}, defaulting to include file"
-        )
-        true
-    }
-  }
-
-  /** Compare two partition values for range filters. Handles strings, dates, and numeric values. */
-  private def compareValues(partitionValue: String, filterValue: String): Int =
-    // Try numeric comparison first
-    try {
-      val pNum = partitionValue.toDouble
-      val fNum = filterValue.toDouble
-      pNum.compareTo(fNum)
-    } catch {
-      case _: NumberFormatException =>
-        // Fall back to string comparison (works for ISO dates like "2024-01-01")
-        partitionValue.compareTo(filterValue)
-    }
+    if (filters.isEmpty) true
+    else filters.forall(f => io.indextables.spark.transaction.PartitionPruning.evaluateFilter(file.partitionValues, f))
 
   override def createReaderFactory(): PartitionReaderFactory =
     new TransactionLogCountReaderFactory(config)

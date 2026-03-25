@@ -12,7 +12,7 @@ import io.indextables.spark.TestBase
 /** Diagnostic test to confirm FFI statistics are empty (tantivy4java bug). */
 class FfiStatisticsDiagnosticTest extends TestBase {
 
-  private val format = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val format = INDEXTABLES_FORMAT
 
   test("FFI statistics are empty — tantivy4java bug in Arrow FFI ingestion path") {
     withTempPath { tantPath =>
