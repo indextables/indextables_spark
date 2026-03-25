@@ -60,7 +60,7 @@ class S3AsyncDownloader(s3AsyncClient: S3AsyncClient) extends AsyncDownloader {
     }
 
     // Parse S3 path to get bucket and key
-    val (bucket, key) = parseS3Path(request.sourcePath)
+    val (bucket, key) = io.indextables.spark.util.CloudPathUtils.parseS3Path(request.sourcePath)
 
     logger.debug(s"Starting async download: s3://$bucket/$key -> ${request.destinationPath}")
 
@@ -108,16 +108,6 @@ class S3AsyncDownloader(s3AsyncClient: S3AsyncClient) extends AsyncDownloader {
    *
    * Handles both s3:// and s3a:// schemes.
    */
-  private def parseS3Path(path: String): (String, String) = {
-    // Normalize s3a:// to s3://
-    val normalizedPath = path.replaceFirst("^s3a://", "s3://")
-
-    val uri    = new URI(normalizedPath)
-    val bucket = uri.getHost
-    val key    = uri.getPath.stripPrefix("/")
-
-    (bucket, key)
-  }
 
   override def close(): Unit = {
     // S3AsyncClient is typically shared and should not be closed here
@@ -172,7 +162,7 @@ object S3AsyncDownloader {
    */
   def fromConfig(configs: Map[String, String], tablePath: String): S3AsyncDownloader = {
     def get(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGet(configs, key)
 
     // Use centralized credential resolution (same as S3CloudStorageProvider)
     // This supports custom credential providers like Unity Catalog

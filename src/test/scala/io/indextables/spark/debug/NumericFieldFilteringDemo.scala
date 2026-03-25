@@ -57,10 +57,10 @@ object NumericFieldFilteringDemo {
     val df = spark.createDataFrame(spark.sparkContext.parallelize(testData), schema)
 
     // Save the data
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(testPath)
 
     // Read back the data
-    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+    val readDf = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(testPath)
     readDf.createOrReplaceTempView("employees")
 
     println("Sample data:")

@@ -34,7 +34,7 @@ import org.scalatest.BeforeAndAfterAll
  *      in the next cycle. 3. A no-changes poll leaves the companion unmodified. 4. A second new commit is picked up by
  *      a subsequent cycle. 5. A restart resumes from the last synced version without re-indexing existing data.
  */
-class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -89,11 +89,6 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
       deleteRecursively(root)
   }
 
-  private def deleteRecursively(f: File): Unit = {
-    if (f.isDirectory) Option(f.listFiles()).foreach(_.foreach(deleteRecursively))
-    f.delete()
-  }
-
   private def flushCaches(): Unit = {
     import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
     GlobalSplitCacheManager.flushAllCaches()
@@ -110,7 +105,7 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
     flushCaches()
     try
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "100000")
         .load(indexPath)
         .count()

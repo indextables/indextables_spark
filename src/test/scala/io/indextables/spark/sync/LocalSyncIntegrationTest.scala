@@ -37,7 +37,7 @@ import org.scalatest.BeforeAndAfterAll
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -94,13 +94,6 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
       f(path)
     } finally
       deleteRecursively(new File(path))
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   /**
@@ -390,7 +383,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Read back companion index — this exercises the full docBatchProjected path
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       val allRecords = companionDf.collect()
@@ -434,7 +427,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Read back companion index
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       val allRecords = companionDf.collect()
@@ -473,7 +466,7 @@ class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
       val ex = intercept[Exception] {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .mode("append")
           .save(indexPath)
       }

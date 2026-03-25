@@ -43,13 +43,13 @@ class SplitConversionThrottleTest extends TestBase {
 
     // Write using V2 API (should auto-configure)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempPath)
 
     // Verify data was written
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempPath)
 
     readDf.count() shouldBe 1000
@@ -68,14 +68,14 @@ class SplitConversionThrottleTest extends TestBase {
       .selectExpr("id", "CONCAT('content ', CAST(id AS STRING)) as content")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option(IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM, "2")
       .save(tempPath)
 
     // Verify data was written
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempPath)
 
     readDf.count() shouldBe 1000
@@ -185,14 +185,14 @@ class SplitConversionThrottleTest extends TestBase {
 
     // Write with explicit low throttle to test limiting
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option(IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM, "1")
       .save(tempPath)
 
     // Verify all data was written correctly
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempPath)
 
     readDf.count() shouldBe 4000
@@ -247,13 +247,13 @@ class SplitConversionThrottleTest extends TestBase {
       .selectExpr("id", "CONCAT('content ', CAST(id AS STRING)) as content")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempPath)
 
     // Verify data was written
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempPath)
 
     readDf.count() shouldBe 1000

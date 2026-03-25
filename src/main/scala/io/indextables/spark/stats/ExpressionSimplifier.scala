@@ -216,26 +216,9 @@ object ExpressionSimplifier {
 
   /** Extract the set of columns referenced by a filter. Useful for determining which stats columns to load. */
   def getReferencedColumns(filter: Filter): Set[String] =
-    filter match {
-      case EqualTo(attr, _)            => Set(attr)
-      case EqualNullSafe(attr, _)      => Set(attr)
-      case GreaterThan(attr, _)        => Set(attr)
-      case GreaterThanOrEqual(attr, _) => Set(attr)
-      case LessThan(attr, _)           => Set(attr)
-      case LessThanOrEqual(attr, _)    => Set(attr)
-      case In(attr, _)                 => Set(attr)
-      case IsNull(attr)                => Set(attr)
-      case IsNotNull(attr)             => Set(attr)
-      case StringStartsWith(attr, _)   => Set(attr)
-      case StringEndsWith(attr, _)     => Set(attr)
-      case StringContains(attr, _)     => Set(attr)
-      case And(left, right)            => getReferencedColumns(left) ++ getReferencedColumns(right)
-      case Or(left, right)             => getReferencedColumns(left) ++ getReferencedColumns(right)
-      case Not(child)                  => getReferencedColumns(child)
-      case _                           => Set.empty
-    }
+    io.indextables.spark.util.FilterUtils.extractFieldNames(filter)
 
   /** Get referenced columns from multiple filters. */
   def getReferencedColumns(filters: Array[Filter]): Set[String] =
-    filters.flatMap(getReferencedColumns).toSet
+    io.indextables.spark.util.FilterUtils.extractFieldNames(filters)
 }

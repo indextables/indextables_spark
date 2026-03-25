@@ -358,7 +358,7 @@ case class SerializableAwsConfig(
     extends Serializable {
 
   private def getConfig(key: String): Option[String] =
-    configs.get(key).orElse(configs.get(key.toLowerCase))
+    io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGetRaw(configs, key)
 
   def accessKey: String            = getConfig("spark.indextables.aws.accessKey").getOrElse("")
   def secretKey: String            = getConfig("spark.indextables.aws.secretKey").getOrElse("")
@@ -472,7 +472,7 @@ class MergeSplitsExecutor(
 
     // Helper to get config with case-insensitive fallback
     def getConfig(key: String): Option[String] =
-      mergedConfigs.get(key).orElse(mergedConfigs.get(key.toLowerCase))
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGetRaw(mergedConfigs, key)
 
     // Extract temp directory with fallback to /local_disk0 if available
     val tempDirectoryPath = getConfig("spark.indextables.merge.tempDirectoryPath")

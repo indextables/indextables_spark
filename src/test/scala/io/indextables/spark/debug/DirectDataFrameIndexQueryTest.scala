@@ -22,7 +22,7 @@ class DirectDataFrameIndexQueryTest extends TestBase {
 
     // Same field configuration
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.category", "string")
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.author", "string")
@@ -31,7 +31,7 @@ class DirectDataFrameIndexQueryTest extends TestBase {
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     println("=== Direct DataFrame IndexQuery Test ===")
@@ -121,13 +121,13 @@ class DirectDataFrameIndexQueryTest extends TestBase {
     ).toDF("id", "content", "load_date")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     println("=== Pre-filtered DataFrame IndexQuery Test ===")

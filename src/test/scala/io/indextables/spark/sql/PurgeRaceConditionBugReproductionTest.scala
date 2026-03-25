@@ -45,7 +45,7 @@ import org.scalatest.BeforeAndAfterEach
  *   - With current BUGGY code: Tests should FAIL
  *   - After fix is applied: Tests should PASS
  */
-class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAfterEach {
+class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var fs: FileSystem      = _
@@ -78,13 +78,6 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   /**
    * BUG REPRODUCTION TEST 1: Race condition at retention boundary
    *
@@ -109,7 +102,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     ).toDF("date", "hour", "value")
 
     initialData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date", "hour")
       .mode("overwrite")
       .save(tablePath)
@@ -118,7 +111,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     for (i <- 1 to 100) {
       val newData = Seq((s"2024-01-${(i % 28) + 1}", i % 24, s"value_$i")).toDF("date", "hour", "value")
       newData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("date", "hour")
         .mode("append")
         .save(tablePath)
@@ -128,7 +121,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     val txLog             = getTransactionLog(tablePath)
     val currentStateFiles = txLog.listFiles().map(_.path).toSet
     val currentRowCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -167,7 +160,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Step 7: Verify table is still fully readable with same row count
     val postPurgeRowCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -198,7 +191,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     // Create partitioned table with many transactions
     val initialData = Seq(("2024-01-01", 10, "init")).toDF("date", "hour", "value")
     initialData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date", "hour")
       .mode("overwrite")
       .save(tablePath)
@@ -206,7 +199,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     for (i <- 1 to 100) {
       val newData = Seq((s"2024-01-${(i % 28) + 1}", i % 24, s"val_$i")).toDF("date", "hour", "value")
       newData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("date", "hour")
         .mode("append")
         .save(tablePath)
@@ -214,7 +207,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Get baseline row count
     val baselineRowCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -236,7 +229,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
       val txLogsDeleted   = metrics.getLong(5)
 
       val rowCountAfterRun = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
         .count()
 
@@ -269,7 +262,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     // Create table with transactions
     val data = Seq(("2024-01-01", 10, "v")).toDF("date", "hour", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date", "hour")
       .mode("overwrite")
       .save(tablePath)
@@ -277,7 +270,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     for (i <- 1 to 50) {
       val newData = Seq((s"2024-01-${(i % 28) + 1}", i % 24, s"val_$i")).toDF("date", "hour", "value")
       newData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("date", "hour")
         .mode("append")
         .save(tablePath)
@@ -313,7 +306,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Verify table is readable
     val rowCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -343,7 +336,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     ).toDF("date", "hour", "value")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date", "hour")
       .mode("overwrite")
       .save(tablePath)
@@ -352,7 +345,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     for (i <- 1 to 50) {
       val newData = Seq((s"2024-01-${(i % 28) + 1}", i % 24, s"val_$i")).toDF("date", "hour", "value")
       newData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("date", "hour")
         .mode("append")
         .save(tablePath)
@@ -360,7 +353,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Get baseline
     val baselineRowCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 
@@ -390,7 +383,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Verify data integrity
     val postPurgeRowCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
 

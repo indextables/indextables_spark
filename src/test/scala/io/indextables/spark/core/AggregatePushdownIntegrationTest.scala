@@ -45,7 +45,7 @@ import org.scalatest.funsuite.AnyFunSuite
  * Integration test that actually creates tantivy4java indexes and executes aggregations. This validates the complete
  * end-to-end aggregation pushdown functionality.
  */
-class AggregatePushdownIntegrationTest extends AnyFunSuite {
+class AggregatePushdownIntegrationTest extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("tantivy4java COUNT aggregation end-to-end") {
     val tempDir = Files.createTempDirectory("tantivy-agg-test").toFile
@@ -325,14 +325,14 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       // Write data WITHOUT explicit fast field configuration
       // This should trigger auto-fast-field configuration for the first numeric field (score)
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
 
       println(s"✅ Auto-fast-field test: Data written to $tablePath without explicit fast field config")
 
       // Read back and verify we can perform aggregations (which proves fast fields were auto-configured)
-      val readData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val readData = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // If auto-fast-field worked, this should succeed without errors
       val count = readData.count()
@@ -403,10 +403,4 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
   }
 
   /** Recursively delete a directory and all its contents. */
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

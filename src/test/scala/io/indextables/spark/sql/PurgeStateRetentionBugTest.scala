@@ -76,7 +76,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -137,7 +137,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -188,7 +188,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }

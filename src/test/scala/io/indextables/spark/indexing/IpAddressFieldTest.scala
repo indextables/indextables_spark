@@ -45,13 +45,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip_addr")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip_addr", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Verify data was written
@@ -79,13 +79,13 @@ class IpAddressFieldTest extends TestBase {
       val data = (1 to 10).map(i => (s"server$i", s"192.168.1.$i")).toDF("name", "ip")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test range query: >= and <=
@@ -122,13 +122,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test IN query with multiple IPs
@@ -153,13 +153,13 @@ class IpAddressFieldTest extends TestBase {
 
       // Use list-based syntax for multiple IP fields
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "client_ip,server_ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test filtering on client_ip
@@ -185,13 +185,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("id", "service", "ip", "port")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test combined filter with IP and other fields
@@ -214,13 +214,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test exact match for various IPv6 formats
@@ -246,13 +246,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test not equal - should return 2 servers
@@ -277,13 +277,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test count with IP filter (simple aggregate pushdown)
@@ -310,13 +310,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip", "requests", "latency")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test SUM with IP filter
@@ -349,13 +349,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip", "requests")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test GROUP BY on IP field with COUNT
@@ -401,13 +401,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip", "service", "requests")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test GROUP BY with filter on IP range
@@ -444,13 +444,13 @@ class IpAddressFieldTest extends TestBase {
       ).toDF("name", "ip", "region", "requests")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.ip", "ip")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Test scan with select and filter

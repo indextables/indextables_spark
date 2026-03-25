@@ -29,7 +29,7 @@ import org.scalatest.funsuite.AnyFunSuite
  * Integration test for GROUP BY functionality with actual Spark DataFrames. This test demonstrates what we need to
  * implement for complete GROUP BY support.
  */
-class GroupByIntegrationTest extends AnyFunSuite {
+class GroupByIntegrationTest extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("GROUP BY with COUNT aggregation - basic test") {
     val spark = SparkSession
@@ -55,7 +55,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with string field for category (should support GROUP BY)
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.category", "string") // String fields support GROUP BY
         .option("spark.indextables.indexing.fastfields", "category,score") // Both GROUP BY column and aggregation column must be fast
         .mode("overwrite")
@@ -64,7 +64,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       println(s"✅ GROUP BY test: Data written to $tablePath")
 
       // Read back the data using V2 API for aggregate pushdown
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform GROUP BY query - this should trigger pushGroupBy() method
       println("🔍 GROUP BY TEST: Executing GROUP BY query...")
@@ -121,13 +121,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.team", "string") // String field for GROUP BY
         .option("spark.indextables.indexing.fastfields", "team,score") // Both GROUP BY column and SUM column must be fast
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform GROUP BY with SUM
       println("🔍 GROUP BY SUM TEST: Executing GROUP BY with SUM...")
@@ -180,7 +180,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with all GROUP BY columns as fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.region", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.typemap.quarter", "string")
@@ -188,7 +188,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform multi-dimensional GROUP BY query - this should use MultiTermsAggregation
       println("🔍 MULTI-DIMENSIONAL GROUP BY TEST: Executing 3-dimensional GROUP BY query...")
@@ -251,14 +251,14 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.team", "string")
         .option("spark.indextables.indexing.typemap.project", "string")
         .option("spark.indextables.indexing.fastfields", "team,project,effort")
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform multi-dimensional GROUP BY with SUM
       println("🔍 MULTI-DIMENSIONAL GROUP BY SUM TEST: Executing 2-dimensional GROUP BY with SUM...")
@@ -308,13 +308,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val tablePath = tempDir.getAbsolutePath
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.status", "string")
         .option("spark.indextables.indexing.fastfields", "status,value") // Add both status and value as fast fields
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // This query should trigger aggregate pushdown with GROUP BY
       val query = df.groupBy("status").count()
@@ -373,7 +373,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with string fields for exact matching and fast fields for aggregation
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.referrer", "string")                  // String for exact match
         .option("spark.indextables.indexing.typemap.status", "string")                    // String for GROUP BY
         .option("spark.indextables.indexing.fastfields", "referrer,status,response_time") // All fields as fast
@@ -383,7 +383,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       println(s"✅ GROUP BY with filter test: Data written to $tablePath")
 
       // Read back the data
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Apply exact match filter and perform GROUP BY with COUNT and SUM
       println("🔍 GROUP BY FILTER TEST: Executing filtered GROUP BY query with COUNT and SUM...")
@@ -484,12 +484,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with integer GROUP BY key
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "priority,score")
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform GROUP BY on integer field with COUNT and SUM
       val groupByResult = df
@@ -540,12 +540,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with long GROUP BY key
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "timestamp_bucket,value")
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform GROUP BY on long field with COUNT and SUM
       val groupByResult = df
@@ -596,12 +596,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with float GROUP BY key
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "rating,sales")
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform GROUP BY on float field with COUNT and SUM
       val groupByResult = df
@@ -652,12 +652,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with double GROUP BY key
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "latitude,population")
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform GROUP BY on double field with COUNT and SUM
       val groupByResult = df
@@ -713,7 +713,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with all 6 GROUP BY columns as fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.region", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option(
@@ -723,7 +723,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Perform 6-dimensional GROUP BY with multiple aggregation functions
       println("🔍 6-DIMENSIONAL GROUP BY TEST: Executing 6-dimensional GROUP BY with MIN, MAX, AVG, SUM, COUNT...")
@@ -815,10 +815,4 @@ class GroupByIntegrationTest extends AnyFunSuite {
   }
 
   /** Recursively delete a directory and all its contents. */
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

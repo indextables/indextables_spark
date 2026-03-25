@@ -467,10 +467,9 @@ case class SyncToExternalCommand(
           existingMeta.configuration
             .get("indextables.companion.indexingModes")
             .map { json =>
-              import com.fasterxml.jackson.databind.ObjectMapper
               import com.fasterxml.jackson.core.`type`.TypeReference
-              val mapper = new ObjectMapper()
-              mapper.readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
+              io.indextables.spark.util.JsonUtil.mapper
+                .readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
             }
             .getOrElse(Map.empty)
         } catch {
@@ -1093,10 +1092,8 @@ case class SyncToExternalCommand(
               "indextables.companion.deltaCatalog"       -> effectiveCatalogName.getOrElse("")
             )
           } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
-                                  import com.fasterxml.jackson.databind.ObjectMapper
-                                  val mapper = new ObjectMapper()
                                   Map(
-                                    "indextables.companion.indexingModes" -> mapper.writeValueAsString(
+                                    "indextables.companion.indexingModes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(
                                       effectiveIndexingModes.asJava
                                     )
                                   )

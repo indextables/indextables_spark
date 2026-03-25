@@ -237,7 +237,7 @@ object DistributedSourceScanner {
       }
       val batch = bridge.importAsColumnarBatch(arrays, schemas, numRows)
       try {
-        val mapper       = new com.fasterxml.jackson.databind.ObjectMapper()
+        val mapper       = io.indextables.spark.util.JsonUtil.mapper
         val results      = new scala.collection.mutable.ArrayBuffer[CompanionSourceFile](numRows)
         var i            = 0
         var loggedSample = false
@@ -322,7 +322,7 @@ object DistributedSourceScanner {
       }
       val batch = bridge.importAsColumnarBatch(arrays, schemas, numRows)
       try {
-        val mapper  = new com.fasterxml.jackson.databind.ObjectMapper()
+        val mapper  = io.indextables.spark.util.JsonUtil.mapper
         val results = new scala.collection.mutable.ArrayBuffer[CompanionSourceFile](numRows)
         var i       = 0
         while (i < numRows) {

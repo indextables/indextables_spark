@@ -29,7 +29,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Integration tests for PURGE INDEXTABLE command. Tests actual file operations with orphaned splits. */
-class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
+class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _
@@ -65,13 +65,6 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   test("PURGE INDEXTABLE should identify and delete orphaned split files") {
     val tablePath = s"$tempDir/test_table"
 
@@ -85,13 +78,13 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     ).toDF("id", "name", "age")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.fastfields", "age")
       .save(tablePath)
 
     // Verify table exists and has files
-    val beforeRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(beforeRead.count() == 3)
 
     // Create orphaned split files by directly writing to filesystem
@@ -141,7 +134,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(!fs.exists(orphanedCrc1))
 
     // Verify table is still intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3)
   }
 
@@ -153,7 +146,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files with different ages
     val oldOrphan    = new Path(s"$tablePath/old_${UUID.randomUUID()}.split")
@@ -207,7 +200,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
       (2, "Bob")
     ).toDF("id", "name")
 
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Get the split files from transaction log
     val validFiles = fs
@@ -238,7 +231,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(!fs.exists(orphanedFile), "Orphaned file should be deleted")
 
     // Table should still be readable
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 2)
   }
 
@@ -250,7 +243,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Try to purge with less than minimum retention (24 hours)
     val exception = intercept[IllegalArgumentException] {
@@ -269,7 +262,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Disable retention check
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
@@ -289,7 +282,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Purge (should find no orphaned files)
     val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
@@ -309,7 +302,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create multiple orphaned files
     val orphanedFiles = Range(1, 11).map { i =>
@@ -349,7 +342,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     ).toDF("id", "name", "date")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date")
       .mode("overwrite")
       .save(tablePath)
@@ -376,7 +369,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(!fs.exists(orphan2))
 
     // Verify table is still intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3)
   }
 
@@ -388,7 +381,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned .split and .crc files
     val uuid          = UUID.randomUUID()
@@ -421,7 +414,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data1 = Seq((1, "Alice")).toDF("id", "name")
-    data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data1.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file from "failed" write
     val orphan1 = new Path(s"$tablePath/failed_write_${UUID.randomUUID()}.split")
@@ -429,7 +422,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Second write (append)
     val data2 = Seq((2, "Bob")).toDF("id", "name")
-    data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
+    data2.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("append").save(tablePath)
 
     // Create another orphaned file
     val orphan2 = new Path(s"$tablePath/failed_write_2_${UUID.randomUUID()}.split")
@@ -447,7 +440,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(metrics.getLong(2) == 2) // Should delete both orphaned files
 
     // Verify table has both records
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 2)
   }
 
@@ -459,7 +452,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files
     val orphanedFiles = Range(1, 6).map { i =>
@@ -505,13 +498,13 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     (1 to 10).foreach { i =>
       val data = Seq((i, s"value_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
     // Verify table has data
-    val beforeRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeRead  = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val beforeCount = beforeRead.count()
     assert(beforeCount > 0, "Table should have data")
 
@@ -547,7 +540,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(metrics.getLong(2) >= 1, "Should have deleted at least 1 orphaned file")
 
     // Verify table still works after purge
-    val afterRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead  = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val afterCount = afterRead.count()
     assert(afterCount == beforeCount, s"Data count should be unchanged: expected $beforeCount, got $afterCount")
 
@@ -585,7 +578,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     (1 to 4).foreach { i =>
       val data = Seq((i, s"value_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -600,7 +593,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     (5 to 10).foreach { i =>
       val data = Seq((i, s"value_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -663,7 +656,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     println(s"Latest version: $latestVersion, Older versions: $olderVersions")
 
     // Verify table has data before purge
-    val beforeRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeRead  = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val beforeCount = beforeRead.count()
     assert(beforeCount == 10, s"Table should have 10 rows, got $beforeCount")
 
@@ -694,7 +687,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     // Most importantly: verify table still works after purge
-    val afterRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead  = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val afterCount = afterRead.count()
     assert(afterCount == beforeCount, s"Data count should be unchanged: expected $beforeCount, got $afterCount")
 

@@ -65,7 +65,7 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       timestamps
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "ts") // Enable fast field for microsecond precision
         .mode("overwrite")
         .save(tempPath)
@@ -75,7 +75,7 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       // Read back
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("📝 Read data:")
@@ -226,7 +226,7 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "ts") // Enable fast field for microsecond precision
         .mode("overwrite")
         .save(tempPath)
@@ -234,7 +234,7 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       // Read and cast to BIGINT (microseconds)
       println("\n📖 Reading and casting to BIGINT...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("📝 Reading timestamp and extracting microseconds...")

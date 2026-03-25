@@ -35,7 +35,7 @@ import io.indextables.spark.TestBase
  */
 class ArrowFfiWriteBenchmark extends TestBase {
 
-  private val FORMAT     = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val FORMAT     = INDEXTABLES_FORMAT
   private val ITERATIONS = 3
 
   private case class BenchmarkResult(

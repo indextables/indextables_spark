@@ -27,16 +27,7 @@ import io.indextables.spark.TestBase
  * Test to validate timestamp round-trip accuracy for V2 table provider. This test specifically checks for the bug where
  * 2025 timestamps come back as 1970.
  */
-class TimestampRoundTripTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class TimestampRoundTripTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   test("should correctly round-trip timestamp values using V2 table provider") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 
@@ -64,7 +55,7 @@ class TimestampRoundTripTest extends TestBase {
       // Write using V2 table provider
       println("💾 Writing data using V2 table provider...")
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -73,7 +64,7 @@ class TimestampRoundTripTest extends TestBase {
       // Read back using V2 table provider
       println("📖 Reading data back using V2 table provider...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("📋 Read schema:")
@@ -142,12 +133,12 @@ class TimestampRoundTripTest extends TestBase {
 
       // Write and read back
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("📝 Read data:")

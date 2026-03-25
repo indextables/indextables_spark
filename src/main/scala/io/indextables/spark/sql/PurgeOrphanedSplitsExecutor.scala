@@ -136,7 +136,7 @@ class PurgeOrphanedSplitsExecutor(
       TransactionLogReader.invalidateCache(ConfigMapper.normalizeTablePath(new Path(tablePath)))
     }
 
-    val mapper               = new com.fasterxml.jackson.databind.ObjectMapper()
+    val mapper               = io.indextables.spark.util.JsonUtil.mapper
     val stateResult          = mapper.readTree(stateResultJson)
     val versionResult        = mapper.readTree(versionResultJson)
     val expiredStatesFound   = stateResult.path("found").asInt(0)
@@ -1200,22 +1200,7 @@ class PurgeOrphanedSplitsExecutor(
         if (line.nonEmpty) {
           EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
-
-          // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
-          val actionOpt: Option[Action] = if (jsonNode.has("protocol")) {
-            Some(JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction]))
-          } else if (jsonNode.has("metaData")) {
-            Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
-          } else if (jsonNode.has("add")) {
-            Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
-          } else if (jsonNode.has("remove")) {
-            Some(JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
-          } else if (jsonNode.has("mergeskip")) {
-            Some(JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction]))
-          } else {
-            None
-          }
-          actionOpt.foreach(actions += _)
+          ActionJsonSerializer.parseActionFromJsonNode(jsonNode).foreach(actions += _)
         }
         line = reader.readLine()
       }
@@ -1225,7 +1210,6 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /** Parse actions from newline-delimited JSON content. */
-  // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
   private def parseActionsFromContent(content: String): Seq[Action] = {
     import io.indextables.spark.util.JsonUtil
 
@@ -1235,20 +1219,9 @@ class PurgeOrphanedSplitsExecutor(
       .map { line =>
         EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode = JsonUtil.mapper.readTree(line)
-
-        if (jsonNode.has("protocol")) {
-          JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
-        } else if (jsonNode.has("metaData")) {
-          JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
-        } else if (jsonNode.has("add")) {
-          JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
-        } else if (jsonNode.has("remove")) {
-          JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
-        } else if (jsonNode.has("mergeskip")) {
-          JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
-        } else {
+        ActionJsonSerializer.parseActionFromJsonNode(jsonNode).getOrElse(
           throw new IllegalArgumentException(s"Unknown action type in line: $line")
-        }
+        )
       }
       .toSeq
   }

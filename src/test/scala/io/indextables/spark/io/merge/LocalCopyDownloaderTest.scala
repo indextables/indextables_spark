@@ -24,7 +24,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
-class LocalCopyDownloaderTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
+class LocalCopyDownloaderTest extends AnyFunSuite with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var tempDir: File = _
 
@@ -35,13 +35,6 @@ class LocalCopyDownloaderTest extends AnyFunSuite with Matchers with BeforeAndAf
     if (tempDir != null && tempDir.exists()) {
       deleteRecursively(tempDir)
     }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 
   test("protocol returns file") {
     val downloader = new LocalCopyDownloader()

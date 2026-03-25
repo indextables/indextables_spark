@@ -5,17 +5,7 @@ import org.apache.spark.sql.Row
 
 import io.indextables.spark.TestBase
 
-class NumericFieldFilteringTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      // Use the new ensureLibraryLoaded method
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class NumericFieldFilteringTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   test("Comprehensive numeric field filtering test") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 
@@ -53,10 +43,10 @@ class NumericFieldFilteringTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(testData), schema)
 
       // Save the data
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
+      df.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(testPath)
 
       // Read back the data
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
       readDf.createOrReplaceTempView("employees")
 
       println("=== COMPREHENSIVE NUMERIC FIELD FILTERING TEST ===\n")

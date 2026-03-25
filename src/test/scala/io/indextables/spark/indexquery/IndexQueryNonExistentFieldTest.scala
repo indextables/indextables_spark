@@ -42,14 +42,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
 
     // Write with text field for title
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("test_table")
@@ -93,14 +93,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("test_table_existing")
@@ -128,13 +128,13 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "content", "category", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("test_table_error_msg")
@@ -171,14 +171,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("simple_select_test")
@@ -214,14 +214,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("count_agg_test")
@@ -257,14 +257,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("sum_agg_test")
@@ -300,14 +300,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("count_existing_test")
@@ -338,14 +338,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("sum_existing_test")
@@ -377,7 +377,7 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "category", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.category", "string")
       .option("spark.indextables.indexing.fastfields", "score,category") // category needed for GROUP BY
@@ -385,7 +385,7 @@ class IndexQueryNonExistentFieldTest extends TestBase {
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("groupby_nonexistent_test")
@@ -424,7 +424,7 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "category", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.category", "string")
       .option("spark.indextables.indexing.fastfields", "score,category") // category needed for GROUP BY
@@ -432,7 +432,7 @@ class IndexQueryNonExistentFieldTest extends TestBase {
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("groupby_existing_test")
@@ -475,14 +475,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("complex_agg_nonexistent_test")
@@ -519,14 +519,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("complex_agg_existing_test")
@@ -561,14 +561,14 @@ class IndexQueryNonExistentFieldTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("stale_error_test")

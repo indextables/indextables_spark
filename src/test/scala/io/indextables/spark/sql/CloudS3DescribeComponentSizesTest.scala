@@ -155,7 +155,7 @@ class CloudS3DescribeComponentSizesTest extends CloudS3TestBase {
     val df = data.toDF("id", "content", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
@@ -222,7 +222,7 @@ class CloudS3DescribeComponentSizesTest extends CloudS3TestBase {
     val df = data.toDF("id", "content", "year", "region")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year", "region")
       .mode("overwrite")
       .save(tablePath)
@@ -274,7 +274,7 @@ class CloudS3DescribeComponentSizesTest extends CloudS3TestBase {
     val df = data.toDF("id", "content", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
@@ -325,7 +325,7 @@ class CloudS3DescribeComponentSizesTest extends CloudS3TestBase {
     val df = data.toDF("id", "content", "year")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)

@@ -63,13 +63,13 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     println(s"Writing 10,000 rows to $tablePath")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read back and count
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     println("Executing COUNT(*) query...")
@@ -88,13 +88,13 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
       .createDataFrame(testData)
       .toDF("id", "name")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Use DataFrame.count()
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val count = df.count()
@@ -110,13 +110,13 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
       .createDataFrame(testData)
       .toDF("id", "description")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Create temp view
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .createOrReplaceTempView("test_table")
 
@@ -137,12 +137,12 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
       .toDF("id", "data", "partition_col")
       .repartition(10) // Force multiple splits
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Explain the plan to verify optimization
@@ -162,12 +162,12 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
       .createDataFrame(testData)
       .toDF("id", "name")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Apply LIMIT before COUNT - this simulates Databricks interactive query behavior
@@ -190,12 +190,12 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
       .createDataFrame(testData)
       .toDF("id", "description")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Use aggregation syntax with LIMIT
@@ -221,12 +221,12 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
       .createDataFrame(testData)
       .toDF("id", "value")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Call df.count() directly - should use transaction log

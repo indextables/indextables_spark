@@ -301,13 +301,13 @@ class TokenLengthConfigurationTest extends TestBase {
     """)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2
@@ -322,14 +322,14 @@ class TokenLengthConfigurationTest extends TestBase {
     """)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.text.maxTokenLength", "100")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2
@@ -344,14 +344,14 @@ class TokenLengthConfigurationTest extends TestBase {
     """)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.text.maxTokenLength", "legacy")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2
@@ -366,7 +366,7 @@ class TokenLengthConfigurationTest extends TestBase {
     """)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content")
       .option("spark.indextables.indexing.text.maxTokenLength", "255")         // default
       .option("spark.indextables.indexing.tokenLength.title", "40")            // legacy for title
@@ -375,7 +375,7 @@ class TokenLengthConfigurationTest extends TestBase {
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2
@@ -390,7 +390,7 @@ class TokenLengthConfigurationTest extends TestBase {
     """)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content,body")
       .option("spark.indextables.indexing.tokenLength.legacy", "title")     // 40 for title
       .option("spark.indextables.indexing.tokenLength.255", "content,body") // 255 for content and body
@@ -398,7 +398,7 @@ class TokenLengthConfigurationTest extends TestBase {
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2
@@ -413,7 +413,7 @@ class TokenLengthConfigurationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.text", "content")
         .option("spark.indextables.indexing.tokenLength.contnt", "255") // Typo
         .mode("overwrite")
@@ -433,7 +433,7 @@ class TokenLengthConfigurationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.text", "content")
         .option("spark.indextables.indexing.tokenLength.255", "content,titl,bdy") // Typos
         .mode("overwrite")
@@ -460,14 +460,14 @@ class TokenLengthConfigurationTest extends TestBase {
     // This test verifies that the configuration is accepted and write completes successfully
     // The actual token filtering behavior is implemented in tantivy4java
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.text.maxTokenLength", "10") // Custom limit
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Verify data was written and can be read
@@ -484,7 +484,7 @@ class TokenLengthConfigurationTest extends TestBase {
 
     // Different token lengths for different fields
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content")
       .option("spark.indextables.indexing.tokenLength.title", "40")    // legacy for title
       .option("spark.indextables.indexing.tokenLength.content", "255") // default for content
@@ -492,7 +492,7 @@ class TokenLengthConfigurationTest extends TestBase {
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Verify data was written and can be read
@@ -508,14 +508,14 @@ class TokenLengthConfigurationTest extends TestBase {
 
     // Maximum token length setting
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.text.maxTokenLength", "tantivy_max")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Verify data was written and can be read

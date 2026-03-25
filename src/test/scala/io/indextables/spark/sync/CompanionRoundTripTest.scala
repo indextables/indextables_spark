@@ -34,7 +34,7 @@ import org.scalatest.BeforeAndAfterAll
  * Each test writes known data to a Delta table, builds a companion index, reads ALL rows back through the companion,
  * and asserts that every column of every row matches the original source.
  */
-class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -93,13 +93,6 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
       deleteRecursively(new File(path))
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   private def buildAndReadCompanion(deltaPath: String, indexPath: String): DataFrame = {
     val syncResult = spark.sql(
       s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
@@ -107,7 +100,7 @@ class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAft
     syncResult.collect()(0).getString(2) shouldBe "success"
 
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.read.defaultLimit", "1000")
       .option("spark.indextables.read.columnar.enabled", "true")
       .load(indexPath)

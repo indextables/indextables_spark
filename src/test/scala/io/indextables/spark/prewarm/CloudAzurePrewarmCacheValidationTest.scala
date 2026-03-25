@@ -43,7 +43,7 @@ import io.indextables.spark.CloudAzureTestBase
  *   1. System properties: test.azure.storageAccount, test.azure.accountKey 2. ~/.azure/credentials file (matches
  *      tantivy4java pattern) 3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
  */
-class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
+class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase with io.indextables.spark.testutils.FileCleanupHelper {
 
   // Generate unique test run ID to avoid conflicts
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
@@ -78,13 +78,6 @@ class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
     // For now, rely on container lifecycle policies or manual cleanup
     finally
       super.afterAll()
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
 
   /** List all files in the disk cache directory for debugging. */
   private def listDiskCacheContents(label: String): Unit = {
@@ -176,7 +169,7 @@ class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
     testData
       .coalesce(2) // Create 2 splits for better test coverage
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAccount)
       .option("spark.indextables.azure.accountKey", accountKey)
       .option("spark.indextables.indexWriter.batchSize", "100")
@@ -235,7 +228,7 @@ class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
     listDiskCacheContents("BEFORE QUERIES (should match AFTER PREWARM)")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAccount)
       .option("spark.indextables.azure.accountKey", accountKey)
       .load(testPath)
@@ -340,7 +333,7 @@ class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAccount)
       .option("spark.indextables.azure.accountKey", accountKey)
       .option("spark.indextables.indexWriter.batchSize", "75")
@@ -376,7 +369,7 @@ class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
 
     // Execute a range query on 'score' - should hit cache
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAccount)
       .option("spark.indextables.azure.accountKey", accountKey)
       .load(testPath)
@@ -411,7 +404,7 @@ class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase {
     testData
       .coalesce(2)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAccount)
       .option("spark.indextables.azure.accountKey", accountKey)
       .option("spark.indextables.indexWriter.batchSize", "200")

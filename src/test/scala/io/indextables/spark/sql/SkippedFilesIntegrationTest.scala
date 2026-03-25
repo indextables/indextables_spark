@@ -57,7 +57,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -161,7 +161,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -315,7 +315,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -408,7 +408,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 

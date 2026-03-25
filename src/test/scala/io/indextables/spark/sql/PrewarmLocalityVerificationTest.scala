@@ -26,7 +26,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Tests to verify that prewarm command tracks and reports locality correctly. */
-class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEach {
+class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession   = _
   var tempTablePath: String = _
@@ -54,13 +54,6 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   test("prewarm result should include locality_match column") {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
@@ -71,7 +64,7 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Write to IndexTables
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -138,7 +131,7 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Write to IndexTables
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
@@ -168,7 +161,7 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("date")
       .save(tempTablePath)

@@ -28,7 +28,7 @@ import io.indextables.spark.TestBase
 
 class OptimizedWriteIntegrationTest extends TestBase {
 
-  private val FORMAT = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val FORMAT = INDEXTABLES_FORMAT
   private val GB     = 1024L * 1024 * 1024
 
   // Helper to create a TransactionLog for direct API testing

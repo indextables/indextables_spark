@@ -50,7 +50,7 @@ class BatchMetricsBehaviorTest extends TestBase {
       .selectExpr("id", "id % 100 as category", "concat('data_', id) as value")
       .repartition(1) // Force single partition = single split
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -63,7 +63,7 @@ class BatchMetricsBehaviorTest extends TestBase {
     // Run multiple queries and verify each gets correct per-query metrics
     // Use limit(Int.MaxValue) to override the default 250-row limit
     val result1 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
       .limit(Int.MaxValue)
       .collect()
@@ -104,7 +104,7 @@ class BatchMetricsBehaviorTest extends TestBase {
 
     for (i <- 1 to 5) {
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
         .limit(1)
         .collect()
@@ -129,7 +129,7 @@ class BatchMetricsBehaviorTest extends TestBase {
 
     for (i <- 1 to 5) {
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
         .limit(100)
         .collect()
@@ -157,7 +157,7 @@ class BatchMetricsBehaviorTest extends TestBase {
 
     for (i <- 1 to 3) {
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
         .limit(500)
         .collect()
@@ -186,7 +186,7 @@ class BatchMetricsBehaviorTest extends TestBase {
     // Run 3 queries with limit(100)
     for (i <- 1 to 3)
       spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
         .limit(100)
         .collect()
@@ -204,7 +204,7 @@ class BatchMetricsBehaviorTest extends TestBase {
 
     // Read all 10000 docs — streaming retrieval processes all docs in one batch
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
       .limit(Int.MaxValue)
       .collect()
@@ -289,7 +289,7 @@ class BatchMetricsBehaviorTest extends TestBase {
 
     // Execute a query that should trigger batch optimization
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
       .limit(200)
       .collect()

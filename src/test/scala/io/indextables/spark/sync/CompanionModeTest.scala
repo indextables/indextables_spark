@@ -395,7 +395,7 @@ class CompanionModeTest extends TestBase {
       val df = createTestDataFrame()
       val ex = intercept[Exception] {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("append")
           .save(tempPath)
       }

@@ -16,7 +16,7 @@ import org.scalatest.funsuite.AnyFunSuite
  * The root cause was that `isNumericFastField` was being used for MIN/MAX validation, which required fields to be both
  * fast AND numeric. The fix uses `isFastField` instead, which allows MIN/MAX on any fast field type.
  */
-class TestGroupByMinMaxStringValidation extends AnyFunSuite {
+class TestGroupByMinMaxStringValidation extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("GROUP BY with MIN/MAX on string fast field should work") {
     val spark = SparkSession
@@ -46,7 +46,7 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
 
       // Write data with string fields as fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.load_date", "string")
         .option("spark.indextables.indexing.typemap.code", "string")
         .option("spark.indextables.indexing.typemap.hostname", "string")
@@ -56,7 +56,7 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
 
       println(s"✅ Data written to $tablePath")
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // First verify that GROUP BY with just COUNT works (baseline)
       println("\n1. Testing GROUP BY with COUNT(*) only (baseline)...")
@@ -139,14 +139,14 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
 
       // Write data with load_date as fast field but NOT code
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.load_date", "string")
         .option("spark.indextables.indexing.typemap.code", "string")
         .option("spark.indextables.indexing.fastfields", "load_date") // Only load_date, NOT code
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // This should throw an exception because code is not a fast field
       val query = df
@@ -178,10 +178,4 @@ class TestGroupByMinMaxStringValidation extends AnyFunSuite {
   }
 
   /** Recursively delete a directory and all its contents. */
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

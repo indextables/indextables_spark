@@ -59,7 +59,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Write with fast fields enabled for age (required for aggregations)
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
         .save(path)
@@ -68,7 +68,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Count all rows (transaction log optimization)
@@ -107,7 +107,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Write with fast fields enabled for salary
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.salary")
         .mode("overwrite")
         .save(path)
@@ -115,7 +115,7 @@ class JsonFieldAggregateTest extends TestBase {
       println(s"✅ Wrote ${df.count()} rows with fast fields on user.salary")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: SUM on nested field
@@ -152,13 +152,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: AVG on nested field
@@ -195,13 +195,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: MIN/MAX on nested field
@@ -243,13 +243,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age,user.salary")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Multiple aggregates on nested fields
@@ -304,13 +304,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Aggregate with WHERE clause on nested string field
@@ -357,13 +357,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age,user.salary")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Aggregate with WHERE clause on range (age > 30)
@@ -417,13 +417,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age,user.salary")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Aggregate with combined WHERE clause (city='NYC' AND age > 30)
@@ -482,13 +482,13 @@ class JsonFieldAggregateTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age")
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test: Aggregate with complex OR condition ((city='NYC' AND age>30) OR city='LA')
@@ -530,7 +530,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Write with fast fields enabled for timestamp and value
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "timestamp,value")
         .mode("overwrite")
         .save(path)
@@ -539,7 +539,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test 1: Count all rows - should be 5000, NOT 250 (default search limit)
@@ -620,7 +620,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Write with fast fields enabled for metadata.field1 and metadata.field2
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "metadata.field1,metadata.field2,value")
         .mode("overwrite")
         .save(path)
@@ -629,7 +629,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test 1: Count all rows - should be 5000, NOT 250 (default search limit)
@@ -741,7 +741,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Write with fast fields enabled for category (for GROUP BY) and metadata fields (for aggregations)
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "category,metadata.amount,metadata.quantity,value")
         .mode("overwrite")
         .save(path)
@@ -750,7 +750,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test 1: GROUP BY category with COUNT, SUM, and AVG on JSON fields
@@ -863,7 +863,7 @@ class JsonFieldAggregateTest extends TestBase {
       println(s"📊 Writing 50,000 rows to test large split aggregation")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "metadata.score,metadata.rating,value")
         .mode("overwrite")
         .save(path)
@@ -872,7 +872,7 @@ class JsonFieldAggregateTest extends TestBase {
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Test 1: COUNT(*) on full dataset - should be exactly 50000, not limited

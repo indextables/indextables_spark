@@ -51,13 +51,13 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Create table with multiple small partitions
     val df = spark.range(0, 1000).repartition(20).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Verify initial count
     val beforeMerge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     beforeMerge.count() shouldBe 1000
 
@@ -66,7 +66,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify count after merge
     val afterMerge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     afterMerge.count() shouldBe 1000
 
@@ -88,7 +88,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     val df = spark.createDataFrame(data).toDF("id", "text", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -97,7 +97,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify content preserved
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val rows1 = result.filter("id = 1").limit(1).collect()
@@ -119,7 +119,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Create many small splits
     val df = spark.range(0, 500).repartition(25).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -134,7 +134,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Count active splits (merged splits should be fewer)
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -155,7 +155,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
         "REPEAT('x', 100) as padding"
       )
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -164,7 +164,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2000
@@ -186,7 +186,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     val df = spark.createDataFrame(data).toDF("id", "text", "score", "active", "date")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -194,7 +194,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     spark.sql(s"MERGE SPLITS '$tablePath' TARGET SIZE 100M")
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Verify schema preserved
@@ -226,7 +226,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
         "CAST(id % 4 AS STRING) as partition_col"
       )
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .partitionBy("partition_col")
       .mode("overwrite")
       .save(tablePath)
@@ -236,7 +236,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify all data still accessible
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 200
@@ -258,7 +258,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Create data with many partitions
     val df = spark.range(0, 500).repartition(20).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -267,7 +267,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -284,7 +284,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 100).repartition(10).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -303,7 +303,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -321,7 +321,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Create table with single partition
     val df = spark.range(0, 100).repartition(1).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -330,7 +330,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -344,7 +344,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Create empty table
     val df = spark.range(0, 0).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -358,7 +358,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify table still accessible
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 0
@@ -372,7 +372,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Create initial data
     val df = spark.range(0, 500).repartition(25).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -382,7 +382,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     // Append more data
     val df2 = spark.range(500, 1000).repartition(25).selectExpr("id", "CAST(id AS STRING) as text")
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("append")
       .save(tablePath)
 
@@ -391,7 +391,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify all data intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -412,7 +412,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 500).repartition(10).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -421,7 +421,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify filters still work
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.filter("id = 250").count() shouldBe 1
@@ -447,7 +447,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
         "CAST(id AS DOUBLE) as value"
       )
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.fastfields", "value")
       .mode("overwrite")
       .save(tablePath)
@@ -457,7 +457,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify aggregations work
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val agg = result

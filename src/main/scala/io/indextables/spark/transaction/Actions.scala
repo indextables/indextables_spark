@@ -21,8 +21,9 @@ import scala.jdk.CollectionConverters._
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode, ObjectMapper}
+import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
+import io.indextables.spark.util.JsonUtil
 
 /**
  * Pre-parsed metadata extracted from docMappingJson. This avoids repeated JSON parsing throughout the codebase.
@@ -46,7 +47,7 @@ case class DocMappingMetadata(
   storedFields: Set[String] = Set.empty)
 
 object DocMappingMetadata {
-  private val mapper = new ObjectMapper()
+  private val mapper = JsonUtil.mapper
   private val logger = org.slf4j.LoggerFactory.getLogger(DocMappingMetadata.getClass)
 
   /** Empty metadata for when no docMappingJson is available */

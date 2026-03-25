@@ -346,7 +346,7 @@ object AsyncMergeOnWriteManager {
 
       val targetSizeStr = writeOptions.getOrElse(
         AsyncMergeOnWriteConfig.KEY_TARGET_SIZE,
-        AsyncMergeOnWriteConfig.formatBytes(AsyncMergeOnWriteConfig.DEFAULT_TARGET_SIZE_BYTES)
+        io.indextables.spark.util.SizeParser.formatBytes(AsyncMergeOnWriteConfig.DEFAULT_TARGET_SIZE_BYTES)
       )
       val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
 

@@ -346,7 +346,7 @@ object CredentialProviderFactory {
     tablePath: String
   ): Option[BasicAWSCredentials] = {
     def getConfig(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase))
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGetRaw(configs, key)
 
     // Priority 1: Use explicit credentials if present
     (
@@ -429,7 +429,7 @@ object CredentialProviderFactory {
     parquetTablePath: String
   ): Option[BasicAWSCredentials] = {
     def getConfig(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase))
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGetRaw(configs, key)
 
     // Priority 1: Explicit companion credentials
     (

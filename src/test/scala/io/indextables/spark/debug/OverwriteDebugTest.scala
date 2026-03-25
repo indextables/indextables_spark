@@ -20,12 +20,12 @@ class OverwriteDebugTest extends TestBase {
       .withColumn("type", lit("initial"))
 
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testPath)
 
     // Verify initial data
-    val read1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+    val read1 = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
     println(s"Initial count: ${read1.count()}")
     read1.show()
 
@@ -37,13 +37,13 @@ class OverwriteDebugTest extends TestBase {
 
     println("=== Starting overwrite operation ===")
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testPath)
     println("=== Completed overwrite operation ===")
 
     // Verify overwritten data
-    val read2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+    val read2 = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
     println(s"After overwrite count: ${read2.count()}")
     read2.show()
 

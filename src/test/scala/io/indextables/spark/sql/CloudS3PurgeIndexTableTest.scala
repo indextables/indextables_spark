@@ -152,7 +152,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files - S3 will set modification time to current time
     val orphan1 = new Path(s"$tablePath/orphan1_${UUID.randomUUID()}.split")
@@ -191,7 +191,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     assert(fs.exists(orphan2), "Recent orphan2 should be kept")
 
     // Verify table data is intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ S3 modification times correctly received and used for retention filtering")
@@ -212,7 +212,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     ).toDF("id", "name", "date")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date")
       .mode("overwrite")
       .save(tablePath)
@@ -253,7 +253,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     assert(fs.exists(orphan2), "Orphan 2 should still exist in S3 after DRY RUN")
 
     // Verify table is still intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ S3 partitioned table recursive listing works correctly")
@@ -268,7 +268,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files at different S3 path depths
     val rootOrphan   = new Path(s"$tablePath/orphaned_root_${UUID.randomUUID()}.split")
@@ -327,7 +327,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file in S3
     val orphan = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.split")
@@ -373,7 +373,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files in S3
     val orphan1 = new Path(s"$tablePath/orphan1_${UUID.randomUUID()}.split")
@@ -416,7 +416,7 @@ class CloudS3PurgeIndexTableTest extends CloudS3TestBase {
     assert(!fs.exists(orphan2), "Old orphan2 should be deleted from S3")
 
     // Verify table data is intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ S3 purge with short retention and sleep successfully deleted old files")

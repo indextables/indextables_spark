@@ -129,7 +129,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Write the data - this creates Avro state (state-v*) instead of JSON checkpoint
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -159,7 +159,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Read back to verify data
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val count = readDf.count()
     println(s"Row count: $count")
@@ -203,7 +203,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
     ).toDF("id", "name", "value")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -254,7 +254,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify data integrity
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     assert(readDf.count() == 2, "Table should still have 2 rows")
 
@@ -278,7 +278,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
       ).toDF("id", "name", "value")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (batch == 1) "overwrite" else "append")
         .save(tablePath)
 
@@ -287,7 +287,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify all data
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val rowCount = readDf.count()
     println(s"\nTotal rows after 5 writes: $rowCount")
@@ -333,7 +333,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
     ).toDF("id", "name", "date")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date")
       .mode("overwrite")
       .save(tablePath)
@@ -350,7 +350,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify all data
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val rowCount = readDf.count()
     println(s"Total rows: $rowCount")
@@ -390,7 +390,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
       ).toDF("id", "name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (batch == 1) "overwrite" else "append")
         .save(tablePath)
 
@@ -425,7 +425,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify data integrity
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val rowCount = readDf.count()
     println(s"\nTotal rows: $rowCount")
@@ -490,7 +490,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
       ).toDF("id", "name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (batch == 1) "overwrite" else "append")
         .save(tablePath)
 
@@ -508,7 +508,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify data integrity before purge
     val rowCountBefore = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows before purge: $rowCountBefore")
@@ -579,7 +579,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
     // Most importantly: verify data is STILL readable after purge
     println("\n=== Verifying data integrity AFTER purge ===")
     val rowCountAfter = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows after purge: $rowCountAfter")
@@ -610,7 +610,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
     ).toDF("id", "name", "date")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date")
       .mode("overwrite")
       .save(tablePath)
@@ -635,7 +635,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify row count
     val rowCountBefore = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows before drop: $rowCountBefore")
@@ -655,7 +655,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify row count after drop (logically removed)
     val rowCountAfterDrop = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows after drop: $rowCountAfterDrop")
@@ -714,7 +714,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
     // Verify data integrity - remaining partitions should still work
     println("\n=== Verifying data integrity AFTER purge ===")
     val rowCountAfterPurge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows after purge: $rowCountAfterPurge")
@@ -741,7 +741,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
         (1 to 10).map(i => (batch * 100 + i, s"User_${batch}_$i", batch * 1000 + i)).toDF("id", "name", "value")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (batch == 1) "overwrite" else "append")
         .save(tablePath)
 
@@ -758,7 +758,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify row count
     val rowCountBefore = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows before merge: $rowCountBefore")
@@ -787,7 +787,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
 
     // Verify data integrity after merge
     val rowCountAfterMerge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows after merge: $rowCountAfterMerge")
@@ -843,7 +843,7 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
     // Most importantly: verify data integrity after purge
     println("\n=== Verifying data integrity AFTER purge ===")
     val rowCountAfterPurge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     println(s"Total rows after purge: $rowCountAfterPurge")

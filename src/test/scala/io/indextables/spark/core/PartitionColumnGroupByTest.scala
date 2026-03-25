@@ -53,13 +53,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by Date column
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_date")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY DateType partition column
@@ -107,13 +107,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by Timestamp column
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_ts")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY TimestampType partition column
@@ -158,13 +158,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by Date + String
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_date", "part_category")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY both partition columns
@@ -215,13 +215,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by Integer column
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_year")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY IntegerType partition column
@@ -265,13 +265,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by Long column
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_id")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY LongType partition column
@@ -315,13 +315,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by String column
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_region")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY StringType partition column
@@ -366,14 +366,14 @@ class PartitionColumnGroupByTest extends TestBase {
       // Write partitioned by Date only
       // When using tantivy GROUP BY (with non-partition columns), ALL GROUP BY columns need to be fast
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_date")
         .option("spark.indextables.indexing.fastfields", "category,part_date") // both columns need to be fast for GROUP BY
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // GROUP BY Date partition + non-partition column - uses tantivy aggregation
@@ -424,13 +424,13 @@ class PartitionColumnGroupByTest extends TestBase {
 
       // Write partitioned by Date column
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("part_date")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Simple COUNT(*) with Date partition filter

@@ -62,7 +62,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write using V2 API (JSON fields should be automatically detected)
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -70,7 +70,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       println(s"✅ Read back ${result.count()} rows")
@@ -130,7 +130,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write using V2 API
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -138,7 +138,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       println(s"✅ Read back ${result.count()} rows")
@@ -204,7 +204,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -212,7 +212,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       println(s"✅ Read back ${result.count()} rows")
@@ -267,7 +267,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -275,7 +275,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 3
@@ -339,7 +339,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -347,7 +347,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Read with filter on nested field
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("user.name") === "Alice")
 
@@ -395,13 +395,13 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test GreaterThan filter
       val result1 = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("user.age") > 28)
 
@@ -410,7 +410,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Test LessThan filter
       val result2 = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("user.age") < 30)
 
@@ -451,14 +451,14 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write data with fast field configuration for range queries
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age") // Configure fast field for range query
         .mode("overwrite")
         .save(path)
 
       // Test AND filter: city = NYC AND age > 28
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("user.city") === "NYC" && col("user.age") > 28)
 
@@ -501,13 +501,13 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Filter for non-null names
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("user.name").isNotNull)
 
@@ -549,13 +549,13 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Test OR filter: (city = NYC AND age > 30) OR name = Bob
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter((col("user.city") === "NYC" && col("user.age") > 30) || col("user.name") === "Bob")
 
@@ -605,13 +605,13 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Read all data back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.show(false)

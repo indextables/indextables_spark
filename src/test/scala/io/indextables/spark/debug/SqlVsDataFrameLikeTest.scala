@@ -4,17 +4,7 @@ import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
 
-class SqlVsDataFrameLikeTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-      true
-    } catch {
-      case _: Exception => false
-    }
-
+class SqlVsDataFrameLikeTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   private def analyzePushdown(queryName: String, queryExecution: org.apache.spark.sql.execution.QueryExecution)
     : Unit = {
     val physicalPlan = queryExecution.executedPlan
@@ -64,10 +54,10 @@ class SqlVsDataFrameLikeTest extends TestBase {
       ).toDF("id", "review_text", "category")
 
       // Save the data
-      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
+      testData.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(testPath)
 
       // Read back the data
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
       readDf.createOrReplaceTempView("review_table")
 
       println(s"Total rows in test table: ${readDf.count()}")

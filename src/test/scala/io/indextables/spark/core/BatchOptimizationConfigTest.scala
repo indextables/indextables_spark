@@ -61,8 +61,13 @@ class BatchOptimizationConfigTest extends AnyFunSuite with Matchers {
     SplitCacheConfig.parseSizeString("\t16M\n") shouldBe 16L * 1024L * 1024L
   }
 
+  test("parseSizeString - fractional sizes") {
+    SplitCacheConfig.parseSizeString("1.5M") shouldBe (1.5 * 1024 * 1024).toLong
+    SplitCacheConfig.parseSizeString("2.5G") shouldBe (2.5 * 1024 * 1024 * 1024).toLong
+  }
+
   test("parseSizeString - invalid format throws exception") {
-    val invalidFormats = Seq("16X", "abc", "K512", "M16", "", "1.5M", "512KB")
+    val invalidFormats = Seq("16X", "abc", "K512", "M16", "", "512KB")
 
     invalidFormats.foreach { invalid =>
       val exception = intercept[IllegalArgumentException] {

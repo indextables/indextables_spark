@@ -321,7 +321,7 @@ object SyncTaskExecutor {
     }
     val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(storageConfig, credentialPath)
 
-    val (bucket, key) = parseS3Path(s3Path)
+    val (bucket, key) = io.indextables.spark.util.CloudPathUtils.parseS3Path(s3Path)
     val clientBuilder = software.amazon.awssdk.services.s3.S3Client.builder()
 
     resolvedCreds.foreach { creds =>
@@ -406,15 +406,6 @@ object SyncTaskExecutor {
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(localPath, destPath, uploadConfig, tablePath)
   }
 
-  private def parseS3Path(s3Path: String): (String, String) = {
-    val path       = s3Path.replaceFirst("^s3a?://", "")
-    val slashIndex = path.indexOf('/')
-    if (slashIndex < 0) {
-      (path, "")
-    } else {
-      (path.substring(0, slashIndex), path.substring(slashIndex + 1))
-    }
-  }
 
   /**
    * Extract the table base path from a full file path by stripping the filename and any trailing Hive-style partition

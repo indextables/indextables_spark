@@ -28,7 +28,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /** Tests for DESCRIBE INDEXTABLES STORAGE STATS command. */
-class DescribeStorageStatsCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class DescribeStorageStatsCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -57,13 +57,6 @@ class DescribeStorageStatsCommandTest extends AnyFunSuite with Matchers with Bef
       deleteRecursively(tempDir)
     }
     super.afterAll()
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   // ===== SQL Parsing Tests =====
@@ -173,13 +166,13 @@ class DescribeStorageStatsCommandTest extends AnyFunSuite with Matchers with Bef
     val testData = (1 to 100).map(i => (i, s"value_$i")).toDF("id", "value")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read to trigger object storage access (for local files, bytes may not increase)
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     readDf.count()

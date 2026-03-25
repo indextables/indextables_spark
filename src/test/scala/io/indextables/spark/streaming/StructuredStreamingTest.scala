@@ -82,7 +82,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
 
           // Write each batch to IndexTables4Spark using V2 DataSource
           batchDF.write
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(INDEXTABLES_FORMAT)
             .mode("append") // Append each batch
             .option("spark.indextables.indexing.typemap.content", "text")
             .option("spark.indextables.indexing.fastfields", "score")
@@ -101,7 +101,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
       println(s"🔍 Verifying data integrity...")
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(outputDir)
 
       // Verify record count
@@ -181,7 +181,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
           // For this test, we use append mode which will create duplicates
           // In production, you'd handle deduplication in the foreachBatch logic
           batchDF.write
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(INDEXTABLES_FORMAT)
             .mode("append")
             .option("spark.indextables.indexing.typemap.content", "text")
             .save(outputDir)
@@ -193,7 +193,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
 
       // Verify data
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(outputDir)
 
       val totalCount = resultDf.count()
@@ -249,7 +249,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
           println(s"📦 Processing batch $batchId with partitioning by date")
 
           batchDF.write
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(INDEXTABLES_FORMAT)
             .mode("append")
             .partitionBy("date") // Partition by date
             .option("spark.indextables.indexing.typemap.content", "text")
@@ -263,7 +263,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
 
       // Verify partitioned data
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(outputDir)
 
       val totalCount = resultDf.count()

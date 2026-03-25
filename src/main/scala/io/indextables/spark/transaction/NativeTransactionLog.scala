@@ -22,8 +22,7 @@ import java.util.UUID
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.spark.util.JsonUtil
 import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter, TxLogSnapshotInfo, WriteResult}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.sources.Filter
@@ -52,7 +51,7 @@ class NativeTransactionLog(
 
   private val logger = LoggerFactory.getLogger(classOf[NativeTransactionLog])
 
-  private val mapper: ObjectMapper = new ObjectMapper().registerModule(DefaultScalaModule)
+  private val mapper = JsonUtil.mapper
 
   /** Native table path string (with scheme normalization) */
   private val nativeTablePath: String = ConfigMapper.normalizeTablePath(tablePath)
@@ -140,14 +139,7 @@ class NativeTransactionLog(
     assertTableWritable()
     // overwriteFiles must re-read the file list on each retry attempt to capture
     // files added by concurrent writers. Use writeVersionOnce in a manual retry loop.
-    val maxAttempts = options.getInt("spark.indextables.state.retry.maxAttempts", 10)
-    var attempt     = 0
-    var conflicts   = Seq.empty[Long]
-
-    while (attempt < maxAttempts) {
-      attempt += 1
-
-      // Read current visible files
+    retryWithBackoff("overwrite files") { () =>
       val currentFiles = listFiles()
       val removeActions = currentFiles.map { f =>
         RemoveAction(
@@ -160,30 +152,10 @@ class NativeTransactionLog(
           tags = None
         )
       }
-
       val actions: Seq[Action] = removeActions ++ addActions
       val actionsJson          = ActionJsonSerializer.actionsToJsonLines(actions)
-      val result               = TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
-
-      if (result.getVersion >= 0) {
-        lastRetryMetrics = Some(TxRetryMetrics(attempt, conflicts.size, result.getVersion, conflicts))
-        return result.getVersion
-      }
-
-      // Conflict — re-read and retry
-      conflicts = conflicts ++ result.getConflictedVersions.asScala.map(_.toLong)
-
-      if (attempt < maxAttempts) {
-        val delay = Math.min(100L * (1L << (attempt - 1)), 5000L)
-        Thread.sleep(delay)
-      }
+      TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
     }
-
-    throw new TransactionConflictException(
-      s"Failed to overwrite files after $maxAttempts attempts",
-      -1,
-      maxAttempts
-    )
   }
 
   override def removeFile(path: String, deletionTimestamp: Long): Long = {
@@ -222,40 +194,14 @@ class NativeTransactionLog(
     result.getVersion
   }
 
-  override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long = {
+  override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long =
     // Must re-read metadata on each retry to compose safely with concurrent updates
-    val maxAttempts = options.getInt("spark.indextables.state.retry.maxAttempts", 10)
-    var attempt     = 0
-    var conflicts   = Seq.empty[Long]
-
-    while (attempt < maxAttempts) {
-      attempt += 1
-
+    retryWithBackoff("commit metadata update") { () =>
       val currentMetadata = getMetadata()
       val updatedMetadata = transform(currentMetadata)
       val actionsJson     = ActionJsonSerializer.actionsToJsonLines(Seq(updatedMetadata))
-      val result          = TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
-
-      if (result.getVersion >= 0) {
-        lastRetryMetrics = Some(TxRetryMetrics(attempt, conflicts.size, result.getVersion, conflicts))
-        return result.getVersion
-      }
-
-      // Conflict — re-read metadata and retry
-      conflicts = conflicts ++ result.getConflictedVersions.asScala.map(_.toLong)
-
-      if (attempt < maxAttempts) {
-        val delay = Math.min(100L * (1L << (attempt - 1)), 5000L)
-        Thread.sleep(delay)
-      }
+      TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
     }
-
-    throw new TransactionConflictException(
-      s"Failed to commit metadata update after $maxAttempts attempts",
-      -1,
-      maxAttempts
-    )
-  }
 
   override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
     val actionsJson = ActionJsonSerializer.actionsToJsonLines(removeActions)
@@ -286,9 +232,7 @@ class NativeTransactionLog(
   // Read Operations
   // ------------------------------------------------------------------------------------
 
-  override def listFiles(): Seq[AddAction] = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return Seq.empty
+  override def listFiles(): Seq[AddAction] = withSnapshot[Seq[AddAction]](Seq.empty) { snapshot =>
     assertTableReadable()
     val metadataConfigJson = extractMetadataConfigJson(snapshot)
 
@@ -332,9 +276,7 @@ class NativeTransactionLog(
   override def getTotalRowCount(): Long =
     listFiles().flatMap(_.numRecords).sum
 
-  override def getSchema(): Option[StructType] = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return None
+  override def getSchema(): Option[StructType] = withSnapshot[Option[StructType]](None) { snapshot =>
     val metadataJson = snapshot.getMetadataJson
     if (metadataJson == null || metadataJson.isEmpty) return None
     val metadata = parseMetadataJson(metadataJson)
@@ -342,9 +284,7 @@ class NativeTransactionLog(
     else Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
   }
 
-  override def getPartitionColumns(): Seq[String] = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return Seq.empty
+  override def getPartitionColumns(): Seq[String] = withSnapshot[Seq[String]](Seq.empty) { snapshot =>
     val metadataJson = snapshot.getMetadataJson
     if (metadataJson == null || metadataJson.isEmpty) return Seq.empty
     parseMetadataJson(metadataJson).partitionColumns
@@ -353,11 +293,9 @@ class NativeTransactionLog(
   override def isPartitioned(): Boolean =
     getPartitionColumns().nonEmpty
 
-  override def getMetadata(): MetadataAction = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) {
-      throw new RuntimeException(s"No metadata found in transaction log for $nativeTablePath")
-    }
+  override def getMetadata(): MetadataAction = withSnapshot[MetadataAction](
+    throw new RuntimeException(s"No metadata found in transaction log for $nativeTablePath")
+  ) { snapshot =>
     val metadataJson = snapshot.getMetadataJson
     if (metadataJson == null || metadataJson.isEmpty) {
       throw new RuntimeException(s"No metadata found in transaction log for $nativeTablePath")
@@ -365,9 +303,7 @@ class NativeTransactionLog(
     parseMetadataJson(metadataJson)
   }
 
-  override def getProtocol(): ProtocolAction = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return ProtocolVersion.defaultProtocol()
+  override def getProtocol(): ProtocolAction = withSnapshot(ProtocolVersion.defaultProtocol()) { snapshot =>
     val protocolJson = snapshot.getProtocolJson
     if (protocolJson == null || protocolJson.isEmpty) ProtocolVersion.legacyProtocol()
     else mapper.readValue(protocolJson, classOf[ProtocolAction])
@@ -383,9 +319,7 @@ class NativeTransactionLog(
     if (checkEnabled) ProtocolVersion.validateWriterVersion(getProtocol())
   }
 
-  override def getCheckpointActions(): Option[Seq[Action]] = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return None
+  override def getCheckpointActions(): Option[Seq[Action]] = withSnapshot[Option[Seq[Action]]](None) { snapshot =>
     if (snapshot.getManifestPaths.isEmpty) return None
 
     val metadataConfigJson = extractMetadataConfigJson(snapshot)
@@ -489,9 +423,7 @@ class NativeTransactionLog(
 
   override def getLastRetryMetrics(): Option[TxRetryMetrics] = lastRetryMetrics
 
-  override def getLastCheckpointVersion(): Option[Long] = {
-    val snapshot = getOrRefreshSnapshot()
-    if (snapshot == null) return None
+  override def getLastCheckpointVersion(): Option[Long] = withSnapshot[Option[Long]](None) { snapshot =>
     if (snapshot.getCheckpointVersion >= 0) Some(snapshot.getCheckpointVersion) else None
   }
 
@@ -514,6 +446,45 @@ class NativeTransactionLog(
         logger.debug(s"Table not yet initialized at $nativeTablePath")
         null
     }
+
+  /** Execute a function with the current snapshot, returning a default if no snapshot exists. */
+  private def withSnapshot[T](default: => T)(f: TxLogSnapshotInfo => T): T = {
+    val snapshot = getOrRefreshSnapshot()
+    if (snapshot == null) default else f(snapshot)
+  }
+
+  /**
+   * Retry an operation with exponential backoff. The operation is called on each attempt
+   * and should return a WriteResult from writeVersionOnce.
+   */
+  private def retryWithBackoff(operationName: String)(operation: () => WriteResult): Long = {
+    val maxAttempts = options.getInt("spark.indextables.state.retry.maxAttempts", 10)
+    var attempt     = 0
+    var conflicts   = Seq.empty[Long]
+
+    while (attempt < maxAttempts) {
+      attempt += 1
+      val result = operation()
+
+      if (result.getVersion >= 0) {
+        lastRetryMetrics = Some(TxRetryMetrics(attempt, conflicts.size, result.getVersion, conflicts))
+        return result.getVersion
+      }
+
+      conflicts = conflicts ++ result.getConflictedVersions.asScala.map(_.toLong)
+
+      if (attempt < maxAttempts) {
+        val delay = Math.min(100L * (1L << (attempt - 1)), 5000L)
+        Thread.sleep(delay)
+      }
+    }
+
+    throw new TransactionConflictException(
+      s"Failed to $operationName after $maxAttempts attempts",
+      -1,
+      maxAttempts
+    )
+  }
 
   private def recordRetryMetrics(result: WriteResult): Unit = {
     lastRetryMetrics = Some(
@@ -593,20 +564,7 @@ class NativeTransactionLog(
       .flatMap { line =>
         Try {
           val jsonNode = mapper.readTree(line)
-          if (jsonNode.has("protocol")) {
-            Some(mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction]))
-          } else if (jsonNode.has("metaData")) {
-            Some(mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
-          } else if (jsonNode.has("add")) {
-            Some(mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
-          } else if (jsonNode.has("remove")) {
-            Some(mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
-          } else if (jsonNode.has("skip") || jsonNode.has("mergeskip")) {
-            val skipNode = if (jsonNode.has("skip")) jsonNode.get("skip") else jsonNode.get("mergeskip")
-            Some(mapper.treeToValue(skipNode, classOf[SkipAction]))
-          } else {
-            None
-          }
+          ActionJsonSerializer.parseActionFromJsonNode(jsonNode)
         }.toOption.flatten.toSeq
       }
       .toSeq

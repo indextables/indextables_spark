@@ -50,10 +50,10 @@ class FlushIndexTablesCacheCommandTest extends TestBase {
 
       // Write data using IndexTables4Spark - this will create cache managers
       val tablePath = tempDir.toString
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+      df.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
       // Read data back - this will create location registry entries
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
       readDf.collect() // Force execution
 
       // Now flush the cache

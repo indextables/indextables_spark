@@ -29,7 +29,7 @@ import io.indextables.spark.TestBase
  */
 class MultiSplitLimitShortCircuitTest extends TestBase {
 
-  private val FORMAT = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val FORMAT = INDEXTABLES_FORMAT
 
   /** Write multiple batches to the same path to create multiple splits. */
   private def writeMultipleSplits(

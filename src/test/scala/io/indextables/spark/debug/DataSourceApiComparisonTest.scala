@@ -4,17 +4,7 @@ import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
 
-class DataSourceApiComparisonTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-      true
-    } catch {
-      case _: Exception => false
-    }
-
+class DataSourceApiComparisonTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   private def analyzePushdown(queryName: String, queryExecution: org.apache.spark.sql.execution.QueryExecution)
     : Unit = {
     val physicalPlan = queryExecution.executedPlan
@@ -66,13 +56,13 @@ class DataSourceApiComparisonTest extends TestBase {
       ).toDF("id", "review_text", "category")
 
       // Save the data
-      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
+      testData.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(testPath)
 
       // Test with current default configuration
       println("=== TESTING WITH DEFAULT SPARK CONFIGURATION ===")
 
       // Read back the data for DataFrame operations
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
       readDf.createOrReplaceTempView("api_test_table")
 
       // Test 1: DataFrame API
@@ -108,7 +98,7 @@ class DataSourceApiComparisonTest extends TestBase {
 
       // Test 4: DataFrame with forced V2
       val dfQueryV2 = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
         .filter($"review_text".contains("dog"))
       analyzePushdown("DataFrame API (.filter) - Forced V2", dfQueryV2.queryExecution)
@@ -160,9 +150,9 @@ class DataSourceApiComparisonTest extends TestBase {
         }
         .toDF("id", "content", "category")
 
-      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
+      testData.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(testPath)
 
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
       readDf.createOrReplaceTempView("performance_test")
 
       println(s"Created test dataset with ${testData.count()} rows")

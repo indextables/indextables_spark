@@ -21,7 +21,7 @@ class FastFieldDebugTest extends TestBase {
       println(s"Schema: ${df.schema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testPath)
 

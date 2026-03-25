@@ -38,7 +38,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.title", "text")
         .option("spark.indextables.indexing.typemap.descriptin", "text") // Typo: should be "description"
         .mode("overwrite")
@@ -58,7 +58,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.titl", "text")       // Typo
         .option("spark.indextables.indexing.typemap.contnt", "text")     // Typo
         .option("spark.indextables.indexing.typemap.descriptin", "text") // Typo
@@ -81,7 +81,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "score,val,ratng") // "val" and "ratng" are typos
         .mode("overwrite")
         .save(tablePath)
@@ -101,7 +101,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.indexrecordoption.contnt", "position") // Typo
         .mode("overwrite")
@@ -121,7 +121,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.titl", "text")                 // Typo in typemap
         .option("spark.indextables.indexing.fastfields", "scor,ratng")             // Typos in fastfields
         .option("spark.indextables.indexing.indexrecordoption.contnt", "position") // Typo in indexrecordoption
@@ -145,7 +145,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.descriptin", "text")
         .mode("overwrite")
         .save(tablePath)
@@ -164,14 +164,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Valid configuration should succeed
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "string")
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -186,13 +186,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Valid configuration should succeed
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.fastfields", "score,value")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -207,14 +207,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Valid configuration should succeed
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.indexrecordoption.content", "position")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -229,14 +229,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Should accept case-insensitive match
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "string") // lowercase matches Title
       .option("spark.indextables.indexing.typemap.content", "text") // lowercase matches CONTENT
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -251,7 +251,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.nonfastfields", "contnt,descriptin") // Typos
         .mode("overwrite")
         .save(tablePath)
@@ -270,7 +270,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.storeonlyfields", "metadta") // Typo
         .mode("overwrite")
         .save(tablePath)
@@ -288,7 +288,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.indexonlyfields", "searchbl") // Typo
         .mode("overwrite")
         .save(tablePath)
@@ -306,7 +306,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.tokenizer.en_stem", "contnt") // Typo in field name
         .mode("overwrite")
@@ -325,13 +325,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Empty fastfields should be allowed (no fields explicitly set as fast)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.fastfields", "")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -349,13 +349,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Nested path like "user.age" should be allowed because "user" exists in schema
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.fastfields", "user.age,user.name")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2
@@ -370,7 +370,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "user.age,profile.name") // "user" and "profile" don't exist
         .mode("overwrite")
         .save(tablePath)
@@ -392,13 +392,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // New syntax: typemap.<type> = "field1,field2,..."
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content,body")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -413,14 +413,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // New syntax: indexrecordoption.<option> = "field1,field2,..."
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content")
       .option("spark.indextables.indexing.indexrecordoption.position", "title,content")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -435,14 +435,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // New syntax: tokenizer.<tokenizer_name> = "field1,field2,..."
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content")
       .option("spark.indextables.indexing.tokenizer.en_stem", "title,content")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -457,7 +457,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.text", "title,contnt,descriptin") // typos
         .mode("overwrite")
         .save(tablePath)
@@ -476,7 +476,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.text", "content")
         .option("spark.indextables.indexing.indexrecordoption.position", "content,bdy") // typo
         .mode("overwrite")
@@ -495,7 +495,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.text", "content")
         .option("spark.indextables.indexing.tokenizer.en_stem", "content,titl") // typo
         .mode("overwrite")
@@ -514,14 +514,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Mixed syntax: some per-field, some per-type
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content") // new syntax
       .option("spark.indextables.indexing.typemap.tags", "string")        // old syntax
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -536,7 +536,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // List syntax with single field (no comma)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.tokenizer.en_stem", "content")
       .option("spark.indextables.indexing.indexrecordoption.basic", "content")
@@ -544,7 +544,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -559,13 +559,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // List with extra whitespace should be trimmed
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "  title , content  ")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -585,13 +585,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Configure content as text field (tokenized)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     result.createOrReplaceTempView("typemap_text_test")
 
@@ -618,13 +618,13 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Configure status as string field (exact match, which is default)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.string", "status")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     result.createOrReplaceTempView("typemap_string_test")
 
@@ -649,14 +649,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Configure content as text with en_stem tokenizer
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.tokenizer.en_stem", "content")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     result.createOrReplaceTempView("tokenizer_stem_test")
 
@@ -678,14 +678,14 @@ class IndexingConfigFieldValidationTest extends TestBase {
 
     // Configure content as text with default tokenizer (no stemming)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
       .option("spark.indextables.indexing.tokenizer.default", "content")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
     result.createOrReplaceTempView("tokenizer_no_stem_test")
 

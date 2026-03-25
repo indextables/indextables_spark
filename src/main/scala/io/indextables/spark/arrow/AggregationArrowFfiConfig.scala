@@ -34,8 +34,7 @@ object AggregationArrowFfiConfig {
   val DEFAULT_ENABLED = true
 
   def fromMap(config: Map[String, String]): AggregationArrowFfiConfig = {
-    val lowerCaseConfig                  = config.map { case (k, v) => k.toLowerCase -> v }
-    def get(key: String): Option[String] = lowerCaseConfig.get(key.toLowerCase)
+    val get = io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveLookup(config)
 
     AggregationArrowFfiConfig(
       enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED)

@@ -66,7 +66,7 @@ class AzureAsyncDownloader(
     }
 
     // Parse Azure path to get container and blob
-    val (container, blobPath) = parseAzurePath(request.sourcePath)
+    val (container, blobPath) = io.indextables.spark.util.CloudPathUtils.parseAzurePath(request.sourcePath)
 
     logger.debug(s"Starting async download: $container/$blobPath -> ${request.destinationPath}")
 
@@ -135,28 +135,6 @@ class AzureAsyncDownloader(
    *
    * Handles various Azure URL schemes: azure://, wasb://, wasbs://, abfs://, abfss://
    */
-  private def parseAzurePath(path: String): (String, String) = {
-    // Normalize to azure:// scheme for parsing
-    val normalizedPath = path
-      .replaceFirst("^wasbs?://", "azure://")
-      .replaceFirst("^abfss?://", "azure://")
-
-    val uri = new URI(normalizedPath)
-
-    // Container is the host or first path component depending on URL format
-    // azure://container/path or azure://container@account/path
-    val hostPart = uri.getHost
-    val pathPart = uri.getPath.stripPrefix("/")
-
-    // If host contains @, it's in format container@account
-    if (hostPart.contains("@")) {
-      val container = hostPart.split("@")(0)
-      (container, pathPart)
-    } else {
-      // Host is the container
-      (hostPart, pathPart)
-    }
-  }
 
   override def close(): Unit = {
     // BlobServiceAsyncClient is typically shared and should not be closed here
@@ -233,7 +211,7 @@ object AzureAsyncDownloader {
    */
   def fromConfig(configs: Map[String, String]): Option[AzureAsyncDownloader] = {
     def get(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGet(configs, key)
 
     val accountName  = get("spark.indextables.azure.accountName")
     val accountKey   = get("spark.indextables.azure.accountKey")

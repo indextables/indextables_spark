@@ -32,7 +32,7 @@ class FilteredViewPartitionGroupByBugTest extends TestBase {
 
       // Write with partition and fast fields for date_histogram
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "event_time,load_date")
         .partitionBy("load_date")
         .mode("overwrite")
@@ -40,7 +40,7 @@ class FilteredViewPartitionGroupByBugTest extends TestBase {
 
       // Step 1: Read and create filtered view
       val rdf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val filteredDf = rdf.filter($"load_date" =!= "2024-01-03")
