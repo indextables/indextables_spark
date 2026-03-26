@@ -824,4 +824,94 @@ class SyncToExternalParsingTest extends TestBase {
     )
     cmd.invalidateAllPartitions shouldBe true
   }
+
+  // ==========================================================================
+  // WITH STREAMING tests
+  // ==========================================================================
+
+  test("parse WITH STREAMING POLL INTERVAL in SECONDS") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index' WITH STREAMING POLL INTERVAL 30 SECONDS"
+    )
+    cmd.streamingPollIntervalMs shouldBe Some(30000L)
+  }
+
+  test("parse WITH STREAMING POLL INTERVAL in MINUTES") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index' WITH STREAMING POLL INTERVAL 5 MINUTES"
+    )
+    cmd.streamingPollIntervalMs shouldBe Some(300000L)
+  }
+
+  test("default streamingPollIntervalMs should be None") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.streamingPollIntervalMs shouldBe None
+  }
+
+  test("WITH STREAMING is rejected when combined with DRY RUN") {
+    an[Exception] should be thrownBy {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index' DRY RUN WITH STREAMING POLL INTERVAL 30 SECONDS"
+      )
+    }
+  }
+
+  test("parse WITH STREAMING for PARQUET source") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET '/tmp/data' AT LOCATION '/tmp/index' WITH STREAMING POLL INTERVAL 60 SECONDS"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.streamingPollIntervalMs shouldBe Some(60000L)
+  }
+
+  test("parse WITH STREAMING for ICEBERG source") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.table' AT LOCATION 's3://bucket/index' WITH STREAMING POLL INTERVAL 2 MINUTES"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.streamingPollIntervalMs shouldBe Some(120000L)
+  }
+
+  test("parse WITH STREAMING combined with FROM VERSION and WHERE") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+        |  FROM VERSION 100
+        |  WHERE region = 'us-east'
+        |  AT LOCATION 's3://bucket/index'
+        |  WITH STREAMING POLL INTERVAL 30 SECONDS""".stripMargin
+    )
+    cmd.fromVersion shouldBe Some(100L)
+    cmd.wherePredicates should have size 1
+    cmd.wherePredicates.head should include("region")
+    cmd.streamingPollIntervalMs shouldBe Some(30000L)
+  }
+
+  test("parse WITH STREAMING combined with INDEXING MODES and FASTFIELDS") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'
+        |  INDEXING MODES ('content':'text')
+        |  FASTFIELDS MODE HYBRID
+        |  AT LOCATION 's3://bucket/index'
+        |  WITH STREAMING POLL INTERVAL 1 MINUTES""".stripMargin
+    )
+    cmd.indexingModes("content") shouldBe "text"
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.streamingPollIntervalMs shouldBe Some(60000L)
+  }
+
+  test("parse WITH STREAMING with POLL INTERVAL 1 SECONDS (minimum boundary)") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index' WITH STREAMING POLL INTERVAL 1 SECONDS"
+    )
+    cmd.streamingPollIntervalMs shouldBe Some(1000L)
+  }
+
+  test("case-insensitive WITH STREAMING keywords") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index' with streaming poll interval 30 seconds"
+    )
+    cmd.streamingPollIntervalMs shouldBe Some(30000L)
+  }
 }

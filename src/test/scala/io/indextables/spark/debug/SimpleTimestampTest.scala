@@ -47,13 +47,13 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       println("Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("Read schema:")

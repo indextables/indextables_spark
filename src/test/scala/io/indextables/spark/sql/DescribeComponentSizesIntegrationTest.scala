@@ -287,7 +287,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val df = spark.createDataFrame(data).toDF("id", "content", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(tablePath)
@@ -306,7 +306,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val df = spark.createDataFrame(data).toDF("id", "content", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
@@ -326,7 +326,7 @@ class DescribeComponentSizesIntegrationTest extends AnyFunSuite with Matchers wi
     val df = spark.createDataFrame(data).toDF("id", "content", "year", "region")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year", "region")
       .mode("overwrite")
       .save(tablePath)

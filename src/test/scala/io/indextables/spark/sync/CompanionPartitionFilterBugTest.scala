@@ -35,7 +35,7 @@ import org.scalatest.BeforeAndAfterAll
  * group-by aggregate path must all exclude it before converting to a Tantivy query. Otherwise the query returns
  * incorrect results (zero or wrong).
  */
-class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -81,13 +81,6 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
       DriverSplitLocalityManager.clear()
     } catch { case _: Exception => }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   /**
    * Creates a partitioned parquet dataset and builds a companion index.
    *
@@ -132,7 +125,7 @@ class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with Bef
 
       // Read companion
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 

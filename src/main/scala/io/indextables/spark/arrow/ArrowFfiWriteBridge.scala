@@ -17,6 +17,11 @@
 
 package io.indextables.spark.arrow
 
+import java.nio.charset.StandardCharsets
+
+import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
@@ -27,19 +32,15 @@ import org.apache.arrow.vector._
 import org.apache.arrow.vector.complex.{ListVector, MapVector, StructVector}
 import org.apache.arrow.vector.types.{DateUnit, FloatingPointPrecision, TimeUnit}
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
-import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.slf4j.LoggerFactory
-
-import java.nio.charset.StandardCharsets
-import scala.collection.JavaConverters._
 
 /**
  * Export-direction Arrow FFI bridge for the write path. Buffers InternalRows into an Arrow VectorSchemaRoot and exports
  * to FFI structs for zero-copy handoff to Rust via tantivy4java.
  *
  * Complex types (Struct, Array, Map) are passed as native Arrow complex vectors (StructVector, ListVector, MapVector).
- * The Rust side converts these directly to tantivy OwnedValue without JSON serialization — see
- * tantivy4java's Arrow-Native Complex Type Indexing feature.
+ * The Rust side converts these directly to tantivy OwnedValue without JSON serialization — see tantivy4java's
+ * Arrow-Native Complex Type Indexing feature.
  *
  * ARCHITECTURE & MIGRATION PATH:
  *
@@ -249,7 +250,12 @@ class ArrowFfiWriteBridge(
     }
 
   /** Write a Spark InternalRow (struct value) into an Arrow StructVector at the given row index. */
-  private def writeStruct(vector: StructVector, rowIdx: Int, struct: InternalRow, st: StructType): Unit = {
+  private def writeStruct(
+    vector: StructVector,
+    rowIdx: Int,
+    struct: InternalRow,
+    st: StructType
+  ): Unit = {
     var i = 0
     while (i < st.fields.length) {
       if (!struct.isNullAt(i)) {
@@ -267,11 +273,16 @@ class ArrowFfiWriteBridge(
   }
 
   /** Write a Spark ArrayData into an Arrow ListVector at the given row index. */
-  private def writeList(vector: ListVector, rowIdx: Int, array: ArrayData, at: ArrayType): Unit = {
+  private def writeList(
+    vector: ListVector,
+    rowIdx: Int,
+    array: ArrayData,
+    at: ArrayType
+  ): Unit = {
     val numElements = array.numElements()
     val startOffset = vector.startNewValue(rowIdx)
     val dataVector  = vector.getDataVector.asInstanceOf[FieldVector]
-    var i = 0
+    var i           = 0
     while (i < numElements) {
       if (!array.isNullAt(i)) {
         writeValueGeneric(dataVector, startOffset + i, array.get(i, at.elementType), at.elementType)
@@ -282,15 +293,20 @@ class ArrowFfiWriteBridge(
   }
 
   /** Write a Spark MapData into an Arrow MapVector at the given row index. */
-  private def writeMap(vector: MapVector, rowIdx: Int, mapData: MapData, mt: MapType): Unit = {
+  private def writeMap(
+    vector: MapVector,
+    rowIdx: Int,
+    mapData: MapData,
+    mt: MapType
+  ): Unit = {
     val keys       = mapData.keyArray()
     val values     = mapData.valueArray()
     val numEntries = keys.numElements()
 
-    val startOffset    = vector.startNewValue(rowIdx)
-    val entriesVector  = vector.getDataVector.asInstanceOf[StructVector]
-    val keyVector      = entriesVector.getChild("key").asInstanceOf[FieldVector]
-    val valueVector    = entriesVector.getChild("value").asInstanceOf[FieldVector]
+    val startOffset   = vector.startNewValue(rowIdx)
+    val entriesVector = vector.getDataVector.asInstanceOf[StructVector]
+    val keyVector     = entriesVector.getChild("key").asInstanceOf[FieldVector]
+    val valueVector   = entriesVector.getChild("value").asInstanceOf[FieldVector]
 
     var i = 0
     while (i < numEntries) {
@@ -308,7 +324,12 @@ class ArrowFfiWriteBridge(
    * Write a generic Spark internal-format value into an Arrow vector. Used recursively inside complex types where we
    * have already extracted the value via `InternalRow.get(i, dataType)` or `ArrayData.get(i, dataType)`.
    */
-  private def writeValueGeneric(vector: FieldVector, rowIdx: Int, value: Any, dataType: DataType): Unit = {
+  private def writeValueGeneric(
+    vector: FieldVector,
+    rowIdx: Int,
+    value: Any,
+    dataType: DataType
+  ): Unit = {
     if (value == null) return
     dataType match {
       case StringType =>
@@ -378,14 +399,16 @@ object ArrowFfiWriteBridge {
    *   - MapType → Arrow Map (MapVector) with key/value entry struct child
    */
   def toArrowSchema(sparkSchema: StructType): Schema = {
-    val fields = sparkSchema.fields.map { field =>
-      sparkTypeToArrowField(field.name, field.dataType, field.nullable)
-    }
+    val fields = sparkSchema.fields.map(field => sparkTypeToArrowField(field.name, field.dataType, field.nullable))
     new Schema(fields.toList.asJava)
   }
 
   /** Convert a Spark field to an Arrow Field, recursively handling complex types. */
-  def sparkTypeToArrowField(name: String, dataType: DataType, nullable: Boolean): Field =
+  def sparkTypeToArrowField(
+    name: String,
+    dataType: DataType,
+    nullable: Boolean
+  ): Field =
     dataType match {
       case st: StructType =>
         val children = st.fields.map(f => sparkTypeToArrowField(f.name, f.dataType, f.nullable))
@@ -400,8 +423,8 @@ object ArrowFfiWriteBridge {
         )
 
       case mt: MapType =>
-        val keyField     = sparkTypeToArrowField("key", mt.keyType, nullable = false)
-        val valueField   = sparkTypeToArrowField("value", mt.valueType, mt.valueContainsNull)
+        val keyField   = sparkTypeToArrowField("key", mt.keyType, nullable = false)
+        val valueField = sparkTypeToArrowField("value", mt.valueType, mt.valueContainsNull)
         val entriesField = new Field(
           "entries",
           new FieldType(false, ArrowType.Struct.INSTANCE, null),

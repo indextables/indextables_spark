@@ -84,22 +84,22 @@ class AsyncMergeOnWriteConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("parse bytes from string - various units") {
-    AsyncMergeOnWriteConfig.parseBytes("1024") shouldBe 1024L
-    AsyncMergeOnWriteConfig.parseBytes("1K") shouldBe 1024L
-    AsyncMergeOnWriteConfig.parseBytes("1k") shouldBe 1024L
-    AsyncMergeOnWriteConfig.parseBytes("2M") shouldBe 2L * 1024 * 1024
-    AsyncMergeOnWriteConfig.parseBytes("2m") shouldBe 2L * 1024 * 1024
-    AsyncMergeOnWriteConfig.parseBytes("4G") shouldBe 4L * 1024 * 1024 * 1024
-    AsyncMergeOnWriteConfig.parseBytes("4g") shouldBe 4L * 1024 * 1024 * 1024
-    AsyncMergeOnWriteConfig.parseBytes("1T") shouldBe 1L * 1024 * 1024 * 1024 * 1024
+    io.indextables.spark.util.SizeParser.parseSize("1024") shouldBe 1024L
+    io.indextables.spark.util.SizeParser.parseSize("1K") shouldBe 1024L
+    io.indextables.spark.util.SizeParser.parseSize("1k") shouldBe 1024L
+    io.indextables.spark.util.SizeParser.parseSize("2M") shouldBe 2L * 1024 * 1024
+    io.indextables.spark.util.SizeParser.parseSize("2m") shouldBe 2L * 1024 * 1024
+    io.indextables.spark.util.SizeParser.parseSize("4G") shouldBe 4L * 1024 * 1024 * 1024
+    io.indextables.spark.util.SizeParser.parseSize("4g") shouldBe 4L * 1024 * 1024 * 1024
+    io.indextables.spark.util.SizeParser.parseSize("1T") shouldBe 1L * 1024 * 1024 * 1024 * 1024
   }
 
   test("format bytes to string") {
-    AsyncMergeOnWriteConfig.formatBytes(512L) shouldBe "512B"
-    AsyncMergeOnWriteConfig.formatBytes(1024L) shouldBe "1K"
-    AsyncMergeOnWriteConfig.formatBytes(2L * 1024 * 1024) shouldBe "2M"
-    AsyncMergeOnWriteConfig.formatBytes(4L * 1024 * 1024 * 1024) shouldBe "4G"
-    AsyncMergeOnWriteConfig.formatBytes(1L * 1024 * 1024 * 1024 * 1024) shouldBe "1T"
+    io.indextables.spark.util.SizeParser.formatBytes(512L) shouldBe "512 bytes"
+    io.indextables.spark.util.SizeParser.formatBytes(1024L) shouldBe "1K"
+    io.indextables.spark.util.SizeParser.formatBytes(2L * 1024 * 1024) shouldBe "2M"
+    io.indextables.spark.util.SizeParser.formatBytes(4L * 1024 * 1024 * 1024) shouldBe "4G"
+    io.indextables.spark.util.SizeParser.formatBytes(1L * 1024 * 1024 * 1024 * 1024) shouldBe "1T"
   }
 
   test("fromOptions with custom values") {

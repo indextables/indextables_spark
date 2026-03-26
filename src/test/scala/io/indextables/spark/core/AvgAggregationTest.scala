@@ -31,7 +31,7 @@ import org.scalatest.matchers.should.Matchers
  * Comprehensive test for AVG aggregation functionality with and without GROUP BY. Verifies that Spark correctly
  * transforms AVG into SUM + COUNT operations for distributed processing.
  */
-class AvgAggregationTest extends AnyFunSuite with Matchers {
+class AvgAggregationTest extends AnyFunSuite with Matchers with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("AVG aggregation should work correctly for simple aggregations (no GROUP BY)") {
     val spark = SparkSession
@@ -58,7 +58,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data using V2 API to ensure we test distributed aggregation
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
@@ -66,7 +66,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
       println(s"✅ AVG Simple Test: Data written to $tablePath")
 
       // Read back the data
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Verify we have multiple partitions
       val partitionCount = df.rdd.getNumPartitions
@@ -131,7 +131,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data using V2 API
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.category", "string")          // String field for GROUP BY
         .option("spark.indextables.indexing.fastfields", "category,score,rating") // All fields must be fast
         .mode(SaveMode.Overwrite)
@@ -139,7 +139,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       println(s"✅ AVG GROUP BY Test: Data written to $tablePath")
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Verify we have multiple partitions
       val partitionCount = df.rdd.getNumPartitions
@@ -215,7 +215,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data
       largeTestData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "category,score,rating")
         .mode(SaveMode.Overwrite)
@@ -223,7 +223,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       println(s"✅ AVG Distributed Test: Large dataset written to $tablePath")
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // Test both simple and GROUP BY AVG on the same large dataset
       println("🔍 AVG Distributed Test: Testing simple AVG on large dataset...")
@@ -282,10 +282,4 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
   }
 
   /** Recursively delete a directory and all its contents. */
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

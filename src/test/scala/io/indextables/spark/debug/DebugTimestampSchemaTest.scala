@@ -48,7 +48,7 @@ class DebugTimestampSchemaTest extends AnyFunSuite with BeforeAndAfterAll {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -57,7 +57,7 @@ class DebugTimestampSchemaTest extends AnyFunSuite with BeforeAndAfterAll {
       println("=" * 80)
 
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("All data:")

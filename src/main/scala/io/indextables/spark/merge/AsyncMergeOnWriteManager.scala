@@ -28,7 +28,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.sql.MergeSplitsExecutor
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.TransactionLogInterface
 import org.slf4j.LoggerFactory
 
 /**
@@ -135,7 +135,7 @@ object AsyncMergeOnWriteManager {
     tablePath: String,
     totalMergeGroups: Int,
     batchSize: Int,
-    transactionLog: TransactionLog,
+    transactionLog: TransactionLogInterface,
     writeOptions: Map[String, String],
     serializedHadoopConf: Map[String, String],
     sparkSession: SparkSession
@@ -336,7 +336,7 @@ object AsyncMergeOnWriteManager {
   /** Execute a merge job. This runs in a background thread. */
   private def executeMergeJob(
     job: AsyncMergeJob,
-    transactionLog: TransactionLog,
+    transactionLog: TransactionLogInterface,
     writeOptions: Map[String, String],
     serializedHadoopConf: Map[String, String],
     sparkSession: SparkSession
@@ -346,7 +346,7 @@ object AsyncMergeOnWriteManager {
 
       val targetSizeStr = writeOptions.getOrElse(
         AsyncMergeOnWriteConfig.KEY_TARGET_SIZE,
-        AsyncMergeOnWriteConfig.formatBytes(AsyncMergeOnWriteConfig.DEFAULT_TARGET_SIZE_BYTES)
+        io.indextables.spark.util.SizeParser.formatBytes(AsyncMergeOnWriteConfig.DEFAULT_TARGET_SIZE_BYTES)
       )
       val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
 

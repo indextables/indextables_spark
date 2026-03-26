@@ -25,17 +25,7 @@ import io.indextables.spark.TestBase
  * Integration tests for IndexQuery expressions with aggregate operations. Validates that IndexQuery filters are
  * properly passed to aggregate scans (both SimpleAggregateScan and GroupByAggregateScan).
  */
-class IndexQueryAggregateTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-      true
-    } catch {
-      case _: Exception => false
-    }
-
+class IndexQueryAggregateTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   // Helper to create test data with text fields for IndexQuery
   private def createTestData() = {
     val data = Seq(
@@ -56,14 +46,14 @@ class IndexQueryAggregateTest extends TestBase {
 
       // Write with text field for IndexQuery
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.fastfields", "score")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -85,14 +75,14 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.fastfields", "score")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -114,14 +104,14 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.fastfields", "score")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -159,7 +149,7 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.category", "text")
         .option("spark.indextables.indexing.fastfields", "score")
@@ -167,7 +157,7 @@ class IndexQueryAggregateTest extends TestBase {
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -189,7 +179,7 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,category")
@@ -197,7 +187,7 @@ class IndexQueryAggregateTest extends TestBase {
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -242,7 +232,7 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = spark.createDataFrame(data).toDF("id", "content", "category", "score")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,category")
@@ -250,7 +240,7 @@ class IndexQueryAggregateTest extends TestBase {
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -294,14 +284,14 @@ class IndexQueryAggregateTest extends TestBase {
       testData
         .repartition(2)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.fastfields", "score")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -323,7 +313,7 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score")
@@ -331,7 +321,7 @@ class IndexQueryAggregateTest extends TestBase {
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -379,7 +369,7 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = spark.createDataFrame(data).toDF("id", "content", "category", "score")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,category")
@@ -387,7 +377,7 @@ class IndexQueryAggregateTest extends TestBase {
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")
@@ -433,7 +423,7 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score")
@@ -441,7 +431,7 @@ class IndexQueryAggregateTest extends TestBase {
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_docs")

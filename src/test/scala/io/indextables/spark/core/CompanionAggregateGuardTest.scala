@@ -11,19 +11,16 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{MetadataAction, TransactionLog}
+import io.indextables.spark.transaction.{MetadataAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 
 /** Tests for the aggregate guard that prevents silently incorrect aggregate results when aggregate pushdown fails. */
 class CompanionAggregateGuardTest extends TestBase {
 
   private def markAsCompanionTable(testPath: String, includeSourcePath: Boolean = false): Unit = {
-    val txLog = new TransactionLog(
+    val txLog = TransactionLogFactory.create(
       new Path(testPath),
-      spark,
-      new CaseInsensitiveStringMap(
-        Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava
-      )
+      spark
     )
     try {
       val currentMetadata = txLog.getMetadata()
@@ -56,7 +53,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
@@ -65,7 +62,7 @@ class CompanionAggregateGuardTest extends TestBase {
       markAsCompanionTable(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // MIN on a non-fast TEXT field causes pushAggregation() to reject.
@@ -96,7 +93,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
@@ -104,7 +101,7 @@ class CompanionAggregateGuardTest extends TestBase {
       // Do NOT mark as companion - this is a regular table
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // MIN on a non-fast TEXT field causes pushAggregation() to reject.
@@ -131,7 +128,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 500).map(i => (i.toLong, s"item $i content")).toDF("id", "content")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
@@ -140,7 +137,7 @@ class CompanionAggregateGuardTest extends TestBase {
       markAsCompanionTable(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.read.companion.requireAggregatePushdown", "false")
         .load(testPath)
 
@@ -160,7 +157,7 @@ class CompanionAggregateGuardTest extends TestBase {
       val df = (0 until 100).map(i => (i.toLong, s"item$i", i * 10)).toDF("id", "name", "score")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(testPath)
@@ -168,7 +165,7 @@ class CompanionAggregateGuardTest extends TestBase {
       markAsCompanionTable(testPath, includeSourcePath = true)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // Unfiltered COUNT(*) uses TransactionLogCountScan

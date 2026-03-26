@@ -93,7 +93,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files - Azure will set modification time to current time
     val orphan1Path = s"$tablePath/orphan1_${UUID.randomUUID()}.split"
@@ -132,7 +132,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     assert(provider.exists(orphan2Path), "Recent orphan2 should be kept")
 
     // Verify table data is intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ Azure Blob Storage modification times correctly received and used for retention filtering")
@@ -155,7 +155,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     ).toDF("id", "name", "date")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date")
       .mode("overwrite")
       .save(tablePath)
@@ -199,7 +199,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     assert(provider.exists(orphan2Path), "Orphan 2 should still exist in Azure after DRY RUN")
 
     // Verify table is still intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ Azure partitioned table recursive listing works correctly")
@@ -216,7 +216,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files at different Azure path depths
     val rootOrphanPath   = s"$tablePath/orphaned_root_${UUID.randomUUID()}.split"
@@ -274,7 +274,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file in Azure
     val orphanPath = s"$tablePath/orphaned_${UUID.randomUUID()}.split"
@@ -320,7 +320,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "oauth_test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file
     val orphanPath = s"$tablePath/orphaned_${UUID.randomUUID()}.split"
@@ -367,7 +367,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files in Azure
     val orphan1Path = s"$tablePath/orphan1_${UUID.randomUUID()}.split"
@@ -406,7 +406,7 @@ class CloudAzurePurgeIndexTableTest extends CloudAzureTestBase {
     assert(!provider.exists(orphan2Path), "Old orphan2 should be deleted from Azure")
 
     // Verify table data is intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ Azure purge with short retention and sleep successfully deleted old files")

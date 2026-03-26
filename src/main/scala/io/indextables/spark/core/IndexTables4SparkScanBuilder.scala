@@ -58,13 +58,13 @@ import io.indextables.spark.filters.{
   MixedSparkFilter
 }
 import io.indextables.spark.sql.TableRootUtils
-import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLogInterface}
 import io.indextables.spark.util.ProtocolNormalizer
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   options: CaseInsensitiveStringMap,
   config: Map[String, String] // Direct config instead of broadcast
@@ -2411,7 +2411,7 @@ object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
 
   // Shared ObjectMapper for JSON parsing (thread-safe, reusable)
-  private[core] val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+  private[core] val objectMapper = io.indextables.spark.util.JsonUtil.mapper
 
   // WeakHashMap using DataSourceV2Relation object as key
   // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning

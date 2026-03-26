@@ -84,7 +84,8 @@ case class SyncToExternalCommand(
   wherePredicates: Seq[String] = Seq.empty,
   invalidateAllPartitions: Boolean = false,
   tableRoots: Map[String, String] = Map.empty,
-  dryRun: Boolean)
+  dryRun: Boolean,
+  streamingPollIntervalMs: Option[Long] = None)
     extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[SyncToExternalCommand])
@@ -117,6 +118,27 @@ case class SyncToExternalCommand(
   )
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    if (streamingPollIntervalMs.isDefined) {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = {
+        (
+          spark,
+          cycleStart,
+          lastSyncedVersion
+        ) =>
+          val cycleCommand = lastSyncedVersion match {
+            case Some(v) if sourceFormat == "delta" =>
+              copy(fromVersion = Some(v), streamingPollIntervalMs = None)
+            case Some(v) if sourceFormat == "iceberg" =>
+              copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
+            case _ =>
+              copy(streamingPollIntervalMs = None)
+          }
+          cycleCommand.executeSyncInternal(spark, cycleStart)
+      }
+      new StreamingCompanionManager(this, streamingPollIntervalMs.get, syncFn).runStreaming(sparkSession)
+      return Seq.empty
+    }
+
     val startTime = System.currentTimeMillis()
     logger.info(
       s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
@@ -278,7 +300,12 @@ case class SyncToExternalCommand(
           case "delta" =>
             val deltaPath         = resolvedStorageLocation.getOrElse(sourcePath)
             val sourceCredentials = resolveCredentials(mergedConfigs, deltaPath)
-            scanner.scanDeltaTable(deltaPath, sourceCredentials, wherePredicates = wherePredicates)
+            scanner.scanDeltaTable(
+              deltaPath,
+              sourceCredentials,
+              wherePredicates = wherePredicates,
+              fromVersion = fromVersion
+            )
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
             val (ns, tbl) = {
@@ -286,13 +313,16 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
+            // fromSnapshot means "return changes added after this snapshot" (incremental filter),
+            // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
-              fromSnapshot,
-              wherePredicates = wherePredicates
+              snapshotId = None,
+              wherePredicates = wherePredicates,
+              fromSnapshotId = fromSnapshot
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -437,10 +467,9 @@ case class SyncToExternalCommand(
           existingMeta.configuration
             .get("indextables.companion.indexingModes")
             .map { json =>
-              import com.fasterxml.jackson.databind.ObjectMapper
               import com.fasterxml.jackson.core.`type`.TypeReference
-              val mapper = new ObjectMapper()
-              mapper.readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
+              io.indextables.spark.util.JsonUtil.mapper
+                .readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
             }
             .getOrElse(Map.empty)
         } catch {
@@ -525,6 +554,32 @@ case class SyncToExternalCommand(
           (Seq.empty[String], Seq.empty[String])
         }
 
+      // Safety check: fail if too many string columns would be hashed without explicit INCLUDE/EXCLUDE.
+      // When no HASHED FASTFIELDS clause is specified, tantivy4java hashes ALL string columns by default,
+      // which can produce oversized splits with many useless hashed columns.
+      if (effectiveHfInclude.isEmpty && effectiveHfExclude.isEmpty) {
+        val textFields = effectiveIndexingModes.collect { case (f, m) if m.toLowerCase == "text" => f.toLowerCase }.toSet
+        val partitionFieldsLower = partitionColumns.map(_.toLowerCase).toSet
+        val hashableStringColumns = sourceSchema.fields.count { field =>
+          field.dataType == StringType &&
+            !textFields.contains(field.name.toLowerCase) &&
+            !partitionFieldsLower.contains(field.name.toLowerCase)
+        }
+        val maxAutomaticHashedFastfields = mergedConfigs
+          .get("spark.indextables.companion.maxAutomaticHashedFastfields")
+          .map(_.toInt)
+          .getOrElse(10)
+        if (hashableStringColumns > maxAutomaticHashedFastfields) {
+          throw new IllegalArgumentException(
+            s"Source schema has $hashableStringColumns string columns that would be hashed as fast fields, " +
+              s"which exceeds the limit of $maxAutomaticHashedFastfields. This can produce oversized splits with many " +
+              s"useless hashed columns. Use HASHED FASTFIELDS INCLUDE (...) to select specific fields, " +
+              s"or HASHED FASTFIELDS EXCLUDE (...) to remove unwanted fields. " +
+              s"To override this limit, set spark.indextables.companion.maxAutomaticHashedFastfields to a higher value."
+          )
+        }
+      }
+
       // 7. Determine what needs indexing via anti-join (works for both initial and incremental).
       // All source readers return relative paths, so the anti-join is bucket-independent
       // and works across cross-region failover (different S3 buckets, same relative paths).
@@ -545,15 +600,57 @@ case class SyncToExternalCommand(
           existingFiles
         }
 
-      val (rawParquetFiles, splitsToInvalidate) = distributedRDD match {
-        case Some(rdd) =>
-          // Distributed anti-join using RDDs
-          val antiJoin = new DistributedAntiJoin(sparkSession)
-          val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
-          (result.filesToIndex, result.splitsToInvalidate)
-        case None =>
-          // In-memory anti-join (fallback path)
-          computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+      val (rawParquetFiles, splitsToInvalidate) = distributedResult match {
+        case Some(dr) if dr.isIncremental =>
+          // Incremental changeset from getChangesBetween / getChangesSince.
+          // New files are guaranteed additions — anti-join is skipped for those.
+          // Removed source paths (Delta only) require finding and invalidating the companion
+          // splits that indexed them, and re-indexing any sibling files from those splits.
+          val newFiles = dr.driverFiles.getOrElse(dr.filesRDD.collect().toSeq)
+          if (newFiles.size > 10000)
+            logger.warn(
+              s"Large incremental changeset: ${newFiles.size} files collected to driver. " +
+                "Consider reducing spark.indextables.companion.stream.maxIncrementalCommits to avoid OOM."
+            )
+          if (dr.removedSourcePaths.isEmpty) {
+            logger.info(s"Incremental changeset: ${newFiles.size} new files (anti-join skipped)")
+            (newFiles, Seq.empty[AddAction])
+          } else {
+            val normalizedRemoved = dr.removedSourcePaths.map(normalizePath).toSet
+            val splitsToInvalidate = scopedExistingFiles.filter { split =>
+              split.companionSourceFiles.exists(_.exists(f => normalizedRemoved.contains(normalizePath(f))))
+            }
+            // Files from invalidated splits that are NOT in the removed set still exist in the
+            // source and must be re-indexed (their split is being removed).
+            val remainingToReindex = splitsToInvalidate
+              .flatMap { split =>
+                split.companionSourceFiles
+                  .getOrElse(Seq.empty)
+                  .filterNot(f => normalizedRemoved.contains(normalizePath(f)))
+                  .map(relPath => CompanionSourceFile(normalizePath(relPath), split.partitionValues, 0L))
+              }
+              .groupBy(f => normalizePath(f.path))
+              .map(_._2.head)
+              .toSeq
+            logger.info(
+              s"Incremental changeset: ${newFiles.size} new files, " +
+                s"${dr.removedSourcePaths.size} removed source paths, " +
+                s"${splitsToInvalidate.size} splits to invalidate, " +
+                s"${remainingToReindex.size} sibling files to re-index"
+            )
+            (newFiles ++ remainingToReindex, splitsToInvalidate)
+          }
+        case _ =>
+          distributedRDD match {
+            case Some(rdd) =>
+              // Distributed anti-join using RDDs (full-snapshot path)
+              val antiJoin = new DistributedAntiJoin(sparkSession)
+              val result   = antiJoin.computeChanges(rdd, scopedExistingFiles, isInitialSync)
+              (result.filesToIndex, result.splitsToInvalidate)
+            case None =>
+              // In-memory anti-join (fallback path)
+              computeAntiJoinChanges(allSourceFiles.get, scopedExistingFiles, isInitialSync)
+          }
       }
 
       logger.info(
@@ -723,7 +820,7 @@ case class SyncToExternalCommand(
     sparkSession: SparkSession,
     groups: Seq[SyncIndexingGroupPlan],
     syncConfig: SyncConfig,
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     splitsToInvalidate: Seq[AddAction],
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
@@ -961,12 +1058,12 @@ case class SyncToExternalCommand(
    *   For Iceberg: the S3 storage root from catalog. For Delta UC: the storage_location from UC API. None for
    *   path-based Delta/Parquet.
    *
-   * Note: This method reads existing metadata and overwrites table root entries non-atomically
-   * via commitSyncActions (not commitMetadataUpdate). A concurrent SET TABLE ROOT between the
-   * metadata read and the commit could be silently overwritten. See SetTableRootCommand scaladoc.
+   * Note: This method reads existing metadata and overwrites table root entries non-atomically via commitSyncActions
+   * (not commitMetadataUpdate). A concurrent SET TABLE ROOT between the metadata read and the commit could be silently
+   * overwritten. See SetTableRootCommand scaladoc.
    */
   private def buildCompanionMetadata(
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     effectiveIndexingModes: Map[String, String],
     effectiveWherePredicates: Seq[String],
     effectiveHfInclude: Seq[String],
@@ -995,10 +1092,8 @@ case class SyncToExternalCommand(
               "indextables.companion.deltaCatalog"       -> effectiveCatalogName.getOrElse("")
             )
           } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
-                                  import com.fasterxml.jackson.databind.ObjectMapper
-                                  val mapper = new ObjectMapper()
                                   Map(
-                                    "indextables.companion.indexingModes" -> mapper.writeValueAsString(
+                                    "indextables.companion.indexingModes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(
                                       effectiveIndexingModes.asJava
                                     )
                                   )
@@ -1085,7 +1180,7 @@ case class SyncToExternalCommand(
    *   (existingFiles, isInitialSync)
    */
   private def determineSyncMode(
-    transactionLog: io.indextables.spark.transaction.TransactionLog,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     deltaSchema: org.apache.spark.sql.types.StructType,
     partitionColumns: Seq[String]
   ): (Seq[AddAction], Boolean) =
@@ -1304,6 +1399,91 @@ case class SyncToExternalCommand(
 
     config
   }
+
+  /**
+   * Reads the last successfully synced source version from the companion index transaction log. Used by
+   * StreamingCompanionManager to resume incremental sync after a restart without performing a full anti-join scan.
+   *
+   * Returns None if the companion index does not yet exist, has never been synced, or on any error.
+   */
+  private[sql] def readLastSyncedVersionFromLog(sparkSession: SparkSession): Option[Long] =
+    try {
+      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+      val transactionLog = TransactionLogFactory.create(
+        new org.apache.hadoop.fs.Path(destPath),
+        sparkSession,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
+      )
+      try
+        transactionLog
+          .getMetadata()
+          .configuration
+          .get("indextables.companion.lastSyncedVersion")
+          .flatMap(v => scala.util.Try(v.toLong).toOption)
+      catch {
+        case e: Exception =>
+          logger.debug(s"[IndextablesCompanion] readLastSyncedVersionFromLog: inner error reading metadata (returning None): ${e.getMessage}")
+          None
+      } finally
+        transactionLog.close()
+    } catch {
+      case e: Exception =>
+        logger.debug(s"[IndextablesCompanion] readLastSyncedVersionFromLog: error opening transaction log (returning None, expected on first run): ${e.getMessage}")
+        None
+    }
+
+  /**
+   * Cheap source version probe for streaming pre-poll.
+   *
+   * Delta: 1 GET (_last_checkpoint) + O(k) HEAD probes — no checkpoint parquet reads. Iceberg: 1 catalog.load_table()
+   * call — no manifest list read. Parquet / unknown: returns None. On any error: returns None so the caller falls
+   * through to executeSyncInternal.
+   *
+   * Used by StreamingCompanionManager to skip executeSyncInternal entirely on no-change polling cycles, avoiding the
+   * checkpoint parquet read that getSnapshotInfo() would otherwise trigger.
+   */
+  private[sql] def cheapSourceVersion(
+    sparkSession: SparkSession,
+    cachedBaseConfigs: Option[Map[String, String]] = None
+  ): Option[Long] =
+    try {
+      val mergedConfigs = cachedBaseConfigs.getOrElse {
+        val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+        val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+        val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+          ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      }
+      sourceFormat match {
+        case "delta" =>
+          val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+          val kernelPath        = io.indextables.spark.sync.DeltaLogReader.normalizeForDeltaKernel(sourcePath)
+          val deltaConfig       = io.indextables.spark.sync.DeltaLogReader.translateCredentials(sourceCredentials)
+          Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
+        case "iceberg" =>
+          val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
+          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials)
+          val parts             = sourcePath.split("\\.", 2)
+          if (parts.length != 2) None
+          else {
+            val (ns, tbl) = (parts(0), parts(1))
+            Some(
+              io.indextables.tantivy4java.iceberg.IcebergTableReader
+                .getCurrentSnapshotId(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig)
+            )
+          }
+        case _ => None
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug(
+          s"[IndextablesCompanion] cheapSourceVersion($sourceFormat): caught exception, returning None: ${e.getMessage}"
+        )
+        None
+    }
 
   /**
    * Resolve credentials for a given storage path. Returns a flat map of credential properties suitable for immediate

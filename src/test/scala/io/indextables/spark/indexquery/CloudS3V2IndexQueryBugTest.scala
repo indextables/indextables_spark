@@ -48,14 +48,14 @@ class CloudS3V2IndexQueryBugTest extends CloudS3TestBase {
     val df = spark.createDataFrame(data).toDF("id", "content")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(s3Path)
 
     // Read back using V2 DataSource
     val readDF = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(s3Path)
 
     // Create temp view for SQL testing
@@ -84,7 +84,7 @@ class CloudS3V2IndexQueryBugTest extends CloudS3TestBase {
     val df = spark.createDataFrame(data).toDF("id", "content", "tags")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.typemap.tags", "text")
       .mode("overwrite")
@@ -92,7 +92,7 @@ class CloudS3V2IndexQueryBugTest extends CloudS3TestBase {
 
     // Read back using V2 DataSource
     val readDF = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(s3Path)
 
     // Create temp view for SQL testing
@@ -122,14 +122,14 @@ class CloudS3V2IndexQueryBugTest extends CloudS3TestBase {
     val df = spark.createDataFrame(data).toDF("id", "content")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(s3Path)
 
     // Read back using V2 DataSource
     val readDF = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(s3Path)
 
     // Create temp view for SQL testing

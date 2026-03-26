@@ -97,7 +97,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     // Write with merge enabled but async disabled
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "false")
       .option("spark.indextables.mergeOnWrite.batchCpuFraction", "0.167")
@@ -105,7 +105,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -123,7 +123,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     // Write with async merge enabled but high threshold to avoid actual merge
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.batchCpuFraction", "0.167")
@@ -131,7 +131,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -149,7 +149,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     // Write with very high threshold (requires many batches worth of groups)
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.batchCpuFraction", "0.5")   // Large batches
@@ -161,7 +161,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     AsyncMergeOnWriteManager.isMergeInProgress(tablePath) shouldBe false
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -192,7 +192,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
 
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.batchCpuFraction", batchCpuFraction.toString)
@@ -201,7 +201,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 300
@@ -221,7 +221,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     // High threshold to prevent merge trigger
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "100")
@@ -282,7 +282,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     // Write with custom async config
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.batchCpuFraction", "0.2")
@@ -297,7 +297,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     AsyncMergeOnWriteManager.getAvailableBatchSlots shouldBe 5
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -317,7 +317,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
 
     df1.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "100")
@@ -330,7 +330,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
 
     df2.write
       .mode("append")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "100")
@@ -338,7 +338,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
 
     // Verify all data
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 200
@@ -361,7 +361,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
 
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .partitionBy("partition_col")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
@@ -369,7 +369,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -394,7 +394,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
     // Invalid config values should not break the write
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.async.enabled", "true")
       .option("spark.indextables.mergeOnWrite.batchCpuFraction", "invalid") // Invalid - should use default
@@ -402,7 +402,7 @@ class AsyncMergeOnWriteIntegrationTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100

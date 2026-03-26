@@ -53,7 +53,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
     // Create table with data
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -71,7 +71,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -85,7 +85,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
     // Create table
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -106,7 +106,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -123,7 +123,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -139,7 +139,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Data should still be intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -152,7 +152,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -164,7 +164,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -181,7 +181,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -212,7 +212,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -233,7 +233,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Data should still be readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -253,12 +253,12 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
       val df = spark.range(i * 50, (i + 1) * 50).selectExpr("id", "CAST(id AS STRING) as text")
       if (i == 0) {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tablePath)
       } else {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("append")
           .save(tablePath)
       }
@@ -275,7 +275,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 750 // 15 * 50
@@ -291,14 +291,14 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
       val df = spark.range(i * 50, (i + 1) * 50).selectExpr("id", "CAST(id AS STRING) as text")
       if (i == 0) {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.checkpoint.enabled", "true")
           .option("spark.indextables.checkpoint.interval", "10")
           .mode("overwrite")
           .save(tablePath)
       } else {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.checkpoint.enabled", "true")
           .option("spark.indextables.checkpoint.interval", "10")
           .mode("append")
@@ -317,7 +317,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 600 // 12 * 50
@@ -334,7 +334,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -350,7 +350,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val readFuture = Future {
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
       result.count()
     }
@@ -374,7 +374,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
     // Create empty table
     val df = spark.range(0, 0).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -383,7 +383,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify table still accessible
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 0
@@ -406,7 +406,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
         "CAST(id % 4 AS STRING) as partition_col"
       )
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .partitionBy("partition_col")
       .mode("overwrite")
       .save(tablePath)
@@ -424,7 +424,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Verify all partitions still readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 200
@@ -458,7 +458,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -472,7 +472,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Data should still be intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100

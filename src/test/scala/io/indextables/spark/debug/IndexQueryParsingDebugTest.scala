@@ -17,7 +17,7 @@ class IndexQueryParsingDebugTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testDataPath)
 

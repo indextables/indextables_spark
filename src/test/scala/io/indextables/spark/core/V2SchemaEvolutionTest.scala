@@ -44,13 +44,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Verify initial read
       val initialResult = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       initialResult.count() shouldBe 10
@@ -67,13 +67,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
 
       // Append data with new schema
       evolvedData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read evolved table
       val evolvedResult = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       evolvedResult.count() shouldBe 20
@@ -100,7 +100,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       originalData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -114,13 +114,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       reorderedData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read combined data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 10
@@ -146,7 +146,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       intData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -160,13 +160,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       longData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read combined data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 10
@@ -197,7 +197,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       fullData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -210,13 +210,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       partialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read all data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 15
@@ -245,13 +245,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       diverseData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Read without explicit schema
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Verify inferred schema types
@@ -278,7 +278,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       stringData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -292,13 +292,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       numericData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read and verify
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 12
@@ -328,7 +328,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       nullableData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -342,13 +342,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       nonNullableData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read combined data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 10
@@ -374,7 +374,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       userData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -390,7 +390,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       contactData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
@@ -408,13 +408,13 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
         )
 
       prefData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(path)
 
       // Read final merged schema
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 10

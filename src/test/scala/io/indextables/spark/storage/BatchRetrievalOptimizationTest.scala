@@ -43,7 +43,7 @@ class BatchRetrievalOptimizationTest extends TestBase {
     // Create test data with multiple documents that will be read in sequence
     val df = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.batchOptimization.gapTolerance", "1M")
@@ -51,7 +51,7 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     // Read with batch optimization - adjacent ranges should be consolidated
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .load(tablePath)
 
@@ -67,13 +67,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
     // Create sparse data that will have large gaps between document positions
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read with very small gap tolerance - ranges should NOT be consolidated
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.batchOptimization.gapTolerance", "1K") // Very small
       .load(tablePath)
@@ -89,13 +89,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
     // Create larger dataset
     val df = spark.range(0, 1000).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read with small max range size - should create multiple requests
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.batchOptimization.maxRangeSize", "2M") // Small limit
       .load(tablePath)
@@ -110,13 +110,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 200).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Multiple queries that might create overlapping range requests
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .load(tablePath)
 
@@ -136,13 +136,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read with limited prefetch concurrency
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.batchOptimization.maxConcurrentPrefetch", "2")
       .load(tablePath)
@@ -158,12 +158,12 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 1000).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .load(tablePath)
 
@@ -192,12 +192,12 @@ class BatchRetrievalOptimizationTest extends TestBase {
         "REPEAT('x', 100) as padding" // Add some bulk
       )
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .load(tablePath)
 
@@ -212,12 +212,12 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 200).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val baseRead = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .load(tablePath)
 
@@ -226,7 +226,7 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     // Second read - should use cache, not prefetch again
     val cachedResult = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .load(tablePath)
 
@@ -244,13 +244,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Explicitly disable batch optimization
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "false")
       .load(tablePath)
 
@@ -264,13 +264,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Use profile which provides validated defaults
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.profile", "conservative")
       .load(tablePath)
 
@@ -288,12 +288,12 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 300).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.profile", "conservative")
       .load(tablePath)
 
@@ -307,12 +307,12 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 300).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.profile", "aggressive")
       .load(tablePath)
 
@@ -330,13 +330,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Set high minimum threshold - optimization should be bypassed
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.batchOptimization.minDocsForOptimization", "200")
       .load(tablePath)
@@ -352,13 +352,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Set low minimum threshold - optimization should apply
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.batchOptimization.minDocsForOptimization", "50")
       .load(tablePath)
@@ -377,13 +377,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
 
     val df = spark.range(0, 200).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Enable adaptive tuning
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.read.batchOptimization.enabled", "true")
       .option("spark.indextables.read.adaptiveTuning.enabled", "true")
       .load(tablePath)

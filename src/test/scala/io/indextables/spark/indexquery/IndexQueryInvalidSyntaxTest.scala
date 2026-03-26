@@ -98,13 +98,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("parens_test")
@@ -147,13 +147,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("field_ref_test")
@@ -194,13 +194,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "description", "docid")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.description", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("quotes_test")
@@ -241,13 +241,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "name", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.name", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("boolean_test")
@@ -288,13 +288,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("malformed_test")
@@ -335,14 +335,14 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("count_invalid_test")
@@ -387,13 +387,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("valid_test")
@@ -442,14 +442,14 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("valid_agg_test")
@@ -488,13 +488,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("empty_query_test")
@@ -530,13 +530,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("error_msg_test")
@@ -575,13 +575,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "my_special_field", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.my_special_field", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("error_field_test")
@@ -624,13 +624,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("persistence_test")
@@ -677,13 +677,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("mixed_and_test")
@@ -724,13 +724,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("mixed_or_test")
@@ -771,13 +771,13 @@ class IndexQueryInvalidSyntaxTest extends TestBase {
     ).toDF("id", "title", "category")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("mixed_valid_test")

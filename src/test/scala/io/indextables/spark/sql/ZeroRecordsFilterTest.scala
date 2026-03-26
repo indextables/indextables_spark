@@ -22,13 +22,13 @@ import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
 /** Test to validate that files with zero records are not inserted into the transaction log */
-class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: File       = _
@@ -59,13 +59,6 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   "IndexTables4Spark write operations" should "not create transaction log entries for files with zero records" in {
     val tablePath = new File(tempDir, "zero_records_test").getAbsolutePath
 
@@ -89,7 +82,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
 
     // Write the empty DataFrame
     emptyData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -113,7 +106,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     println("✅ Verified: No AddActions created for empty dataset")
 
     // Verify we can still read from the table (should return empty)
-    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val readBack = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     readBack.count() shouldBe 0
 
     println("✅ Verified: Empty table can be read successfully")
@@ -144,7 +137,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
 
     // Write initial data
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -170,7 +163,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     val emptyData = spark.createDataFrame(emptyRDD2, schema)
 
     emptyData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -185,7 +178,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     finalAddActions.length shouldBe initialAddActions.length
 
     // Verify data integrity
-    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val readBack = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     readBack.count() shouldBe 2 // Original 2 records should still be there
 
     println("✅ Verified: Empty append operation did not create unnecessary AddActions")

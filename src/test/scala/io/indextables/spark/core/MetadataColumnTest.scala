@@ -35,10 +35,10 @@ class MetadataColumnTest extends TestBase {
       ).toDF("id", "title", "category")
 
       // Write the data
-      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath)
+      testData.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(tempPath)
 
       // Read back and get the table instance
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(tempPath)
 
       // Verify that we can access the metadata columns through introspection
       // The regular schema should NOT include _indexall
@@ -73,7 +73,7 @@ class MetadataColumnTest extends TestBase {
         (1, "Apache Spark is fast")
       ).toDF("id", "title")
 
-      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath)
+      testData.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(tempPath)
 
       // Create the table through the V2 DataSource API
       val tableProvider = new IndexTables4SparkTableProvider()

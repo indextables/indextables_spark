@@ -89,6 +89,8 @@ case class PrewarmCacheCommand(
 
   // Credential resolution centralized in CredentialProviderFactory.resolveCredentialsOnDriver()
 
+  // Plain ObjectMapper without ScalaModule — PrewarmCacheCommand is serialized to executors,
+  // and ScalaTypeModifier is not serializable.
   private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
 
   /**

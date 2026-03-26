@@ -83,7 +83,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (1 to 5).foreach { i =>
       val data = Seq((i, s"initial_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -102,7 +102,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Overwrite the table (version 5) - this creates REMOVE actions for old files
     val overwriteData = Seq((100, "new_data")).toDF("id", "value")
     overwriteData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -114,7 +114,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (7 to 12).foreach { i =>
       val data = Seq((i + 100, s"newer_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -152,7 +152,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (1 to 5).foreach { i =>
       val data = Seq((i, s"initial_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -172,7 +172,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Overwrite the table - creates REMOVE actions for old files
     val overwriteData = Seq((100, "new_data")).toDF("id", "value")
     overwriteData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -180,7 +180,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (7 to 12).foreach { i =>
       val data = Seq((i + 100, s"newer_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -241,7 +241,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Create initial data - just one write to keep it simple
     val initialData = Seq((1, "initial")).toDF("id", "value")
     initialData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -259,7 +259,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Overwrite to create new transaction log versions
     val overwriteData = Seq((100, "new_data")).toDF("id", "value")
     overwriteData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -267,7 +267,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (7 to 12).foreach { i =>
       val data = Seq((i + 100, s"newer_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -350,7 +350,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (1 to 3).foreach { i =>
       val data = Seq((i, s"group_a_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -369,7 +369,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // v3: Overwrite
     val overwriteData = Seq((100, "overwrite")).toDF("id", "value")
     overwriteData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -377,7 +377,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (5 to 13).foreach { i =>
       val data = Seq((i + 100, s"group_d_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -433,7 +433,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Verify we can still read data
     val readData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val count = readData.count()
     assert(count > 0, "Should be able to read data after PURGE")
@@ -451,7 +451,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // v0: Initial write with specific data that will create a split file
     val initialData = Seq((1, "version1")).toDF("id", "value")
     initialData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -459,7 +459,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (2 to 3).foreach { i =>
       val data = Seq((i, s"data_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -467,7 +467,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // v3: Overwrite (removes all old files, creates REMOVE actions)
     val overwriteData = Seq((100, "overwrite")).toDF("id", "value")
     overwriteData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -475,7 +475,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     (5 to 14).foreach { i =>
       val data = Seq((i + 100, s"new_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("append")
         .save(tablePath)
     }
@@ -512,7 +512,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Verify we can read the current data
     val readData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val count = readData.count()
     assert(count > 0, "Should be able to read data after PURGE")

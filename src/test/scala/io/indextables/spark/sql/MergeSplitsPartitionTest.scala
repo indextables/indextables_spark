@@ -24,7 +24,7 @@ import org.apache.spark.sql.functions.{col, lit}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
@@ -38,7 +38,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsPartitionTest])
 
   var tempTablePath: String          = _
-  var transactionLog: TransactionLog = _
+  var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -99,7 +99,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         data1
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.batchSize", "25")
           .partitionBy("year", "quarter")
           .mode("append")
@@ -118,7 +118,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         data2
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.batchSize", "25")
           .partitionBy("year", "quarter")
           .mode("append")
@@ -194,7 +194,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Verify no cross-partition contamination by checking data integrity
     val finalData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val totalCount = finalData.count()
@@ -205,7 +205,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       case (year, quarter, idRange) =>
         // Read fresh data for each partition
         val freshData = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(tempTablePath)
 
         val partitionData = freshData.filter(
@@ -442,7 +442,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
           chunkData
             .coalesce(1)
             .write
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(INDEXTABLES_FORMAT)
             .option("spark.indextables.indexWriter.batchSize", "20")
             .partitionBy("year", "quarter")
             .mode("append")
@@ -498,7 +498,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val finalData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val totalCount = finalData.count()
@@ -528,7 +528,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.batchSize", "5")
         .partitionBy("year")
         .mode("append")
@@ -558,7 +558,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity (this would fail if any files were merged twice)
     val finalData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val totalCount    = finalData.count()

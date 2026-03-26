@@ -40,7 +40,7 @@ import org.scalatest.BeforeAndAfterAll
  * (EqualTo, range, In, Not, And, Or, StringStartsWith, StringContains, StringEndsWith), aggregations (COUNT, SUM, AVG,
  * MIN, MAX), GROUP BY, and combined filter + aggregation patterns.
  */
-class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -85,13 +85,6 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
       GlobalSplitCacheManager.flushAllCaches()
       DriverSplitLocalityManager.clear()
     } catch { case _: Exception => }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
 
   /**
    * Builds a companion index from two parquet batches, merges the resulting splits, and runs the provided test function
@@ -185,7 +178,7 @@ class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with Be
       flushCaches()
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       f(df)

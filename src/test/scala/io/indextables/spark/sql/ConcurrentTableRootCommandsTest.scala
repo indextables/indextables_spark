@@ -43,7 +43,7 @@ import org.scalatest.BeforeAndAfterAll
  *
  * Run with: mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.sql.ConcurrentTableRootCommandsTest'
  */
-class ConcurrentTableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class ConcurrentTableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -88,13 +88,6 @@ class ConcurrentTableRootCommandsTest extends AnyFunSuite with Matchers with Bef
     super.afterAll()
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   /** Create a test IndexTables table and write sample data. */
   private def createTestTable(tablePath: String): Unit = {
     val schema = StructType(
@@ -107,7 +100,7 @@ class ConcurrentTableRootCommandsTest extends AnyFunSuite with Matchers with Bef
     val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
   }

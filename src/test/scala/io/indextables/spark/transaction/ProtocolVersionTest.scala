@@ -124,7 +124,7 @@ class ProtocolVersionTest extends TestBase {
         val exception = intercept[ProtocolVersionException] {
           txLog.listFiles()
         }
-        exception.getMessage should include("minReaderVersion = 999")
+        exception.getMessage should include("version 999")
         exception.getMessage should include("upgrade")
       } finally
         txLog.close()
@@ -155,7 +155,7 @@ class ProtocolVersionTest extends TestBase {
         val exception = intercept[ProtocolVersionException] {
           txLog.addFiles(Seq(addAction))
         }
-        exception.getMessage should include("minWriterVersion = 999")
+        exception.getMessage should include("version 999")
         exception.getMessage should include("upgrade")
       } finally
         txLog.close()

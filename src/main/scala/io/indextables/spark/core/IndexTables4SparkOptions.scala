@@ -33,6 +33,12 @@ case class FieldIndexingConfig(
 /** Utilities for handling IndexTables4Spark write and read options. Similar to Delta Lake's DeltaOptions. */
 class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
+  /** Parse a comma-separated config value into a Set of trimmed, non-empty strings. */
+  private def parseCommaSeparatedSet(key: String): Set[String] =
+    Option(options.get(key))
+      .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
+      .getOrElse(Set.empty)
+
   /** Whether to enable bloom filters. */
   def bloomFiltersEnabled: Option[Boolean] =
     Option(options.get("bloomFiltersEnabled")).map(_.toBoolean)
@@ -117,30 +123,22 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
   /** Get fast fields configuration. Returns set of field names that should get "fast" indexing. */
   lazy val getFastFields: Set[String] =
-    Option(options.get("spark.indextables.indexing.fastfields"))
-      .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
-      .getOrElse(Set.empty)
+    parseCommaSeparatedSet("spark.indextables.indexing.fastfields")
 
   /**
    * Get non-fast fields configuration. Returns set of field names that should be excluded from default fast field
    * behavior. This allows users to exclude specific fields from being auto-configured as fast.
    */
   lazy val getNonFastFields: Set[String] =
-    Option(options.get("spark.indextables.indexing.nonfastfields"))
-      .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
-      .getOrElse(Set.empty)
+    parseCommaSeparatedSet("spark.indextables.indexing.nonfastfields")
 
   /** Get store-only fields configuration. Returns set of field names that should be stored but not indexed. */
   lazy val getStoreOnlyFields: Set[String] =
-    Option(options.get("spark.indextables.indexing.storeonlyfields"))
-      .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
-      .getOrElse(Set.empty)
+    parseCommaSeparatedSet("spark.indextables.indexing.storeonlyfields")
 
   /** Get index-only fields configuration. Returns set of field names that should be indexed but not stored. */
   lazy val getIndexOnlyFields: Set[String] =
-    Option(options.get("spark.indextables.indexing.indexonlyfields"))
-      .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
-      .getOrElse(Set.empty)
+    parseCommaSeparatedSet("spark.indextables.indexing.indexonlyfields")
 
   /**
    * Get tokenizer override configuration. Maps field names to their tokenizer types.
@@ -357,6 +355,10 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def diskCacheWriteQueueCapacity: Option[String] =
     Option(options.get("spark.indextables.cache.disk.writeQueue.capacity"))
 
+  /** Max write queue memory budget cap. Supports "8G", "16G" formats. Default: 8x initial queue size (0 = default). */
+  def diskCacheMaxWriteQueueBudget: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.writeQueue.maxBudget"))
+
   /** Drop query-path writes when queue is full instead of blocking. Default: true. */
   def diskCacheDropWritesWhenFull: Option[Boolean] =
     Option(options.get("spark.indextables.cache.disk.dropWritesWhenFull")).map(_.toBoolean)
@@ -524,6 +526,9 @@ object IndexTables4SparkOptions {
   val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
   val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 
+  // Read mode configuration
+  val READ_MODE = "spark.indextables.read.mode"
+
   // Columnar reads configuration
   val COLUMNAR_READS_ENABLED = "spark.indextables.read.columnar.enabled"
 
@@ -536,5 +541,6 @@ object IndexTables4SparkOptions {
   val DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
   val DISK_CACHE_WRITE_QUEUE_MODE       = "spark.indextables.cache.disk.writeQueue.mode"
   val DISK_CACHE_WRITE_QUEUE_CAPACITY   = "spark.indextables.cache.disk.writeQueue.capacity"
+  val DISK_CACHE_WRITE_QUEUE_MAX_BUDGET = "spark.indextables.cache.disk.writeQueue.maxBudget"
   val DISK_CACHE_DROP_WRITES_WHEN_FULL  = "spark.indextables.cache.disk.dropWritesWhenFull"
 }

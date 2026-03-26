@@ -241,7 +241,7 @@ class CloudS3CredentialProviderE2ETest
     println(s"Writing ${data1.count()} records to $tablePath...")
 
     data1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .mode("overwrite")
       .save(tablePath)
@@ -268,7 +268,7 @@ class CloudS3CredentialProviderE2ETest
       )
 
     data2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .mode("append")
       .save(tablePath)
@@ -283,7 +283,7 @@ class CloudS3CredentialProviderE2ETest
     println("=" * 60)
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .load(tablePath)
 
@@ -323,7 +323,7 @@ class CloudS3CredentialProviderE2ETest
     println("=" * 60)
 
     val afterMergeDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .load(tablePath)
 
@@ -401,7 +401,7 @@ class CloudS3CredentialProviderE2ETest
     val data = spark.range(20).select(col("id"), lit("test").as("value"))
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .mode("overwrite")
       .save(tablePath)
@@ -446,7 +446,7 @@ class CloudS3CredentialProviderE2ETest
     for (i <- 0 until 3) {
       val data = spark.range(i * 20, (i + 1) * 20).select(col("id"), lit(s"batch$i").as("batch"))
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .options(options)
         .mode(if (i == 0) "overwrite" else "append")
         .save(tablePath)
@@ -491,7 +491,7 @@ class CloudS3CredentialProviderE2ETest
 
     // Verify data integrity
     val finalDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .load(tablePath)
 
@@ -512,7 +512,7 @@ class CloudS3CredentialProviderE2ETest
     // First write some data
     val data = spark.range(100).select(col("id"), lit("test").as("value"))
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .mode("overwrite")
       .save(tablePath)
@@ -525,7 +525,7 @@ class CloudS3CredentialProviderE2ETest
 
     // Read the data
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(options)
       .load(tablePath)
 

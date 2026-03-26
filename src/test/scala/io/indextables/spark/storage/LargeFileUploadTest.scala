@@ -57,7 +57,7 @@ class LargeFileUploadTest extends TestBase {
 
       // Configure for streaming upload with lower threshold for testing
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.s3.streamingThreshold", "5000000") // 5MB threshold for testing
         .option("spark.indextables.s3.multipartThreshold", "5000000") // 5MB multipart threshold
         .option("spark.indextables.s3.maxConcurrency", "2")           // Limit concurrency for test
@@ -66,7 +66,7 @@ class LargeFileUploadTest extends TestBase {
 
       // Verify data was written correctly using efficient count
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val count = readDf.count()
@@ -104,7 +104,7 @@ class LargeFileUploadTest extends TestBase {
 
       // Set a very low threshold to force streaming upload even for small files
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.s3.streamingThreshold", "1024") // 1KB threshold
         .option("spark.indextables.s3.multipartThreshold", "1024") // 1KB multipart threshold
         .mode("overwrite")
@@ -112,7 +112,7 @@ class LargeFileUploadTest extends TestBase {
 
       // Verify data integrity using efficient count
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val count = readDf.count()
@@ -151,7 +151,7 @@ class LargeFileUploadTest extends TestBase {
 
       // Test with optimized settings for large files
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.s3.streamingThreshold", "100000000") // 100MB
         .option("spark.indextables.s3.multipartThreshold", "100000000") // 100MB
         .option("spark.indextables.s3.maxConcurrency", "8")             // Higher concurrency
@@ -164,7 +164,7 @@ class LargeFileUploadTest extends TestBase {
 
       // Verify a sample of the data
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val count = readDf.count()

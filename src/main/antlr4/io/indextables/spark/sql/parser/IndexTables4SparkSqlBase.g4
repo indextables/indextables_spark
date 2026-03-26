@@ -100,7 +100,8 @@ statement
         (INVALIDATE ALL PARTITIONS)?
         (TABLE ROOTS '(' tableRootList ')')?
         AT LOCATION destPath=STRING
-        (DRY RUN)?                                            #syncToExternal
+        (DRY RUN)?
+        (WITH STREAMING POLL INTERVAL pollInterval=INTEGER_VALUE pollUnit=(SECONDS | MINUTES))?   #syncToExternal
     | SET indexTablesKeyword TABLE ROOT rootName=STRING '=' rootPath=STRING
         AT (path=STRING | table=qualifiedName)                #setTableRoot
     | UNSET indexTablesKeyword TABLE ROOT rootName=STRING
@@ -174,6 +175,7 @@ nonReserved
     | BUILD | COMPANION | DELTA | PARQUET | ICEBERG | INDEXING | MODES | FASTFIELDS | HYBRID | DISABLED | PARQUET_ONLY | INPUT | VERSION | WRITER | HEAP
     | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE | INVALIDATE
     | SET | UNSET | TABLE | ROOT | ROOTS
+    | STREAMING | POLL | INTERVAL | SECONDS | MINUTES
     ;
 
 // Keywords (case-insensitive)
@@ -269,6 +271,11 @@ UNSET: [Uu][Nn][Ss][Ee][Tt];
 TABLE: [Tt][Aa][Bb][Ll][Ee];
 ROOT: [Rr][Oo][Oo][Tt];
 ROOTS: [Rr][Oo][Oo][Tt][Ss];
+STREAMING: [Ss][Tt][Rr][Ee][Aa][Mm][Ii][Nn][Gg];
+POLL: [Pp][Oo][Ll][Ll];
+INTERVAL: [Ii][Nn][Tt][Ee][Rr][Vv][Aa][Ll];
+SECONDS: [Ss][Ee][Cc][Oo][Nn][Dd][Ss];
+MINUTES: [Mm][Ii][Nn][Uu][Tt][Ee][Ss];
 
 // Literals
 STRING

@@ -29,8 +29,7 @@ import org.apache.hadoop.fs.Path
  * simple and optimized implementations.
  *
  * Implementations:
- *   - TransactionLog: Simple sequential implementation with basic caching
- *   - OptimizedTransactionLog: Advanced implementation with parallel operations, enhanced caching, and async updates
+ *   - NativeTransactionLog: Backed by tantivy4java's native Rust txlog module via JNI
  */
 trait TransactionLogInterface extends AutoCloseable {
 
@@ -335,4 +334,58 @@ trait TransactionLogInterface extends AutoCloseable {
    */
   def readVersion(version: Long): Seq[Action] =
     throw new UnsupportedOperationException("readVersion must be implemented by subclass")
+
+  // ------------------------------------------------------------------------------------
+  // Extended methods used by callers beyond the core interface.
+  // Default implementations allow gradual migration to NativeTransactionLog.
+  // ------------------------------------------------------------------------------------
+
+  /** Invalidate all cached state. */
+  def invalidateCache(): Unit = ()
+
+  /** Get cache statistics for monitoring. */
+  def getCacheStats(): Option[CacheStats] = None
+
+  /** Get retry metrics from the last write operation. */
+  def getLastRetryMetrics(): Option[TxRetryMetrics] = None
+
+  /** Get the Spark schema (cached). Alias for getSchema() by default. */
+  def getSparkSchema(): Option[StructType] = getSchema()
+
+  /** Get the partition schema as a StructType. */
+  def getPartitionSchema(): StructType = {
+    val schema           = getSchema().getOrElse(new StructType())
+    val partitionColumns = getPartitionColumns()
+    if (partitionColumns.isEmpty) new StructType()
+    else new StructType(partitionColumns.flatMap(col => schema.fields.find(_.name == col)).toArray)
+  }
+
+  /** Get the version of the last checkpoint, if any. */
+  def getLastCheckpointVersion(): Option[Long] = None
+
+  /** Get full checkpoint info, if any. */
+  def getLastCheckpointInfo(): Option[LastCheckpointInfo] = None
+
+  /** Pre-warm caches (no-op by default). */
+  def prewarmCache(): Unit = ()
+
+  /** Record a skipped file with cooldown. */
+  def recordSkippedFile(
+    filePath: String,
+    reason: String,
+    operation: String,
+    partitionValues: Option[Map[String, String]] = None,
+    size: Option[Long] = None,
+    cooldownHours: Int = 24
+  ): Long =
+    throw new UnsupportedOperationException("recordSkippedFile must be implemented by subclass")
+
+  /** Get all skip actions from the transaction log. */
+  def getSkippedFiles(): Seq[SkipAction] = Seq.empty
+
+  /** Get files currently in cooldown with their retry-after timestamps. */
+  def getFilesInCooldown(): Map[String, Long] = Map.empty
+
+  /** Filter out files that are currently in cooldown. */
+  def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] = candidateFiles
 }

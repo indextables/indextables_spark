@@ -79,13 +79,13 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     // First write: create many small split files
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "false") // Disable for initial write
       .partitionBy("year")                                       // Partition by year (similar to kdate in the log)
       .save(tablePath)
 
     // Verify initial write created many files
-    val txLog = new io.indextables.spark.transaction.OptimizedTransactionLog(
+    val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
       new org.apache.hadoop.fs.Path(tablePath),
       spark
     )
@@ -116,7 +116,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     // Our many small files with 4GB target should form few groups, well below threshold
     appendDf.write
       .mode("append")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "4G")
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1000") // Very high threshold
@@ -126,7 +126,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data is correct
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val totalExpected = (numRecordsPerPartition * numPartitions) + 1000
@@ -165,7 +165,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     // New config: threshold = batchSize * minBatchesToTrigger (default: 1)
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "10M")        // Small target = many groups
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1") // Low threshold (default)
@@ -175,7 +175,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10000
@@ -198,7 +198,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     // Even with low threshold, merge shouldn't trigger because there are no valid groups
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "100M")
       .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1") // Low threshold (default)
@@ -208,13 +208,13 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
 
     // Verify only 1 file exists (no merge occurred)
-    val txLog = new io.indextables.spark.transaction.OptimizedTransactionLog(
+    val txLog = io.indextables.spark.transaction.TransactionLogFactory.create(
       new org.apache.hadoop.fs.Path(tablePath),
       spark
     )

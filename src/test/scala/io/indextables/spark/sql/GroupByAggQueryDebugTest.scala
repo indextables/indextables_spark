@@ -35,7 +35,7 @@ import org.scalatest.BeforeAndAfterAll
  * (string), owner (int), subscriptionFilter (array[string]), message_date (date - partition-key), message_hour
  * (string), asv (string)
  */
-class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -79,13 +79,6 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
       deleteRecursively(tempDir)
     }
     super.afterAll()
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   private def createTestData(): Unit = {
@@ -244,7 +237,7 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
     // Write with partitioning by message_date
     // Using DEFAULT fast fields configuration (auto-configured)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.message", "text")
       .partitionBy("message_date")
       .mode("overwrite")
@@ -259,7 +252,7 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
     println("=" * 80)
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     readDf.createOrReplaceTempView("my_index")
@@ -323,7 +316,7 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
     println("=" * 80)
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     readDf.createOrReplaceTempView("my_index_partition_test")
@@ -367,7 +360,7 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
     println("=" * 80)
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     readDf.createOrReplaceTempView("my_index_mixed_test")

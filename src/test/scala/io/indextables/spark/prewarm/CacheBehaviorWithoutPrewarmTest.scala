@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory
  *   - First query should populate the cache
  *   - Second identical query should get 100% cache hits (no new components)
  */
-class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEach {
+class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[CacheBehaviorWithoutPrewarmTest])
 
@@ -64,13 +64,6 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
     deleteRecursively(new File(cacheDir))
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   private def countCacheFiles(): Int = {
     val cacheFile = new File(cacheDir)
     if (cacheFile.exists()) {
@@ -96,7 +89,7 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
     // Write to IndexTables
     logger.info("Writing test data...")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "id,score") // Add id as fast field for range queries
@@ -104,7 +97,7 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Read with prewarm DISABLED
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", cacheDir)
       .option("spark.indextables.prewarm.enabled", "false")

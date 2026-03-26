@@ -39,7 +39,7 @@ import org.slf4j.LoggerFactory
  *      segments 4. Record cache stats after prewarm 5. Execute queries that would normally cause cache misses 6. Verify
  *      no new cache misses occurred
  */
-class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach {
+class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheMissValidationTest])
 
@@ -80,13 +80,6 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   private def createTestData(numRecords: Int = 500): Unit = {
     val ss = spark
     import ss.implicits._
@@ -108,7 +101,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "100")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -156,7 +149,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Execute range query that would use fast fields
     val rangeQuery = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
       .filter(col("score") > 100.0 && col("score") < 200.0)
       .count()
@@ -188,7 +181,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Execute various queries to validate complete prewarm
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Term query
@@ -243,7 +236,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Execute query that retrieves documents
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val docCount = df.select("id", "content").limit(10).collect().length
@@ -273,7 +266,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         .toDF("id", "content", "region", "date")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("region")
         .option("spark.indextables.indexWriter.batchSize", "50")
         .mode("overwrite")
@@ -353,7 +346,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     val minimalData = Seq((1L, "test")).toDF("id", "content")
 
     minimalData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
@@ -425,7 +418,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         testData
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.batchSize", "50")
           .option("spark.indextables.indexing.fastfields", "score")
           .mode("overwrite")
@@ -527,7 +520,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         testData
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.batchSize", "25")
           .option("spark.indextables.indexing.fastfields", "score")
           .mode("overwrite")
@@ -554,7 +547,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         // Execute a range query that uses fast fields - should be served from cache
         val rangeQueryStart = System.currentTimeMillis()
         val rangeCount = diskCacheSpark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .load(testPath)
           .filter(col("score") > 100.0)
           .count()
@@ -615,7 +608,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         testData
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .option("spark.indextables.indexWriter.batchSize", "50")
           .option("spark.indextables.indexing.fastfields", "score")
           .mode("overwrite")
@@ -633,7 +626,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Run a query to further populate the cache
         val queryResult = diskCacheSpark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .load(testPath)
           .filter(col("score") > 100.0)
           .count()

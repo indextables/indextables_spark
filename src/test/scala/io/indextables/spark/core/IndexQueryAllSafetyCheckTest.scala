@@ -30,7 +30,7 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for the _indexall safety check that rejects queries searching too many fields. Uses tantivy4java's
  * SplitQuery.countQueryFields() for accurate field counting.
  */
-class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
+class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   @transient private var _spark: SparkSession = _
   private var tempDir: java.nio.file.Path     = _
@@ -58,13 +58,6 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       deleteRecursively(tempDir.toFile)
     }
     super.afterAll()
-  }
-
-  private def deleteRecursively(file: java.io.File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
   }
 
   /**
@@ -175,9 +168,9 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_reject").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
-    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val readDf = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
     // Should throw IllegalArgumentException with helpful message
     val exception = intercept[Exception] {
@@ -200,9 +193,9 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_qualified").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
-    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val readDf = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
     // Should succeed - query is fully qualified (searches only 1 field)
     val result = readDf.filter("_indexall indexquery 'f1:test'").collect()
@@ -218,9 +211,9 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
     val df   = data.toDF("id", "f1", "f2", "f3", "f4")
 
     val tablePath = tempDir.resolve("narrow_table").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
-    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val readDf = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
     // Should succeed - table has only 5 fields, below limit of 10
     val result = readDf.filter("_indexall indexquery 'test'").collect()
@@ -237,11 +230,11 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_custom_config").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Set higher limit via read option
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option(IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS, "20")
       .load(tablePath)
 
@@ -260,11 +253,11 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       data.toDF("id", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15")
 
     val tablePath = tempDir.resolve("wide_table_disabled").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Disable the check by setting limit to 0
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option(IndexTables4SparkSQLConf.TANTIVY4SPARK_INDEXALL_MAX_UNQUALIFIED_FIELDS, "0")
       .load(tablePath)
 
@@ -291,9 +284,9 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       .withColumn("extra1", org.apache.spark.sql.functions.lit("x"))
 
     val tablePath = tempDir.resolve("table_with_named_fields").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
-    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val readDf = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
     val exception = intercept[Exception] {
       readDf.filter("_indexall indexquery 'search'").collect()
@@ -321,10 +314,10 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       data.toDF("id", "uid", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14")
 
     val tablePath = tempDir.resolve("mixed_boolean_unqualified").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .createOrReplaceTempView("mixed_test")
 
@@ -358,13 +351,13 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     val tablePath = tempDir.resolve("mixed_boolean_qualified").toString
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.f1", "text") // text field for tokenized search
       .mode("overwrite")
       .save(tablePath)
 
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .createOrReplaceTempView("mixed_qualified_test")
 
@@ -395,10 +388,10 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
       data.toDF("id", "uid", "urgency", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13")
 
     val tablePath = tempDir.resolve("complex_nested_unqualified").toString
-    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    df.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .createOrReplaceTempView("complex_nested_test")
 
@@ -436,13 +429,13 @@ class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll {
 
     val tablePath = tempDir.resolve("complex_nested_qualified").toString
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.f1", "text") // text field for tokenized search
       .mode("overwrite")
       .save(tablePath)
 
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .createOrReplaceTempView("complex_qualified_test")
 

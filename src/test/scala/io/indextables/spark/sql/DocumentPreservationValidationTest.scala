@@ -22,7 +22,7 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
@@ -38,7 +38,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
 
   private val logger                         = LoggerFactory.getLogger(classOf[DocumentPreservationValidationTest])
   private var tempTablePath: String          = _
-  private var transactionLog: TransactionLog = _
+  private var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -132,7 +132,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     allDataDF
       .repartition(numberOfSplits)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tempTablePath)
 
@@ -152,7 +152,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     )
 
     // Step 4: Query all documents BEFORE merge (baseline)
-    val beforeMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
+    val beforeMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
     val beforeMergeCount  = beforeMergeDF.count()
     val beforeMergeDocIds = beforeMergeDF.select("id").collect().map(_.getLong(0)).sorted
 
@@ -201,7 +201,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     )
 
     // Step 7: Query all documents AFTER merge (validation)
-    val afterMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
+    val afterMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
     val afterMergeCount  = afterMergeDF.count()
     val afterMergeDocIds = afterMergeDF.select("id").collect().map(_.getLong(0)).sorted
 
@@ -533,7 +533,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
 
     // Write with very small target to create many tiny splits
     dataDF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tempTablePath)
 
@@ -541,7 +541,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
 
     // Query before merge
     val beforeCount =
-      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath).count()
+      spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath).count()
 
     // Execute merge
     val mergeSplitsCommand = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
@@ -553,7 +553,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
 
     // Query after merge
     val afterCount =
-      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath).count()
+      spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath).count()
 
     // Validation
     assert(afterCount == beforeCount, s"Edge case failed: Document count changed from $beforeCount to $afterCount")

@@ -92,7 +92,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
     // Write some data
     val df = spark.range(100).toDF("id")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
 
@@ -114,21 +114,21 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write 1: counter = 1
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
     assert(PurgeOnWriteTransactionCounter.get(tablePath) === 1)
 
     // Write 2: counter = 2
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
     assert(PurgeOnWriteTransactionCounter.get(tablePath) === 2)
 
     // Write 3: counter should reset to 0 after purge triggers
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
     assert(
@@ -151,7 +151,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write 1: creates split files
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
 
@@ -170,7 +170,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write 2: should trigger purge and clean up old orphaned files
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
 
@@ -194,7 +194,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
     // Write 10 times to create transaction log files 0-9
     (1 to 10).foreach { i =>
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
         .save(tablePath)
     }
@@ -217,7 +217,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
     // Write 5 more times to reach triggerAfterWrites=15 and trigger purge
     (1 to 5).foreach { _ =>
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(SaveMode.Append)
         .save(tablePath)
     }
@@ -243,7 +243,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write with custom credentials (for local FS this just validates no errors)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .option("spark.indextables.aws.accessKey", "test-access-key")
       .option("spark.indextables.aws.secretKey", "test-secret-key")
@@ -266,13 +266,13 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write should succeed even though purge will fail
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
 
     // Verify data was written successfully
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     assert(result.count() === 50)
   }
@@ -290,25 +290,25 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write to table1 twice
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(table1Path)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(table1Path)
 
     // Write to table2 three times
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(table2Path)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(table2Path)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(table2Path)
 
@@ -331,11 +331,11 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write twice to create some transaction logs
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
 
@@ -361,7 +361,7 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Write one more time to trigger purge (3rd write)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
 

@@ -37,7 +37,7 @@ import org.scalatest.BeforeAndAfterAll
  *   - Partition column values are correctly injected
  *   - Complex types (Array, Struct, Map) are correctly deserialized
  */
-class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -96,13 +96,6 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       deleteRecursively(new File(path))
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   /** Build companion index from a Delta table and return a DataFrame reading it. */
   private def buildAndReadCompanion(deltaPath: String, indexPath: String): DataFrame = {
     val syncResult = spark.sql(
@@ -111,9 +104,9 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
     syncResult.collect()(0).getString(2) shouldBe "success"
 
     spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.read.defaultLimit", "1000")
-      .option("spark.indextables.read.columnar.enabled", "false") // Explicit row path (has Timestamp tests)
+      .option("spark.indextables.read.columnar.enabled", "true")
       .load(indexPath)
   }
 
@@ -884,7 +877,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       syncResult.collect()(0).getString(2) shouldBe "success"
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
       df.createOrReplaceTempView("indexing_modes_test")
@@ -943,7 +936,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       syncResult.collect()(0).getString(2) shouldBe "success"
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
       df.createOrReplaceTempView("ip_modes_test")
@@ -1001,7 +994,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       syncResult.collect()(0).getString(2) shouldBe "success"
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -1052,7 +1045,7 @@ class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with
       syncResult.collect()(0).getString(2) shouldBe "success"
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
       df.createOrReplaceTempView("json_string_test")

@@ -29,7 +29,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Error handling and edge case tests for PURGE INDEXTABLE command. */
-class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEach {
+class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _
@@ -63,13 +63,6 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   test("PURGE INDEXTABLE should handle non-existent table path") {
     val nonExistentPath = s"$tempDir/non_existent_table"
 
@@ -99,7 +92,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Try negative retention - should throw exception
     val exception = intercept[Exception] {
@@ -118,7 +111,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Disable retention check to test zero retention behavior
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
@@ -152,7 +145,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Get transaction log files
     val txLogPath        = new Path(s"$tablePath/_transaction_log")
@@ -176,7 +169,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file
     val orphan = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.split")
@@ -201,7 +194,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data1 = Seq((1, "Alice")).toDF("id", "name")
-    data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data1.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file
     val orphan = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.split")
@@ -211,7 +204,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
 
     // Simulate concurrent write (append)
     val data2 = Seq((2, "Bob")).toDF("id", "name")
-    data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
+    data2.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("append").save(tablePath)
 
     // Purge should still work correctly
     val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
@@ -221,7 +214,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     assert(metrics.getLong(2) >= 1) // At least the orphan was deleted
 
     // Table should have both records
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 2)
   }
 
@@ -233,7 +226,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files with special characters
     val specialOrphans = Seq(
@@ -272,7 +265,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     ).toDF("id", "name", "year", "month", "day")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year", "month", "day")
       .mode("overwrite")
       .save(tablePath)
@@ -300,7 +293,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned file
     val orphan = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.split")
@@ -343,7 +336,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files with known sizes
     val file1 = new Path(s"$tablePath/orphan1.split")
@@ -387,7 +380,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files with different case extensions
     // (Note: filesystem behavior may vary, but command should handle gracefully)
@@ -413,7 +406,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Purge should not crash on edge cases
     val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
@@ -431,7 +424,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Note: Symlink behavior is filesystem-dependent
     // Command should handle gracefully without following symlinks

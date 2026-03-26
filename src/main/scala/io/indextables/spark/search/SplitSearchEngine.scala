@@ -443,7 +443,7 @@ object SplitSearchEngine {
    */
   private val exactOnlyOverrideCache = new ConcurrentHashMap[String, Map[String, FieldType]]()
 
-  private val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+  private val objectMapper = io.indextables.spark.util.JsonUtil.mapper
 
   /**
    * Clear the exact_only override cache. Called when split caches are flushed to avoid stale overrides after schema

@@ -452,6 +452,7 @@ case class SplitCacheConfig(
   diskCacheWriteQueueMode: Option[String] = None,      // "fragment" or "size" (default: size)
   diskCacheWriteQueueCapacity: Option[String] = None,  // Fragment: slot count; Size: byte limit ("1G")
   diskCacheDropWritesWhenFull: Option[Boolean] = None, // Drop query-path writes when full (default: true)
+  diskCacheMaxWriteQueueBudget: Option[Long] = None,   // Max write queue memory budget cap (0 = 8x initial)
   // Parquet coalesce configuration
   coalesceMaxGap: Option[Long] = None, // Max gap between byte ranges to coalesce (default: 512KB)
   // Companion mode (parquet companion splits)
@@ -813,6 +814,12 @@ case class SplitCacheConfig(
             tieredConfig = tieredConfig.withWriteQueueSizeLimit(1L * 1024L * 1024L * 1024L)
         }
 
+        // Apply max write queue memory budget cap (0 = default: 8x initial queue size)
+        diskCacheMaxWriteQueueBudget.foreach { budget =>
+          logger.debug(s"L2 Disk cache write queue max budget: $budget bytes")
+          tieredConfig = tieredConfig.withMaxWriteQueueBudget(budget)
+        }
+
         // Apply drop-writes-when-full (default: true)
         val dropWrites = diskCacheDropWritesWhenFull.getOrElse(true)
         logger.debug(s"L2 Disk cache drop writes when full: $dropWrites")
@@ -918,6 +925,13 @@ object GlobalSplitCacheManager {
    * result in new cache instances without any explicit timestamp tracking.
    */
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
+    // Only initialize on executor task threads (TaskContext present).
+    // GlobalSplitCacheManager is also called from driver-side commands (DESCRIBE, PREWARM)
+    // where no TaskContext exists — skip init to avoid ERROR log spam.
+    if (org.apache.spark.TaskContext.get() != null) {
+      io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
+    }
+
     logger.debug(s"GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
     logger.debug(s"Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
     logger.debug(s"Session token present: ${config.awsSessionToken.isDefined}")

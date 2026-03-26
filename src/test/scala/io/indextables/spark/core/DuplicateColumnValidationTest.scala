@@ -39,7 +39,7 @@ class DuplicateColumnValidationTest extends TestBase {
     // Attempt to write should throw IllegalArgumentException
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
     }
@@ -67,7 +67,7 @@ class DuplicateColumnValidationTest extends TestBase {
     // Attempt to write should throw IllegalArgumentException
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
     }
@@ -91,13 +91,13 @@ class DuplicateColumnValidationTest extends TestBase {
 
     // Write should succeed
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Verify data can be read back
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -115,13 +115,13 @@ class DuplicateColumnValidationTest extends TestBase {
 
     // This should succeed (case-sensitive duplicates are allowed, just warned about)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Verify data can be read back
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 10
@@ -142,13 +142,13 @@ class DuplicateColumnValidationTest extends TestBase {
 
     // Write should succeed
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Verify table was created
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 0
@@ -164,7 +164,7 @@ class DuplicateColumnValidationTest extends TestBase {
 
     val exception = intercept[IllegalArgumentException] {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
     }

@@ -7,7 +7,7 @@ import org.apache.spark.sql.SparkSession
 
 import org.scalatest.funsuite.AnyFunSuite
 
-class TestGroupBySumValidation extends AnyFunSuite {
+class TestGroupBySumValidation extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("GROUP BY with SUM where SUM field is NOT fast (should be rejected)") {
     val spark = SparkSession
@@ -33,13 +33,13 @@ class TestGroupBySumValidation extends AnyFunSuite {
 
       // Write data with category as fast field but NOT amount
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "category") // Only category, NOT amount
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
 
       // This should throw an exception because neither "category" nor "amount" are properly configured as fast fields
       val query = df.groupBy("category").agg(org.apache.spark.sql.functions.sum("amount"))
@@ -81,10 +81,4 @@ class TestGroupBySumValidation extends AnyFunSuite {
   }
 
   /** Recursively delete a directory and all its contents. */
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

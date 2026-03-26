@@ -26,12 +26,12 @@ class AggregateExceptionTest extends TestBase {
       val df = data.toDF("id", "group_id", "name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // COUNT with IsNull should now work - Spark handles the filter after reading data
@@ -53,12 +53,12 @@ class AggregateExceptionTest extends TestBase {
         .selectExpr("id", "id % 10 as group_id", "concat('item_', id) as name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // COUNT with supported filters should work (IsNotNull is implicitly handled)
@@ -79,12 +79,12 @@ class AggregateExceptionTest extends TestBase {
         .selectExpr("id", "id % 10 as group_id", "concat('item_', id) as name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // Non-aggregate query with IsNull should work (returns 0 rows since no nulls)
@@ -109,12 +109,12 @@ class AggregateExceptionTest extends TestBase {
       // Note: 'value' is NOT configured as a fast field, so IsNull won't be pushed down
       // This tests that IsNull filters don't block aggregation - Spark handles them via post-filtering
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // SUM with IsNull should now work - Spark handles the filter after reading data
@@ -142,13 +142,13 @@ class AggregateExceptionTest extends TestBase {
       val df = (0 until 100).map(i => (i.toLong, s"region_${i % 3}", s"item_$i")).toDF("id", "region", "name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("region")
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // Spark adds implicit IsNotNull(region) for comparison predicates.
@@ -170,13 +170,13 @@ class AggregateExceptionTest extends TestBase {
         .toDF("id", "region", "type", "name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("region", "type")
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // Compound filter on both partition columns - Spark adds IsNotNull for both
@@ -199,13 +199,13 @@ class AggregateExceptionTest extends TestBase {
         .toDF("id", "region", "name")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("region")
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // GROUP BY partition column - this is the exact reproduction case.
@@ -230,14 +230,14 @@ class AggregateExceptionTest extends TestBase {
         .toDF("id", "region", "value")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,value")
         .partitionBy("region")
         .mode("overwrite")
         .save(testPath)
 
       val readDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(testPath)
 
       // Filter on partition column + GROUP BY partition column + COUNT

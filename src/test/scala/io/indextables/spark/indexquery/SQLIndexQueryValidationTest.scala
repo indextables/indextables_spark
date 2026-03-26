@@ -60,7 +60,7 @@ class SQLIndexQueryValidationTest extends TestBase {
     spark.conf.set("spark.indextables.indexing.typemap.tags", "text")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .option("spark.indextables.indexing.typemap.title", "text")      // tokenized search
       .option("spark.indextables.indexing.typemap.author", "string")   // exact matching
@@ -84,7 +84,7 @@ class SQLIndexQueryValidationTest extends TestBase {
 
     // Create temp view from DataFrame for standard Spark usage
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testDataPath)
 
     df.createOrReplaceTempView("tantivy_documents")

@@ -2,17 +2,7 @@ package io.indextables.spark.debug
 
 import io.indextables.spark.TestBase
 
-class NumericFieldFilteringTestSimple extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-      true
-    } catch {
-      case _: Exception => false
-    }
-
+class NumericFieldFilteringTestSimple extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   test("numeric field filtering test") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping test")
 
@@ -30,10 +20,10 @@ class NumericFieldFilteringTestSimple extends TestBase {
       ).toDF("id", "age", "salary", "score", "active", "name")
 
       // Save the data
-      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
+      testData.write.format(INDEXTABLES_FORMAT).mode("overwrite").save(testPath)
 
       // Read back the data
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
+      val readDf = spark.read.format(INDEXTABLES_FORMAT).load(testPath)
       readDf.createOrReplaceTempView("employees")
 
       println(s"Total rows: ${readDf.count()}")

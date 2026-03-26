@@ -36,7 +36,7 @@ import org.scalatest.BeforeAndAfterAll
  * Uses delta-spark (Spark SQL) for all Delta table manipulations rather than delta-standalone, providing realistic
  * Delta transaction histories.
  */
-class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -97,13 +97,6 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       f(path)
     } finally
       deleteRecursively(new File(path))
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   private def syncAndCollect(deltaPath: String, indexPath: String): org.apache.spark.sql.Row = {
@@ -1234,7 +1227,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // READ from companion index — should return all 50 rows
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -1262,7 +1255,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       syncAndCollect(deltaPath, indexPath).getString(2) shouldBe "success"
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -1296,7 +1289,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
       syncAndCollect(deltaPath, indexPath).getString(2) shouldBe "success"
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       val count = df.count()
@@ -1336,7 +1329,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Should find all 25 rows
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -1432,7 +1425,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
         .collect()
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // COUNT(*) aggregate pushdown
@@ -1504,7 +1497,7 @@ class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndA
 
       // Verify count still correct after merge
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
       df.count() shouldBe 4
     }

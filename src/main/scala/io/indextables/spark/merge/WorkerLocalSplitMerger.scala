@@ -115,6 +115,9 @@ class WorkerLocalSplitMerger(
 
     require(inputSplits.nonEmpty, "Cannot merge empty split list")
 
+    // Initialize native memory pool before any tantivy4java native calls
+    io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
+
     // Gap #3: Acquire semaphore to limit concurrent merges
     logger.info(s"Acquiring merge semaphore (${mergeSemaphore.availablePermits()} permits available)...")
     mergeSemaphore.acquire()

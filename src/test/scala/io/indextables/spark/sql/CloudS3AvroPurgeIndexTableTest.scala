@@ -124,7 +124,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     (1 to 6).foreach { i =>
       val data = Seq((i, s"test$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "5")
         .mode(if (i == 1) "overwrite" else "append")
@@ -157,7 +157,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     )
 
     // Verify data integrity
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 6, s"Table should still have 6 rows, got ${afterRead.count()}")
 
     println("✅ Avro state directories preserved correctly during PURGE")
@@ -172,7 +172,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files - S3 will set modification time to current time
     val orphan1 = new Path(s"$tablePath/orphan1_${UUID.randomUUID()}.split")
@@ -212,7 +212,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     assert(fs.exists(orphan2), "Recent orphan2 should be kept")
 
     // Verify table data is intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ Avro: S3 modification times correctly received and used for retention filtering")
@@ -235,7 +235,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
       ).toDF("id", "name", "date")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "5")
         .partitionBy("date")
@@ -281,7 +281,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     assert(stateDirectoriesAfter.nonEmpty, "Avro state directory should be preserved")
 
     // Verify table is still intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 12, s"Table should have 12 rows (6 writes × 2 rows), got ${afterRead.count()}")
 
     println("✅ Avro: S3 partitioned table with Avro state handled correctly")
@@ -299,7 +299,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     (1 to 6).foreach { i =>
       val data = Seq((i, s"test$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "5")
         .mode(if (i == 1) "overwrite" else "append")
@@ -331,7 +331,7 @@ class CloudS3AvroPurgeIndexTableTest extends CloudS3TestBase {
     println(s"📊 PURGE DRY RUN completed")
 
     // Verify data integrity after purge planning
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 6, s"Table should still have 6 rows")
 
     println("✅ Avro state directory structure preserved during PURGE operations")

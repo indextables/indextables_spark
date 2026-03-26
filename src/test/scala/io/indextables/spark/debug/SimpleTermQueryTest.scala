@@ -24,16 +24,7 @@ import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery,
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
 /** Simple test to validate that tantivy4java term queries work properly on the indexes we create. */
-class SimpleTermQueryTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class SimpleTermQueryTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   test("tantivy4java direct term query should work") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 
@@ -58,7 +49,7 @@ class SimpleTermQueryTest extends TestBase {
       // Write data using tantivy4spark
       println("💾 Writing data...")
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 

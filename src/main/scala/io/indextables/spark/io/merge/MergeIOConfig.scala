@@ -83,14 +83,12 @@ object MergeIOConfig {
   /** Create configuration from a case-insensitive string map (Spark options). */
   def fromOptions(options: CaseInsensitiveStringMap): MergeIOConfig =
     MergeIOConfig(
-      maxConcurrencyPerCore = getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
-      memoryBudgetBytes = parseBytes(
-        options.getOrDefault(KEY_MEMORY_BUDGET, formatBytes(DEFAULT_MEMORY_BUDGET_BYTES))
-      ),
-      downloadRetries = getIntOption(options, KEY_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_RETRIES),
-      uploadMaxConcurrency = getIntOption(options, KEY_UPLOAD_MAX_CONCURRENCY, DEFAULT_UPLOAD_MAX_CONCURRENCY),
-      retryBaseDelayMs = getLongOption(options, KEY_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
-      retryMaxDelayMs = getLongOption(options, KEY_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS)
+      maxConcurrencyPerCore = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
+      memoryBudgetBytes = parseBytes(options.getOrDefault(KEY_MEMORY_BUDGET, formatBytes(DEFAULT_MEMORY_BUDGET_BYTES))),
+      downloadRetries = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_RETRIES),
+      uploadMaxConcurrency = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_UPLOAD_MAX_CONCURRENCY, DEFAULT_UPLOAD_MAX_CONCURRENCY),
+      retryBaseDelayMs = io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, KEY_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
+      retryMaxDelayMs = io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, KEY_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS)
     ).validate()
 
   /**
@@ -99,10 +97,7 @@ object MergeIOConfig {
    * Key lookup is case-insensitive.
    */
   def fromMap(configs: Map[String, String]): MergeIOConfig = {
-    // Build a case-insensitive lookup map
-    val lowerCaseConfigs = configs.map { case (k, v) => k.toLowerCase -> v }
-    def get(key: String): Option[String] =
-      lowerCaseConfigs.get(key.toLowerCase)
+    val get = io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveLookup(configs)
 
     MergeIOConfig(
       maxConcurrencyPerCore =
@@ -115,29 +110,11 @@ object MergeIOConfig {
     ).validate()
   }
 
-  private def getIntOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Int
-  ): Int = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default else value.toInt
-  }
-
-  private def getLongOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Long
-  ): Long = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default else value.toLong
-  }
-
   /** Parse a byte size string (e.g., "2G", "512M", "1.5G", "1024K") into bytes. */
   def parseBytes(size: String): Long =
-    io.indextables.spark.merge.AsyncMergeOnWriteConfig.parseBytes(size)
+    io.indextables.spark.util.SizeParser.parseSize(size)
 
   /** Format bytes as a human-readable string. */
   def formatBytes(bytes: Long): String =
-    io.indextables.spark.merge.AsyncMergeOnWriteConfig.formatBytes(bytes)
+    io.indextables.spark.util.SizeParser.formatBytes(bytes)
 }

@@ -17,8 +17,8 @@
 
 package io.indextables.spark.sql
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
@@ -46,13 +46,12 @@ object TableRootUtils {
   val DESIGNATOR_NAME_PATTERN = "[a-zA-Z0-9_-]+"
 
   /** Validate a designator name, throwing IllegalArgumentException if invalid. */
-  def validateDesignatorName(name: String): Unit = {
+  def validateDesignatorName(name: String): Unit =
     if (!name.matches(DESIGNATOR_NAME_PATTERN)) {
       throw new IllegalArgumentException(
         s"Invalid table root name '$name': must contain only letters, digits, hyphens, and underscores"
       )
     }
-  }
 
   /** Build a CaseInsensitiveStringMap from Spark config for transaction log access. */
   def buildOptions(
@@ -63,9 +62,7 @@ object TableRootUtils {
     sparkSession.conf.getAll.filter(_._1.startsWith("spark.indextables.")).foreach {
       case (k, v) => optionsMap.put(k, v)
     }
-    credentialOperation.foreach { op =>
-      optionsMap.put("spark.indextables.databricks.credential.operation", op)
-    }
+    credentialOperation.foreach(op => optionsMap.put("spark.indextables.databricks.credential.operation", op))
     new CaseInsensitiveStringMap(optionsMap)
   }
 

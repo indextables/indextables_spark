@@ -193,7 +193,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     // Step 1: Write data to S3
     println(s"✍️  Step 1: Writing data to S3...")
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testTablePath)
 
@@ -201,7 +201,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
 
     // Step 2: Read data back from S3
     println(s"📖 Step 2: Reading data from S3...")
-    val readData  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testTablePath)
+    val readData  = spark.read.format(INDEXTABLES_FORMAT).load(testTablePath)
     val readCount = readData.count()
 
     assert(readCount == 1000, s"Expected 1000 records, got $readCount")
@@ -250,13 +250,13 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
 
     // Write search test data
     searchTestData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(searchTablePath)
 
     try {
       val searchData =
-        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(searchTablePath)
+        spark.read.format(INDEXTABLES_FORMAT).load(searchTablePath)
 
       // Test various IndexQuery operations using SQL
       searchData.createOrReplaceTempView("search_table")
@@ -287,7 +287,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     println(s"📊 Testing cache statistics with S3 data")
 
     // Use existing test data for cache statistics
-    val readData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testTablePath)
+    val readData = spark.read.format(INDEXTABLES_FORMAT).load(testTablePath)
 
     // Perform some operations to populate cache
     val count1 = readData.filter(col("category") === "technology").count()
@@ -353,36 +353,36 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
       // Step 1: Initial write
       val initialData = generateTestDataset(300, "initial")
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(multiOpTablePath)
 
       val count1 =
-        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
+        spark.read.format(INDEXTABLES_FORMAT).load(multiOpTablePath).count()
       assert(count1 == 300, s"Initial write: expected 300, got $count1")
       println(s"📝 Initial write: $count1 records")
 
       // Step 2: Append more data
       val appendData = generateTestDataset(200, "append")
       appendData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(multiOpTablePath)
 
       val count2 =
-        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
+        spark.read.format(INDEXTABLES_FORMAT).load(multiOpTablePath).count()
       assert(count2 == 500, s"After append: expected 500, got $count2")
       println(s"📝 After append: $count2 records")
 
       // Step 3: Overwrite data
       val overwriteData = generateTestDataset(400, "overwrite")
       overwriteData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(multiOpTablePath)
 
       val count3 =
-        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
+        spark.read.format(INDEXTABLES_FORMAT).load(multiOpTablePath).count()
       assert(count3 == 400, s"After overwrite: expected 400, got $count3")
       println(s"📝 After overwrite: $count3 records")
 

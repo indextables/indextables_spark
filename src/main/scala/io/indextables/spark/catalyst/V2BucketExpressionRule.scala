@@ -244,7 +244,8 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
         // Without this, Spark's final aggregate expects DoubleType (the field's type),
         // causing string keys to be cast to 0.0 and all buckets to collapse into one.
         val typedRef = AttributeReference(fieldRef.name, StringType, fieldRef.nullable, fieldRef.metadata)(
-          fieldRef.exprId, fieldRef.qualifier
+          fieldRef.exprId,
+          fieldRef.qualifier
         )
         (config, typedRef)
 

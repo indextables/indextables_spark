@@ -248,14 +248,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write test data - url as text type for IndexQuery support
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.url", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_urls")
@@ -317,14 +317,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write test data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.url", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_mixed")
@@ -374,14 +374,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write test data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_nested")
@@ -432,14 +432,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write test data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_not")
@@ -486,14 +486,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write test data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.url", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_sql_or")
@@ -534,7 +534,7 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write test data with both content and tags as text fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.tags", "text")
         .mode("overwrite")
@@ -542,7 +542,7 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_indexall")
@@ -583,13 +583,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "status")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("test_nonexistent")
@@ -635,7 +635,7 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write as partitioned table
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("load_date")
         .option("spark.indextables.indexing.typemap.message", "text")
         .mode("overwrite")
@@ -643,7 +643,7 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Read back
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("partitioned_data")
@@ -691,14 +691,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
 
       // Write as partitioned table
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("partition_col")
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("partition_or_test")
@@ -748,14 +748,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "date_partition", "priority", "content")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("date_partition")
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("complex_partition_test")
@@ -840,13 +840,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "title")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.title", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("multi_or_test")
@@ -893,13 +893,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "code")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("not_mixed_test")
@@ -944,14 +944,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content1", "content2", "idcol", "codeval")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content1", "text")
         .option("spark.indextables.indexing.typemap.content2", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("not_complex_or_test")
@@ -1001,13 +1001,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "status")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("double_not_test")
@@ -1050,14 +1050,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "field1", "field2")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.field1", "text")
         .option("spark.indextables.indexing.typemap.field2", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("multi_field_and_test")
@@ -1094,14 +1094,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "field1", "field2")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.field1", "text")
         .option("spark.indextables.indexing.typemap.field2", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("multi_field_or_test")
@@ -1138,14 +1138,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "title", "tags", "status")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.title", "text")
         .option("spark.indextables.indexing.typemap.tags", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("indexall_combined_test")
@@ -1183,14 +1183,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "title", "category")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.title", "text")
         .option("spark.indextables.indexing.typemap.category", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("indexall_or_specific_test")
@@ -1229,13 +1229,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "priority")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("range_pred_test")
@@ -1274,13 +1274,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "status")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("in_clause_test")
@@ -1319,13 +1319,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "status")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("string_eq_test")
@@ -1364,13 +1364,13 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "content", "category", "status", "score")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("deep_nested_test")
@@ -1417,14 +1417,14 @@ class IndexQueryBooleanTest extends AnyFunSuite with TestBase {
       ).toDF("id", "date_part", "content")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("date_part")
         .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       df.createOrReplaceTempView("partition_or_indexquery_test")

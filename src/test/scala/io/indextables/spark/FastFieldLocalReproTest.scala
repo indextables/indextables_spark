@@ -135,7 +135,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -148,7 +148,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -160,7 +160,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     // EXACT SAME PRE-MERGE VERIFICATION AS TEST 647 (lines 685-695)
     println(s"🔍 Pre-merge data verification...")
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val preMergeCount = preMergeData.count()
@@ -184,7 +184,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     // EXACT SAME POST-MERGE VERIFICATION AS TEST 647 (lines 707-723)
     println(s"🔍 Post-merge data verification...")
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val postMergeCount = postMergeData.count()
@@ -244,7 +244,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -256,7 +256,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -274,7 +274,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
 
     println(s"🔍 Pre-merge data verification...")
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -299,7 +299,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     // Verify data integrity after merge
     println(s"🔍 Post-merge data verification...")
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 

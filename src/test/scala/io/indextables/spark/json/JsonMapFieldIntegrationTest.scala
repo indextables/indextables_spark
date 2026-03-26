@@ -35,12 +35,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "attributes")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2
@@ -70,12 +70,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "counters")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2
@@ -105,12 +105,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "metrics")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2
@@ -141,12 +141,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "attributes")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 3
@@ -167,12 +167,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "attributes", "counters")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2
@@ -200,12 +200,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "lookup")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2
@@ -236,12 +236,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "attributes")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2
@@ -261,12 +261,12 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       val df = spark.createDataFrame(data).toDF("id", "metrics")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 2

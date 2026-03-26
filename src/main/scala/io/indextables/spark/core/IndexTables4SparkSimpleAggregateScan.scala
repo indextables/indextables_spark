@@ -37,7 +37,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.filters.MixedBooleanFilter
-import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLogInterface}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
@@ -48,7 +48,7 @@ import org.slf4j.LoggerFactory
  */
 class IndexTables4SparkSimpleAggregateScan(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
@@ -180,7 +180,7 @@ class IndexTables4SparkSimpleAggregateScan(
 /** Batch implementation for simple aggregations. */
 class IndexTables4SparkSimpleAggregateBatch(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
@@ -384,7 +384,7 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
   indexQueryFilters: Array[Any] = Array.empty)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
+  private val logger          = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
   private val arrowFfiEnabled = io.indextables.spark.arrow.AggregationArrowFfiConfig.isEnabled(config)
 
   logger.debug(s"SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled")
@@ -429,7 +429,9 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
         new MultiSplitSimpleAggregateColumnarReader(multiSplitPartition, sparkSession)
 
       case simpleAggPartition: IndexTables4SparkSimpleAggregatePartition =>
-        logger.info(s"SIMPLE AGGREGATE READER FACTORY: Creating columnar reader for split ${simpleAggPartition.split.path}")
+        logger.info(
+          s"SIMPLE AGGREGATE READER FACTORY: Creating columnar reader for split ${simpleAggPartition.split.path}"
+        )
         new SimpleAggregateColumnarReader(simpleAggPartition, sparkSession)
 
       case other =>

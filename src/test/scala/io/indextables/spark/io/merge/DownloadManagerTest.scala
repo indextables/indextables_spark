@@ -26,7 +26,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
-class DownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
+class DownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var tempDir: File = _
 
@@ -37,13 +37,6 @@ class DownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterE
     if (tempDir != null && tempDir.exists()) {
       deleteRecursively(tempDir)
     }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 
   test("submitBatch should download all files successfully") {
     val manager = new CloudDownloadManager(MergeIOConfig(maxConcurrencyPerCore = 2))

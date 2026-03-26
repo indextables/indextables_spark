@@ -187,7 +187,7 @@ class CloudS3IntegrationJustMergeTest extends CloudS3TestBase {
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -195,7 +195,7 @@ class CloudS3IntegrationJustMergeTest extends CloudS3TestBase {
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -205,7 +205,7 @@ class CloudS3IntegrationJustMergeTest extends CloudS3TestBase {
     // Verify data exists before merge
     val readOptions = getReadOptions()
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -227,7 +227,7 @@ class CloudS3IntegrationJustMergeTest extends CloudS3TestBase {
 
     // Verify data integrity after merge
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 

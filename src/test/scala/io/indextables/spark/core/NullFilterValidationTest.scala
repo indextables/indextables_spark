@@ -47,7 +47,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with email configured as fast field
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,email,score")
         .mode("overwrite")
         .save(path)
@@ -56,7 +56,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // First, read all data without filter to verify data exists
       val allData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       println(s"=== DEBUG: All data (no filter) ===")
@@ -65,7 +65,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Read and filter for non-null emails
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("email").isNotNull)
 
@@ -98,14 +98,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with email configured as fast field
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,email,score")
         .mode("overwrite")
         .save(path)
 
       // Read and filter for null emails
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("email").isNull)
 
@@ -130,7 +130,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with only score as fast field (name is NOT fast)
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(path)
@@ -138,7 +138,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       // IS NOT NULL on non-fast field is NOT pushed down to Tantivy
       // Instead, Spark handles the filter after reading all data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("name").isNotNull)
         .collect()
@@ -164,7 +164,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with only score as fast field (name is NOT fast)
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(path)
@@ -172,7 +172,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       // IS NULL on non-fast field is NOT pushed down to Tantivy
       // Instead, Spark handles the filter after reading all data
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("name").isNull)
         .collect()
@@ -196,14 +196,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
         .toDF("id", "name", "score")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,name,score")
         .mode("overwrite")
         .save(path)
 
       // Attempt to use IS NOT NULL on non-existent field
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Spark's schema validation throws ExtendedAnalysisException before our validation kicks in
@@ -235,14 +235,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with all fields as fast
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,status,score")
         .mode("overwrite")
         .save(path)
 
       // Filter: status IS NOT NULL AND score > 200
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("status").isNotNull && col("score") > 200)
 
@@ -269,14 +269,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
         .toDF("id", "status", "score")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,status,score")
         .mode("overwrite")
         .save(path)
 
       // Count where status IS NOT NULL
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("status").isNotNull)
         .count()
@@ -302,14 +302,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
         .toDF("id", "name", "score")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "id,name,score")
         .mode("overwrite")
         .save(path)
 
       // Filter: name IS NULL OR score < 150
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("name").isNull || col("score") < 150)
 
@@ -340,7 +340,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with message_content as TEXT (not FAST) - typical for log/message fields
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.message_content", "text")
         // Note: NOT adding message_content to fastfields
         .mode("overwrite")
@@ -349,7 +349,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       // This is the exact query pattern that was failing:
       // SELECT * FROM table WHERE text_field IS NULL
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("message_content").isNull)
 
@@ -378,7 +378,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
         .toDF("id", "log_message")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.log_message", "text")
         .mode("overwrite")
         .save(path)
@@ -386,7 +386,7 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       // COUNT with IS NULL on non-FAST text field should work
       // Spark handles the filter via post-filtering
       val count = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("log_message").isNull)
         .count()
@@ -413,14 +413,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
 
       // Write with message_content as TEXT (not FAST)
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.message_content", "text")
         .mode("overwrite")
         .save(path)
 
       // SELECT * WHERE text_field IS NOT NULL
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("message_content").isNotNull)
 
@@ -449,14 +449,14 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
         .toDF("id", "log_message")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.log_message", "text")
         .mode("overwrite")
         .save(path)
 
       // COUNT with IS NOT NULL on non-FAST text field should work
       val count = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
         .filter(col("log_message").isNotNull)
         .count()

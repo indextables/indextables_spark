@@ -23,30 +23,23 @@ import org.apache.spark.sql.connector.write.RequiresDistributionAndOrdering
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 
 class OptimizedWriteIntegrationTest extends TestBase {
 
-  private val FORMAT = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val FORMAT = INDEXTABLES_FORMAT
   private val GB     = 1024L * 1024 * 1024
 
   // Helper to create a TransactionLog for direct API testing
-  private def createTxLog(tablePath: Path): TransactionLog = {
-    import scala.jdk.CollectionConverters._
-    new TransactionLog(
-      tablePath,
-      spark,
-      new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-        Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava
-      )
-    )
+  private def createTxLog(tablePath: Path): TransactionLogInterface = {
+    TransactionLogFactory.create(tablePath, spark)
   }
 
   // Helper to create a WriteBuilder for API testing
   private def createWriteBuilder(
     tablePath: Path,
-    txLog: TransactionLog,
+    txLog: TransactionLogInterface,
     extraOptions: Map[String, String] = Map.empty,
     schemaFields: Seq[(String, String)] = Seq("id" -> "long", "text" -> "string")
   ): io.indextables.spark.core.IndexTables4SparkWriteBuilder = {

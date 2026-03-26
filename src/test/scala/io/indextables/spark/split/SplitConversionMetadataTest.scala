@@ -44,7 +44,7 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -65,7 +65,7 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -76,7 +76,7 @@ class SplitConversionMetadataTest extends TestBase {
     //   TANT path: part-NNNNN-N-UUID.split
     //   Arrow FFI path: part-UUID.split (Rust-generated)
     // UUID format: 8-4-4-4-12 hex digits
-    val uuidPattern = """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
+    val uuidPattern  = """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
     val splitPattern = s"""^part-(?:\\d+-\\d+-)?$uuidPattern\\.split$$""".r
 
     splitFiles.foreach { f =>
@@ -94,13 +94,13 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read and verify data
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -126,12 +126,12 @@ class SplitConversionMetadataTest extends TestBase {
     val expectedCount = 1234
     val df            = spark.range(0, expectedCount).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe expectedCount
@@ -145,19 +145,19 @@ class SplitConversionMetadataTest extends TestBase {
     // Initial write
     val df1 = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Append
     val df2 = spark.range(500, 800).selectExpr("id", "CAST(id AS STRING) as text")
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("append")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 800
@@ -171,12 +171,12 @@ class SplitConversionMetadataTest extends TestBase {
     // Create empty DataFrame with schema
     val emptyDf = spark.range(0, 0).selectExpr("id", "CAST(id AS STRING) as text")
     emptyDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 0
@@ -198,12 +198,12 @@ class SplitConversionMetadataTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text", "score", "active", "date")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Verify schema has all fields
@@ -228,12 +228,12 @@ class SplitConversionMetadataTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("first", "second", "third", "fourth", "fifth")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val fields = result.schema.fieldNames.toSeq
@@ -254,12 +254,12 @@ class SplitConversionMetadataTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 3
@@ -282,13 +282,13 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(0, 1000).repartition(20).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.splitConversion.maxParallelism", "4")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -302,12 +302,12 @@ class SplitConversionMetadataTest extends TestBase {
     // Create many partitions
     val df = spark.range(0, 2000).repartition(50).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2000
@@ -324,13 +324,13 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(0, 500).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.heapSize", "50M")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -347,29 +347,29 @@ class SplitConversionMetadataTest extends TestBase {
 
     // Test M (megabytes)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.heapSize", "100M")
       .mode("overwrite")
       .save(tablePath1)
 
     // Test G (gigabytes)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.heapSize", "1G")
       .mode("overwrite")
       .save(tablePath2)
 
     // Test K (kilobytes)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.heapSize", "102400K")
       .mode("overwrite")
       .save(tablePath3)
 
     // Verify all wrote successfully
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath1).count() shouldBe 100
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath2).count() shouldBe 100
-    spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath3).count() shouldBe 100
+    spark.read.format(INDEXTABLES_FORMAT).load(tablePath1).count() shouldBe 100
+    spark.read.format(INDEXTABLES_FORMAT).load(tablePath2).count() shouldBe 100
+    spark.read.format(INDEXTABLES_FORMAT).load(tablePath3).count() shouldBe 100
 
     logger.info("Heap size format test passed")
   }
@@ -383,13 +383,13 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(0, 1000).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "100")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -406,12 +406,12 @@ class SplitConversionMetadataTest extends TestBase {
 
     val df = spark.range(100, 200).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Statistics should enable efficient filtering
@@ -432,14 +432,14 @@ class SplitConversionMetadataTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "long_text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.stats.truncation.enabled", "true")
       .option("spark.indextables.stats.truncation.maxLength", "32")
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 2

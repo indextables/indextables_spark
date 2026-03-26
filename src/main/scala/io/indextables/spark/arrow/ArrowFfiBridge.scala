@@ -37,6 +37,8 @@ class ArrowFfiBridge extends AutoCloseable {
   // NOTE: dictionaryProvider accumulates state across importAsColumnarBatch calls.
   // Safe for single-batch-per-reader model but would need per-batch cleanup for multi-batch streaming.
   private val dictionaryProvider = new CDataDictionaryProvider()
+  // Per-batch provider created by importAsColumnarBatchStreaming; replaced each batch.
+  private var currentStreamingProvider: CDataDictionaryProvider = _
 
   /**
    * Allocate Arrow C structs for the given number of columns.
@@ -108,13 +110,77 @@ class ArrowFfiBridge extends AutoCloseable {
     }
   }
 
-  override def close(): Unit =
+  /**
+   * Import filled Arrow C structs into a Spark ColumnarBatch using a fresh dictionary provider.
+   *
+   * Unlike [[importAsColumnarBatch]], this method creates a new CDataDictionaryProvider per call, making it safe for
+   * multi-batch streaming where batches are consumed and closed independently. The provider's lifetime is tied to the
+   * FieldVectors in the returned ColumnarBatch.
+   */
+  def importAsColumnarBatchStreaming(
+    arrays: Array[ArrowArray],
+    schemas: Array[ArrowSchema],
+    numRows: Int
+  ): ColumnarBatch = {
+    val batchProvider   = new CDataDictionaryProvider()
+    val importedVectors = new scala.collection.mutable.ArrayBuffer[ArrowColumnVector](arrays.length)
+    try {
+      arrays.zip(schemas).foreach {
+        case (arr, sch) =>
+          val fieldVector: FieldVector = Data.importVector(allocator, arr, sch, batchProvider)
+          importedVectors += new ArrowColumnVector(fieldVector)
+      }
+      logger.debug(s"Imported ${importedVectors.size} Arrow vectors (streaming) with $numRows rows")
+      // Replace provider: assign new before closing old so batchProvider is safe if close throws.
+      // The old provider's vectors were already closed by the reader's closePreviousBatch().
+      val oldProvider = currentStreamingProvider
+      currentStreamingProvider = batchProvider
+      if (oldProvider != null) {
+        try oldProvider.close()
+        catch { case _: Exception => }
+      }
+      new ColumnarBatch(importedVectors.toArray, numRows)
+    } catch {
+      case ex: Exception =>
+        importedVectors.foreach(v =>
+          try v.close()
+          catch { case _: Exception => }
+        )
+        arrays
+          .drop(importedVectors.size)
+          .foreach(a =>
+            try a.close()
+            catch { case _: Exception => }
+          )
+        schemas
+          .drop(importedVectors.size)
+          .foreach(s =>
+            try s.close()
+            catch { case _: Exception => }
+          )
+        try batchProvider.close()
+        catch { case _: Exception => }
+        throw ex
+    }
+  }
+
+  private def closeCurrentStreamingProvider(): Unit =
+    if (currentStreamingProvider != null) {
+      try currentStreamingProvider.close()
+      catch { case _: Exception => }
+      currentStreamingProvider = null
+    }
+
+  override def close(): Unit = {
+    closeCurrentStreamingProvider()
+
     try
       dictionaryProvider.close()
     catch {
       case e: Exception =>
         logger.warn("Error closing Arrow dictionary provider", e)
     }
+  }
 }
 
 object ArrowFfiBridge {

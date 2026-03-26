@@ -28,16 +28,7 @@ import io.indextables.spark.TestBase
  * Isolated test for the failing "should handle equality and IN queries" test. This helps debug schema consistency and
  * dirty table issues.
  */
-class EqualityAndInQueriesTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class EqualityAndInQueriesTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   private def createCategoricalDataFrame(): DataFrame = {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
@@ -78,7 +69,7 @@ class EqualityAndInQueriesTest extends TestBase {
       // Write data
       println("💾 Writing data...")
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -87,7 +78,7 @@ class EqualityAndInQueriesTest extends TestBase {
       // Read the data back
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println(s"📊 Read back ${readData.count()} rows")

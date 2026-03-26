@@ -23,7 +23,7 @@ import org.apache.spark.sql.{DataFrame, SaveMode}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLogInterface}
 import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 
@@ -34,7 +34,7 @@ import org.scalatest.BeforeAndAfterEach
 class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
 
   private var testTablePath: Path            = _
-  private var transactionLog: TransactionLog = _
+  private var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -91,7 +91,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     complexData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
 
@@ -163,19 +163,19 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     batch1
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
     batch2
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(testTablePath.toString)
     batch3
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(testTablePath.toString)
 
@@ -208,7 +208,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     uniformData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
 
@@ -220,7 +220,10 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     // Verify that min equals max for uniform columns
     assert(minVals("name") == "SameName" && maxVals("name") == "SameName", "Uniform string column should have min=max")
     assert(minVals("age") == "30" && maxVals("age") == "30", "Uniform int column should have min=max")
-    assert(minVals("salary").toDouble == 75000.0 && maxVals("salary").toDouble == 75000.0, "Uniform double column should have min=max")
+    assert(
+      minVals("salary").toDouble == 75000.0 && maxVals("salary").toDouble == 75000.0,
+      "Uniform double column should have min=max"
+    )
     assert(
       minVals("department") == "Engineering" && maxVals("department") == "Engineering",
       "Uniform string column should have min=max"
@@ -242,7 +245,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     singleRecord
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
 
@@ -267,7 +270,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
 
@@ -300,7 +303,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     initial
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
 
@@ -315,7 +318,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     append1
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(testTablePath.toString)
 
@@ -330,7 +333,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     append2
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(testTablePath.toString)
 

@@ -20,11 +20,11 @@ package io.indextables.spark.core
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.expressions.aggregate._
 import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.ColumnarBatch
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.arrow.AggregationArrowFfiHelper
 import io.indextables.spark.filters.MixedBooleanFilter
@@ -45,11 +45,11 @@ class SimpleAggregateColumnarReader(
   sparkSession: SparkSession)
     extends PartitionReader[ColumnarBatch] {
 
-  private val logger      = LoggerFactory.getLogger(classOf[SimpleAggregateColumnarReader])
-  private val helper      = new AggregationArrowFfiHelper()
+  private val logger               = LoggerFactory.getLogger(classOf[SimpleAggregateColumnarReader])
+  private val helper               = new AggregationArrowFfiHelper()
   private var batch: ColumnarBatch = _
-  private var consumed    = false
-  private var initialized = false
+  private var consumed             = false
+  private var initialized          = false
 
   override def next(): Boolean = {
     if (consumed) return false
@@ -116,7 +116,7 @@ class SimpleAggregateColumnarReader(
       // Uses multiSplitMultiAggregateArrowFfi with single searcher — searches once, exports all aggs
       val aggregations = buildAggregations()
       val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
-      val searchers = new java.util.ArrayList[io.indextables.tantivy4java.split.SplitSearcher]()
+      val searchers    = new java.util.ArrayList[io.indextables.tantivy4java.split.SplitSearcher]()
       searchers.add(searcher)
 
       val ffiBatches = helper.executeMultiSplitMultiAgg(cacheManager, searchers, queryAstJson, aggregations)
@@ -133,26 +133,29 @@ class SimpleAggregateColumnarReader(
         val readSchema = createSimpleAggregateReadSchema()
         val arrowTypes = deriveArrowTypes()
         batch = helper.combineSingleRowBatches(ffiBatches, readSchema, arrowTypes)
-        logger.debug(s"SimpleAggregateColumnarReader: assembled batch with ${readSchema.fields.length} columns (single-pass)")
+        logger.debug(
+          s"SimpleAggregateColumnarReader: assembled batch with ${readSchema.fields.length} columns (single-pass)"
+        )
 
-      } finally {
-        ffiBatches.foreach(b => try b.close() catch { case _: Exception => })
-      }
+      } finally
+        ffiBatches.foreach(b =>
+          try b.close()
+          catch { case _: Exception => }
+        )
 
     } catch {
-      case e: IllegalArgumentException => throw e
+      case e: IllegalArgumentException                                 => throw e
       case e: io.indextables.spark.exceptions.IndexQueryParseException => throw e
       case e: Exception =>
-        throw new RuntimeException(
-          s"SimpleAggregateColumnarReader: failed for split ${partition.split.path}", e)
+        throw new RuntimeException(s"SimpleAggregateColumnarReader: failed for split ${partition.split.path}", e)
     }
   }
 
   private def deriveArrowTypes(): Array[String] =
     partition.aggregation.aggregateExpressions.map {
-      case _: Count | _: CountStar => "Int64"
+      case _: Count | _: CountStar  => "Int64"
       case _: Sum | _: Min | _: Max => "Float64"
-      case _ => ""
+      case _                        => ""
     }
 
   private def buildQueryAstJson(splitSearchEngine: SplitSearchEngine): String = {
@@ -232,15 +235,14 @@ class SimpleAggregateColumnarReader(
     result.toArray
   }
 
-  private def hasZeroCount(ffiBatches: Array[ColumnarBatch]): Boolean = {
+  private def hasZeroCount(ffiBatches: Array[ColumnarBatch]): Boolean =
     // Find COUNT or COUNT(*) batch and check if value is 0
-    partition.aggregation.aggregateExpressions.zipWithIndex.collectFirst {
-      case (_: Count, idx) if idx < ffiBatches.length     => ffiBatches(idx)
-      case (_: CountStar, idx) if idx < ffiBatches.length => ffiBatches(idx)
-    }.exists { countBatch =>
-      countBatch.numRows() > 0 && countBatch.column(0).getLong(0) == 0L
-    }
-  }
+    partition.aggregation.aggregateExpressions.zipWithIndex
+      .collectFirst {
+        case (_: Count, idx) if idx < ffiBatches.length     => ffiBatches(idx)
+        case (_: CountStar, idx) if idx < ffiBatches.length => ffiBatches(idx)
+      }
+      .exists(countBatch => countBatch.numRows() > 0 && countBatch.column(0).getLong(0) == 0L)
 
   private def createSimpleAggregateReadSchema(): StructType = {
     val fields = partition.aggregation.aggregateExpressions.zipWithIndex.map {
@@ -267,7 +269,7 @@ class SimpleAggregateColumnarReader(
   }
 
   private def getInputFieldType(aggExpr: AggregateFunc): DataType = {
-    val column = aggExpr.children().headOption.getOrElse(return LongType)
+    val column    = aggExpr.children().headOption.getOrElse(return LongType)
     val fieldName = extractFieldName(column)
     partition.schema.fields.find(_.name == fieldName).map(_.dataType).getOrElse(LongType)
   }
@@ -277,7 +279,8 @@ class SimpleAggregateColumnarReader(
     else io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
 
   private def selectCountStarField(): String = {
-    val numericTypes: Set[DataType] = Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
+    val numericTypes: Set[DataType] =
+      Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
 
     // Prefer companion tracking fields
     val fastFields = EnhancedTransactionLogCache.getDocMappingMetadata(partition.split).fastFields
@@ -303,10 +306,12 @@ class SimpleAggregateColumnarReader(
           .find(f => numericTypes.contains(f.dataType))
           .orElse(partition.schema.fields.find(_.dataType == StringType))
           .map(_.name)
-          .getOrElse(throw new IllegalArgumentException(
-            "COUNT(*) aggregation requires at least one fast field. " +
-              "Please configure a fast field using spark.indextables.indexing.fastfields."
-          ))
+          .getOrElse(
+            throw new IllegalArgumentException(
+              "COUNT(*) aggregation requires at least one fast field. " +
+                "Please configure a fast field using spark.indextables.indexing.fastfields."
+            )
+          )
       }
     }
   }
@@ -315,19 +320,19 @@ class SimpleAggregateColumnarReader(
 /**
  * Columnar partition reader for multi-split simple aggregations using Arrow FFI.
  *
- * Uses native `SplitCacheManager.multiSplitAggregateArrowFfi()` which searches each split,
- * merges intermediate results via native `merge_fruits()`, and exports merged Arrow data.
+ * Uses native `SplitCacheManager.multiSplitAggregateArrowFfi()` which searches each split, merges intermediate results
+ * via native `merge_fruits()`, and exports merged Arrow data.
  */
 class MultiSplitSimpleAggregateColumnarReader(
   partition: IndexTables4SparkMultiSplitSimpleAggregatePartition,
   sparkSession: SparkSession)
     extends PartitionReader[ColumnarBatch] {
 
-  private val logger      = LoggerFactory.getLogger(classOf[MultiSplitSimpleAggregateColumnarReader])
-  private val helper      = new AggregationArrowFfiHelper()
+  private val logger               = LoggerFactory.getLogger(classOf[MultiSplitSimpleAggregateColumnarReader])
+  private val helper               = new AggregationArrowFfiHelper()
   private var batch: ColumnarBatch = _
-  private var consumed    = false
-  private var initialized = false
+  private var consumed             = false
+  private var initialized          = false
 
   override def next(): Boolean = {
     if (consumed) return false
@@ -363,17 +368,24 @@ class MultiSplitSimpleAggregateColumnarReader(
       val searchers = new java.util.ArrayList[io.indextables.tantivy4java.split.SplitSearcher]()
       partition.splits.foreach { split =>
         val resolvedPath = PathResolutionUtils.resolveSplitPathAsString(
-          split.path, partition.tablePath.toString
+          split.path,
+          partition.tablePath.toString
         )
         val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
-          resolvedPath, partition.config
+          resolvedPath,
+          partition.config
         )
         val splitMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(
-          split, partition.tablePath.toString
+          split,
+          partition.tablePath.toString
         )
         val options = Some(IndexTables4SparkOptions(partition.config))
         val engine = SplitSearchEngine.fromSplitFileWithMetadata(
-          partition.schema, splitPath, splitMetadata, cacheConfig, options
+          partition.schema,
+          splitPath,
+          splitMetadata,
+          cacheConfig,
+          options
         )
         searchers.add(engine.getSplitSearcher())
       }
@@ -381,28 +393,36 @@ class MultiSplitSimpleAggregateColumnarReader(
       // Build query from filters using first split's engine
       val firstSplit = partition.splits.head
       val firstResolvedPath = PathResolutionUtils.resolveSplitPathAsString(
-        firstSplit.path, partition.tablePath.toString
+        firstSplit.path,
+        partition.tablePath.toString
       )
       val firstSplitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
-        firstResolvedPath, partition.config
+        firstResolvedPath,
+        partition.config
       )
       val firstMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(
-        firstSplit, partition.tablePath.toString
+        firstSplit,
+        partition.tablePath.toString
       )
       val firstEngine = SplitSearchEngine.fromSplitFileWithMetadata(
-        partition.schema, firstSplitPath, firstMetadata, cacheConfig,
+        partition.schema,
+        firstSplitPath,
+        firstMetadata,
+        cacheConfig,
         Some(IndexTables4SparkOptions(partition.config))
       )
       val queryAstJson = buildQueryAstJson(firstEngine)
 
       // Build aggregations and execute via native multi-split single-pass FFI (FR-C)
       val aggregations = buildAggregations()
-      val ffiBatches = helper.executeMultiSplitMultiAgg(cacheManager, searchers, queryAstJson, aggregations)
+      val ffiBatches   = helper.executeMultiSplitMultiAgg(cacheManager, searchers, queryAstJson, aggregations)
 
       try {
         // Check for zero-count
         if (hasZeroCount(ffiBatches)) {
-          logger.debug(s"MultiSplitSimpleAggregateColumnarReader: no matching docs across ${partition.splits.length} splits")
+          logger.debug(
+            s"MultiSplitSimpleAggregateColumnarReader: no matching docs across ${partition.splits.length} splits"
+          )
           batch = null
           return
         }
@@ -413,24 +433,28 @@ class MultiSplitSimpleAggregateColumnarReader(
         batch = helper.combineSingleRowBatches(ffiBatches, readSchema, arrowTypes)
         logger.debug(s"MultiSplitSimpleAggregateColumnarReader: assembled batch with ${readSchema.fields.length} columns from ${partition.splits.length} splits (single-pass)")
 
-      } finally {
-        ffiBatches.foreach(b => try b.close() catch { case _: Exception => })
-      }
+      } finally
+        ffiBatches.foreach(b =>
+          try b.close()
+          catch { case _: Exception => }
+        )
 
     } catch {
-      case e: IllegalArgumentException => throw e
+      case e: IllegalArgumentException                                 => throw e
       case e: io.indextables.spark.exceptions.IndexQueryParseException => throw e
       case e: Exception =>
         throw new RuntimeException(
-          s"MultiSplitSimpleAggregateColumnarReader: failed for ${partition.splits.length} splits", e)
+          s"MultiSplitSimpleAggregateColumnarReader: failed for ${partition.splits.length} splits",
+          e
+        )
     }
   }
 
   private def deriveArrowTypes(): Array[String] =
     partition.aggregation.aggregateExpressions.map {
-      case _: Count | _: CountStar => "Int64"
+      case _: Count | _: CountStar  => "Int64"
       case _: Sum | _: Min | _: Max => "Float64"
-      case _ => ""
+      case _                        => ""
     }
 
   private def buildQueryAstJson(splitSearchEngine: SplitSearchEngine): String = {
@@ -503,14 +527,13 @@ class MultiSplitSimpleAggregateColumnarReader(
     result.toArray
   }
 
-  private def hasZeroCount(ffiBatches: Array[ColumnarBatch]): Boolean = {
-    partition.aggregation.aggregateExpressions.zipWithIndex.collectFirst {
-      case (_: Count, idx) if idx < ffiBatches.length     => ffiBatches(idx)
-      case (_: CountStar, idx) if idx < ffiBatches.length => ffiBatches(idx)
-    }.exists { countBatch =>
-      countBatch.numRows() > 0 && countBatch.column(0).getLong(0) == 0L
-    }
-  }
+  private def hasZeroCount(ffiBatches: Array[ColumnarBatch]): Boolean =
+    partition.aggregation.aggregateExpressions.zipWithIndex
+      .collectFirst {
+        case (_: Count, idx) if idx < ffiBatches.length     => ffiBatches(idx)
+        case (_: CountStar, idx) if idx < ffiBatches.length => ffiBatches(idx)
+      }
+      .exists(countBatch => countBatch.numRows() > 0 && countBatch.column(0).getLong(0) == 0L)
 
   private def createSimpleAggregateReadSchema(): StructType = {
     val fields = partition.aggregation.aggregateExpressions.zipWithIndex.map {
@@ -537,7 +560,7 @@ class MultiSplitSimpleAggregateColumnarReader(
   }
 
   private def getInputFieldType(aggExpr: AggregateFunc): DataType = {
-    val column = aggExpr.children().headOption.getOrElse(return LongType)
+    val column    = aggExpr.children().headOption.getOrElse(return LongType)
     val fieldName = extractFieldName(column)
     partition.schema.fields.find(_.name == fieldName).map(_.dataType).getOrElse(LongType)
   }
@@ -547,7 +570,8 @@ class MultiSplitSimpleAggregateColumnarReader(
     else io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
 
   private def selectCountStarField(): String = {
-    val numericTypes: Set[DataType] = Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
+    val numericTypes: Set[DataType] =
+      Set(IntegerType, LongType, FloatType, DoubleType, DateType, TimestampType, BooleanType)
 
     val fastFields = EnhancedTransactionLogCache.getDocMappingMetadata(partition.splits.head).fastFields
     if (fastFields.contains("__pq_file_hash")) return "__pq_file_hash"
@@ -571,10 +595,12 @@ class MultiSplitSimpleAggregateColumnarReader(
           .find(f => numericTypes.contains(f.dataType))
           .orElse(partition.schema.fields.find(_.dataType == StringType))
           .map(_.name)
-          .getOrElse(throw new IllegalArgumentException(
-            "COUNT(*) aggregation requires at least one fast field. " +
-              "Please configure a fast field using spark.indextables.indexing.fastfields."
-          ))
+          .getOrElse(
+            throw new IllegalArgumentException(
+              "COUNT(*) aggregation requires at least one fast field. " +
+                "Please configure a fast field using spark.indextables.indexing.fastfields."
+            )
+          )
       }
     }
   }

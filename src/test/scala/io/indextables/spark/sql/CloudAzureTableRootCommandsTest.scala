@@ -79,7 +79,7 @@ class CloudAzureTableRootCommandsTest extends CloudAzureTestBase {
     val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
   }

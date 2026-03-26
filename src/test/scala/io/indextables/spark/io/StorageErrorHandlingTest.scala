@@ -54,7 +54,7 @@ class StorageErrorHandlingTest extends TestBase {
     // Create table with data
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -68,7 +68,7 @@ class StorageErrorHandlingTest extends TestBase {
 
       // Read should handle missing file gracefully or fail with clear error
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       // Depending on implementation, this might return partial results or fail
@@ -93,7 +93,7 @@ class StorageErrorHandlingTest extends TestBase {
     // Create table with data
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -106,7 +106,7 @@ class StorageErrorHandlingTest extends TestBase {
       Files.write(splitFiles.head.toPath, "corrupted data".getBytes)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       try {
@@ -128,7 +128,7 @@ class StorageErrorHandlingTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -141,7 +141,7 @@ class StorageErrorHandlingTest extends TestBase {
       Files.write(splitFiles.head.toPath, Array.emptyByteArray)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
       try {
@@ -168,12 +168,12 @@ class StorageErrorHandlingTest extends TestBase {
     // Write to non-existent nested directory - should either create it or fail cleanly
     try {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .save(nonExistentPath)
 
       // Verify data was written
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(nonExistentPath)
       result.count() shouldBe 100
 
@@ -197,7 +197,7 @@ class StorageErrorHandlingTest extends TestBase {
 
     try {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
       fail("Should have thrown exception for read-only directory")
@@ -221,7 +221,7 @@ class StorageErrorHandlingTest extends TestBase {
     // Create table with data
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -238,7 +238,7 @@ class StorageErrorHandlingTest extends TestBase {
 
         try {
           val result = spark.read
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(INDEXTABLES_FORMAT)
             .load(tablePath)
           result.count()
           logger.info("Read succeeded despite corrupted transaction log")
@@ -258,7 +258,7 @@ class StorageErrorHandlingTest extends TestBase {
     // Create table with data
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -269,7 +269,7 @@ class StorageErrorHandlingTest extends TestBase {
 
       try {
         val result = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(tablePath)
         result.count()
         fail("Should have failed with missing transaction log")
@@ -292,7 +292,7 @@ class StorageErrorHandlingTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -307,7 +307,7 @@ class StorageErrorHandlingTest extends TestBase {
       for (i <- 1 to 3)
         try {
           val result = spark.read
-            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+            .format(INDEXTABLES_FORMAT)
             .load(tablePath)
           result.count()
         } catch {
@@ -326,7 +326,7 @@ class StorageErrorHandlingTest extends TestBase {
     // First write to create table
     val df1 = spark.range(0, 50).selectExpr("id", "CAST(id AS STRING) as text")
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -338,7 +338,7 @@ class StorageErrorHandlingTest extends TestBase {
     val df2 = spark.range(50, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df2.write
       .mode("append")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -364,7 +364,7 @@ class StorageErrorHandlingTest extends TestBase {
 
     try {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .save(invalidPath)
       fail("Should have thrown exception for invalid path")
     } catch {
@@ -386,7 +386,7 @@ class StorageErrorHandlingTest extends TestBase {
 
     // First create the table
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -399,7 +399,7 @@ class StorageErrorHandlingTest extends TestBase {
         val df2 = spark.range(100, 200).selectExpr("id", "CAST(id AS STRING) as text")
         df2.write
           .mode("append")
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("overwrite")
           .save(tablePath)
         fail("Should have thrown exception for read-only transaction log")
@@ -423,7 +423,7 @@ class StorageErrorHandlingTest extends TestBase {
 
     val df = spark.range(0, 1000).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -435,7 +435,7 @@ class StorageErrorHandlingTest extends TestBase {
     val futures = (1 to 5).map { i =>
       Future {
         val result = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .load(tablePath)
         val count = result.count()
         logger.info(s"Concurrent read $i completed with $count rows")

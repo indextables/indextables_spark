@@ -76,7 +76,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -137,7 +137,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -188,7 +188,7 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -213,10 +213,12 @@ class PurgeStateRetentionBugTest extends AnyFunSuite with BeforeAndAfterEach {
     statesBefore.foreach { stateStatus =>
       val version = stateStatus.getPath.getName.replace("state-v", "").toLong
       if (version != latestVersion) {
-        // Age this state directory
+        // Age this state directory and its contents (_manifest.avro)
         fs.setTimes(stateStatus.getPath, oldTimestamp, -1)
+        val contents = fs.listStatus(stateStatus.getPath)
+        contents.foreach(f => fs.setTimes(f.getPath, oldTimestamp, -1))
         agedCount += 1
-        println(s"Aged ${stateStatus.getPath.getName} to 25 hours ago")
+        println(s"Aged ${stateStatus.getPath.getName} to 25 hours ago (${contents.length} files inside)")
       }
     }
 

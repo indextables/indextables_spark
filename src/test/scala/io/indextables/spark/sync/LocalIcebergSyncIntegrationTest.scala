@@ -43,7 +43,7 @@ import org.scalatest.BeforeAndAfterAll
  *
  * Tests are automatically skipped if the REST catalog is not reachable.
  */
-class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with IcebergTestSupport {
+class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with IcebergTestSupport with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val REST_URI         = "http://localhost:8181"
   private val MINIO_ENDPOINT   = "http://localhost:9000"
@@ -118,11 +118,6 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
   private def newIndexPath(): String = {
     val path = new File(tempDir, UUID.randomUUID().toString.substring(0, 8))
     path.getAbsolutePath
-  }
-
-  private def deleteRecursively(f: File): Unit = {
-    if (f.isDirectory) f.listFiles().foreach(deleteRecursively)
-    f.delete()
   }
 
   // --- Tests ---
@@ -237,7 +232,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       .getString(2) shouldBe "success"
 
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(indexPath)
 
     val count = companionDf.count()
@@ -258,7 +253,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       .getString(2) shouldBe "success"
 
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(indexPath)
 
     val columns = companionDf.columns.toSet
@@ -283,7 +278,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       .getString(2) shouldBe "success"
 
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(indexPath)
 
     val filtered   = companionDf.filter(companionDf("event_type") === "click")
@@ -306,7 +301,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     // Verify the companion has the partition column in its schema
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(indexPath)
 
     companionDf.columns should contain("region")
@@ -325,7 +320,7 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
     result.collect()(0).getString(2) shouldBe "success"
 
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(indexPath)
 
     // GROUP BY partition column with COUNT(*)

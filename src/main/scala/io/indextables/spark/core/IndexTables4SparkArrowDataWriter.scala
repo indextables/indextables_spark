@@ -17,22 +17,24 @@
 
 package io.indextables.spark.core
 
-import org.apache.hadoop.fs.Path
+import java.util.{Map => JMap}
+
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.write.{DataWriter, WriterCommitMessage}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
+import org.apache.hadoop.fs.Path
+
 import io.indextables.spark.arrow.ArrowFfiWriteBridge
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.AddAction
 import io.indextables.spark.util.{ProtocolNormalizer, StatisticsCalculator, StatisticsTruncation}
-import java.util.{Map => JMap}
 import io.indextables.spark.write.ArrowFfiWriteConfig
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
-
-import scala.jdk.CollectionConverters._
 
 /**
  * Arrow FFI DataWriter that buffers InternalRows into Arrow columnar batches and sends them to Rust via the Arrow C
@@ -76,9 +78,8 @@ class IndexTables4SparkArrowDataWriter(
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkArrowDataWriter])
 
-  private lazy val options: CaseInsensitiveStringMap = {
+  private lazy val options: CaseInsensitiveStringMap =
     new CaseInsensitiveStringMap(serializedOptions.asJava)
-  }
 
   // Normalize table path (s3a:// -> s3://)
   private val normalizedTablePath = {
@@ -98,9 +99,9 @@ class IndexTables4SparkArrowDataWriter(
     StatisticsCalculator.getStatsEligibleFields(writeSchema, serializedOptions).map(_._1.name).toSet
 
   // Native handle from beginSplitFromArrow — lazily initialized on first write
-  private var nativeHandle: Long    = 0L
-  private var initialized: Boolean  = false
-  private var totalRowCount: Long   = 0L
+  private var nativeHandle: Long   = 0L
+  private var initialized: Boolean = false
+  private var totalRowCount: Long  = 0L
 
   // Partition column names as Java array for JNI
   private val partitionColsArray: Array[String] = partitionColumns.toArray
@@ -137,54 +138,62 @@ class IndexTables4SparkArrowDataWriter(
     val fieldTypeMapping   = tantivyOptions.getFieldTypeMapping
     val tokenizerOverrides = tantivyOptions.getTokenizerOverrides
 
-    writeSchema.fields.map { field =>
-      val typemapValue = fieldTypeMapping.get(field.name.toLowerCase)
+    writeSchema.fields
+      .map { field =>
+        val typemapValue = fieldTypeMapping.get(field.name.toLowerCase)
 
-      // Map typemap values and Spark DataTypes to Rust field config (type + default tokenizer)
-      val (fieldType, defaultTokenizer) = typemapValue match {
-        case Some("text")              => ("text", "default")
-        case Some("string")            => ("text", "raw")
-        case Some("json")              => ("json", "")
-        case Some("ip") | Some("ipaddr") => ("ip", "")
-        case Some("i64")               => ("i64", "")
-        case Some("f64")               => ("f64", "")
-        case Some("bool")              => ("bool", "")
-        case Some("datetime")          => ("datetime", "")
-        case Some("bytes")             => ("bytes", "")
-        case Some(other)               => (other, "")
-        case None => field.dataType match {
-          case StringType                                  => ("text", "raw")
-          case IntegerType | LongType                      => ("i64", "")
-          case FloatType | DoubleType                      => ("f64", "")
-          case BooleanType                                 => ("bool", "")
-          case TimestampType | DateType                    => ("datetime", "")
-          case _: StructType | _: ArrayType | _: MapType   => ("json", "")
-          case BinaryType                                  => ("bytes", "")
-          case _                                           => ("text", "raw")
+        // Map typemap values and Spark DataTypes to Rust field config (type + default tokenizer)
+        val (fieldType, defaultTokenizer) = typemapValue match {
+          case Some("text")                => ("text", "default")
+          case Some("string")              => ("text", "raw")
+          case Some("json")                => ("json", "")
+          case Some("ip") | Some("ipaddr") => ("ip", "")
+          case Some("i64")                 => ("i64", "")
+          case Some("f64")                 => ("f64", "")
+          case Some("bool")                => ("bool", "")
+          case Some("datetime")            => ("datetime", "")
+          case Some("bytes")               => ("bytes", "")
+          case Some(other)                 => (other, "")
+          case None =>
+            field.dataType match {
+              case StringType                                => ("text", "raw")
+              case IntegerType | LongType                    => ("i64", "")
+              case FloatType | DoubleType                    => ("f64", "")
+              case BooleanType                               => ("bool", "")
+              case TimestampType | DateType                  => ("datetime", "")
+              case _: StructType | _: ArrayType | _: MapType => ("json", "")
+              case BinaryType                                => ("bytes", "")
+              case _                                         => ("text", "raw")
+            }
         }
-      }
 
-      // Explicit tokenizer override wins over default
-      val effectiveTokenizer = tokenizerOverrides.getOrElse(field.name.toLowerCase, defaultTokenizer)
-      val escapedName = escapeJsonString(field.name)
-      val tokenizer = if (effectiveTokenizer.nonEmpty) {
-        s""","tokenizer":"${escapeJsonString(effectiveTokenizer)}""""
-      } else ""
-      val stats = if (statsEligibleColumns.contains(field.name)) ""","stats":true""" else ""
-      s"""{"name":"$escapedName","type":"$fieldType"$tokenizer$stats}"""
-    }.mkString("[", ",", "]")
+        // Explicit tokenizer override wins over default
+        val effectiveTokenizer = tokenizerOverrides.getOrElse(field.name.toLowerCase, defaultTokenizer)
+        val escapedName        = escapeJsonString(field.name)
+        val tokenizer = if (effectiveTokenizer.nonEmpty) {
+          s""","tokenizer":"${escapeJsonString(effectiveTokenizer)}""""
+        } else ""
+        val stats = if (statsEligibleColumns.contains(field.name)) ""","stats":true""" else ""
+        s"""{"name":"$escapedName","type":"$fieldType"$tokenizer$stats}"""
+      }
+      .mkString("[", ",", "]")
   }
 
   /** Initialize the native split writer on first write. */
   private def ensureInitialized(): Unit =
     if (!initialized) {
+      io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
       val schemaAddr      = bridge.exportSchema()
       val fieldConfigJson = buildFieldConfigJson()
       val maxDocs         = maxRowsPerSplit.getOrElse(0L)
 
       nativeHandle = QuickwitSplit.beginSplitFromArrow(
-        schemaAddr, partitionColsArray, heapSize,
-        fieldConfigJson, maxDocs, outputDir
+        schemaAddr,
+        partitionColsArray,
+        heapSize,
+        fieldConfigJson,
+        maxDocs,
+        outputDir
       )
       initialized = true
       logger.info(
@@ -234,9 +243,7 @@ class IndexTables4SparkArrowDataWriter(
     logger.info(s"finishAllSplitsRaw produced ${results.size()} splits for partition $partitionId")
 
     // Build AddActions from raw result maps (includes native statistics)
-    val allActions = results.asScala.map { result =>
-      buildAddAction(result)
-    }.toSeq
+    val allActions = results.asScala.map(result => buildAddAction(result)).toSeq
 
     // Report output metrics
     val totalBytes   = allActions.map(_.size).sum
@@ -275,9 +282,9 @@ class IndexTables4SparkArrowDataWriter(
   // ---- Private helpers ----
 
   /**
-   * Resolve the output directory for split files. For cloud tables (S3/Azure), Rust's finishAllSplits writes to a
-   * local temp directory; splits are then uploaded to cloud in buildAddAction. For local tables, splits are written
-   * directly to the table path.
+   * Resolve the output directory for split files. For cloud tables (S3/Azure), Rust's finishAllSplits writes to a local
+   * temp directory; splits are then uploaded to cloud in buildAddAction. For local tables, splits are written directly
+   * to the table path.
    */
   private def resolveOutputDir(): String = {
     val pathStr = normalizedTablePath.toString
@@ -309,22 +316,27 @@ class IndexTables4SparkArrowDataWriter(
     Option(result.get(key)).map(_.asInstanceOf[java.lang.Long].longValue()).getOrElse(0L)
 
   private def getInt(result: JMap[String, Object], key: String): Int =
-    Option(result.get(key)).map {
-      case l: java.lang.Long    => l.intValue()
-      case i: java.lang.Integer => i.intValue()
-      case other                => other.toString.toInt
-    }.getOrElse(0)
+    Option(result.get(key))
+      .map {
+        case l: java.lang.Long    => l.intValue()
+        case i: java.lang.Integer => i.intValue()
+        case other                => other.toString.toInt
+      }
+      .getOrElse(0)
 
-  /** Build an AddAction from a raw finishAllSplitsRaw result map. For cloud tables, uploads the split file to cloud storage. */
+  /**
+   * Build an AddAction from a raw finishAllSplitsRaw result map. For cloud tables, uploads the split file to cloud
+   * storage.
+   */
   @SuppressWarnings(Array("unchecked"))
   private def buildAddAction(result: JMap[String, Object]): AddAction = {
-    val partitionKey    = getStr(result, "partitionKey")
+    val partitionKey = getStr(result, "partitionKey")
     val partitionValues = Option(result.get("partitionValues"))
       .map(_.asInstanceOf[JMap[String, String]].asScala.toMap)
       .getOrElse(Map.empty[String, String])
-    val localSplitPath  = getStr(result, "splitPath")
-    val numDocs         = getLong(result, "numDocs")
-    val fileName        = localSplitPath.substring(localSplitPath.lastIndexOf('/') + 1)
+    val localSplitPath = getStr(result, "splitPath")
+    val numDocs        = getLong(result, "numDocs")
+    val fileName       = localSplitPath.substring(localSplitPath.lastIndexOf('/') + 1)
 
     // For cloud tables, upload the local split file to cloud storage and capture size from local file.
     // For local tables, get file size directly from the filesystem.
@@ -352,10 +364,12 @@ class IndexTables4SparkArrowDataWriter(
       (cloudDest, localFileSize)
     } else {
       val localFile = new java.io.File(localSplitPath)
-      val fileSize = if (localFile.exists()) localFile.length() else {
-        logger.warn(s"Could not get file size for $localSplitPath")
-        0L
-      }
+      val fileSize =
+        if (localFile.exists()) localFile.length()
+        else {
+          logger.warn(s"Could not get file size for $localSplitPath")
+          0L
+        }
       (localSplitPath, fileSize)
     }
 
@@ -387,10 +401,11 @@ class IndexTables4SparkArrowDataWriter(
     // Extract time range and tags from native result (matches TANT writer's SplitMetadata extraction)
     val timeRangeStart = Option(result.get("timeRangeStart")).map(_.toString).filter(_.nonEmpty)
     val timeRangeEnd   = Option(result.get("timeRangeEnd")).map(_.toString).filter(_.nonEmpty)
-    val splitTags = Option(result.get("splitTags")).map(_.asInstanceOf[java.util.Set[String]]).filter(!_.isEmpty).map { tagSet =>
-      import scala.jdk.CollectionConverters._
-      tagSet.asScala.toSet
-    }
+    val splitTags =
+      Option(result.get("splitTags")).map(_.asInstanceOf[java.util.Set[String]]).filter(!_.isEmpty).map { tagSet =>
+        import scala.jdk.CollectionConverters._
+        tagSet.asScala.toSet
+      }
 
     AddAction(
       path = addActionPath,
