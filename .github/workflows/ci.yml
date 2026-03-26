@@ -9,7 +9,7 @@ jobs:
   build-and-test-macos:
     name: Build & Test (macOS ARM64)
     runs-on: [self-hosted, macOS, ARM64]
-    environment: self-hosted
+    environment: test-runners
     env:
       JAVA_HOME: /opt/homebrew/opt/openjdk@11
       PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
@@ -30,7 +30,7 @@ jobs:
   build-and-test-linux:
     name: Build & Test (Linux X64)
     runs-on: [self-hosted, Linux, X64]
-    environment: self-hosted
+    environment: test-runners
     env:
       JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
 
