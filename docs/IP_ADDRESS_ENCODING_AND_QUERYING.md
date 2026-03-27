@@ -612,62 +612,12 @@ df.groupBy("ip").agg(count("*"), sum("bytes"))
 df.filter($"ip" >= "10.0.0.0").groupBy("ip").agg(avg("latency"))
 ```
 
-### CIDR and Wildcard Patterns
-
-CIDR notation and IPv4 wildcard patterns are transparently expanded by tantivy4java at the native layer. Callers pass these strings as normal term values and receive correct range semantics automatically.
-
-**Supported syntax:**
-
-| Pattern | Expands to |
-|---|---|
-| `192.168.1.0/24` | range `[192.168.1.0, 192.168.1.255]` |
-| `10.0.0.0/8` | range `[10.0.0.0, 10.255.255.255]` |
-| `192.168.1.0/32` | exact match on `192.168.1.0` |
-| `0.0.0.0/0` | match all IP documents |
-| `192.168.1.*` | range `[192.168.1.0, 192.168.1.255]` (same as `/24`) |
-| `10.0.*.*` | range `[10.0.0.0, 10.0.255.255]` |
-| `*.*.*.*` | match all IP documents |
-
-IPv6 CIDR (`2001:db8::/32`) is also supported. IPv6 wildcards are not standard and are not supported.
-
-> **IPv6 in IndexQuery requires quoting.** Colons in IPv6 addresses confuse Tantivy's query parser (it interprets them as field separators). Wrap any IPv6 address or CIDR in double quotes inside the IndexQuery string:
-> ```sql
-> -- Correct
-> WHERE ip indexquery '"2001:db8::/32"'
-> WHERE ip indexquery '"2001:db8::1"'
->
-> -- Wrong — colons will be misinterpreted
-> WHERE ip indexquery '2001:db8::/32'
-> ```
-> `EqualTo` and `IN` filter pushdown do **not** require quoting because they bypass the query parser entirely.
-
-**Usage examples — all three query surfaces:**
-
-```scala
-// EqualTo (Spark filter pushdown) — no quoting needed
-df.filter($"ip" === "192.168.1.0/24")
-df.filter($"ip" === "192.168.1.*")
-
-// IN (expanded to a union of ranges) — no quoting needed
-df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24"))
-df.filter($"ip".isin("10.0.0.0/8", "192.168.1.1"))  // CIDR + exact IP
-
-// IndexQuery SQL — IPv4 CIDR/wildcard unquoted, IPv6 must be quoted
-spark.sql("SELECT * FROM t WHERE ip indexquery '192.168.1.0/24'")
-spark.sql("SELECT * FROM t WHERE ip indexquery '192.168.1.*'")
-spark.sql("SELECT * FROM t WHERE ip indexquery '192.168.1.0/24 OR 10.0.0.0/8'")
-spark.sql("""SELECT * FROM t WHERE ip indexquery '"2001:db8::/32"'""")
-```
-
-**Boundary behaviour:** Both the network address (`192.168.1.0`) and the broadcast address (`192.168.1.255`) are **included** in the range.
-
-**Non-contiguous wildcards** (e.g. `10.*.1.*`, where a fixed octet follows a wildcard octet) are **not supported** and will produce a query error. A single IP range cannot represent these semantics without false positives — `10.*.1.*` would require 256 separate ranges to be exact, and collapsing them to one range would match addresses like `10.0.2.5` that don't fit the pattern. Use explicit range queries or CIDR notation instead.
-
 ### What Is NOT Supported
 
+- **CIDR notation** (`192.168.1.0/24`): Not supported at any layer. Use equivalent range queries instead.
+- **Wildcard patterns** (`192.168.1.*`): Not supported. Use range queries.
 - **Full-text search**: IP fields are not tokenized; they are atomic values.
 - **Regular expressions on IPs**: Not supported as a query type.
-- **IPv6 wildcards**: Non-standard; use IPv6 CIDR notation instead.
 
 ---
 
