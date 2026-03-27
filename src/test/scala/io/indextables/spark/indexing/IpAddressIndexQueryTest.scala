@@ -27,8 +27,9 @@ import io.indextables.spark.TestBase
  *   - Range: ip_field:[192.168.1.1 TO 192.168.1.10]
  *   - Multiple terms (IN): ip_field:192.168.1.1 OR ip_field:10.0.0.1
  *
- * Note: Wildcard queries (like 192.168.1.*) are NOT supported on IP address fields. Use range queries for subnet-style
- * matching.
+ * CIDR and wildcard patterns are transparently expanded by tantivy4java:
+ *   - CIDR: ip indexquery '192.168.1.0/24'  →  range [192.168.1.0 TO 192.168.1.255]
+ *   - Wildcard: ip indexquery '192.168.1.*'  →  same range
  */
 class IpAddressIndexQueryTest extends TestBase {
 
@@ -308,5 +309,228 @@ class IpAddressIndexQueryTest extends TestBase {
     result.length should be >= 1
     val names = result.map(_.getAs[String]("name")).toSet
     names should contain("server1") // 192.168.1.1
+  }
+
+  test("IP address IndexQuery - CIDR /24 subnet match") {
+    val spark = this.spark
+
+    // CIDR notation is transparently expanded to a range query
+    val result = spark
+      .sql("SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.0/24'")
+      .collect()
+
+    // 192.168.1.1, 192.168.1.2, 192.168.1.3, 192.168.1.10, 192.168.1.100
+    result.length shouldBe 5
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server1", "server2", "server3", "server4", "server5")
+  }
+
+  test("IP address IndexQuery - CIDR /8 subnet match") {
+    val spark = this.spark
+
+    val result = spark
+      .sql("SELECT * FROM ip_servers WHERE ip indexquery '10.0.0.0/8'")
+      .collect()
+
+    result.length shouldBe 2
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server6", "server7")
+  }
+
+  test("IP address IndexQuery - wildcard last octet") {
+    val spark = this.spark
+
+    // Wildcard is transparently expanded to the same range as the equivalent CIDR
+    val result = spark
+      .sql("SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.*'")
+      .collect()
+
+    result.length shouldBe 5
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server1", "server2", "server3", "server4", "server5")
+  }
+
+  test("IP address IndexQuery - wildcard two octets") {
+    val spark = this.spark
+
+    val result = spark
+      .sql("SELECT * FROM ip_servers WHERE ip indexquery '10.0.*.*'")
+      .collect()
+
+    result.length shouldBe 2
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server6", "server7")
+  }
+
+  test("IP address IndexQuery - CIDR with aggregation") {
+    val spark = this.spark
+
+    val result = spark
+      .sql(
+        """SELECT COUNT(*) as cnt, SUM(requests) as total
+           FROM ip_servers
+           WHERE ip indexquery '192.168.1.0/24'"""
+      )
+      .collect()
+
+    result.length shouldBe 1
+    result(0).getAs[Long]("cnt") shouldBe 5
+    // Sum: 100 + 200 + 150 + 250 + 300 = 1000
+    result(0).getAs[Long]("total") shouldBe 1000
+  }
+
+  test("IP address IndexQuery - CIDR wildcard equivalence") {
+    val spark = this.spark
+
+    // CIDR and wildcard should return identical result sets
+    val cidrResult = spark
+      .sql("SELECT id FROM ip_servers WHERE ip indexquery '192.168.1.0/24'")
+      .collect()
+      .map(_.getAs[Int]("id"))
+      .toSet
+
+    val wildcardResult = spark
+      .sql("SELECT id FROM ip_servers WHERE ip indexquery '192.168.1.*'")
+      .collect()
+      .map(_.getAs[Int]("id"))
+      .toSet
+
+    cidrResult shouldBe wildcardResult
+  }
+
+  test("IP address IndexQuery - non-byte-aligned CIDR /25") {
+    val spark = this.spark
+
+    // /25 covers 192.168.1.0–127; 192.168.1.128–255 must be excluded
+    // Dataset has: .1, .2, .3, .10, .100 — all < 128, so all 5 should match
+    val result = spark
+      .sql("SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.0/25'")
+      .collect()
+
+    result.length shouldBe 5
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server1", "server2", "server3", "server4", "server5")
+
+    // Verify the upper half is excluded: a /25 on .128 base should match none of these IPs
+    val upperHalf = spark
+      .sql("SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.128/25'")
+      .collect()
+    upperHalf.length shouldBe 0
+  }
+
+  test("IP address IndexQuery - CIDR OR another CIDR") {
+    val spark = this.spark
+
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers
+           WHERE ip indexquery '192.168.1.0/24 OR 10.0.0.0/8'"""
+      )
+      .collect()
+
+    // All 192.168.1.x (5) + all 10.x.x.x (2)
+    result.length shouldBe 7
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server1", "server2", "server3", "server4", "server5", "server6", "server7")
+  }
+
+  test("IP address IndexQuery - NOT with CIDR excludes subnet") {
+    val spark = this.spark
+
+    // CIDR in the positive clause combined with NOT on a specific IP.
+    // This verifies the CIDR expansion is correctly composed with NOT clauses.
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers
+           WHERE ip indexquery '192.168.1.0/24 AND NOT 192.168.1.1'"""
+      )
+      .collect()
+
+    // CIDR expands to [192.168.1.0 TO 192.168.1.255], then server1 (192.168.1.1) is excluded
+    result.length shouldBe 4
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server2", "server3", "server4", "server5")
+  }
+
+  test("IP address IndexQuery - CIDR with Spark filter on second column") {
+    val spark = this.spark
+
+    // CIDR range filter (native index) combined with Spark filter on region column
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers
+           WHERE ip indexquery '192.168.1.0/24'
+           AND region = 'us-east'"""
+      )
+      .collect()
+
+    // 192.168.1.1 (server1, us-east) and 192.168.1.2 (server2, us-east) match both filters
+    result.length shouldBe 2
+    result.foreach(row => row.getAs[String]("region") shouldBe "us-east")
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server1", "server2")
+  }
+
+  test("IP address IndexQuery - IPv6 CIDR /32 matches correct addresses") {
+    val spark = this.spark
+
+    // 2001:db8::/32 should match server8 (2001:db8::1) and server9 (2001:db8::2)
+    // Must be quoted because colons confuse Tantivy's query parser
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers WHERE ip indexquery '"2001:db8::/32"'"""
+      )
+      .collect()
+
+    result.length shouldBe 2
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server8", "server9")
+  }
+
+  test("IP address IndexQuery - wildcard OR wildcard") {
+    val spark = this.spark
+
+    // Two QueryAst::Wildcard nodes inside a Bool should clause — both must be rewritten
+    val result = spark
+      .sql(
+        """SELECT * FROM ip_servers WHERE ip indexquery '192.168.1.* OR 10.0.*.*'"""
+      )
+      .collect()
+
+    // 192.168.1.* matches servers 1-5; 10.0.*.* matches servers 6-7
+    result.length shouldBe 7
+    val names = result.map(_.getAs[String]("name")).toSet
+    names shouldBe Set("server1", "server2", "server3", "server4", "server5", "server6", "server7")
+  }
+
+  test("IP address IndexQuery - wildcard with aggregation") {
+    val spark = this.spark
+
+    val result = spark
+      .sql(
+        """SELECT COUNT(*) as cnt, SUM(requests) as total
+           FROM ip_servers
+           WHERE ip indexquery '192.168.1.*'"""
+      )
+      .collect()
+
+    result.length shouldBe 1
+    result(0).getAs[Long]("cnt") shouldBe 5
+    // Sum: 100 + 200 + 150 + 250 + 300 = 1000
+    result(0).getAs[Long]("total") shouldBe 1000
+  }
+
+  test("IP address IndexQuery - non-contiguous wildcard is rejected") {
+    val spark = this.spark
+
+    // Non-contiguous wildcard: a fixed octet (1) follows a wildcard octet (*).
+    // Collapsing to a single range [10.0.1.0, 10.255.1.255] would produce false positives
+    // (e.g. 10.0.2.5 would match despite the wrong third octet), so tantivy4java rejects
+    // the pattern entirely and the caller receives an explicit error.
+    intercept[Exception] {
+      spark
+        .sql("SELECT * FROM ip_servers WHERE ip indexquery '10.*.1.*'")
+        .collect()
+    }
   }
 }
