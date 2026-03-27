@@ -94,7 +94,10 @@ case class DescribeFfiProfilerCommand(cacheOnly: Boolean = false) extends LeafRu
 }
 
 /**
- * SQL command to atomically read and reset FFI profiler counters from all hosts.
+ * SQL command to read and reset FFI profiler counters from all hosts.
+ *
+ * Reset is atomic per-host (native CAS), but not cluster-atomic. Events recorded on executors
+ * between their reset and the driver reset are not captured in the returned snapshot.
  *
  * Syntax:
  *   RESET INDEXTABLES PROFILER        -- section timings
@@ -143,16 +146,20 @@ private[sql] object FfiProfilerCommands {
       .sortBy { case (name, _) => name }
       .map { case (name, (count, totalNanos, minNanos, maxNanos)) =>
         val totalMs = totalNanos / 1000000.0
-        val avgUs   = if (count > 0) totalNanos / count / 1000.0 else 0.0
+        val avgUs   = if (count > 0) totalNanos.toDouble / count / 1000.0 else 0.0
         val minUs   = minNanos / 1000.0
         val maxUs   = maxNanos / 1000.0
         Row(name, categoryFor(name), count, totalMs, avgUs, minUs, maxUs)
       }
 
-  private val CACHE_NAMES = Seq("byte_range", "l2_disk", "searcher", "parquet_metadata", "pq_column")
+  def buildCacheRows(counters: Map[String, Long]): Seq[Row] = {
+    // Derive cache names from actual keys (strip _hit/_miss suffixes) so new caches
+    // added in tantivy4java are automatically picked up without code changes.
+    val cacheNames = counters.keys
+      .map(k => k.replaceAll("_(hit|miss)$", ""))
+      .toSeq.distinct.sorted
 
-  def buildCacheRows(counters: Map[String, Long]): Seq[Row] =
-    CACHE_NAMES.flatMap { name =>
+    cacheNames.flatMap { name =>
       val hits   = counters.getOrElse(s"${name}_hit", 0L)
       val misses = counters.getOrElse(s"${name}_miss", 0L)
       if (hits == 0 && misses == 0) None
@@ -162,6 +169,7 @@ private[sql] object FfiProfilerCommands {
         Some(Row(name, hits, misses, hitRate))
       }
     }
+  }
 
   private def categoryFor(section: String): String = section match {
     case s if s.startsWith("agg_")        => "aggregation"
@@ -193,19 +201,18 @@ private[sql] object FfiProfilerExecutorHelper {
   /**
    * Run a function once on each unique executor host using preferred locations.
    * In local mode (no executors), returns empty — caller handles driver separately.
+   *
+   * Note: preferred locations are hints, not guarantees. Under heavy load, Spark may
+   * schedule a task on a different host. This is best-effort, same as PrewarmCacheCommand.
    */
   private def runOnEachHost[T: ClassTag](
     sc: SparkContext,
     fn: () => T
   ): Seq[T] = {
+    if (sc.isLocal) return Seq.empty
+
     val hosts = DriverSplitLocalityManager.getAvailableHosts(sc)
-
     if (hosts.isEmpty) return Seq.empty
-
-    // Check if we're in local mode (hosts contains only localhost-like entries
-    // and there are no real executors)
-    val executorCount = sc.getExecutorMemoryStatus.size - 1 // exclude driver
-    if (executorCount <= 0) return Seq.empty
 
     val hostsWithLocations: Seq[(String, Seq[String])] =
       hosts.toSeq.map(host => (host, Seq(host)))

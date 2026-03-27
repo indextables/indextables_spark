@@ -240,14 +240,8 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
 
       spark.sql("DISABLE INDEXTABLES PROFILER")
     } finally {
-      // Clean up temp directory
-      try {
-        val dir = new java.io.File(tempPath)
-        if (dir.exists()) {
-          dir.listFiles().foreach(_.delete())
-          dir.delete()
-        }
-      } catch { case _: Exception => }
+      try org.apache.commons.io.FileUtils.deleteDirectory(new java.io.File(tempPath))
+      catch { case _: Exception => }
     }
   }
 
