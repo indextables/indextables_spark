@@ -60,12 +60,6 @@ class CompanionWriterHeapSizeTest
       .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
       .config("spark.sql.adaptive.enabled", "false")
       .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-      .config("spark.indextables.aws.accessKey", "test-default-access-key")
-      .config("spark.indextables.aws.secretKey", "test-default-secret-key")
-      .config("spark.indextables.aws.sessionToken", "test-default-session-token")
-      .config("spark.indextables.s3.pathStyleAccess", "true")
-      .config("spark.indextables.aws.region", "us-east-1")
-      .config("spark.indextables.s3.endpoint", "http://localhost:10101")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
