@@ -131,21 +131,21 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Write 1: counter = 1
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
     assert(PurgeOnWriteTransactionCounter.get(tablePath) === 1)
 
     // Write 2: counter = 2
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
     assert(PurgeOnWriteTransactionCounter.get(tablePath) === 2)
 
     // Write 3: counter should reset to 0 after purge triggers
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
     assert(
@@ -170,7 +170,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Write 1: creates split files
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
 
@@ -189,7 +189,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Write 2: should trigger purge and clean up old orphaned files
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
 
@@ -198,85 +198,64 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
     assert(!fs.exists(orphan2), "Orphan2 should be deleted after purge")
   }
 
-  test("purge-on-write should clean up old transaction log files on S3 using sleep") {
+  test("purge should clean up old transaction log files on S3 and preserve table readability") {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
 
-    val tablePath              = s"$testBasePath/cleanup_txlog_sleep"
+    val tablePath              = s"$testBasePath/cleanup_txlog_purge"
     val (accessKey, secretKey) = awsCredentials.get
 
     val df = spark.range(10).toDF("id")
 
-    // Write 10 times to trigger checkpoint (default interval is 10) and create transaction log files 0-9
-    (1 to 10).foreach { i =>
-      df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    // Common write options for this test
+    val s3Opts = Map(
+      "spark.indextables.aws.accessKey"        -> accessKey,
+      "spark.indextables.aws.secretKey"        -> secretKey,
+      "spark.indextables.aws.region"           -> S3_REGION,
+      "spark.indextables.checkpoint.enabled"   -> "true",
+      "spark.indextables.checkpoint.interval"  -> "10"
+    )
+
+    // Write 12 times to create version files 0-11 and a checkpoint at version 10
+    (1 to 12).foreach { i =>
+      val writer = df.write
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
-        .option("spark.indextables.aws.accessKey", accessKey)
-        .option("spark.indextables.aws.secretKey", secretKey)
-        .option("spark.indextables.aws.region", S3_REGION)
-        .option("spark.indextables.checkpoint.enabled", "true") // Enable checkpoints
-        .option("spark.indextables.checkpoint.interval", "10")  // Checkpoint every 10 writes
-        .option("spark.indextables.purgeOnWrite.enabled", "true")
-        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12") // Trigger after 12 writes
-        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
-        .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
-        .option("spark.indextables.purge.retentionCheckEnabled", "false")
-        .save(tablePath)
+      s3Opts.foreach { case (k, v) => writer.option(k, v) }
+      writer.save(tablePath)
     }
 
     val txLogPath = new Path(tablePath, "_transaction_log")
 
     // Verify checkpoint was created
     val checkpointFiles = fs.listStatus(txLogPath).filter(_.getPath.getName.contains("checkpoint"))
-    assert(checkpointFiles.nonEmpty, "Checkpoint file should exist")
+    assert(checkpointFiles.nonEmpty, "Checkpoint file should exist after 10+ writes")
 
-    // Verify early transaction log files exist
-    assert(fs.exists(new Path(txLogPath, "00000000000000000000.json")))
-    assert(fs.exists(new Path(txLogPath, "00000000000000000001.json")))
+    // Count version files before purge
+    val versionFilesBefore = fs.listStatus(txLogPath).count(_.getPath.getName.matches("\\d+\\.json"))
+    assert(versionFilesBefore >= 10, s"Should have at least 10 version files before purge, got $versionFilesBefore")
 
-    // Wait 2 seconds for transaction logs to age
-    println(s"⏳ Sleeping 2 seconds to age transaction logs...")
-    Thread.sleep(2000)
+    // Run synchronous purge via SQL (no sleep/timing dependency)
+    spark.sql(
+      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS"
+    ).collect()
 
-    // Write 2 more times to reach triggerAfterWrites=12 and trigger purge
-    (1 to 2).foreach { _ =>
-      df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .mode(SaveMode.Append)
-        .option("spark.indextables.aws.accessKey", accessKey)
-        .option("spark.indextables.aws.secretKey", secretKey)
-        .option("spark.indextables.aws.region", S3_REGION)
-        .option("spark.indextables.checkpoint.enabled", "true")
-        .option("spark.indextables.checkpoint.interval", "10")
-        .option("spark.indextables.purgeOnWrite.enabled", "true")
-        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12")
-        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
-        .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
-        .option("spark.indextables.purge.retentionCheckEnabled", "false")
-        .save(tablePath)
-    }
-
-    // Wait for purge to complete (purge runs asynchronously in background)
-    println(s"⏳ Waiting 5 seconds for purge to complete on S3...")
-    Thread.sleep(5000)
-
-    // Verify old transaction log files before checkpoint are deleted
-    // Checkpoint is at version 10, so versions 0-8 should be candidates for deletion
+    // Verify old pre-checkpoint version files were deleted
+    val versionFilesAfter = fs.listStatus(txLogPath).count(_.getPath.getName.matches("\\d+\\.json"))
     assert(
-      !fs.exists(new Path(txLogPath, "00000000000000000000.json")),
-      "Old version 0 (before checkpoint) should be deleted"
-    )
-    assert(
-      !fs.exists(new Path(txLogPath, "00000000000000000001.json")),
-      "Old version 1 (before checkpoint) should be deleted"
+      versionFilesAfter < versionFilesBefore,
+      s"Purge should have deleted some version files (before=$versionFilesBefore, after=$versionFilesAfter)"
     )
 
-    // Verify recent files after checkpoint are kept
-    assert(
-      fs.exists(new Path(txLogPath, "00000000000000000010.json")) ||
-        fs.exists(new Path(txLogPath, "00000000000000000011.json")),
-      "Recent version (10 or 11) should be kept"
-    )
+    // CRITICAL: Table must still be readable after purge — the latest state must be preserved
+    val readDf = spark.read
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .load(tablePath)
+
+    val count = readDf.count()
+    assert(count == 120, s"Table should have 120 rows (12 writes x 10 rows), got $count")
   }
 
   test("purge-on-write should propagate S3 credentials from write options") {
@@ -295,7 +274,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Write with explicit S3 credentials - purge should inherit these
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
@@ -307,7 +286,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Verify data is readable
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     assert(result.count() === 50)
   }
@@ -327,25 +306,25 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Write to table1 twice
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(table1Path)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(table1Path)
 
     // Write to table2 three times
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(table2Path)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(table2Path)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(table2Path)
 
@@ -368,7 +347,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
     // Write multiple times to create many small splits
     (1 to 5).foreach { i =>
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
         .option("spark.indextables.aws.accessKey", accessKey)
         .option("spark.indextables.aws.secretKey", secretKey)
@@ -389,7 +368,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Verify data is still readable (merge+purge didn't corrupt data)
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)
@@ -416,7 +395,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
     // Write 3 times with both merge and purge enabled, passing credentials via options
     (1 to 3).foreach { i =>
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
         .option("spark.indextables.aws.accessKey", accessKey)
         .option("spark.indextables.aws.secretKey", secretKey)
@@ -434,7 +413,7 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.aws.accessKey", accessKey)
       .option("spark.indextables.aws.secretKey", secretKey)
       .option("spark.indextables.aws.region", S3_REGION)

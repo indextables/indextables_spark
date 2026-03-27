@@ -19,7 +19,7 @@ package io.indextables.spark.write
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import io.indextables.spark.util.SizeParser
+import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.slf4j.LoggerFactory
 
 /**
@@ -104,35 +104,12 @@ object OptimizedWriteConfig {
   def default: OptimizedWriteConfig = OptimizedWriteConfig()
 
   def fromOptions(options: CaseInsensitiveStringMap): OptimizedWriteConfig = {
-    val enabled = getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
-    val targetSplitSizeBytes = parseSizeOption(
-      options,
-      KEY_TARGET_SPLIT_SIZE,
-      DEFAULT_TARGET_SPLIT_SIZE_BYTES
-    )
-    val samplingRatio = getDoubleOption(
-      options,
-      KEY_SAMPLING_RATIO,
-      DEFAULT_SAMPLING_RATIO,
-      minExclusive = Some(0.0)
-    )
-    val minRowsForEstimation = getLongOption(
-      options,
-      KEY_MIN_ROWS_FOR_EST,
-      DEFAULT_MIN_ROWS_FOR_ESTIMATION,
-      mustBePositive = true
-    )
-    val distributionMode = getStringOption(
-      options,
-      KEY_DISTRIBUTION_MODE,
-      DEFAULT_DISTRIBUTION_MODE,
-      VALID_DISTRIBUTION_MODES
-    )
-    val maxSplitSizeBytes = parseSizeOption(
-      options,
-      KEY_MAX_SPLIT_SIZE,
-      DEFAULT_MAX_SPLIT_SIZE_BYTES
-    )
+    val enabled              = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
+    val targetSplitSizeBytes = ConfigParsingUtils.parseSizeOption(options, KEY_TARGET_SPLIT_SIZE, DEFAULT_TARGET_SPLIT_SIZE_BYTES)
+    val samplingRatio        = ConfigParsingUtils.getDoubleOption(options, KEY_SAMPLING_RATIO, DEFAULT_SAMPLING_RATIO, minExclusive = Some(0.0))
+    val minRowsForEstimation = ConfigParsingUtils.getLongOption(options, KEY_MIN_ROWS_FOR_EST, DEFAULT_MIN_ROWS_FOR_ESTIMATION, mustBePositive = true)
+    val distributionMode     = ConfigParsingUtils.getStringOption(options, KEY_DISTRIBUTION_MODE, DEFAULT_DISTRIBUTION_MODE, VALID_DISTRIBUTION_MODES)
+    val maxSplitSizeBytes    = ConfigParsingUtils.parseSizeOption(options, KEY_MAX_SPLIT_SIZE, DEFAULT_MAX_SPLIT_SIZE_BYTES)
 
     val config = OptimizedWriteConfig(
       enabled = enabled,
@@ -153,8 +130,7 @@ object OptimizedWriteConfig {
   }
 
   def fromMap(configs: Map[String, String]): OptimizedWriteConfig = {
-    val lowerCaseConfigs                 = configs.map { case (k, v) => k.toLowerCase -> v }
-    def get(key: String): Option[String] = lowerCaseConfigs.get(key.toLowerCase)
+    val get = ConfigParsingUtils.caseInsensitiveLookup(configs)
 
     OptimizedWriteConfig(
       enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED),
@@ -168,111 +144,5 @@ object OptimizedWriteConfig {
         .map(SizeParser.parseSize)
         .getOrElse(DEFAULT_MAX_SPLIT_SIZE_BYTES)
     ).validate()
-  }
-
-  private def getBooleanOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Boolean
-  ): Boolean = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try
-        value.toBoolean
-      catch {
-        case _: IllegalArgumentException =>
-          logger.warn(s"Invalid boolean value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
-
-  private def getDoubleOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Double,
-    minExclusive: Option[Double] = None
-  ): Double = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try {
-        val parsed = value.toDouble
-        if (minExclusive.exists(min => parsed <= min)) {
-          logger.warn(s"Invalid value for $key: '$value' (must be > ${minExclusive.get}), using default: $default")
-          default
-        } else {
-          parsed
-        }
-      } catch {
-        case _: NumberFormatException =>
-          logger.warn(s"Invalid double value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
-
-  private def getLongOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Long,
-    mustBePositive: Boolean = false
-  ): Long = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try {
-        val parsed = value.toLong
-        if (mustBePositive && parsed <= 0) {
-          logger.warn(s"Invalid value for $key: '$value' (must be > 0), using default: $default")
-          default
-        } else {
-          parsed
-        }
-      } catch {
-        case _: NumberFormatException =>
-          logger.warn(s"Invalid long value for $key: '$value', using default: $default")
-          default
-      }
-    }
-  }
-
-  private def parseSizeOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: Long
-  ): Long = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      try
-        SizeParser.parseSize(value)
-      catch {
-        case _: IllegalArgumentException =>
-          logger.warn(s"Invalid size value for $key: '$value', using default: ${SizeParser.formatBytes(default)}")
-          default
-      }
-    }
-  }
-
-  private def getStringOption(
-    options: CaseInsensitiveStringMap,
-    key: String,
-    default: String,
-    validValues: Set[String]
-  ): String = {
-    val value = options.get(key)
-    if (value == null || value.isEmpty) default
-    else {
-      val lower = value.toLowerCase
-      if (validValues.contains(lower)) lower
-      else {
-        logger.warn(
-          s"Invalid value for $key: '$value' (must be one of ${validValues.mkString(", ")}), using default: $default"
-        )
-        default
-      }
-    }
   }
 }

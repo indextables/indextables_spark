@@ -61,17 +61,17 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
 
       // Write data in separate operations to create multiple splits
       testData1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
       testData2.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(outputPath)
 
       testData3.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(outputPath)
 
@@ -84,7 +84,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       beforeMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
       // Step 3: Verify we can read all data before merge
-      val beforeMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+      val beforeMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(outputPath)
       val beforeMergeRecords = beforeMergeDF.count()
       beforeMergeRecords shouldBe 150
 
@@ -103,7 +103,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         afterMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
         // Step 6: Verify data integrity
-        val afterMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+        val afterMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(outputPath)
         val afterMergeRecords = afterMergeDF.count()
 
         println(s"Data integrity check: $beforeMergeRecords -> $afterMergeRecords records")
@@ -123,7 +123,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       }
 
       // Step 8: Verify that all data is still accessible
-      val finalDF    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+      val finalDF    = spark.read.format(INDEXTABLES_FORMAT).load(outputPath)
       val finalCount = finalDF.count()
       finalCount shouldBe 150
 
@@ -144,7 +144,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         )
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -161,7 +161,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       val mergeResult = spark.sql(s"MERGE SPLITS '$outputPath' TARGET SIZE 2097152") // 2MB target
 
       // Verify data integrity after merge
-      val afterMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+      val afterMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(outputPath)
       val finalCount   = afterMergeDF.count()
       finalCount shouldBe 100
 
@@ -245,7 +245,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -265,7 +265,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         )
 
       additionalData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(outputPath)
 
@@ -289,7 +289,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       afterMergeFiles.foreach(file => println(s"  - ${file.path} (${file.size} bytes)"))
 
       // Verify data integrity
-      val finalData  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+      val finalData  = spark.read.format(INDEXTABLES_FORMAT).load(outputPath)
       val finalCount = finalData.count()
       finalCount shouldBe 40
 

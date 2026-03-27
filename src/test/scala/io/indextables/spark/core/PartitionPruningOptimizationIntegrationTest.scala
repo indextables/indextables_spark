@@ -25,7 +25,7 @@ import io.indextables.spark.TestBase
 /** Integration tests for partition pruning optimizations with actual Spark operations. */
 class PartitionPruningOptimizationIntegrationTest extends TestBase {
 
-  private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val provider = INDEXTABLES_FORMAT
 
   override def beforeEach(): Unit = {
     super.beforeEach()

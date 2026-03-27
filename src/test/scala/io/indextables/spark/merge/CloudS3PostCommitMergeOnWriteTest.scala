@@ -201,7 +201,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     )
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -221,7 +221,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Verify data integrity
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -252,7 +252,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     )
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -272,7 +272,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Verify data integrity
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -313,7 +313,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     )
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -323,7 +323,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Verify data integrity
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -360,7 +360,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     )
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("partition_col")
       .options(writeOptions)
       .mode("overwrite")
@@ -371,7 +371,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Verify data integrity and partition structure
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -404,7 +404,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // First write
     val df1 = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -414,7 +414,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Second write (append)
     val df2 = spark.range(100, 200).selectExpr("id", "CAST(id AS STRING) as text")
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -424,7 +424,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Third write (append) with lower threshold to trigger merge
     val df3 = spark.range(200, 300).selectExpr("id", "CAST(id AS STRING) as text")
     df3.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions + ("spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.1"))
       .mode("append")
       .save(tablePath)
@@ -444,7 +444,7 @@ class CloudS3PostCommitMergeOnWriteTest extends CloudS3TestBase {
     // Verify all data is present
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 

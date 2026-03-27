@@ -43,7 +43,7 @@ class JsonFieldAppendTest extends TestBase {
 
       println("✅ Writing initial data with JSON field configured via typemap")
       df1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.user_identity", "json")
         .mode("overwrite")
         .save(path)
@@ -58,7 +58,7 @@ class JsonFieldAppendTest extends TestBase {
 
       println("✅ Appending more data with same JSON field configuration")
       df2.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.user_identity", "json")
         .mode("append")
         .save(path)
@@ -67,7 +67,7 @@ class JsonFieldAppendTest extends TestBase {
 
       // Verify all data is present
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 4
@@ -105,7 +105,7 @@ class JsonFieldAppendTest extends TestBase {
       // Initial write
       val df1 = Seq((1, """{"status": "active"}""")).toDF("id", "metadata")
       df1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.metadata", "json")
         .mode("overwrite")
         .save(path)
@@ -113,7 +113,7 @@ class JsonFieldAppendTest extends TestBase {
       // First append
       val df2 = Seq((2, """{"status": "pending"}""")).toDF("id", "metadata")
       df2.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.metadata", "json")
         .mode("append")
         .save(path)
@@ -121,7 +121,7 @@ class JsonFieldAppendTest extends TestBase {
       // Second append
       val df3 = Seq((3, """{"status": "completed"}""")).toDF("id", "metadata")
       df3.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.metadata", "json")
         .mode("append")
         .save(path)
@@ -129,13 +129,13 @@ class JsonFieldAppendTest extends TestBase {
       // Third append
       val df4 = Seq((4, """{"status": "active"}""")).toDF("id", "metadata")
       df4.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.metadata", "json")
         .mode("append")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 4
@@ -156,7 +156,7 @@ class JsonFieldAppendTest extends TestBase {
       ).toDF("id", "userLocation")
 
       df1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.userLocation", "json")
         .mode("overwrite")
         .save(path)
@@ -168,13 +168,13 @@ class JsonFieldAppendTest extends TestBase {
       ).toDF("id", "userLocation")
 
       df2.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.userLocation", "json")
         .mode("append")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       result.count() shouldBe 4

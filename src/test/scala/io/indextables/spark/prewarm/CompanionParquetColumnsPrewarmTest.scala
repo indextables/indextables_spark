@@ -50,7 +50,7 @@ import org.slf4j.LoggerFactory
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[CompanionParquetColumnsPrewarmTest])
 
@@ -113,13 +113,6 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
     } catch {
       case _: Exception =>
     }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
 
   private def createLocalDeltaTable(deltaPath: String, numRows: Int = 50): Unit = {
     val ss = spark
@@ -282,7 +275,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
 
       // Step 3: Read back through companion index selecting only the prewarmed column
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -311,7 +304,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
         .toDF("id", "title", "score")
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexWriter.batchSize", "50")
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("append")
@@ -363,7 +356,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
 
       // Verify data is readable after async prewarm
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 
@@ -417,7 +410,7 @@ class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with 
       NativeSplitCacheManager.resetStorageDownloadMetrics()
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.read.defaultLimit", "1000")
         .load(indexPath)
 

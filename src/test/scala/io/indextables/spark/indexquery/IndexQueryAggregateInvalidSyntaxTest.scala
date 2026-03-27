@@ -86,14 +86,14 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("debug_count_test")
@@ -147,14 +147,14 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("simple_count_invalid_test")
@@ -194,14 +194,14 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("sum_invalid_test")
@@ -241,7 +241,7 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "category", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.typemap.category", "string")
       .option("spark.indextables.indexing.fastfields", "score,category")
@@ -249,7 +249,7 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("groupby_invalid_test")
@@ -291,14 +291,14 @@ class IndexQueryAggregateInvalidSyntaxTest extends TestBase {
     ).toDF("id", "content", "score")
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(testPath)
 
     df.createOrReplaceTempView("valid_agg_test")

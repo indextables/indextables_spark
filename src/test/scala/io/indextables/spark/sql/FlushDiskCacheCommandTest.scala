@@ -35,7 +35,7 @@ import org.slf4j.LoggerFactory
  *   - Output schema validation
  *   - Integration with GlobalSplitCacheManager and DriverSplitLocalityManager
  */
-class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
+class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[FlushDiskCacheCommandTest])
 
@@ -288,12 +288,5 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     // Both should have success or skipped status (not failed)
     val allStatuses = (rows1 ++ rows2).map(_.getAs[String]("status")).toSet
     assert(!allStatuses.contains("failed"), s"Neither flush should fail. Statuses: $allStatuses")
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 }

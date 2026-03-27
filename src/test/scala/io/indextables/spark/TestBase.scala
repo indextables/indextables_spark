@@ -31,6 +31,9 @@ import org.scalatest.matchers.should.Matchers
 
 trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
+  /** DataSource format string for IndexTables4Spark (internal class name). */
+  protected val INDEXTABLES_FORMAT: String = TestBase.INDEXTABLES_FORMAT
+
   protected var spark: SparkSession = _
   protected var tempDir: String     = _
 
@@ -139,4 +142,9 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
     } finally
       deleteRecursively(new File(path))
   }
+}
+
+object TestBase {
+  /** DataSource format string for IndexTables4Spark. Usable from non-TestBase test classes too. */
+  val INDEXTABLES_FORMAT: String = "io.indextables.spark.core.IndexTables4SparkTableProvider"
 }

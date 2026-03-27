@@ -225,14 +225,14 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       // Write test data using IndexTables4Spark V2 DataSource
       // Configure title field as text type for tokenized IndexQuery search
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.title", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read data back using V2 DataSource API
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Create temporary view

@@ -62,7 +62,7 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
 
       // Write data to create AddActions with footer metadata
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -150,12 +150,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Create a query that will trigger AQE and task serialization
@@ -213,12 +213,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       mainData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       val mainTable = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Broadcast join that will involve serializing config and metadata
@@ -262,12 +262,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       complexData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Multi-stage query that crosses AQE stage boundaries
@@ -376,12 +376,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       optimizationData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Query that should trigger multiple AQE optimizations

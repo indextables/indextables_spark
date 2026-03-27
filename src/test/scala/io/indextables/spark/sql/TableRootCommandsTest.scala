@@ -41,7 +41,7 @@ import org.scalatest.BeforeAndAfterAll
  *   - BUILD COMPANION with TABLE ROOTS clause
  *   - Read-time designator root selection
  */
-class TableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class TableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -85,13 +85,6 @@ class TableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfte
     super.afterAll()
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
-  }
-
   /** Create a test IndexTables table and write sample data. */
   private def createTestTable(tablePath: String): Unit = {
     val schema = StructType(
@@ -104,7 +97,7 @@ class TableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfte
     val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
   }

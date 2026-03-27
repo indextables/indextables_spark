@@ -17,8 +17,11 @@
 
 package io.indextables.spark
 
-import java.io.File
+import java.io.{File, FileInputStream}
 import java.nio.file.Files
+import java.util.Properties
+
+import scala.util.Using
 
 import org.apache.spark.sql.SparkSession
 
@@ -75,8 +78,47 @@ abstract class CloudS3TestBase extends AnyFunSuite with Matchers with BeforeAndA
     // Set log level to reduce noise
     spark.sparkContext.setLogLevel("WARN")
 
-    println(s"🚀 CloudS3TestBase: Spark session created for real AWS S3 testing")
+    // Load AWS credentials and configure Spark + Hadoop for native transaction log
+    loadAndConfigureAwsCredentials()
+
+    println(s"CloudS3TestBase: Spark session created for real AWS S3 testing")
   }
+
+  /**
+   * Load AWS credentials from ~/.aws/credentials and set them in Spark and Hadoop config.
+   * The native transaction log requires explicit credential configuration via
+   * spark.indextables.aws.* keys (it does not auto-resolve from Hadoop's filesystem API).
+   */
+  private def loadAndConfigureAwsCredentials(): Unit =
+    try {
+      val home     = System.getProperty("user.home")
+      val credFile = new File(s"$home/.aws/credentials")
+
+      if (credFile.exists()) {
+        val props = new Properties()
+        Using(new FileInputStream(credFile))(fis => props.load(fis))
+
+        val accessKey = props.getProperty("aws_access_key_id")
+        val secretKey = props.getProperty("aws_secret_access_key")
+
+        if (accessKey != null && secretKey != null) {
+          // Set credentials in Spark conf (used by ConfigNormalization)
+          spark.conf.set("spark.indextables.aws.accessKey", accessKey)
+          spark.conf.set("spark.indextables.aws.secretKey", secretKey)
+          spark.conf.set("spark.indextables.aws.region", "us-east-2")
+
+          // Also set in Hadoop conf (used by ConfigNormalization.extractTantivyConfigsFromHadoop)
+          val hadoopConf = spark.sparkContext.hadoopConfiguration
+          hadoopConf.set("spark.indextables.aws.accessKey", accessKey)
+          hadoopConf.set("spark.indextables.aws.secretKey", secretKey)
+          hadoopConf.set("spark.indextables.aws.region", "us-east-2")
+
+          println(s"CloudS3TestBase: AWS credentials loaded from ~/.aws/credentials")
+        }
+      }
+    } catch {
+      case _: Exception => // Ignore if credential loading fails
+    }
 
   override def afterAll(): Unit = {
     if (spark != null) {

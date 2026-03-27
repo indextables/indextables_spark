@@ -26,20 +26,10 @@ import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
 
-class IndexTables4SparkFullIntegrationTest extends TestBase {
+class IndexTables4SparkFullIntegrationTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
 
   // Note: These tests exercise the full integration but will fail at the native JNI level
   // without the actual Tantivy library. They verify the Spark integration is working correctly.
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      // Use the new ensureLibraryLoaded method
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
   test("should perform full write/read cycle with comprehensive test data") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 
@@ -48,7 +38,7 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Step 1: Write data using IndexTables4Spark format with direct path parameter
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "age,salary,experience_years,is_active")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
@@ -56,7 +46,7 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
       // Step 2: Read the data back using the same format (disable default limit for full read)
       spark.conf.set("spark.indextables.read.defaultLimit", "1000000")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Step 3: Verify data integrity and basic operations
@@ -115,13 +105,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
       testData
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read the data back
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test: Use working equality filters instead of broken wildcard queries
@@ -171,13 +161,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write numeric data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read the data back
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test: age > 25 - should return all rows with age > 25
@@ -231,13 +221,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read the data back
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test: department === "Engineering" - should return only Engineering dept rows
@@ -295,13 +285,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write nullable data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read the data back
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test: optional_field isNull - should return rows where optional_field is null
@@ -341,13 +331,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write boolean data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read the data back
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test: is_active === true - should return rows where is_active is true
@@ -389,13 +379,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write datetime data - should succeed now
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data back and test date/timestamp queries
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Verify data was written and can be read
@@ -434,14 +424,14 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write comprehensive data - should succeed now
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "age,salary,experience_years,is_active")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data back and test complex compound queries
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Verify data was written and can be read
@@ -498,13 +488,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Write data for aggregation testing - should succeed now
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data back and test aggregation queries
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Verify data was written and can be read
@@ -547,14 +537,14 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Test partitioned write - should succeed
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .partitionBy("department", "location")
         .save(tempPath)
 
       // Test reading partitioned data and executing partition-aware queries
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       val partitionedQueries = Seq(
@@ -584,13 +574,13 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Test write with evolved schema - should succeed
       evolvedData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Test reading evolved schema and executing queries
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       val evolvedQueries = Seq(
@@ -616,14 +606,14 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
 
       // Step 1: Write comprehensive test data
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Step 2: Read data back and execute comprehensive queries (disable default limit for full read)
       spark.conf.set("spark.indextables.read.defaultLimit", "1000000")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test: Text search - bio contains "machine learning"

@@ -72,8 +72,7 @@ object ConfigUtils {
         .getOrElse(default)
 
     def getConfigOption(configKey: String): Option[String] =
-      // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
-      configMap.get(configKey).orElse(configMap.get(configKey.toLowerCase))
+      ConfigParsingUtils.caseInsensitiveGetRaw(configMap, configKey)
 
     // Resolve AWS credentials through credential provider if configured.
     // This is essential for Unity Catalog and other custom credential providers

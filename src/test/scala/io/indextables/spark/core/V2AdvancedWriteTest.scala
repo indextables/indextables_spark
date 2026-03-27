@@ -38,13 +38,13 @@ class V2AdvancedWriteTest extends TestBase {
       ).toDF("id", "content", "category")
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       // Verify initial data
       val initialRead = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
       initialRead.count() should be(3)
 
@@ -55,13 +55,13 @@ class V2AdvancedWriteTest extends TestBase {
       ).toDF("id", "content", "category")
 
       newData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite) // This should trigger truncate
         .save(tempPath)
 
       // Verify truncate worked
       val finalRead = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       val finalRows = finalRead.collect()
@@ -84,13 +84,13 @@ class V2AdvancedWriteTest extends TestBase {
       ).toDF("id", "content", "category")
 
       validData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       // Verify initial write worked
       val initialRead = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
       initialRead.count() should be(1)
 
@@ -102,7 +102,7 @@ class V2AdvancedWriteTest extends TestBase {
       // Write with potentially problematic configuration
       try
         moreData.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .option("spark.indextables.cache.maxSize", "-1") // Invalid config
           .mode("append")
           .save(tempPath)
@@ -112,7 +112,7 @@ class V2AdvancedWriteTest extends TestBase {
 
       // Verify original data is still intact
       val finalRead = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
       finalRead.count() should be >= 1L // At least original data should exist
     }
@@ -129,7 +129,7 @@ class V2AdvancedWriteTest extends TestBase {
       ).toDF("id", "content", "batch")
 
       batch1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -140,13 +140,13 @@ class V2AdvancedWriteTest extends TestBase {
       ).toDF("id", "content", "batch")
 
       batch2.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(tempPath)
 
       // Verify all data exists
       val finalRead = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       val finalCount = finalRead.count()
@@ -171,13 +171,13 @@ class V2AdvancedWriteTest extends TestBase {
         .toDF("id", "description", "category", "value", "flag")
 
       largeData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
       // Verify all data was written correctly
       val readBack = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       readBack.count() should be(1000)
@@ -200,7 +200,7 @@ class V2AdvancedWriteTest extends TestBase {
       // Initial data
       val initialData = Seq((1, "Initial", "base")).toDF("id", "content", "type")
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -210,18 +210,18 @@ class V2AdvancedWriteTest extends TestBase {
 
       // Both should succeed (append mode)
       writer1Data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(tempPath)
 
       writer2Data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(tempPath)
 
       // Verify final state
       val finalRead = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       val finalCount = finalRead.count()

@@ -24,7 +24,7 @@ import scala.util.Try
 
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.transaction.{AddAction, SkipAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, SkipAction, TransactionLogFactory}
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 
@@ -57,7 +57,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -96,7 +96,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"✅ Skip recorded correctly: ${skippedFile.path} (reason: ${skippedFile.reason})")
 
       // Step 4: Test cooldown functionality
-      val isInCooldown = transactionLog.isFileInCooldown(testFilePath)
+      val isInCooldown = transactionLog.getFilesInCooldown().contains(testFilePath)
       isInCooldown shouldBe true
 
       val filesInCooldown = transactionLog.getFilesInCooldown()
@@ -136,7 +136,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
       // Step 7: Test different file doesn't affect cooldown
       val differentFilePath     = "test/different_file.split"
-      val isDifferentInCooldown = transactionLog.isFileInCooldown(differentFilePath)
+      val isDifferentInCooldown = transactionLog.getFilesInCooldown().contains(differentFilePath)
       isDifferentInCooldown shouldBe false
 
       println(s"✅ Different file correctly not in cooldown")
@@ -161,7 +161,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -315,7 +315,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -380,7 +380,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
       // Test individual file cooldown checking
       skipPaths.foreach { path =>
-        val inCooldown = transactionLog.isFileInCooldown(path)
+        val inCooldown = transactionLog.getFilesInCooldown().contains(path)
         inCooldown shouldBe true
       }
 
@@ -408,7 +408,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(outputPath)
 
@@ -432,7 +432,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"Skip recorded in version: $skipVersion")
 
       // Step 3: Verify file is initially in cooldown
-      val initiallyInCooldown = transactionLog.isFileInCooldown(testFilePath)
+      val initiallyInCooldown = transactionLog.getFilesInCooldown().contains(testFilePath)
       initiallyInCooldown shouldBe true
 
       val testAddAction = AddAction(
@@ -449,18 +449,16 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"✅ File correctly blocked during cooldown period")
 
       // Step 4: Test with an expired cooldown using custom timestamp
-      val expiredFilePath  = "retry/expired_cooldown_file.split"
-      val expiredTimestamp = System.currentTimeMillis() - (2 * 60 * 60 * 1000L) // 2 hours ago
+      val expiredFilePath = "retry/expired_cooldown_file.split"
 
-      // Create a skip record with an expired timestamp (1 hour cooldown, but timestamp is 2 hours ago)
-      val expiredSkipVersion = transactionLog.recordSkippedFileWithTimestamp(
+      // Create a skip record with zero cooldown so it is immediately expired
+      val expiredSkipVersion = transactionLog.recordSkippedFile(
         filePath = expiredFilePath,
         reason = "Testing expired cooldown logic",
         operation = "merge",
-        skipTimestamp = expiredTimestamp,
-        cooldownHours = 1, // 1 hour cooldown, but skip was 2 hours ago, so it should be expired
         partitionValues = Some(Map("retry_test" -> "expired")),
-        size = Some(98765L)
+        size = Some(98765L),
+        cooldownHours = 0 // Zero cooldown makes it immediately expired/retryable
       )
 
       println(s"Recorded expired cooldown file: $expiredFilePath")
@@ -475,7 +473,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
       // Step 5: Verify expired file is NOT filtered (should be retryable)
       val expiredFileFiltered   = transactionLog.filterFilesInCooldown(Seq(expiredFileAction))
-      val expiredFileInCooldown = transactionLog.isFileInCooldown(expiredFilePath)
+      val expiredFileInCooldown = transactionLog.getFilesInCooldown().contains(expiredFilePath)
 
       // The expired file should not be in cooldown and should pass through the filter
       expiredFileInCooldown shouldBe false
@@ -502,7 +500,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
       // Step 7: Verify zero cooldown file is immediately retryable
       val zeroCooldownFiltered   = transactionLog.filterFilesInCooldown(Seq(zeroCooldownAction))
-      val zeroCooldownInCooldown = transactionLog.isFileInCooldown(zeroCooldownFilePath)
+      val zeroCooldownInCooldown = transactionLog.getFilesInCooldown().contains(zeroCooldownFilePath)
 
       // Zero cooldown file should be immediately retryable
       zeroCooldownInCooldown shouldBe false

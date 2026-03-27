@@ -35,22 +35,25 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.arrow.ArrowFfiBridge
 import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.transaction.AddAction
+import io.indextables.tantivy4java.split.SplitSearcher
 import org.slf4j.LoggerFactory
 
 /**
- * Columnar partition reader for companion mode splits using Arrow FFI.
+ * Columnar partition reader for all split types using Arrow FFI streaming.
  *
- * Uses the Arrow C Data Interface to transfer parquet data directly from the native Rust layer as Arrow columnar
- * batches — zero serialization, zero row conversion.
+ * Uses the streaming startStreamingRetrieval()/nextBatch() pipeline for all reads (both companion and regular splits).
+ * This eliminates BM25 scoring overhead, avoids intermediate protobuf allocations, and keeps memory bounded at ~24MB
+ * regardless of result set size.
  *
- * Single-batch model: next() executes search + Arrow FFI retrieval once, get() returns the ColumnarBatch, close() frees
- * resources.
+ * The effective result limit is controlled by `spark.indextables.read.mode`:
+ *   - **fast** (default): Low default limit (250 or configured `defaultLimit`)
+ *   - **complete**: Int.MaxValue (returns all matching rows), unless an explicit SQL LIMIT is pushed
  *
- * Shared initialization logic (effective limit, path resolution, cache config, companion validation, path
- * normalization, footer validation, SplitMetadata reconstruction, SplitSearchEngine creation, query building) is
- * delegated to [[SplitReaderContext]].
+ * Falls back to a partition-only path when all projected columns are partition columns (no data columns to stream).
+ *
+ * Shared initialization logic is delegated to [[SplitReaderContext]].
  */
-class CompanionColumnarPartitionReader(
+class ColumnarPartitionReader(
   addAction: AddAction,
   readSchema: StructType,
   fullTableSchema: StructType,
@@ -62,7 +65,7 @@ class CompanionColumnarPartitionReader(
   metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
     extends PartitionReader[ColumnarBatch] {
 
-  private val logger = LoggerFactory.getLogger(classOf[CompanionColumnarPartitionReader])
+  private val logger = LoggerFactory.getLogger(classOf[ColumnarPartitionReader])
 
   private val ctx = new SplitReaderContext(
     addAction,
@@ -82,126 +85,57 @@ class CompanionColumnarPartitionReader(
 
   private val bridge                               = new ArrowFfiBridge()
   private var splitSearchEngine: SplitSearchEngine = _
-  private var batch: ColumnarBatch                 = _
   private var initialized                          = false
-  private var consumed                             = false
+  private var initFailed                           = false
+  private var initException: Throwable             = _
 
-  // NOTE: Pre-warm join is intentionally omitted for columnar companion reader.
-  // Companion splits use parquet-native reads which don't benefit from the tantivy
-  // component pre-warming path.
+  // Streaming state
+  private var currentBatch: ColumnarBatch                      = _
+  private var streamingSession: SplitSearcher.StreamingSession = _
+  private var finished                                         = false
+  private var totalRowsReturned                                = 0L
+  // Partition-only single-batch state
+  private var partitionOnlyConsumed = false
+
+  // NOTE: Pre-warm join is intentionally omitted for the streaming columnar reader.
+  // The streaming path (startStreamingRetrieval/nextBatch) does not benefit from the
+  // tantivy component pre-warming path used by the old row-based reader.
   private def initialize(): Unit =
     if (!initialized) {
+      if (initFailed)
+        throw new IOException(s"Columnar reader previously failed to initialize for ${addAction.path}", initException)
       try {
         splitSearchEngine = ctx.createSplitSearchEngine()
         initialized = true
         logger.info(
-          s"CompanionColumnarPartitionReader initialized for ${addAction.path}, effectiveLimit=$effectiveLimit"
+          s"ColumnarPartitionReader initialized for ${addAction.path}, " +
+            s"effectiveLimit=$effectiveLimit, readMode=${ctx.readMode}"
         )
       } catch {
         case ex: Exception =>
           logger.error(s"Failed to initialize columnar reader for ${addAction.path}", ex)
-          initialized = true
+          initFailed = true
+          initException = ex
           throw new IOException(s"Failed to initialize columnar reader: ${ex.getMessage}", ex)
       }
     }
 
   override def next(): Boolean = {
-    if (consumed) return false
+    if (finished) return false
 
     try {
       initialize()
-      consumed = true
 
-      val splitQuery = ctx.buildSplitQuery(splitSearchEngine)
+      // Close previous batch before producing the next one
+      closePreviousBatch()
 
-      // --- Execute search ---
-      val searchResult = splitSearchEngine.getSplitSearcher().search(splitQuery, effectiveLimit)
-      try {
-        val hits = searchResult.getHits.asScala.toArray
-        if (hits.isEmpty) {
-          logger.info(s"CompanionColumnarPartitionReader: 0 hits for ${addAction.path}")
-          return false
-        }
+      val numCols = dataFieldNames.length
 
-        // Sort DocAddresses for sequential I/O (cache locality + range read efficiency)
-        val docAddresses = hits.map(_.getDocAddress).sortBy(addr => (addr.getSegmentOrd, addr.getDoc))
-        val numCols      = dataFieldNames.length
-
-        logger.info(
-          s"CompanionColumnarPartitionReader: ${docAddresses.length} hits, " +
-            s"$numCols data columns [${dataFieldNames.mkString(", ")}] for ${addAction.path}"
-        )
-
-        if (numCols == 0) {
-          // All requested columns are partition columns — no FFI needed
-          batch = buildPartitionOnlyBatch(docAddresses.length)
-          return batch.numRows() > 0
-        }
-
-        // Defensive check: verify the searcher actually supports Arrow FFI (per developer guide)
-        val searcher = splitSearchEngine.getSplitSearcher()
-        if (!searcher.supportsArrowFfi()) {
-          throw new IllegalStateException(
-            s"Arrow FFI not supported for companion split ${addAction.path}. " +
-              "supportsArrowFfi() returned false — the split may not have a parquet manifest. " +
-              "Disable columnar reads with spark.indextables.read.columnar.enabled=false to fall back to row path."
-          )
-        }
-
-        // Allocate Arrow FFI structs
-        val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-
-        // Call native FFI export — wrap in try/catch to clean up FFI structs on failure
-        val numRows =
-          try {
-            val n = searcher.docBatchArrowFfi(docAddresses, arrayAddrs, schemaAddrs, dataFieldNames: _*)
-
-            if (n < 0) {
-              // FFI returned -1 despite supportsArrowFfi() check — unexpected
-              arrays.foreach(a =>
-                try a.close()
-                catch { case _: Exception => }
-              )
-              schemas.foreach(s =>
-                try s.close()
-                catch { case _: Exception => }
-              )
-              throw new IllegalStateException(
-                s"docBatchArrowFfi returned -1 for companion split ${addAction.path} " +
-                  "despite supportsArrowFfi() returning true. " +
-                  "Arrow FFI not available — the split may not have a parquet manifest."
-              )
-            }
-            n
-          } catch {
-            case ex: IllegalStateException => throw ex // re-throw our own exception
-            case ex: Exception             =>
-              // Clean up FFI structs not yet consumed by importVector
-              arrays.foreach(a =>
-                try a.close()
-                catch { case _: Exception => }
-              )
-              schemas.foreach(s =>
-                try s.close()
-                catch { case _: Exception => }
-              )
-              throw ex
-          }
-
-        // Import into ColumnarBatch via ArrowFfiBridge
-        val dataBatch = bridge.importAsColumnarBatch(arrays, schemas, numRows)
-
-        // Assemble final batch with partition columns in readSchema order.
-        // assembleColumnarBatch extracts column vectors from dataBatch into a new ColumnarBatch.
-        // The dataBatch reference goes out of scope but is NOT closed — its vectors are now
-        // owned by the assembled batch, which is closed in close().
-        batch = assembleColumnarBatch(dataBatch, numRows)
-        logger.info(s"CompanionColumnarPartitionReader: produced batch with $numRows rows for ${addAction.path}")
-        numRows > 0
-
-      } finally
-        searchResult.close()
-
+      if (numCols > 0) {
+        nextStreaming(splitSearchEngine.getSplitSearcher(), numCols)
+      } else {
+        nextPartitionOnly(splitSearchEngine.getSplitSearcher())
+      }
     } catch {
       case ex: Exception =>
         logger.error(s"Error in columnar next() for ${addAction.path}", ex)
@@ -209,15 +143,102 @@ class CompanionColumnarPartitionReader(
     }
   }
 
-  override def get(): ColumnarBatch = batch
+  /**
+   * Streaming path: uses startStreamingRetrieval()/nextBatch() for all companion reads with data columns. Returns
+   * batches of ~128K rows with bounded ~24MB memory. Stops when the stream is exhausted or effectiveLimit rows have
+   * been returned.
+   */
+  private def nextStreaming(searcher: SplitSearcher, numCols: Int): Boolean = {
+    // Check if we've already satisfied the limit
+    if (totalRowsReturned >= effectiveLimit) {
+      finished = true
+      logger.info(s"Streaming: limit satisfied ($totalRowsReturned >= $effectiveLimit) for ${addAction.path}")
+      return false
+    }
+
+    // Start streaming session on first call
+    if (streamingSession == null) {
+      val splitQuery    = ctx.buildSplitQuery(splitSearchEngine)
+      val queryAstJson  = splitQuery.toQueryAstJson()
+      val typeHints     = buildTypeHints()
+      val maxDocs       = if (effectiveLimit == Int.MaxValue) -1 else effectiveLimit
+      val safeTypeHints = if (typeHints != null) typeHints else Array.empty[String]
+      streamingSession = if (typeHints != null || maxDocs > 0) {
+        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, safeTypeHints, maxDocs)
+      } else {
+        searcher.startStreamingRetrieval(queryAstJson, dataFieldNames: _*)
+      }
+      logger.info(
+        s"Streaming: started session for ${addAction.path}, " +
+          s"columnCount=${streamingSession.getColumnCount}, effectiveLimit=$effectiveLimit, maxDocs=$maxDocs" +
+          (if (typeHints != null) s", typeHints=${typeHints.length / 2} fields" else "")
+      )
+    }
+
+    // Get next batch
+    val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
+
+    val rows =
+      try
+        streamingSession.nextBatch(arrayAddrs, schemaAddrs)
+      catch {
+        case ex: Exception =>
+          cleanupFfiStructs(arrays, schemas)
+          throw ex
+      }
+
+    if (rows <= 0) {
+      cleanupFfiStructs(arrays, schemas)
+      finished = true
+      if (rows < 0) {
+        throw new RuntimeException(
+          s"Streaming retrieval error (nextBatch returned $rows) for ${addAction.path}. " +
+            "This typically indicates a parquet read failure or storage error in the native layer."
+        )
+      }
+      logger.info(s"Streaming: end of stream for ${addAction.path}, totalRowsReturned=$totalRowsReturned")
+      return false
+    }
+
+    val dataBatch = bridge.importAsColumnarBatchStreaming(arrays, schemas, rows)
+    currentBatch = assembleColumnarBatch(dataBatch, rows)
+    totalRowsReturned += rows
+    logger.debug(s"Streaming: batch with $rows rows for ${addAction.path}, totalRowsReturned=$totalRowsReturned")
+    true
+  }
+
+  /** Partition-only projection path: no FFI needed, just count matching rows and build constant vectors. */
+  private def nextPartitionOnly(searcher: SplitSearcher): Boolean = {
+    if (partitionOnlyConsumed) return false
+    partitionOnlyConsumed = true
+    finished = true
+
+    val splitQuery   = ctx.buildSplitQuery(splitSearchEngine)
+    val searchResult = searcher.search(splitQuery, effectiveLimit)
+    try {
+      val numHits = searchResult.getHits.size()
+      if (numHits == 0) {
+        logger.info(s"PartitionOnly: 0 hits for ${addAction.path}")
+        return false
+      }
+      currentBatch = buildPartitionOnlyBatch(numHits)
+      logger.info(s"PartitionOnly: $numHits rows for ${addAction.path}")
+      currentBatch.numRows() > 0
+    } finally
+      searchResult.close()
+  }
+
+  override def get(): ColumnarBatch = currentBatch
 
   override def close(): Unit = {
     ctx.collectMetricsDelta()
     ctx.reportBytesRead()
 
-    if (batch != null) {
-      try batch.close()
-      catch { case e: Exception => logger.warn("Error closing ColumnarBatch", e) }
+    closePreviousBatch()
+
+    if (streamingSession != null) {
+      try streamingSession.close()
+      catch { case e: Exception => logger.warn("Error closing StreamingSession", e) }
     }
 
     try bridge.close()
@@ -229,6 +250,27 @@ class CompanionColumnarPartitionReader(
     }
   }
 
+  private def closePreviousBatch(): Unit =
+    if (currentBatch != null) {
+      try currentBatch.close()
+      catch { case e: Exception => logger.warn("Error closing ColumnarBatch", e) }
+      currentBatch = null
+    }
+
+  private def cleanupFfiStructs(
+    arrays: Array[org.apache.arrow.c.ArrowArray],
+    schemas: Array[org.apache.arrow.c.ArrowSchema]
+  ): Unit = {
+    arrays.foreach(a =>
+      try a.close()
+      catch { case _: Exception => }
+    )
+    schemas.foreach(s =>
+      try s.close()
+      catch { case _: Exception => }
+    )
+  }
+
   /**
    * Assemble the final ColumnarBatch in readSchema column order by interleaving data columns (from FFI) with partition
    * columns (as ConstantColumnVector).
@@ -237,8 +279,6 @@ class CompanionColumnarPartitionReader(
    * columns in parquet schema order rather than the requested dataFieldNames order.
    */
   private def assembleColumnarBatch(dataBatch: ColumnarBatch, numRows: Int): ColumnarBatch = {
-    // Build name→index map from actual FFI vector field names (not positional assumption).
-    // The native FFI export may return columns in parquet schema order rather than requested order.
     val ffiColumnMap: Map[String, Int] = (0 until dataBatch.numCols()).map { i =>
       val name = dataBatch.column(i).asInstanceOf[ArrowColumnVector].getValueVector.getField.getName
       name -> i
@@ -270,6 +310,74 @@ class CompanionColumnarPartitionReader(
     }
     new ColumnarBatch(vectors, numRows)
   }
+
+  /**
+   * Build Arrow type hints for non-companion splits where tantivy's internal types (i64, f64) may differ from the Spark
+   * schema types (Int32, Float32, etc.). Returns null for companion splits since parquet preserves original types.
+   *
+   * Supports complex type hints (JSON format) for Struct, Array, and Map fields, which tells the native layer to
+   * produce proper Arrow Struct/List/Map vectors from JSON-serialized tantivy data.
+   */
+  private def buildTypeHints(): Array[String] = {
+    val isCompanion = config.contains("spark.indextables.companion.parquetTableRoot")
+    if (isCompanion) return null
+
+    // Build alternating [fieldName, arrowType] pairs for fields that need type mapping
+    val hints = scala.collection.mutable.ArrayBuffer[String]()
+    readSchema.fields.foreach { field =>
+      if (!partitionColumnNames.contains(field.name)) {
+        val hint = sparkTypeToHint(field.dataType)
+        if (hint != null) {
+          hints += field.name
+          hints += hint
+        }
+      }
+    }
+    if (hints.isEmpty) null else hints.toArray
+  }
+
+  /** Convert a top-level Spark DataType to a type hint string, or null if no hint is needed. */
+  private def sparkTypeToHint(dataType: DataType): String = dataType match {
+    case IntegerType    => "i32"
+    case ShortType      => "i16"
+    case ByteType       => "i8"
+    case FloatType      => "f32"
+    case DateType       => "date32"
+    case st: StructType => buildStructHint(st)
+    case at: ArrayType  => buildListHint(at)
+    case mt: MapType    => buildMapHint(mt)
+    case _              => null // Default Arrow type is correct (i64, f64, utf8, bool, etc.)
+  }
+
+  /** Convert a Spark DataType to a JSON type value string for use inside complex type hints. */
+  private def toJsonTypeValue(dataType: DataType): String = dataType match {
+    case StringType     => "\"string\""
+    case IntegerType    => "\"i32\""
+    case LongType       => "\"i64\""
+    case ShortType      => "\"i16\""
+    case ByteType       => "\"i8\""
+    case FloatType      => "\"f32\""
+    case DoubleType     => "\"f64\""
+    case BooleanType    => "\"bool\""
+    case DateType       => "\"date32\""
+    case TimestampType  => "\"timestamp\""
+    case st: StructType => buildStructHint(st)
+    case at: ArrayType  => buildListHint(at)
+    case mt: MapType    => buildMapHint(mt)
+    case _              => "\"string\""
+  }
+
+  /** Build struct hint using array-of-pairs format to preserve field ordering. */
+  private def buildStructHint(st: StructType): String = {
+    val fields = st.fields.map(f => s"""["${f.name}", ${toJsonTypeValue(f.dataType)}]""").mkString(", ")
+    s"""{"struct": [$fields]}"""
+  }
+
+  private def buildListHint(at: ArrayType): String =
+    s"""{"list": ${toJsonTypeValue(at.elementType)}}"""
+
+  private def buildMapHint(mt: MapType): String =
+    s"""{"map": [${toJsonTypeValue(mt.keyType)}, ${toJsonTypeValue(mt.valueType)}]}"""
 
   /** Create a ConstantColumnVector for a partition column value. */
   private def createConstantColumnVector(

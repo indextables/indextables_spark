@@ -52,14 +52,14 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("date")
       .save(tablePath)
 
     // Read back with partition filter
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"date" === "2024-01-01")
       .select("id", "name")
@@ -91,14 +91,14 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("month")
       .save(tablePath)
 
     // Read back with partition range filter (>, <, between)
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"month" >= "2024-02")
       .select("id", "name")
@@ -129,7 +129,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("month")
       .save(tablePath)
@@ -138,7 +138,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Partition filter (month === "2024-02") should be excluded from Tantivy
     // Non-partition filter (score > 200) should be sent to Tantivy
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"month" === "2024-02" && $"score" > 200)
       .select("id", "name", "score")
@@ -168,14 +168,14 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("category")
       .save(tablePath)
 
     // Read back with IN filter on partition column
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"category".isin("A", "B"))
       .select("id", "name")
@@ -203,13 +203,13 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write WITHOUT partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Read back with filters - all should go to Tantivy
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"score" >= 150)
       .select("id", "name")
@@ -239,7 +239,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("category")
       .save(tablePath)
@@ -247,7 +247,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // OR filter that mixes partition and non-partition columns should NOT be excluded
     // because excluding it would be incorrect (score > 250 OR category = 'A')
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"score" > 250 || $"category" === "A")
       .select("id", "name")
@@ -276,7 +276,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.fastfields", "score")
       .partitionBy("month")
@@ -284,7 +284,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Aggregate with partition filter
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"month" === "2024-02")
       .agg(
@@ -318,14 +318,14 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Write with partitioning
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .partitionBy("date")
       .save(tablePath)
 
     // Between range filter on partition column
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"date" >= "2024-01-15" && $"date" <= "2024-02-15")
       .select("id", "name")
@@ -357,7 +357,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Write - statistics will have min=2024-02-01, max=2024-03-01
     df.coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -366,7 +366,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Since splitMin (2024-02-01) > filterVal (2024-01-01), filter should be redundant
     val filterVal = Timestamp.from(Instant.parse("2024-01-01T00:00:00.000Z"))
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"created_at" >= filterVal)
       .select("id", "name")
@@ -397,7 +397,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Write - statistics will have min=2024-02-01, max=2024-03-01
     df.coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -405,7 +405,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Filter: event_date <= 2024-12-31 (all data is before this)
     // Since splitMax (2024-03-01) <= filterVal (2024-12-31), filter should be redundant
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"event_date" <= Date.valueOf("2024-12-31"))
       .select("id", "name")
@@ -437,7 +437,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Write
     df.coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -446,7 +446,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Since splitMin (2024-01-01) < filterVal (2024-02-01), filter should NOT be redundant
     val filterVal = Timestamp.from(Instant.parse("2024-02-01T00:00:00.000Z"))
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"created_at" >= filterVal)
       .select("id", "name")
@@ -477,7 +477,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Write - statistics will have min=2024-02-10, max=2024-02-20
     df.coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -487,7 +487,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     val startFilter = Timestamp.from(Instant.parse("2024-01-01T00:00:00.000Z"))
     val endFilter   = Timestamp.from(Instant.parse("2024-12-31T23:59:59.000Z"))
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"created_at" >= startFilter && $"created_at" <= endFilter)
       .select("id", "name")
@@ -520,7 +520,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Write - statistics will have min=2024-02-01, max=2024-03-15
     df.coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -531,7 +531,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // The timestamp filter should be excluded, but the name filter MUST still be applied
     val filterVal = Timestamp.from(Instant.parse("2024-01-01T00:00:00.000Z"))
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"created_at" >= filterVal && $"name" === "alice")
       .select("id", "name")
@@ -565,7 +565,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     // Write - date statistics will have min=2024-02-01, max=2024-03-15
     df.coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -575,7 +575,7 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     //
     // The date filter should be excluded, but the score filter MUST still be applied
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"event_date" <= Date.valueOf("2024-12-31") && $"score" > 200)
       .select("id", "name", "score")

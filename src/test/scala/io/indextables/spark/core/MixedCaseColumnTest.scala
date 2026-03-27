@@ -28,7 +28,7 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
  */
 class MixedCaseColumnTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
-  private val provider = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val provider = INDEXTABLES_FORMAT
 
   test("Mixed-case columns: SQL WHERE clause on regular write path") {
     withTempPath { path =>

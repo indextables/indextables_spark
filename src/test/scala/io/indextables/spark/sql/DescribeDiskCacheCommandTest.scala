@@ -28,7 +28,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /** Tests for DESCRIBE INDEXTABLES DISK CACHE command. */
-class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -57,13 +57,6 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
       deleteRecursively(tempDir)
     }
     super.afterAll()
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   // ===== SQL Parsing Tests =====
@@ -141,7 +134,7 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
 
     // Write with disk cache enabled
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", diskCachePath)
@@ -149,7 +142,7 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
 
     // Read to populate cache
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", diskCachePath)
       .load(tablePath)

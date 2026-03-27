@@ -97,7 +97,7 @@ object MergeUploader {
 
     try {
       // Parse S3 path
-      val (bucket, key) = parseS3Path(destPath)
+      val (bucket, key) = io.indextables.spark.util.CloudPathUtils.parseS3Path(destPath)
 
       if (fileSize >= multipartThreshold) {
         logger.info(s"Uploading to S3 (multipart): bucket=$bucket, key=$key ($fileSize bytes)")
@@ -124,7 +124,7 @@ object MergeUploader {
    */
   private def createS3Client(configs: Map[String, String], tablePath: String): S3Client = {
     def get(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGet(configs, key)
 
     // Use centralized credential resolution (SAME as S3AsyncDownloader.fromConfig)
     val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(configs, tablePath)
@@ -282,14 +282,6 @@ object MergeUploader {
     }
   }
 
-  /** Parse an S3 path into bucket and key. */
-  private def parseS3Path(path: String): (String, String) = {
-    val normalizedPath = path.replaceFirst("^s3a://", "s3://")
-    val uri            = new URI(normalizedPath)
-    val bucket         = uri.getHost
-    val key            = uri.getPath.stripPrefix("/")
-    (bucket, key)
-  }
 
   /**
    * Upload a local file to Azure Blob Storage.
@@ -338,7 +330,7 @@ object MergeUploader {
    */
   private def createAzureBlobClient(destPath: String, configs: Map[String, String]): BlobClient = {
     def get(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGet(configs, key)
 
     val accountName = get("spark.indextables.azure.accountName")
       .getOrElse(throw new RuntimeException("Azure account name not configured (spark.indextables.azure.accountName)"))
@@ -383,7 +375,7 @@ object MergeUploader {
     }
 
     // Parse Azure path to get container and blob
-    val (container, blobPath) = parseAzurePath(destPath)
+    val (container, blobPath) = io.indextables.spark.util.CloudPathUtils.parseAzurePath(destPath)
     logger.debug(s"Azure upload target: container=$container, blob=$blobPath")
 
     // Get blob client for upload
@@ -395,27 +387,6 @@ object MergeUploader {
    *
    * Handles various Azure URL schemes: azure://, wasb://, wasbs://, abfs://, abfss://
    */
-  private def parseAzurePath(path: String): (String, String) = {
-    // Normalize to azure:// scheme for parsing
-    val normalizedPath = path
-      .replaceFirst("^wasbs?://", "azure://")
-      .replaceFirst("^abfss?://", "azure://")
-
-    val uri      = new URI(normalizedPath)
-    val pathPart = uri.getPath.stripPrefix("/")
-
-    // Hadoop-style URLs use container@account.host format:
-    //   wasbs://container@account.blob.core.windows.net/path
-    //   abfss://container@account.dfs.core.windows.net/path
-    // In URI parsing, the part before @ becomes userInfo, not part of host.
-    val userInfo = uri.getUserInfo
-    if (userInfo != null && userInfo.nonEmpty) {
-      (userInfo, pathPart)
-    } else {
-      // Simple format: azure://container/path
-      (uri.getHost, pathPart)
-    }
-  }
 
   /**
    * Upload a local file to cloud storage with retry logic.

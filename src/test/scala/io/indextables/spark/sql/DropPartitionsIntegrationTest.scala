@@ -28,7 +28,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Integration tests for DROP INDEXTABLES PARTITIONS command. */
-class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
+class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _
@@ -62,13 +62,6 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   test("DROP INDEXTABLES PARTITIONS should logically remove partitions matching equality predicate") {
     val tablePath = s"$tempDir/partitioned_table"
 
@@ -84,13 +77,13 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year", "month")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year", "month")
       .mode("overwrite")
       .save(tablePath)
 
     // Verify initial data
-    val beforeDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(beforeDrop.count() == 5)
 
     // Drop partitions for year = '2023'
@@ -100,7 +93,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getLong(2) == 2) // 2 partitions dropped (01 and 02 for 2023)
 
     // Verify data after drop - should only see 2024 data
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 2)
     assert(afterDrop.filter($"year" === "2024").count() == 2)
     assert(afterDrop.filter($"year" === "2023").count() == 0)
@@ -120,7 +113,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)
@@ -131,7 +124,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getString(1) == "success")
 
     // Verify data after drop - should only see 2022, 2023, 2024 data
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 3)
     assert(afterDrop.filter($"year" >= "2022").count() == 3)
   }
@@ -150,7 +143,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year", "quarter")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year", "quarter")
       .mode("overwrite")
       .save(tablePath)
@@ -163,7 +156,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getLong(2) == 1) // Only 1 partition dropped
 
     // Verify data after drop
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 4)
     assert(afterDrop.filter($"year" === "2023" && $"quarter" === "Q1").count() == 0)
     assert(afterDrop.filter($"year" === "2023" && $"quarter" =!= "Q1").count() == 2)
@@ -180,7 +173,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)
@@ -204,7 +197,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -227,7 +220,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)
@@ -256,7 +249,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       ).toDF("id", "name", "year")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.state.format", "json")
         .partitionBy("year")
         .mode("overwrite")
@@ -296,7 +289,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)
@@ -320,7 +313,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(dropResult(0).getString(1) == "success")
 
     // Verify data is logically removed
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 1)
     assert(afterDrop.filter($"year" === "2023").count() == 0)
 
@@ -351,7 +344,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(purgeResult.length == 1)
 
     // Verify the 2024 data is still intact
-    val afterPurge = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterPurge = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterPurge.count() == 1)
     assert(afterPurge.filter($"year" === "2024").count() == 1)
   }
@@ -369,7 +362,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)
@@ -382,7 +375,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getLong(2) == 2) // 2 partitions dropped
 
     // Verify data after drop - should only see 2023 and 2025 data
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 2)
     assert(afterDrop.filter($"year" === "2023").count() == 1)
     assert(afterDrop.filter($"year" === "2025").count() == 1)
@@ -403,7 +396,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "month")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("month")
       .mode("overwrite")
       .save(tablePath)
@@ -414,7 +407,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getString(1) == "success")
 
     // Verify data after drop - should only see months 1, 5, 6
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 3)
     assert(afterDrop.filter($"month" === 1).count() == 1)
     assert(afterDrop.filter($"month" === 5).count() == 1)
@@ -442,13 +435,13 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "partition_key")
 
     data1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("partition_key")
       .mode("overwrite")
       .save(tablePath)
 
     // Verify first insert
-    val count1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+    val count1 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath).count()
     println(s"After insert 1: count=$count1")
     assert(count1 == 2, s"Expected 2 records after first insert, got $count1")
 
@@ -460,18 +453,18 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "partition_key")
 
     data2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("partition_key")
       .mode("append")
       .save(tablePath)
 
     // Verify second insert
-    val count2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+    val count2 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath).count()
     println(s"After insert 2: count=$count2")
     assert(count2 == 4, s"Expected 4 records after second insert, got $count2")
 
     // Verify both partitions exist
-    val df               = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val df               = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val partition01Count = df.filter($"partition_key" === "01").count()
     val partition02Count = df.filter($"partition_key" === "02").count()
     println(s"Partition counts: 01=$partition01Count, 02=$partition02Count")
@@ -493,17 +486,17 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Verify partition 02 is dropped but partition 01 still exists
     val afterDropCount =
-      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath).count()
     println(s"After drop 02: count=$afterDropCount")
     assert(afterDropCount == 2, s"Expected 2 records after dropping partition 02, got $afterDropCount")
 
     val afterDrop01 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"partition_key" === "01")
       .count()
     val afterDrop02 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .filter($"partition_key" === "02")
       .count()
@@ -534,7 +527,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       ).toDF("id", "name", "partition_key")
 
       data1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("partition_key")
         .mode("overwrite")
         .save(tablePath)
@@ -548,7 +541,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       println(s"State format after insert 1: ${stateResult1(0).getAs[String]("format")}")
 
       // Verify first insert
-      val count1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      val count1 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath).count()
       println(s"[AVRO] After insert 1: count=$count1")
       assert(count1 == 2, s"Expected 2 records after first insert, got $count1")
 
@@ -560,7 +553,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       ).toDF("id", "name", "partition_key")
 
       data2.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("partition_key")
         .mode("append")
         .save(tablePath)
@@ -574,12 +567,12 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       println(s"State format after insert 2: ${stateResult2(0).getAs[String]("format")}")
 
       // Verify second insert
-      val count2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      val count2 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath).count()
       println(s"[AVRO] After insert 2: count=$count2")
       assert(count2 == 4, s"Expected 4 records after second insert, got $count2")
 
       // Verify both partitions exist
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
       val partition01Count = df.filter($"partition_key" === "01").count()
       val partition02Count = df.filter($"partition_key" === "02").count()
       println(s"[AVRO] Partition counts: 01=$partition01Count, 02=$partition02Count")
@@ -601,17 +594,17 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
 
       // Verify partition 02 is dropped but partition 01 still exists
       val afterDropCount =
-        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+        spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath).count()
       println(s"[AVRO] After drop 02: count=$afterDropCount")
       assert(afterDropCount == 2, s"Expected 2 records after dropping partition 02, got $afterDropCount")
 
       val afterDrop01 = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
         .filter($"partition_key" === "01")
         .count()
       val afterDrop02 = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
         .filter($"partition_key" === "02")
         .count()
@@ -641,13 +634,13 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     val data = (1 to 12).map(m => (m, s"data_$m", m)).toDF("id", "name", "month")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("month")
       .mode("overwrite")
       .save(tablePath)
 
     // Verify initial data
-    val beforeDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(beforeDrop.count() == 12)
 
     // Drop partitions where month > 9 — should remove months 10, 11, 12
@@ -658,7 +651,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getLong(2) == 3, s"Expected 3 partitions dropped (10, 11, 12), got ${result(0).getLong(2)}")
 
     // Verify data after drop - should only see months 1-9
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 9, s"Expected 9 records after drop, got ${afterDrop.count()}")
 
     // Verify each remaining month
@@ -678,7 +671,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     val data = (1 to 12).map(m => (m, s"data_$m", m)).toDF("id", "name", "month")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("month")
       .mode("overwrite")
       .save(tablePath)
@@ -691,7 +684,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getLong(2) == 10, s"Expected 10 partitions dropped (months 2-11), got ${result(0).getLong(2)}")
 
     // Verify data after drop - should only see months 1 and 12
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 2, s"Expected 2 records after drop, got ${afterDrop.count()}")
     assert(afterDrop.filter($"month" === 1).count() == 1, "Month 1 should still exist")
     assert(afterDrop.filter($"month" === 12).count() == 1, "Month 12 should still exist")
@@ -707,7 +700,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     val data = (1 to 12).map(m => (m, s"data_$m", m)).toDF("id", "name", "month")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("month")
       .mode("overwrite")
       .save(tablePath)
@@ -721,7 +714,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result(0).getLong(2) == 9, s"Expected 9 partitions dropped (months 1-9), got ${result(0).getLong(2)}")
 
     // Verify data after drop - should only see months 10, 11, 12
-    val afterDrop = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop.count() == 3, s"Expected 3 records after drop, got ${afterDrop.count()}")
     for (m <- 10 to 12)
       assert(afterDrop.filter($"month" === m).count() == 1, s"Month $m should still exist")
@@ -741,7 +734,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     ).toDF("id", "name", "year")
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .partitionBy("year")
       .mode("overwrite")
       .save(tablePath)
@@ -751,7 +744,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result1(0).getString(1) == "success")
 
     // Verify
-    val afterDrop1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop1 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop1.count() == 4)
 
     // Second drop: 2021
@@ -759,7 +752,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result2(0).getString(1) == "success")
 
     // Verify
-    val afterDrop2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop2 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop2.count() == 3)
 
     // Third drop: 2022
@@ -767,7 +760,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(result3(0).getString(1) == "success")
 
     // Verify final state
-    val afterDrop3 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterDrop3 = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterDrop3.count() == 2)
     assert(afterDrop3.filter($"year" === "2023").count() == 1)
     assert(afterDrop3.filter($"year" === "2024").count() == 1)

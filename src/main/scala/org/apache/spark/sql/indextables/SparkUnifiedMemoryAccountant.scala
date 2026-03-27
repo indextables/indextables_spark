@@ -17,39 +17,40 @@
 
 package org.apache.spark.sql.indextables
 
-import io.indextables.tantivy4java.memory.NativeMemoryAccountant
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 
-import org.apache.spark.TaskContext
 import org.apache.spark.memory.{MemoryConsumer, MemoryMode, TaskMemoryManager}
+import org.apache.spark.TaskContext
+
+import io.indextables.tantivy4java.memory.NativeMemoryAccountant
 import org.slf4j.LoggerFactory
 
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
-
 /**
- * Thread-dispatching memory accountant that bridges tantivy4java's process-global
- * memory pool with Spark's per-task unified memory manager.
+ * Thread-dispatching memory accountant that bridges tantivy4java's process-global memory pool with Spark's per-task
+ * unified memory manager.
  *
- * Placed in `org.apache.spark.sql.indextables` to access `private[spark]`
- * `TaskContext.taskMemoryManager()`, following the same pattern as
- * [[OutputMetricsUpdater]].
+ * Placed in `org.apache.spark.sql.indextables` to access `private[spark]` `TaskContext.taskMemoryManager()`, following
+ * the same pattern as [[OutputMetricsUpdater]].
  *
- * On each `acquireMemory`/`releaseMemory` call, resolves the current thread's
- * [[TaskContext]] to find the correct [[TaskMemoryManager]] and delegates to it.
- * Since native code runs on Spark task threads, this correctly charges each
+ * On each `acquireMemory`/`releaseMemory` call, resolves the current thread's [[TaskContext]] to find the correct
+ * [[TaskMemoryManager]] and delegates to it. When called from a Spark task thread, this correctly charges each
  * allocation to the right task.
  *
- * If called outside a Spark task context (no [[TaskContext]] on the thread),
- * the allocation is denied (returns 0) and an ERROR is logged with a stack
- * trace. This makes untracked allocations immediately visible as bugs rather
- * than silently hiding them.
+ * When called from a non-task thread (e.g. Rust async/tokio threads spawned by `startStreamingRetrieval`), falls back
+ * to any active [[TaskConsumer]]. This is safe because:
+ *   - Memory is fungible: charging to task A vs B doesn't affect correctness
+ *   - tantivy4java's JvmMemoryPool batches JNI calls via watermarks, so callbacks are infrequent bulk adjustments
+ *     (~64MB chunks)
+ *   - Task completion listeners clean up outstanding allocations per task
+ *   - [[TaskMemoryManager.acquireExecutionMemory]] and [[TaskMemoryManager.releaseExecutionMemory]] are thread-safe
+ *     (synchronized on TaskMemoryManager and MemoryManager respectively)
  *
- * On task completion, any outstanding unreleased memory is forcibly released
- * back to the TaskMemoryManager to prevent progressive pool shrinkage.
+ * On task completion, any outstanding unreleased memory is forcibly released back to the TaskMemoryManager to prevent
+ * progressive pool shrinkage.
  *
- * Design follows the pattern established by DataFusion Comet's
- * `CometTaskMemoryManager`, adapted for tantivy4java's single-accountant
- * process-global model.
+ * Design follows the pattern established by DataFusion Comet's `CometTaskMemoryManager`, adapted for tantivy4java's
+ * single-accountant process-global model.
  */
 class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
 
@@ -60,7 +61,7 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
 
   override def acquireMemory(bytes: Long): Long = {
     val tc = resolveConsumer()
-    if (tc == null) return 0 // Denied — no task context
+    if (tc == null) return 0 // No active task — deny allocation
     val acquired = tc.tmm.acquireExecutionMemory(bytes, tc.consumer)
     tc.used.addAndGet(acquired)
     acquired
@@ -76,12 +77,12 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
     val toRelease = if (newUsed < 0) {
       logger.warn(
         s"Native memory used counter went negative ($newUsed) after releasing $bytes bytes. " +
-          "Clamping to 0.")
+          "Clamping to 0."
+      )
       // CAS loop: only reset to 0 if no concurrent acquire has already corrected it
       var prev = newUsed
-      while (prev < 0 && !tc.used.compareAndSet(prev, 0)) {
+      while (prev < 0 && !tc.used.compareAndSet(prev, 0))
         prev = tc.used.get()
-      }
       bytes + newUsed // == previousUsed, the amount Spark actually granted
     } else {
       bytes
@@ -91,40 +92,73 @@ class SparkUnifiedMemoryAccountant extends NativeMemoryAccountant {
     }
   }
 
+  /**
+   * Resolve the [[TaskConsumer]] for the current call.
+   *
+   * Fast path: TaskContext is on this thread → exact task match. Fallback: no TaskContext (async/tokio thread) → pick
+   * any active consumer. The fallback is safe because memory is fungible and task completion listeners ensure cleanup
+   * regardless of which task was charged.
+   */
   private def resolveConsumer(): TaskConsumer = {
     val ctx = TaskContext.get()
-    if (ctx == null) {
-      // tantivy4java 0.32.5+ calls NativeMemoryManager.shutdown() before the
-      // SplitCacheManager shutdown hook, so this path should only be hit for
-      // genuinely unexpected non-task-thread allocations.
-      logger.error(
-        "Native memory acquire/release called outside Spark task context. " +
-          "This is a bug — all native allocations must occur on a task thread.",
-        new IllegalStateException("No TaskContext"))
-      return null
+    if (ctx != null) {
+      return resolveFromTaskContext(ctx)
     }
+
+    // Async thread fallback: pick any active consumer.
+    // This is hit by Rust tokio threads spawned during startStreamingRetrieval/nextBatch.
+    //
+    // Note: if multiple tasks are active, acquire and release may land on different
+    // fallback consumers. This is harmless at the pool level — completion listeners
+    // clean up each task's outstanding balance — but may trigger spurious "used counter
+    // went negative" warnings and inflate per-task accounting.
+    val iter = consumers.values().iterator()
+    if (iter.hasNext) {
+      val fallback = iter.next()
+      // Guard against the race where the task completed between iterator snapshot and here.
+      if (!consumers.containsKey(fallback.taskId)) {
+        logger.warn("Native memory callback fallback task already completed — allocation will be untracked.")
+        return null
+      }
+      logger.debug(
+        "Native memory callback from non-task thread — using fallback TaskConsumer " +
+          s"(taskId=${fallback.taskId})"
+      )
+      fallback
+    } else {
+      // No active tasks at all (e.g. JVM shutdown, or allocation before any task started).
+      logger.warn("Native memory callback with no active Spark tasks — allocation will be untracked.")
+      null
+    }
+  }
+
+  /** Resolve or create a TaskConsumer for the given TaskContext (must be on the task thread). */
+  private def resolveFromTaskContext(ctx: TaskContext): TaskConsumer = {
     val taskId = ctx.taskAttemptId()
-    // Note: addTaskCompletionListener registers cleanup before computeIfAbsent inserts the
-    // entry into the map. This is safe because the current thread IS the task thread —
-    // the task cannot complete while we're inside computeIfAbsent on that same thread.
-    consumers.computeIfAbsent(taskId, _ => {
-      val tmm = ctx.taskMemoryManager()
-      val tc  = new TaskConsumer(tmm, taskId)
-      // Release any outstanding native memory when the task completes,
-      // preventing progressive off-heap pool shrinkage if Rust defers
-      // releases past task lifetime.
-      ctx.addTaskCompletionListener[Unit] { _ =>
-        val removed = consumers.remove(taskId)
-        if (removed != null) {
-          val outstanding = removed.used.get()
-          if (outstanding > 0) {
-            removed.tmm.releaseExecutionMemory(outstanding, removed.consumer)
-            logger.debug(s"Released $outstanding outstanding native bytes on task $taskId completion")
+    // The completion listener is registered inside the lambda, which executes before the
+    // map entry is visible to other threads. This is safe because the current thread IS
+    // the task thread — the task cannot complete while we're inside computeIfAbsent.
+    consumers.computeIfAbsent(
+      taskId,
+      _ => {
+        val tmm = ctx.taskMemoryManager()
+        val tc  = new TaskConsumer(tmm, taskId)
+        // Release any outstanding native memory when the task completes,
+        // preventing progressive off-heap pool shrinkage if Rust defers
+        // releases past task lifetime.
+        ctx.addTaskCompletionListener[Unit] { _ =>
+          val removed = consumers.remove(taskId)
+          if (removed != null) {
+            val outstanding = removed.used.get()
+            if (outstanding > 0) {
+              removed.tmm.releaseExecutionMemory(outstanding, removed.consumer)
+              logger.debug(s"Released $outstanding outstanding native bytes on task $taskId completion")
+            }
           }
         }
+        tc
       }
-      tc
-    })
+    )
   }
 }
 
@@ -132,10 +166,8 @@ object SparkUnifiedMemoryAccountant {
 
   private val logger = LoggerFactory.getLogger(classOf[SparkUnifiedMemoryAccountant])
 
-  /**
-   * Per-task wrapper holding a MemoryConsumer registered with the task's TaskMemoryManager.
-   */
-  private class TaskConsumer(val tmm: TaskMemoryManager, taskId: Long) {
+  /** Per-task wrapper holding a MemoryConsumer registered with the task's TaskMemoryManager. */
+  private class TaskConsumer(val tmm: TaskMemoryManager, val taskId: Long) {
     val used = new AtomicLong()
 
     val consumer: MemoryConsumer = new MemoryConsumer(tmm, 0, MemoryMode.OFF_HEAP) {

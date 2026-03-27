@@ -21,9 +21,7 @@ import java.nio.file.Files
 
 import io.indextables.spark.TestBase
 
-/**
- * Tests for StreamingCompanionManager lifecycle and interruption behavior.
- */
+/** Tests for StreamingCompanionManager lifecycle and interruption behavior. */
 class StreamingCompanionManagerTest extends TestBase {
 
   /** Minimal valid SyncToExternalCommand pointing at local temp paths. */
@@ -56,10 +54,10 @@ class StreamingCompanionManagerTest extends TestBase {
   test("cheapSourceVersion returns None for iceberg format when catalog is unreachable") {
     val sourceDir = "namespace.tableName"
     val indexDir  = Files.createTempDirectory("streaming-index-iceberg").toString
-    val command   = SyncToExternalCommand(
+    val command = SyncToExternalCommand(
       sourceFormat = "iceberg",
-      sourcePath   = sourceDir,
-      destPath     = indexDir,
+      sourcePath = sourceDir,
+      destPath = indexDir,
       indexingModes = Map.empty,
       fastFieldMode = "HYBRID",
       targetInputSize = None,
@@ -77,7 +75,11 @@ class StreamingCompanionManagerTest extends TestBase {
     // giving the interrupt a reliable target.
     // syncFn always throws to simulate the empty-source-dir failure and trigger the error backoff sleep.
     val syncFn: (org.apache.spark.sql.SparkSession, Long, Option[Long]) => Seq[org.apache.spark.sql.Row] =
-      (_, _, _) => throw new IllegalStateException("simulated sync failure: no files in source dir")
+      (
+        _,
+        _,
+        _
+      ) => throw new IllegalStateException("simulated sync failure: no files in source dir")
     val manager = new StreamingCompanionManager(makeCommand(sourceDir, indexDir), pollIntervalMs = 60000L, syncFn)
     val thread  = new Thread(() => manager.runStreaming(spark))
     thread.setDaemon(true)
@@ -104,9 +106,7 @@ class StreamingCompanionManagerTest extends TestBase {
     val command = makeCommand(sourceDir, indexDir).copy(streamingPollIntervalMs = Some(60000L))
     var result: Seq[org.apache.spark.sql.Row] = null
 
-    val thread = new Thread(() => {
-      result = command.run(spark)
-    })
+    val thread = new Thread(() => result = command.run(spark))
     thread.setDaemon(true)
     thread.start()
 

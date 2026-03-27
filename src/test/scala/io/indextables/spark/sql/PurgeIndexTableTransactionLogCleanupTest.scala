@@ -83,7 +83,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -91,8 +91,12 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     val txLogPath = new Path(s"$tablePath/_transaction_log")
 
     // Verify we have transaction log files and a checkpoint
-    val filesBeforeCleanup = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
-    assert(filesBeforeCleanup.exists(_.contains(".checkpoint.json")), "Should have checkpoint file")
+    val txLogEntries = fs.listStatus(txLogPath)
+    val filesBeforeCleanup = txLogEntries.map(_.getPath.getName).toSet
+    val avroStateDirPattern = """^state-v\d{20}$""".r
+    val hasCheckpoint = filesBeforeCleanup.exists(_.contains(".checkpoint.json")) ||
+      txLogEntries.exists(s => s.isDirectory && avroStateDirPattern.findFirstIn(s.getPath.getName).isDefined)
+    assert(hasCheckpoint, "Should have checkpoint file or Avro state directory")
     assert(filesBeforeCleanup.exists(_.matches("\\d{20}\\.json")), "Should have version files")
 
     // Explicitly age transaction log files 0-8 to 25 hours ago to exceed 24-hour retention
@@ -119,7 +123,10 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     val filesAfterCleanup = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
 
     // Checkpoint and _last_checkpoint should still exist
-    assert(filesAfterCleanup.exists(_.contains(".checkpoint.json")), "Checkpoint file should remain")
+    val txLogEntriesAfter = fs.listStatus(txLogPath)
+    val hasCheckpointAfter = filesAfterCleanup.exists(_.contains(".checkpoint.json")) ||
+      txLogEntriesAfter.exists(s => s.isDirectory && avroStateDirPattern.findFirstIn(s.getPath.getName).isDefined)
+    assert(hasCheckpointAfter, "Checkpoint file or Avro state directory should remain")
     assert(filesAfterCleanup.contains("_last_checkpoint"), "_last_checkpoint should remain")
   }
 
@@ -135,7 +142,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -181,7 +188,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -232,7 +239,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -263,7 +270,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -283,7 +290,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -303,7 +310,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -332,7 +339,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -367,8 +374,12 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     assert(versionsBeforePurge.contains(12L), "Version 12.json should exist before purge")
 
     // Also verify we have a checkpoint at version 12
-    val filesBeforePurge = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
-    assert(filesBeforePurge.exists(_.contains(".checkpoint.json")), "Should have checkpoint file")
+    val txLogEntriesBefore = fs.listStatus(txLogPath)
+    val filesBeforePurge = txLogEntriesBefore.map(_.getPath.getName).toSet
+    val avroStateDirPat = """^state-v\d{20}$""".r
+    val hasCheckpointBefore = filesBeforePurge.exists(_.contains(".checkpoint.json")) ||
+      txLogEntriesBefore.exists(s => s.isDirectory && avroStateDirPat.findFirstIn(s.getPath.getName).isDefined)
+    assert(hasCheckpointBefore, "Should have checkpoint file or Avro state directory")
 
     // STEP 2: Run purge - should delete ONLY aged versions 0-8 (9 files) which are:
     // 1. Explicitly aged to 25 hours ago via fs.setTimes()
@@ -391,7 +402,10 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     println(s"Transaction log files after purge: ${filesAfterPurgeList.mkString(", ")}")
 
     val filesAfterPurge = filesAfterPurgeList.toSet
-    assert(filesAfterPurge.exists(_.contains(".checkpoint.json")), "Checkpoint files should remain")
+    val txLogEntriesAfterPurge = fs.listStatus(txLogPath)
+    val hasCheckpointAfterPurge = filesAfterPurge.exists(_.contains(".checkpoint.json")) ||
+      txLogEntriesAfterPurge.exists(s => s.isDirectory && avroStateDirPat.findFirstIn(s.getPath.getName).isDefined)
+    assert(hasCheckpointAfterPurge, "Checkpoint files or Avro state directory should remain")
     assert(filesAfterPurge.contains("_last_checkpoint"), "_last_checkpoint should remain")
 
     // Verify that ONLY aged versions 0-8 are gone, and fresh versions 9-12 remain
@@ -416,7 +430,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // STEP 5: Verify we can still READ after purging 0.json
     // The TransactionLog should now read from checkpoint to reconstruct schema and state
     val readData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .orderBy("id")
 
@@ -440,7 +454,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // STEP 6: Verify we can still WRITE (append) after purging 0.json
     val newData = Seq((13, "record_13")).toDF("id", "value")
     newData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("append")
       .save(tablePath)
 
@@ -448,7 +462,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
 
     // STEP 7: Verify the new data is readable
     val finalData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .orderBy("id")
 

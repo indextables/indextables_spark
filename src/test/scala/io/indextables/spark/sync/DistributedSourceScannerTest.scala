@@ -30,7 +30,7 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for DistributedSourceScanner — verifies that distributed Delta and Parquet scans produce the same file set as
  * the existing single-call readers.
  */
-class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -74,13 +74,6 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       f(path)
     finally
       deleteRecursively(new File(path))
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   private val emptyCredentials: Map[String, String] = Map.empty
@@ -169,10 +162,10 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       // trueCurrentVersion = checkpoint version (0) + 0 post-checkpoint commits = 0.
       // This verifies the formula snapshotInfo.getVersion + getCommitFilePaths.size
       // returns the correct value even when there are no post-checkpoint commits.
-      createDeltaTable(deltaPath, numFiles = 3, rowsPerFile = 5)  // creates checkpoint at version 0
+      createDeltaTable(deltaPath, numFiles = 3, rowsPerFile = 5) // creates checkpoint at version 0
 
       val reader   = new DeltaLogReader(deltaPath, emptyCredentials)
-      val expected = reader.currentVersion()  // should be 0
+      val expected = reader.currentVersion() // should be 0
       expected shouldBe 0L
 
       val scanner = new DistributedSourceScanner(spark)
@@ -241,7 +234,7 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
   // ─── Incremental Delta Tests (fromVersion parameter) ───
 
   test("DistributedScanResult.isIncremental defaults to false") {
-    val sc  = spark.sparkContext
+    val sc = spark.sparkContext
     val result = DistributedScanResult(
       filesRDD = sc.emptyRDD[CompanionSourceFile],
       version = Some(5L),
@@ -254,7 +247,7 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
   }
 
   test("DistributedScanResult.isIncremental can be set to true") {
-    val sc  = spark.sparkContext
+    val sc = spark.sparkContext
     val result = DistributedScanResult(
       filesRDD = sc.emptyRDD[CompanionSourceFile],
       version = Some(5L),
@@ -272,9 +265,9 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       val deltaPath = new File(tempDir, "delta_incr_noop").getAbsolutePath
       createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
 
-      val scanner    = new DistributedSourceScanner(spark)
+      val scanner = new DistributedSourceScanner(spark)
       // Full scan to learn the current version
-      val fullResult = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val fullResult     = scanner.scanDeltaTable(deltaPath, emptyCredentials)
       val currentVersion = fullResult.version.get
 
       // Incremental scan with fromVersion == currentVersion → no new commits → empty result
@@ -292,8 +285,8 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       // Create table with checkpoint at version 0
       createDeltaTable(deltaPath, numFiles = 2, rowsPerFile = 5)
 
-      val scanner     = new DistributedSourceScanner(spark)
-      val fullResult  = scanner.scanDeltaTable(deltaPath, emptyCredentials)
+      val scanner       = new DistributedSourceScanner(spark)
+      val fullResult    = scanner.scanDeltaTable(deltaPath, emptyCredentials)
       val syncedVersion = fullResult.version.get
 
       // Append more files WITHOUT checkpoint → creates post-checkpoint commits
@@ -342,9 +335,8 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
         // Full scan: isIncremental is false and all files are returned
         result.isIncremental shouldBe false
         result.filesRDD.collect() should not be empty
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.sync.maxIncrementalCommits")
-      }
     }
   }
 
@@ -486,10 +478,14 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
   }
 
   /**
-   * Append rows to an existing Delta table without triggering a new checkpoint.
-   * This creates post-checkpoint commits, which is the scenario that exposes version tracking bugs.
+   * Append rows to an existing Delta table without triggering a new checkpoint. This creates post-checkpoint commits,
+   * which is the scenario that exposes version tracking bugs.
    */
-  private def appendToDeltaTableWithoutCheckpoint(path: String, numFiles: Int, rowsPerFile: Int): Unit = {
+  private def appendToDeltaTableWithoutCheckpoint(
+    path: String,
+    numFiles: Int,
+    rowsPerFile: Int
+  ): Unit = {
     val ss = spark
     import ss.implicits._
     // Disable automatic checkpointing for this append

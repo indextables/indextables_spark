@@ -59,7 +59,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     // This simulates the real-world scenario where credentials are passed via options
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")            // Small target
@@ -72,7 +72,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
 
     // Read back and verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -96,7 +96,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     // This should still work for local filesystem
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")
@@ -104,7 +104,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -127,7 +127,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     // Write with credentials - should log (masked) credential info
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")
@@ -138,7 +138,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -163,7 +163,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     // Write with DIFFERENT credentials in options - these should take priority
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")
@@ -173,7 +173,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 200

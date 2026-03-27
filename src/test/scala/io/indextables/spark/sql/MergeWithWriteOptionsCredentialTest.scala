@@ -106,7 +106,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     for (i <- 1 to 5) {
       val df = spark.createDataFrame(Seq((i, s"value$i"))).toDF("id", "value")
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(localPath)
     }
@@ -135,7 +135,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     val localPath = tempDir + "/extract_aws_test"
     val df        = spark.createDataFrame(Seq((1, "value1"))).toDF("id", "value")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(localPath)
 
@@ -205,7 +205,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     for (i <- 1 to 3) {
       val df = spark.createDataFrame(Seq((i, s"value$i"))).toDF("id", "value")
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(localPath)
     }
@@ -251,7 +251,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     // First write: Create initial table (no merge yet)
     val df1 = spark.createDataFrame(Seq((1, "value1"), (2, "value2"))).toDF("id", "value")
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(localPath)
     logger.info("Initial write completed")
@@ -263,7 +263,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     // Note: Using local path, so merge will use local filesystem (not S3)
     // This tests the config propagation logic without needing actual S3 access
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "1K")            // Very small to force merge
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Low threshold to trigger merge
@@ -278,7 +278,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
     // Verify the table is readable (proves merge didn't corrupt data)
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(localPath)
       .count()
 

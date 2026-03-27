@@ -19,9 +19,7 @@ package io.indextables.spark.sql
 
 import io.indextables.spark.TestBase
 
-/**
- * Unit tests for StreamingCompanionMetrics accumulator registration and update behavior.
- */
+/** Unit tests for StreamingCompanionMetrics accumulator registration and update behavior. */
 class StreamingCompanionMetricsTest extends TestBase {
 
   test("all accumulators start at zero") {

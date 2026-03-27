@@ -22,12 +22,12 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.TransactionLogInterface
 import io.indextables.spark.write.{OptimizedWriteConfig, WriteSizeEstimator}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkWriteBuilder(
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   tablePath: Path,
   info: LogicalWriteInfo,
   options: CaseInsensitiveStringMap,

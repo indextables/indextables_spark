@@ -25,7 +25,7 @@ import java.time.Instant
 import scala.util.{Failure, Success, Try}
 
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicSessionCredentials}
-import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
+import com.fasterxml.jackson.databind.JsonNode
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
 import io.indextables.spark.transaction.EnhancedTransactionLogCache
 import io.indextables.spark.util.{ConfigSource, ConfigurationResolver, MapConfigSource}
@@ -351,7 +351,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     .build()
 
   // Process-global JSON parser
-  private val objectMapper: ObjectMapper = new ObjectMapper()
+  private val objectMapper = io.indextables.spark.util.JsonUtil.mapper
 
   // Process-global credentials cache
   @volatile private var globalCredentialsCache: Cache[String, CachedCredentials] = _

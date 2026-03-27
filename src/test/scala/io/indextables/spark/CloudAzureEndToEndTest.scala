@@ -68,7 +68,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write to Azure
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(azurePath)
 
@@ -76,7 +76,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read from Azure
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     val readData = readDf.orderBy("id").collect()
@@ -103,7 +103,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write to Azure with text field type for full-text search
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
       .save(azurePath)
@@ -112,7 +112,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read and query with IndexQuery
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     // Query for "python"
@@ -139,7 +139,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write partitioned data to Azure
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date", "hour")
       .mode("overwrite")
       .save(azurePath)
@@ -148,7 +148,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read with partition pruning
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     // Query specific partition
@@ -173,13 +173,13 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write first batch
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(azurePath)
 
     // Append second batch
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("append")
       .save(azurePath)
 
@@ -192,7 +192,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Verify data integrity after merge
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     val allDocs = readDf.orderBy("id").collect()
@@ -220,7 +220,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write to Azure with fast field configuration
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
       .save(azurePath)
@@ -229,7 +229,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read and perform aggregations
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     // Test aggregate pushdown
@@ -254,7 +254,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     // Write with multiple partitions
     df.repartition(4)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(azurePath)
 
@@ -262,7 +262,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read and validate count
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     val count = readDf.count()
@@ -284,7 +284,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     val df1       = spark.createDataFrame(testData1).toDF("id", "content")
 
     df1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(azurePath)
 
@@ -295,7 +295,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     val df2       = spark.createDataFrame(testData2).toDF("id", "content")
 
     df2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(azurePath)
 
@@ -303,7 +303,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Validate only new data exists
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     val allDocs = readDf.collect()
@@ -329,7 +329,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write to Azure with text fields
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.description", "text")
       .mode("overwrite")
@@ -339,7 +339,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read and query with _indexall
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     val sparkDocs = readDf.filter("_indexall indexquery 'Spark'").collect()
@@ -367,7 +367,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write using abfss:// scheme (should normalize to azure:// internally)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("overwrite")
@@ -377,7 +377,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read using abfss:// scheme (normalization should work)
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val readData = readDf.orderBy("id").collect()
@@ -408,7 +408,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     val appendDf   = spark.createDataFrame(appendData).toDF("id", "content", "score")
 
     appendDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .mode("append")
@@ -418,7 +418,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Validate appended data
     val afterAppend = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val appendedCount = afterAppend.count()
@@ -433,7 +433,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Validate data integrity after merge
     val afterMerge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val mergeCount = afterMerge.count()
@@ -458,7 +458,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     val df = spark.createDataFrame(testData).toDF("id", "content", "score")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(abfssPath)
 
@@ -468,7 +468,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     val azurePath = s"azure://$testContainer/test-mixed-$testId"
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(azurePath)
 
     val readData = readDf.orderBy("id").collect()
@@ -485,7 +485,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
     val appendDf   = spark.createDataFrame(appendData).toDF("id", "content", "score")
 
     appendDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("append")
       .save(azurePath)
 
@@ -493,7 +493,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read back using abfss:// scheme
     val finalDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val finalCount = finalDf.count()
@@ -519,7 +519,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write partitioned data using abfss://
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .partitionBy("date", "hour")
       .mode("overwrite")
       .save(abfssPath)
@@ -528,7 +528,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read with partition pruning using abfss://
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     // Query specific partition
@@ -550,7 +550,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Validate data integrity
     val afterMerge = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val totalCount = afterMerge.count()
@@ -584,7 +584,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write using OAuth credentials
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAcct)
       .option("spark.indextables.azure.tenantId", tenantId)
       .option("spark.indextables.azure.clientId", clientId)
@@ -596,7 +596,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read using OAuth credentials
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.azure.accountName", storageAcct)
       .option("spark.indextables.azure.tenantId", tenantId)
       .option("spark.indextables.azure.clientId", clientId)
@@ -633,7 +633,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write using OAuth credentials from file (no explicit credentials needed)
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(abfssPath)
 
@@ -641,7 +641,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Read using OAuth credentials from file
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val readData = readDf.orderBy("id").collect()
@@ -684,7 +684,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Write data
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(abfssPath)
 
@@ -697,7 +697,7 @@ class CloudAzureEndToEndTest extends CloudAzureTestBase {
 
     // Verify data integrity
     val readDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(TestBase.INDEXTABLES_FORMAT)
       .load(abfssPath)
 
     val rowCount = readDf.count()

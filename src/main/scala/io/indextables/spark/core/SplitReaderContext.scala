@@ -32,19 +32,18 @@ import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.storage.{BatchOptMetrics, BatchOptimizationMetricsAccumulator, SplitCacheConfig}
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitQuery}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /**
- * Shared initialization context for split-based partition readers (both row and columnar).
+ * Shared initialization context for split-based columnar partition readers.
  *
  * Encapsulates the duplicated logic for: effective limit calculation, path resolution, cache config, companion
  * validation, path normalization, footer validation, SplitMetadata reconstruction, SplitSearchEngine creation, split
  * field name retrieval, partition filter separation, range filter stats optimization, IndexQuery cleanup, and
  * SplitQuery building.
  *
- * Both [[IndexTables4SparkPartitionReader]] and [[CompanionColumnarPartitionReader]] compose this class (has-a) rather
- * than inheriting from it, avoiding trait mixin complexity with different `PartitionReader[T]` type parameters.
+ * [[ColumnarPartitionReader]] composes this class (has-a) rather than inheriting from it, avoiding trait mixin
+ * complexity with the `PartitionReader[ColumnarBatch]` type parameter.
  */
 class SplitReaderContext(
   addAction: AddAction,
@@ -59,14 +58,8 @@ class SplitReaderContext(
 
   private val logger = LoggerFactory.getLogger(classOf[SplitReaderContext])
 
-  /** Effective limit: use pushed limit, then configurable default, then hardcoded fallback. */
-  val effectiveLimit: Int = {
-    val configuredDefault = config
-      .get("spark.indextables.read.defaultLimit")
-      .flatMap(s => scala.util.Try(s.toInt).toOption)
-      .getOrElse(250)
-    limit.getOrElse(configuredDefault)
-  }
+  val readMode: String    = SplitReaderContext.resolveReadMode(config)
+  val effectiveLimit: Int = SplitReaderContext.computeEffectiveLimit(config, limit)
 
   /** Resolved file path from AddAction against table path. */
   val filePath: String = PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
@@ -135,27 +128,7 @@ class SplitReaderContext(
     }
 
     // Reconstruct SplitMetadata from AddAction
-    val splitMetadata = new QuickwitSplit.SplitMetadata(
-      addAction.path.split("/").last.replace(".split", ""),
-      "tantivy4spark-index",
-      0L,
-      "tantivy4spark-source",
-      "tantivy4spark-node",
-      toLongSafeOption(addAction.numRecords),
-      toLongSafeOption(addAction.uncompressedSizeBytes),
-      addAction.timeRangeStart.map(Instant.parse).orNull,
-      addAction.timeRangeEnd.map(Instant.parse).orNull,
-      System.currentTimeMillis() / 1000,
-      "Mature",
-      addAction.splitTags.getOrElse(Set.empty[String]).asJava,
-      toLongSafeOption(addAction.footerStartOffset),
-      toLongSafeOption(addAction.footerEndOffset),
-      toLongSafeOption(addAction.deleteOpstamp),
-      addAction.numMergeOps.getOrElse(0),
-      "doc-mapping-uid",
-      addAction.docMappingJson.orNull,
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()
-    )
+    val splitMetadata = io.indextables.spark.util.SplitMetadataFactory.fromAddAction(addAction, tablePath.toString)
 
     val options = Some(IndexTables4SparkOptions(config))
 
@@ -263,16 +236,16 @@ class SplitReaderContext(
   }
 
   /** Result of resolving partition column references within a filter. */
-  private sealed trait PartitionResolution
-  private case object ResolvedTrue extends PartitionResolution
-  private case object ResolvedFalse extends PartitionResolution
+  sealed private trait PartitionResolution
+  private case object ResolvedTrue                  extends PartitionResolution
+  private case object ResolvedFalse                 extends PartitionResolution
   private case class ResolvedFilter(filter: Filter) extends PartitionResolution
 
   /**
-    * Resolve partition column references in a filter against this split's partition values.
-    * For leaf filters on partition columns, evaluates them against the known partition values.
-    * For And/Or, recursively resolves and simplifies using boolean logic.
-    */
+   * Resolve partition column references in a filter against this split's partition values. For leaf filters on
+   * partition columns, evaluates them against the known partition values. For And/Or, recursively resolves and
+   * simplifies using boolean logic.
+   */
   private def resolvePartitionReferences(filter: Filter): PartitionResolution = {
     import org.apache.spark.sql.sources._
 
@@ -311,24 +284,24 @@ class SplitReaderContext(
         val l = resolvePartitionReferences(left)
         val r = resolvePartitionReferences(right)
         (l, r) match {
-          case (ResolvedTrue, _) | (_, ResolvedTrue) => ResolvedTrue
-          case (ResolvedFalse, other)                => other
-          case (other, ResolvedFalse)                => other
+          case (ResolvedTrue, _) | (_, ResolvedTrue)    => ResolvedTrue
+          case (ResolvedFalse, other)                   => other
+          case (other, ResolvedFalse)                   => other
           case (ResolvedFilter(lf), ResolvedFilter(rf)) => ResolvedFilter(Or(lf, rf))
         }
       case And(left, right) =>
         val l = resolvePartitionReferences(left)
         val r = resolvePartitionReferences(right)
         (l, r) match {
-          case (ResolvedFalse, _) | (_, ResolvedFalse) => ResolvedFalse
-          case (ResolvedTrue, other)                   => other
-          case (other, ResolvedTrue)                   => other
+          case (ResolvedFalse, _) | (_, ResolvedFalse)  => ResolvedFalse
+          case (ResolvedTrue, other)                    => other
+          case (other, ResolvedTrue)                    => other
           case (ResolvedFilter(lf), ResolvedFilter(rf)) => ResolvedFilter(And(lf, rf))
         }
       case Not(child) =>
         resolvePartitionReferences(child) match {
-          case ResolvedTrue     => ResolvedFalse
-          case ResolvedFalse    => ResolvedTrue
+          case ResolvedTrue      => ResolvedFalse
+          case ResolvedFalse     => ResolvedTrue
           case ResolvedFilter(f) => ResolvedFilter(Not(f))
         }
       case leaf if isPartitionLeaf(leaf) =>
@@ -339,29 +312,48 @@ class SplitReaderContext(
   }
 
   /** Compare a partition value string with a filter value for equality. */
-  private def partitionValueEquals(partitionValue: String, filterValue: Any, attr: String): Boolean =
+  private def partitionValueEquals(
+    partitionValue: String,
+    filterValue: Any,
+    attr: String
+  ): Boolean =
     filterValue match {
-      case s: String       => partitionValue == s
-      case i: Int          => scala.util.Try(partitionValue.toInt).toOption.contains(i)
-      case l: Long         => scala.util.Try(partitionValue.toLong).toOption.contains(l)
-      case d: Double       => scala.util.Try(partitionValue.toDouble).toOption.contains(d)
-      case f: Float        => scala.util.Try(partitionValue.toFloat).toOption.contains(f)
-      case b: Boolean      => scala.util.Try(partitionValue.toBoolean).toOption.contains(b)
+      case s: String  => partitionValue == s
+      case i: Int     => scala.util.Try(partitionValue.toInt).toOption.contains(i)
+      case l: Long    => scala.util.Try(partitionValue.toLong).toOption.contains(l)
+      case d: Double  => scala.util.Try(partitionValue.toDouble).toOption.contains(d)
+      case f: Float   => scala.util.Try(partitionValue.toFloat).toOption.contains(f)
+      case b: Boolean => scala.util.Try(partitionValue.toBoolean).toOption.contains(b)
       case date: java.sql.Date =>
-        scala.util.Try(java.time.LocalDate.parse(partitionValue)).toOption.exists(_.toEpochDay == date.toLocalDate.toEpochDay)
+        scala.util
+          .Try(java.time.LocalDate.parse(partitionValue))
+          .toOption
+          .exists(_.toEpochDay == date.toLocalDate.toEpochDay)
       case ts: java.sql.Timestamp =>
-        scala.util.Try(java.time.Instant.parse(partitionValue + "Z")).toOption.exists(_.toEpochMilli == ts.getTime)
+        scala.util
+          .Try(java.time.Instant.parse(partitionValue))
+          .orElse(scala.util.Try(java.time.Instant.parse(partitionValue + "Z")))
+          .toOption
+          .exists(_.toEpochMilli == ts.getTime)
       case _ => partitionValue == filterValue.toString
     }
 
   /** Compare a partition value with a filter value, returning negative/zero/positive like Comparable. */
-  private def partitionValueCompare(partitionValue: String, filterValue: Any, attr: String): Int = {
+  private def partitionValueCompare(
+    partitionValue: String,
+    filterValue: Any,
+    attr: String
+  ): Int = {
     val fieldType = fullTableSchema.fields.find(_.name == attr).map(_.dataType)
     fieldType match {
-      case Some(IntegerType) => scala.util.Try(partitionValue.toInt).getOrElse(0).compareTo(filterValue.asInstanceOf[Int])
-      case Some(LongType) => scala.util.Try(partitionValue.toLong).getOrElse(0L).compareTo(filterValue.asInstanceOf[Long])
-      case Some(DoubleType) => scala.util.Try(partitionValue.toDouble).getOrElse(0.0).compareTo(filterValue.asInstanceOf[Double])
-      case Some(FloatType) => scala.util.Try(partitionValue.toFloat).getOrElse(0.0f).compareTo(filterValue.asInstanceOf[Float])
+      case Some(IntegerType) =>
+        scala.util.Try(partitionValue.toInt).getOrElse(0).compareTo(filterValue.asInstanceOf[Int])
+      case Some(LongType) =>
+        scala.util.Try(partitionValue.toLong).getOrElse(0L).compareTo(filterValue.asInstanceOf[Long])
+      case Some(DoubleType) =>
+        scala.util.Try(partitionValue.toDouble).getOrElse(0.0).compareTo(filterValue.asInstanceOf[Double])
+      case Some(FloatType) =>
+        scala.util.Try(partitionValue.toFloat).getOrElse(0.0f).compareTo(filterValue.asInstanceOf[Float])
       case Some(DateType) =>
         val pvDays = scala.util.Try(java.time.LocalDate.parse(partitionValue).toEpochDay.toInt).getOrElse(0)
         filterValue match {
@@ -403,19 +395,6 @@ class SplitReaderContext(
   def reportBytesRead(): Unit = {
     val bytesRead = addAction.size
     org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)
-  }
-
-  /** Safe conversion for Option[Any] to Long to handle JSON deserialization type variations. */
-  private def toLongSafeOption(opt: Option[Any]): Long = opt match {
-    case Some(value) =>
-      value match {
-        case l: Long              => l
-        case i: Int               => i.toLong
-        case i: java.lang.Integer => i.toLong
-        case l: java.lang.Long    => l
-        case _                    => value.toString.toLong
-      }
-    case None => 0L
   }
 
   /**
@@ -536,4 +515,42 @@ class SplitReaderContext(
       case _ => false
     }
   }
+}
+
+object SplitReaderContext {
+
+  /**
+   * Resolve and validate the read mode from configuration.
+   *
+   * @return
+   *   "fast" or "complete"
+   * @throws IllegalArgumentException
+   *   if an invalid mode is configured
+   */
+  def resolveReadMode(config: Map[String, String]): String = {
+    val mode = config.getOrElse(IndexTables4SparkOptions.READ_MODE, "fast").toLowerCase
+    require(
+      mode == "fast" || mode == "complete",
+      s"Invalid ${IndexTables4SparkOptions.READ_MODE} value '$mode'. Must be 'fast' or 'complete'."
+    )
+    mode
+  }
+
+  /**
+   * Compute the effective result limit from config and any pushed limit.
+   *
+   *   - **fast** (default): pushed limit → configured `defaultLimit` → 250
+   *   - **complete**: pushed limit → Int.MaxValue (return everything)
+   */
+  def computeEffectiveLimit(config: Map[String, String], limit: Option[Int]): Int =
+    resolveReadMode(config) match {
+      case "complete" =>
+        limit.getOrElse(Int.MaxValue)
+      case _ =>
+        val configuredDefault = config
+          .get("spark.indextables.read.defaultLimit")
+          .flatMap(s => scala.util.Try(s.toInt).toOption)
+          .getOrElse(250)
+        limit.getOrElse(configuredDefault)
+    }
 }

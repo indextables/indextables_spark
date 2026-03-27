@@ -15,7 +15,7 @@ import org.scalatest.funsuite.AnyFunSuite
  *   - Additional GROUP BY columns use nested TermsAggregation as sub-aggregations
  *   - Results are flattened: [bucket_key, term_key, aggregation_values]
  */
-class BucketAggregationMultiKeyTest extends AnyFunSuite {
+class BucketAggregationMultiKeyTest extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("DateHistogram with single GROUP BY key should work") {
     val spark = SparkSession
@@ -47,7 +47,7 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
 
       // Write data with timestamp and hostname as fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "timestamp,hostname,value")
         .mode("overwrite")
         .save(tablePath)
@@ -55,7 +55,7 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
       println(s"Data written to $tablePath")
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       df.createOrReplaceTempView("test_table")
@@ -115,13 +115,13 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
 
       // Write data with timestamp and hostname as fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "timestamp,hostname,value")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       df.createOrReplaceTempView("test_table")
@@ -183,13 +183,13 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
       println("=" * 80)
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "category,hostname,price")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       df.createOrReplaceTempView("price_table")
@@ -245,13 +245,13 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
       println("=" * 80)
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "category,hostname,price")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       df.createOrReplaceTempView("price_table")
@@ -314,13 +314,13 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
 
       // Write data with all fields as fast fields
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "timestamp,hostname,region,value")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       df.createOrReplaceTempView("test_table")
@@ -377,13 +377,13 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
       println("=" * 80)
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "category,hostname,region,price")
         .mode("overwrite")
         .save(tablePath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       df.createOrReplaceTempView("price_table")
@@ -414,10 +414,4 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
   }
 
   /** Recursively delete a directory and all its contents. */
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
 }

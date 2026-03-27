@@ -39,7 +39,7 @@ import org.scalatest.BeforeAndAfterAll
  *
  * No cloud credentials needed -- runs entirely on local filesystem.
  */
-class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -91,13 +91,6 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       f(path)
     } finally
       deleteRecursively(new File(path))
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   /**
@@ -309,7 +302,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Read back companion index
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       val allRecords = companionDf.collect()
@@ -448,7 +441,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       val ex = intercept[Exception] {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .mode("append")
           .save(indexPath)
       }
@@ -467,7 +460,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 15
@@ -500,7 +493,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // First verify regular count works
@@ -545,7 +538,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Verify total count
@@ -594,7 +587,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       result.collect()(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Verify total count
@@ -626,7 +619,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // COUNT(name) is value_count on the string fast field.
@@ -658,7 +651,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // terms(name) with sum(score) and avg(score) sub-aggregations.
@@ -691,7 +684,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // IS NOT NULL on a string field maps to an exists/FieldPresence query in tantivy4java.
@@ -712,7 +705,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // IS NULL on a non-nullable string field should return no rows.
@@ -748,7 +741,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // A filter forces SimpleAggregateScan (not TransactionLogCountScan).
@@ -771,7 +764,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // IN on a string field: should match exactly the specified values.

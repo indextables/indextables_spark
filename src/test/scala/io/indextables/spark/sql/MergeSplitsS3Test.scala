@@ -202,7 +202,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
 
     // Write with small batch size to create multiple splits
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "10")
       .mode("overwrite")
       .save(s3TablePath)
@@ -229,7 +229,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     )
 
     // Verify we can still read the data after merge
-    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(s3TablePath)
+    val readBack = spark.read.format(INDEXTABLES_FORMAT).load(s3TablePath)
     assert(readBack.count() == 99, "Should preserve all records after merge")
   }
 
@@ -246,7 +246,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       )
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .partitionBy("partition")
       .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
@@ -267,7 +267,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     assert(result.head.getString(0) == s3TablePath, "Should preserve S3 path")
 
     // Read back and verify data integrity
-    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(s3TablePath)
+    val readBack = spark.read.format(INDEXTABLES_FORMAT).load(s3TablePath)
     assert(readBack.count() > 0, "Should have data")
   }
 
@@ -282,7 +282,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .select(col("id"), concat(lit("doc_"), col("id")).as("content"))
 
     testData.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
       .save(s3aPath)
@@ -340,7 +340,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .filter(col("id") <= 300)
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "100")
       .mode(SaveMode.Overwrite)
       .save(s3TablePath)
@@ -350,7 +350,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .filter(col("id") > 300 && col("id") <= 600)
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "100")
       .mode(SaveMode.Append)
       .save(s3TablePath)
@@ -360,7 +360,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .filter(col("id") > 600)
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "100")
       .mode(SaveMode.Append)
       .save(s3TablePath)
@@ -462,7 +462,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     // This ensures we don't have any cached references
     println("🔄 Creating fresh DataFrameReader to avoid cached references...")
 
-    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(s3TablePath)
+    val readBack = spark.read.format(INDEXTABLES_FORMAT).load(s3TablePath)
 
     println("🔍 About to count records from merged data...")
     val finalCount =

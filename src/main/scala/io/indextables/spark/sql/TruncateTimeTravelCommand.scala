@@ -27,7 +27,7 @@ import org.apache.spark.sql.types.{LongType, StringType}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{TransactionLogCheckpoint, TransactionLogFactory}
+import io.indextables.spark.transaction.{ActionJsonSerializer, TransactionLogFactory}
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import org.slf4j.LoggerFactory
 
@@ -60,9 +60,10 @@ case class TruncateTimeTravelCommand(
   private val logger = LoggerFactory.getLogger(classOf[TruncateTimeTravelCommand])
 
   // Regex patterns for file detection (from PurgeOrphanedSplitsExecutor)
-  private val VersionFilePattern = """^(\d{20})\.json$""".r
-  private val ManifestPattern    = """^(\d{20})\.checkpoint\.json$""".r
-  private val PartFilePattern    = """^(\d{20})\.checkpoint\.([a-f0-9]+)\.(\d{5})\.json$""".r
+  private val VersionFilePattern  = """^(\d{20})\.json$""".r
+  private val ManifestPattern     = """^(\d{20})\.checkpoint\.json$""".r
+  private val PartFilePattern     = """^(\d{20})\.checkpoint\.([a-f0-9]+)\.(\d{5})\.json$""".r
+  private val AvroStateDirPattern = """^state-v(\d{20})$""".r
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("table_path", StringType)(),
@@ -123,11 +124,11 @@ case class TruncateTimeTravelCommand(
           case Some(cpVersion) =>
             // Checkpoint exists but not at current version - create new one
             logger.info(s"Existing checkpoint at v$cpVersion, creating new checkpoint at v$currentVersion")
-            createCheckpointAtCurrentVersion(sparkSession, resolvedPath, options)
+            createCheckpointAtCurrentVersion(transactionLog, resolvedPath, options)
           case None =>
             // No checkpoint exists - create one
             logger.info(s"No checkpoint exists, creating checkpoint at v$currentVersion")
-            createCheckpointAtCurrentVersion(sparkSession, resolvedPath, options)
+            createCheckpointAtCurrentVersion(transactionLog, resolvedPath, options)
         }
 
         // Now delete old transaction log files
@@ -139,43 +140,53 @@ case class TruncateTimeTravelCommand(
         )
 
         try {
-          // List all files in transaction log directory
-          val allFiles = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
+          // List all files in transaction log directory (recursive to include Avro state dir contents)
+          val allFiles = cloudProvider.listFiles(transactionLogPath.toString, recursive = true)
 
           // Categorize files
           val versionFiles    = scala.collection.mutable.ListBuffer[(Long, String)]()
           val checkpointFiles = scala.collection.mutable.ListBuffer[(Long, String)]()
           val partFiles       = scala.collection.mutable.ListBuffer[(Long, String, String)]() // (version, uuid, path)
+          val avroStateFiles  = scala.collection.mutable.ListBuffer[(Long, String)]() // (version, file path)
 
           allFiles.foreach { f =>
-            val fileName = new Path(f.path).getName
-            fileName match {
-              case VersionFilePattern(versionStr) =>
-                val version = versionStr.toLong
-                versionFiles += ((version, f.path))
-              case ManifestPattern(versionStr) =>
-                val version = versionStr.toLong
-                checkpointFiles += ((version, f.path))
-              case PartFilePattern(versionStr, uuid, _) =>
-                val version = versionStr.toLong
-                partFiles += ((version, uuid, f.path))
-              case _ => // Ignore other files (like _last_checkpoint)
+            val filePath = new Path(f.path)
+            val fileName = filePath.getName
+            // Check if file is inside an Avro state directory (e.g., state-v5/_manifest)
+            val parentName = Option(filePath.getParent).map(_.getName).getOrElse("")
+            parentName match {
+              case AvroStateDirPattern(versionStr) =>
+                avroStateFiles += ((versionStr.toLong, f.path))
+              case _ =>
+                fileName match {
+                  case VersionFilePattern(versionStr) =>
+                    versionFiles += ((versionStr.toLong, f.path))
+                  case ManifestPattern(versionStr) =>
+                    checkpointFiles += ((versionStr.toLong, f.path))
+                  case PartFilePattern(versionStr, uuid, _) =>
+                    partFiles += ((versionStr.toLong, uuid, f.path))
+                  case _ => // Ignore other files (like _last_checkpoint)
+                }
             }
           }
 
-          logger.info(s"Found ${versionFiles.size} version files, ${checkpointFiles.size} checkpoints, ${partFiles.size} checkpoint parts")
+          logger.info(s"Found ${versionFiles.size} version files, ${checkpointFiles.size} JSON checkpoints, " +
+            s"${partFiles.size} checkpoint parts, ${avroStateFiles.map(_._1).toSet.size} Avro state checkpoints")
 
           // Identify files to delete:
           // - Version files with version < checkpointVersion
           // - Checkpoint files with version < checkpointVersion
           // - Part files with version < checkpointVersion
+          // - Avro state files with version < checkpointVersion
           val versionsToDelete    = versionFiles.filter(_._1 < checkpointVersion)
           val checkpointsToDelete = checkpointFiles.filter(_._1 < checkpointVersion)
           val partsToDelete       = partFiles.filter(_._1 < checkpointVersion)
+          val avroStateToDelete   = avroStateFiles.filter(_._1 < checkpointVersion)
 
-          val totalFilesToDelete = versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size
+          val totalFilesToDelete = versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size + avroStateToDelete.size
 
-          logger.info(s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, ${partsToDelete.size} parts")
+          logger.info(s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, " +
+            s"${partsToDelete.size} parts, ${avroStateToDelete.size} Avro state files")
 
           if (totalFilesToDelete == 0) {
             return Seq(
@@ -193,7 +204,8 @@ case class TruncateTimeTravelCommand(
 
           if (dryRun) {
             // Preview mode - don't actually delete
-            logger.info(s"DRY RUN: Would delete ${versionsToDelete.size} version files, ${checkpointsToDelete.size} checkpoint files, ${partsToDelete.size} checkpoint parts")
+            val totalCheckpointDeletes = checkpointsToDelete.size + partsToDelete.size + avroStateToDelete.size
+            logger.info(s"DRY RUN: Would delete ${versionsToDelete.size} version files, $totalCheckpointDeletes checkpoint files/state files")
 
             Seq(
               Row(
@@ -201,9 +213,9 @@ case class TruncateTimeTravelCommand(
                 "DRY_RUN",
                 checkpointVersion,
                 versionsToDelete.size.toLong,
-                (checkpointsToDelete.size + partsToDelete.size).toLong,
+                totalCheckpointDeletes.toLong,
                 transactionLog.listFiles().size.toLong,
-                s"Would delete ${versionsToDelete.size} version files and ${checkpointsToDelete.size + partsToDelete.size} checkpoint files (DRY RUN - no changes made)"
+                s"Would delete ${versionsToDelete.size} version files and $totalCheckpointDeletes checkpoint files (DRY RUN - no changes made)"
               )
             )
           } else {
@@ -253,9 +265,36 @@ case class TruncateTimeTravelCommand(
                 }
             }
 
+            // Delete Avro state files (files inside state-v{N}/ directories)
+            val avroStateDirs = scala.collection.mutable.Set[String]()
+            avroStateToDelete.foreach {
+              case (version, path) =>
+                try {
+                  // Track parent directory for cleanup
+                  val parentDir = new Path(path).getParent.toString
+                  avroStateDirs += parentDir
+                  if (cloudProvider.deleteFile(path)) {
+                    deletedCheckpoints += 1
+                    logger.debug(s"Deleted Avro state file: v$version")
+                  }
+                } catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete Avro state file v$version: ${e.getMessage}")
+                }
+            }
+            // Clean up empty state directories
+            avroStateDirs.foreach { dirPath =>
+              try cloudProvider.deleteFile(dirPath)
+              catch { case _: Exception => }
+            }
+
             logger.info(
               s"Truncation complete: deleted $deletedVersions version files, $deletedCheckpoints checkpoint files"
             )
+
+            // Invalidate snapshot cache so listFiles() reads fresh state
+            // after version files were deleted from storage
+            transactionLog.invalidateCache()
 
             Seq(
               Row(
@@ -290,45 +329,37 @@ case class TruncateTimeTravelCommand(
         )
     }
 
-  /** Create a checkpoint at the current version. Returns the checkpoint version. */
+  /** Create a checkpoint at the current version using the existing transaction log. Returns the checkpoint version. */
   private def createCheckpointAtCurrentVersion(
-    sparkSession: SparkSession,
+    transactionLog: io.indextables.spark.transaction.TransactionLogInterface,
     resolvedPath: Path,
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap
   ): Long = {
-    val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
-    try {
-      val versions       = transactionLog.getVersions()
-      val currentVersion = versions.max
+    val versions       = transactionLog.getVersions()
+    val currentVersion = versions.max
 
-      // Get all current actions (file state)
-      val allFiles = transactionLog.listFiles()
-      val metadata = transactionLog.getMetadata()
-      val protocol = transactionLog.getProtocol()
+    // Get all current actions (file state)
+    val allFiles = transactionLog.listFiles()
+    val metadata = transactionLog.getMetadata()
+    val protocol = transactionLog.getProtocol()
 
-      // Build complete action list for checkpoint
-      val allActions = Seq(protocol) ++ Seq(metadata) ++ allFiles
+    logger.info(s"Creating checkpoint at version $currentVersion with ${allFiles.length + 2} actions")
 
-      logger.info(s"Creating checkpoint at version $currentVersion with ${allActions.length} actions")
+    // Create checkpoint via native TransactionLogWriter
+    val nativeTablePath = io.indextables.spark.transaction.ConfigMapper.normalizeTablePath(resolvedPath)
+    val nativeConfig    = io.indextables.spark.transaction.ConfigMapper.toNativeConfig(options)
 
-      // Create checkpoint handler
-      val transactionLogPath = new Path(resolvedPath, "_transaction_log")
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        transactionLogPath.toString,
-        options,
-        sparkSession.sparkContext.hadoopConfiguration
-      )
+    val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
+    val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
+    val addsJson     = ActionJsonSerializer.addActionsToJson(allFiles)
 
-      try {
-        val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
-        checkpoint.createCheckpoint(currentVersion, allActions)
-        checkpoint.close()
-        logger.info(s"Created checkpoint at version $currentVersion")
-        currentVersion
-      } finally
-        cloudProvider.close()
-    } finally
-      transactionLog.close()
+    io.indextables.jni.txlog.TransactionLogWriter.createCheckpoint(
+      nativeTablePath, nativeConfig, addsJson, metadataJson, protocolJson
+    )
+    // Invalidate snapshot cache so subsequent reads see the new checkpoint
+    transactionLog.invalidateCache()
+    logger.info(s"Created checkpoint at version $currentVersion")
+    currentVersion
   }
 
   /** Resolve table path from string path or table identifier. */

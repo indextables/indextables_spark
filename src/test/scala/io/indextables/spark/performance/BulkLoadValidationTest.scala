@@ -22,16 +22,7 @@ import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
 
-class BulkLoadValidationTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class BulkLoadValidationTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   ignore("should write 439,999 records using V2 provider and read them back") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping bulk load test")
 
@@ -47,13 +38,13 @@ class BulkLoadValidationTest extends TestBase {
 
       // Write using V2 provider
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back using V2 provider
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
         .limit(9999999)
 

@@ -23,19 +23,21 @@ import org.apache.spark.sql.catalyst.parser.ParserUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
-import io.indextables.spark.sql.TableRootUtils
 import io.indextables.spark.sql.{
   CheckpointCommand,
   DescribeComponentSizesCommand,
   DescribeDiskCacheCommand,
   DescribeEnvironmentCommand,
+  DescribeFfiProfilerCommand,
   DescribeMergeJobsCommand,
   DescribePrewarmJobsCommand,
   DescribeStateCommand,
   DescribeStorageStatsCommand,
   DescribeTableRootsCommand,
   DescribeTransactionLogCommand,
+  DisableFfiProfilerCommand,
   DropPartitionsCommand,
+  EnableFfiProfilerCommand,
   FlushDiskCacheCommand,
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
@@ -43,6 +45,7 @@ import io.indextables.spark.sql.{
   PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand,
+  ResetFfiProfilerCommand,
   SetTableRootCommand,
   SyncToExternalCommand,
   TruncateTimeTravelCommand,
@@ -50,6 +53,7 @@ import io.indextables.spark.sql.{
   WaitForPrewarmJobsCommand
 }
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
+import io.indextables.spark.sql.TableRootUtils
 import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory
 
@@ -331,6 +335,18 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
 
   override def visitFlushDiskCache(ctx: FlushDiskCacheContext): LogicalPlan =
     FlushDiskCacheCommand()
+
+  override def visitEnableProfiler(ctx: EnableProfilerContext): LogicalPlan =
+    EnableFfiProfilerCommand()
+
+  override def visitDisableProfiler(ctx: DisableProfilerContext): LogicalPlan =
+    DisableFfiProfilerCommand()
+
+  override def visitDescribeProfiler(ctx: DescribeProfilerContext): LogicalPlan =
+    DescribeFfiProfilerCommand(cacheOnly = ctx.CACHE() != null)
+
+  override def visitResetProfiler(ctx: ResetProfilerContext): LogicalPlan =
+    ResetFfiProfilerCommand(cacheOnly = ctx.CACHE() != null)
 
   override def visitInvalidateIndexTablesTransactionLogCache(ctx: InvalidateIndexTablesTransactionLogCacheContext)
     : LogicalPlan = {
@@ -970,14 +986,15 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
           throw new IllegalArgumentException("WITH STREAMING is not compatible with DRY RUN")
         }
         val n = ctx.pollInterval.getText.toLong
-        if (n <= 0) throw new IllegalArgumentException(
-          s"WITH STREAMING POLL INTERVAL must be at least 1 SECONDS (got $n)"
-        )
+        if (n <= 0)
+          throw new IllegalArgumentException(
+            s"WITH STREAMING POLL INTERVAL must be at least 1 SECONDS (got $n)"
+          )
         val ms = ctx.pollUnit.getText.toUpperCase match {
           case "SECONDS" => n * 1000L
           case "MINUTES" => n * 60L * 1000L
         }
-        logger.debug(s"Streaming poll interval: ${n} ${ctx.pollUnit.getText} (${ms}ms)")
+        logger.debug(s"Streaming poll interval: $n ${ctx.pollUnit.getText} (${ms}ms)")
         Some(ms)
       } else {
         None

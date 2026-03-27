@@ -55,7 +55,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -149,7 +149,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -193,14 +193,14 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
 
           // Create PartitionReader - this will validate footer metadata internally
           try {
-            val partitionReader = readerFactory.createReader(serializedPartition)
+            val partitionReader = readerFactory.createColumnarReader(serializedPartition)
 
             // Read some records to validate the reader works
             var recordCount = 0
             while (partitionReader.next() && recordCount < 10) {
-              val row = partitionReader.get()
-              row should not be null
-              recordCount += 1
+              val batch = partitionReader.get()
+              batch should not be null
+              recordCount += batch.numRows()
             }
 
             partitionReader.close()
@@ -232,7 +232,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 
@@ -289,13 +289,13 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       complexData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .partitionBy("partition_key")
         .save(tempPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Complex query that will create many InputPartitions
@@ -366,7 +366,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tempPath)
 

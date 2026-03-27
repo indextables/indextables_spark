@@ -456,25 +456,25 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
     // Write small splits first
     smallDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("append")
       .save(tempTablePath)
 
     // Write more small splits
     smallDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("append")
       .save(tempTablePath)
 
     // Write a larger split
     largeDf.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("append")
       .save(tempTablePath)
 
     // Get initial split count
     val initialDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
     val initialCount = initialDf.count()
 
@@ -490,7 +490,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity - count should be the same
     val finalDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
     val finalCount = finalDf.count()
 
@@ -507,7 +507,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     val df       = spark.createDataFrame(testData).toDF("id", "content")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
@@ -614,7 +614,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     // Write 6 separate small splits
     for (i <- 1 to 6) {
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("append")
         .save(tempTablePath)
       // Small delay to ensure different modification times
@@ -623,7 +623,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
     // Verify we have multiple splits
     val initialDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
     val initialCount = initialDf.count()
 
@@ -637,7 +637,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val finalDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tempTablePath)
     val finalCount = finalDf.count()
     assert(finalCount == initialCount, s"Data count should be preserved: expected $initialCount, got $finalCount")

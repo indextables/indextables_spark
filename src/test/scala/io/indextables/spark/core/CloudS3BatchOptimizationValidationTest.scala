@@ -136,7 +136,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
     val df = spark.range(0, 1000).toDF("id").selectExpr("id", "id * 2 as value", "concat('item_', id) as label")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -151,7 +151,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
     // Use collect() instead of count() to force document retrieval and trigger batch optimization
     // Set limit to avoid default 250 row limit per partition
     val result1 =
-      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(10000).collect()
+      spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(testPath).limit(10000).collect()
     val time1 = System.currentTimeMillis() - start1
 
     result1.length shouldEqual 1000
@@ -182,7 +182,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
     spark.conf.set("spark.indextables.read.batchOptimization.metrics.enabled", "false")
     val start2 = System.currentTimeMillis()
     val result2 =
-      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(10000).collect()
+      spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(testPath).limit(10000).collect()
     val time2 = System.currentTimeMillis() - start2
 
     result2.length shouldEqual 1000
@@ -218,7 +218,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
       .toDF("id")
       .selectExpr("id", "id % 10 as category", "concat('data_', id) as data")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -232,7 +232,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
       val start = System.currentTimeMillis()
       // Use limit + collect instead of count() to avoid aggregate pushdown issues
       val count = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(testPath)
         .filter("category = 5")
         .limit(100000)
@@ -272,7 +272,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
       )
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -322,7 +322,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
         // Use limit + collect instead of count() to avoid aggregate pushdown issues
         // with IsNotNull filters (Spark adds implicit IsNotNull for comparison predicates)
         val count = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .load(testPath)
           .filter(filter)
           .limit(100000)
@@ -351,7 +351,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
       .selectExpr("id", "id * 3 as value", "concat('row_', id) as text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -363,7 +363,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
 
     val start = System.currentTimeMillis()
     val result =
-      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(20000).collect()
+      spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(testPath).limit(20000).collect()
     val time = System.currentTimeMillis() - start
 
     result.length shouldEqual 10000
@@ -384,7 +384,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
       .toDF("id")
       .selectExpr("id", "id % 100 as category", "concat('data_', id) as value")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -397,7 +397,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
 
     // Execute query with filter to trigger batch retrieval
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(testPath)
       .filter("category < 50")
       .limit(20000)
@@ -481,7 +481,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
       .toDF("id")
       .selectExpr("id", "id % 10 as category", "concat('data_', id) as value")
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testPath)
 
@@ -494,7 +494,7 @@ class CloudS3BatchOptimizationValidationTest extends CloudS3TestBase {
 
     // Execute query to retrieve all documents
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(testPath)
       .limit(rowCount * 2) // Ensure we get all rows
       .collect()

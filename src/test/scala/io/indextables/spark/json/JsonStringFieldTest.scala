@@ -34,7 +34,7 @@ class JsonStringFieldTest extends TestBase {
       val df = Seq((1, """{"one": "two", "three": "four"}""")).toDF("id", "val_field")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.val_field", "json")
         .mode("overwrite")
         .save(path)
@@ -43,7 +43,7 @@ class JsonStringFieldTest extends TestBase {
 
       // Read back
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("test_table")
@@ -89,7 +89,7 @@ class JsonStringFieldTest extends TestBase {
       ).toDF("id", "val_field")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.val_field", "json")
         .mode("overwrite")
         .save(path)
@@ -97,7 +97,7 @@ class JsonStringFieldTest extends TestBase {
       println(s"✅ Wrote ${df.count()} records")
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("test_table")
@@ -135,13 +135,13 @@ class JsonStringFieldTest extends TestBase {
       ).toDF("id", "user_data")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.user_data", "json")
         .mode("overwrite")
         .save(path)
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("users")
@@ -197,7 +197,7 @@ class JsonStringFieldTest extends TestBase {
       println("✅ Writing data with mixed-case field name 'valField'")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.valField", "json")
         .mode("overwrite")
         .save(path)
@@ -206,7 +206,7 @@ class JsonStringFieldTest extends TestBase {
 
       // Read back
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("test_table")
@@ -268,7 +268,7 @@ class JsonStringFieldTest extends TestBase {
       println("✅ Writing data with multiple mixed-case field names")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.userStatus", "json")
         .option("spark.indextables.indexing.typemap.httpResponse", "json")
         .option("spark.indextables.indexing.typemap.LogLevel", "json")
@@ -278,7 +278,7 @@ class JsonStringFieldTest extends TestBase {
       println("✅ Successfully wrote data with multiple mixed-case field names")
 
       val resultDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       resultDf.createOrReplaceTempView("mixed_case_table")

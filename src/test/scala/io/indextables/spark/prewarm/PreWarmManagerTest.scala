@@ -99,7 +99,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
 
     // Write as indextables
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 

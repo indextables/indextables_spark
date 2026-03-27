@@ -155,9 +155,12 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
     val files             = fs.listStatus(txLogPath)
     val versionPattern    = """^\d{20}\.json$""".r
     val checkpointPattern = """^\d{20}\.checkpoint.*\.json$""".r
+    val avroStatePattern  = """^state-v\d{20}$""".r
 
     val versionCount    = files.count(f => versionPattern.findFirstIn(f.getPath.getName).isDefined)
-    val checkpointCount = files.count(f => checkpointPattern.findFirstIn(f.getPath.getName).isDefined)
+    val jsonCheckpoints = files.count(f => checkpointPattern.findFirstIn(f.getPath.getName).isDefined)
+    val avroCheckpoints = files.count(f => f.isDirectory && avroStatePattern.findFirstIn(f.getPath.getName).isDefined)
+    val checkpointCount = jsonCheckpoints + avroCheckpoints
 
     (versionCount, checkpointCount)
   }
@@ -175,7 +178,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
     for (i <- 1 to 8) {
       val data = Seq((i, s"value_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -205,7 +208,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
 
     // Verify data integrity
     val finalCount = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
       .count()
     finalCount shouldBe 8
@@ -224,7 +227,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
     for (i <- 1 to 6) {
       val data = Seq((i, s"value_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -259,7 +262,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
     for (i <- 1 to 15) {
       val data = Seq((i, s"value_$i", i * 10.0)).toDF("id", "value", "score")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -268,7 +271,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
 
     // Get data before truncation
     val dataBefore = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val countBefore = dataBefore.count()
@@ -283,7 +286,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
 
     // Verify data integrity
     val dataAfter = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val countAfter = dataAfter.count()
@@ -318,7 +321,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
       for (i <- 1 to 21) {
         val data = Seq((i, s"value_$i", i * 100.0)).toDF("id", "value", "amount")
         data.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .mode(if (i == 1) "overwrite" else "append")
           .save(tablePath)
       }
@@ -333,7 +336,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
 
       // Get data state before truncation
       val dataBefore = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
       val countBefore = dataBefore.count()
       val sumBefore   = dataBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
@@ -365,7 +368,7 @@ class CloudS3TruncateTimeTravelTest extends CloudS3TestBase {
 
       // CRITICAL: Verify ALL data is still readable after truncation
       val dataAfter = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tablePath)
 
       val countAfter = dataAfter.count()

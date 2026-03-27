@@ -28,16 +28,7 @@ import io.indextables.spark.TestBase
  * Isolated test for the failing "should handle complex compound queries" test. This helps debug complex boolean logic
  * combinations and query handling.
  */
-class ComplexCompoundQueriesTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class ComplexCompoundQueriesTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   private def createComprehensiveTestDataFrame(): DataFrame = {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
@@ -127,7 +118,7 @@ class ComplexCompoundQueriesTest extends TestBase {
       // Write comprehensive data - should succeed now
       println("💾 Writing data...")
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -136,7 +127,7 @@ class ComplexCompoundQueriesTest extends TestBase {
       // Read data back and test complex compound queries
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println(s"📊 Read back ${readData.limit(1000).collect().length} rows")

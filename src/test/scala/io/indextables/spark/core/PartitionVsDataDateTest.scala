@@ -41,13 +41,13 @@ class PartitionVsDataDateTest extends TestBase with Matchers {
       // Write with partition_date as partition column, data_date as regular indexed field
       // seq_num provides fast field for COUNT aggregation, data_date for filtering
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .option("spark.indextables.indexing.fastfields", "seq_num,data_date")
         .partitionBy("partition_date")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val df = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
 
       // Test data date query (should work - field is stored in split)
       println("Creating filter for data_date === '2023-02-15'")

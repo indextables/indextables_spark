@@ -40,13 +40,13 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Write data WITHOUT configuring batch as fast field
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // This should work - unfiltered count (uses transaction log optimization)
@@ -72,14 +72,14 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
       // Write data WITHOUT any fast fields configured
       // Since all fields are strings, no numeric fast field will be available
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.nonfastfields", "id,batch,content")
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // With only string fields and nonfastfields configured, COUNT with filters has two possible behaviors:
@@ -117,14 +117,14 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
       // Write data WITH numeric field configured as fast field
       // COUNT(*) aggregation with filters requires a numeric fast field (StatsAggregation limitation)
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "seq_num")
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // This should work - filtered count with numeric fast field configuration
@@ -154,14 +154,14 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Write data with numeric fast field (required for COUNT with filters)
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.fastfields", "seq_num")
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // This should work - filter on any field with numeric fast field configured

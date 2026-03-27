@@ -27,7 +27,7 @@ import io.indextables.spark.TestBase
  */
 class IndexQueryCTETest extends TestBase {
 
-  private val format = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val format = INDEXTABLES_FORMAT
 
   test("IndexQuery in outer query of CTE - filter CTE results with indexquery") {
     val spark = this.spark

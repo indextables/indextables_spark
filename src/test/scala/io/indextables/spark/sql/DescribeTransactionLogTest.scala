@@ -27,7 +27,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Tests for DESCRIBE INDEXTABLES TRANSACTION LOG command. */
-class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
+class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _
@@ -61,13 +61,6 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   test("DESCRIBE INDEXTABLES TRANSACTION LOG should return all actions") {
     val tablePath    = s"$tempDir/test_table"
     val sparkSession = spark
@@ -76,14 +69,14 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
     // Write initial data
     val data1 = Seq((1, "one"), (2, "two")).toDF("id", "value")
     data1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Write more data
     val data2 = Seq((3, "three"), (4, "four")).toDF("id", "value")
     data2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("append")
       .save(tablePath)
 
@@ -128,7 +121,7 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 15).foreach { i =>
       val data = Seq((i, s"value_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -173,14 +166,14 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
     // Write initial data
     val data1 = Seq((1, "one"), (2, "two")).toDF("id", "value")
     data1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     // Overwrite with new data
     val data2 = Seq((10, "ten"), (20, "twenty")).toDF("id", "value")
     data2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -213,7 +206,7 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
     (1 to 10).foreach { i =>
       val data = Seq((i, s"value_$i", s"extra_field_$i")).toDF("id", "value", "extra")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }

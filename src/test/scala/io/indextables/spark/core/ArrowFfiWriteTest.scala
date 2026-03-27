@@ -17,12 +17,12 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.write.ArrowFfiWriteConfig
+import io.indextables.spark.TestBase
 
 class ArrowFfiWriteTest extends TestBase {
 
-  private val FORMAT = "io.indextables.spark.core.IndexTables4SparkTableProvider"
+  private val FORMAT = INDEXTABLES_FORMAT
 
   // ===== Arrow FFI (default path) =====
 
@@ -394,7 +394,7 @@ class ArrowFfiWriteTest extends TestBase {
   }
 
   test("Arrow FFI vs TANT batch: statistics parity") {
-    import io.indextables.spark.transaction.TransactionLog
+    import io.indextables.spark.transaction.TransactionLogFactory
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
     import scala.jdk.CollectionConverters._
 
@@ -408,9 +408,10 @@ class ArrowFfiWriteTest extends TestBase {
       df.write.mode("overwrite").format(FORMAT).option(ArrowFfiWriteConfig.KEY_ENABLED, "false").save(tantPath)
 
       def getActions(tablePath: String) = {
-        val txLog = new TransactionLog(
-          new org.apache.hadoop.fs.Path(tablePath), spark,
-          new CaseInsensitiveStringMap(Map("spark.indextables.transaction.allowDirectUsage" -> "true").asJava))
+        val txLog = TransactionLogFactory.create(
+          new org.apache.hadoop.fs.Path(tablePath),
+          spark
+        )
         txLog.listFiles()
       }
 

@@ -130,7 +130,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Write test data with disk cache configuration
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", diskCachePath.toString)
@@ -151,7 +151,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Write with disk cache explicitly disabled
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "false")
       .option("spark.indextables.cache.disk.path", localCachePath.toString)
@@ -159,7 +159,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Read the data
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "false")
       .option("spark.indextables.cache.disk.path", localCachePath.toString)
       .load(testTablePath)
@@ -175,7 +175,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val testTablePath = tablePath.resolve("zstd_test").toString
 
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", diskCachePath.resolve("zstd_cache").toString)
@@ -191,7 +191,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val testTablePath = tablePath.resolve("no_compress_test").toString
 
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", diskCachePath.resolve("no_compress_cache").toString)
@@ -210,13 +210,13 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Write data first
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testTablePath)
 
     // Read with disk cache enabled
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
       .option("spark.indextables.cache.disk.compression", "lz4")
@@ -235,14 +235,14 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Write data
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "string")
       .save(testTablePath)
 
     // Read with filter
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
       .load(testTablePath)
@@ -259,13 +259,13 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Write data
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testTablePath)
 
     // Read with both disk cache and batch optimization
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
       .option("spark.indextables.cache.disk.compression", "lz4")
@@ -288,13 +288,13 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     try {
       // Write data
       createTestData().write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(testTablePath)
 
       // Read without explicit disk cache options (should use session config)
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(testTablePath)
 
       df.count() shouldBe 5
@@ -330,7 +330,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val localCachePath = diskCachePath.resolve("maxsize_cache").toString
 
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
@@ -346,7 +346,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val localCachePath = diskCachePath.resolve("mincompress_cache").toString
 
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
@@ -362,7 +362,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     val localCachePath = diskCachePath.resolve("manifest_cache").toString
 
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
@@ -381,14 +381,14 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
     Files.createDirectories(spacePath)
 
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", spacePath.toString)
       .save(testTablePath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", spacePath.toString)
       .load(testTablePath)
@@ -402,13 +402,13 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Write data
     createTestData().write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(testTablePath)
 
     // First read
     val df1 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
       .load(testTablePath)
@@ -417,7 +417,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Second read (should use cached data)
     val df2 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
       .load(testTablePath)
@@ -426,7 +426,7 @@ class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Third read with filter
     val df3 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.disk.enabled", "true")
       .option("spark.indextables.cache.disk.path", localCachePath)
       .load(testTablePath)

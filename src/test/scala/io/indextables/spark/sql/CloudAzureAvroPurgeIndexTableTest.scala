@@ -93,7 +93,7 @@ class CloudAzureAvroPurgeIndexTableTest extends CloudAzureTestBase {
     (1 to 6).foreach { i =>
       val data = Seq((i, s"test$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "5")
         .mode(if (i == 1) "overwrite" else "append")
@@ -121,7 +121,7 @@ class CloudAzureAvroPurgeIndexTableTest extends CloudAzureTestBase {
     assert(provider.exists(lastCheckpointPath), "_last_checkpoint should be preserved after PURGE DRY RUN")
 
     // Verify data integrity
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 6, s"Table should still have 6 rows, got ${afterRead.count()}")
 
     println("✅ Avro state preserved correctly during PURGE on Azure")
@@ -137,7 +137,7 @@ class CloudAzureAvroPurgeIndexTableTest extends CloudAzureTestBase {
     val sparkSession = spark
     import sparkSession.implicits._
     val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+    data.write.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).mode("overwrite").save(tablePath)
 
     // Create orphaned files - Azure will set modification time to current time
     val orphan1Path = s"$tablePath/orphan1_${UUID.randomUUID()}.split"
@@ -177,7 +177,7 @@ class CloudAzureAvroPurgeIndexTableTest extends CloudAzureTestBase {
     assert(provider.exists(orphan2Path), "Recent orphan2 should be kept")
 
     // Verify table data is intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 3, "Table should still have 3 rows")
 
     println("✅ Avro: Azure modification times correctly handled")
@@ -201,7 +201,7 @@ class CloudAzureAvroPurgeIndexTableTest extends CloudAzureTestBase {
       ).toDF("id", "name", "date")
 
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "5")
         .partitionBy("date")
@@ -245,7 +245,7 @@ class CloudAzureAvroPurgeIndexTableTest extends CloudAzureTestBase {
     assert(provider.exists(lastCheckpointPath), "_last_checkpoint should be preserved")
 
     // Verify table is still intact
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     assert(afterRead.count() == 12, s"Table should have 12 rows (6 writes × 2 rows), got ${afterRead.count()}")
 
     println("✅ Avro: Azure partitioned table with Avro state handled correctly")

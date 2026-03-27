@@ -37,16 +37,7 @@ import io.indextables.spark.TestBase
  *   - Failed data skipping (always returns 0 for comparison)
  *   - Incorrect BETWEEN query results (string comparison instead of numeric)
  */
-class TimestampDataSkippingAndQueryTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class TimestampDataSkippingAndQueryTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   test("V2 DataSource: timestamp BETWEEN query with data skipping validation") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 
@@ -94,7 +85,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       split1Data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -102,7 +93,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       split2Data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Append)
         .save(tempPath)
 
@@ -110,7 +101,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       split3Data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Append)
         .save(tempPath)
 
@@ -140,7 +131,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       // Now test the BETWEEN query
       println("\n🔍 Testing BETWEEN query...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("📋 Read schema:")
@@ -258,12 +249,12 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       testData
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       // Test various comparison operators
@@ -325,12 +316,12 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       testData
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println("\n📝 Read back data:")

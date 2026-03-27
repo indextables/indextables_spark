@@ -166,7 +166,7 @@ class CloudAzureIcebergSyncTest extends CloudAzureTestBase with IcebergTestSuppo
       .getString(2) shouldBe "success"
 
     val companionDf = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(indexPath)
 
     companionDf.count() should be > 0L

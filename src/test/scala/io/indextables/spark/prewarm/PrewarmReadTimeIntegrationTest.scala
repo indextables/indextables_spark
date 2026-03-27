@@ -33,7 +33,7 @@ import org.slf4j.LoggerFactory
  *
  * Tests that prewarm executes automatically when reading data with appropriate config set.
  */
-class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
+class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmReadTimeIntegrationTest])
 
@@ -86,13 +86,6 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
   }
 
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles().foreach(deleteRecursively)
-    }
-    file.delete()
-  }
-
   private def createTestData(numRecords: Int = 200): Unit = {
     val ss = spark
     import ss.implicits._
@@ -112,7 +105,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.indexWriter.batchSize", "50")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -133,7 +126,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     // Read and query - prewarm should happen automatically
     val startTime = System.currentTimeMillis()
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count    = df.filter(col("category") === "category_2").count()
@@ -154,7 +147,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.prewarm.enabled", "false")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count = df.filter(col("category") === "category_1").count()
@@ -173,7 +166,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.prewarm.segments", "TERM_DICT,FAST_FIELD")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Execute a query that would benefit from these segments
@@ -192,7 +185,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.prewarm.segments", "TERM_DICT,FAST_FIELD,POSTINGS,FIELD_NORM,DOC_STORE")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Query and retrieve document content
@@ -213,7 +206,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.prewarm.fields", "title,category")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Query on prewarmed field using equality filter (supported)
@@ -232,7 +225,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.prewarm.fields", "")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count = df.count()
@@ -252,7 +245,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.prewarm.splitsPerTask", "5")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Use score (fast field) for range query instead of id
@@ -275,7 +268,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Should not throw exception
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     val count = df.count()
@@ -296,7 +289,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     // Field validation is best-effort - if metadata unavailable, prewarm succeeds
     try {
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(tempTablePath)
 
       // Force evaluation
@@ -320,7 +313,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Configure via reader options instead of session
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.prewarm.enabled", "true")
       .option("spark.indextables.prewarm.segments", "TERM_DICT")
       .option("spark.indextables.prewarm.fields", "title")
@@ -342,7 +335,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Reader option enables it
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.prewarm.enabled", "true")
       .option("spark.indextables.prewarm.segments", "TERM_DICT")
       .load(tempTablePath)
@@ -366,7 +359,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     // First read - triggers prewarm
     val start1 = System.currentTimeMillis()
     val df1 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
     val count1    = df1.filter(col("category") === "category_0").count()
     val duration1 = System.currentTimeMillis() - start1
@@ -374,7 +367,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     // Second read - should use cached data
     val start2 = System.currentTimeMillis()
     val df2 = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
     val count2    = df2.filter(col("category") === "category_1").count()
     val duration2 = System.currentTimeMillis() - start2
@@ -412,7 +405,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
         .toDF("id", "content", "region")
 
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .partitionBy("region")
         .option("spark.indextables.indexWriter.batchSize", "30")
         .mode("overwrite")
@@ -423,7 +416,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
       spark.conf.set("spark.indextables.prewarm.partitionFilter", "region = 'region_1'")
 
       val df = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(partitionedPath)
 
       // Query the filtered partition
@@ -450,7 +443,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.read.batchOptimization.profile", "balanced")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Execute query that benefits from both prewarm and batch optimization
@@ -486,7 +479,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.read.batchOptimization.minDocsForOptimization", "25")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // First query - triggers prewarm
@@ -514,7 +507,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.read.batchOptimization.profile", "aggressive")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Time a range query (benefits from both fast field prewarm and batch opt)
@@ -550,7 +543,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.read.batchOptimization.profile", "balanced")
 
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tempTablePath)
 
     // Query should work with batch optimization only

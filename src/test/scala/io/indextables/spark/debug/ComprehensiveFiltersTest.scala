@@ -28,16 +28,7 @@ import io.indextables.spark.TestBase
  * Isolated test for the failing "should complete full write/read/query cycle with comprehensive filters" test. This
  * helps debug the full end-to-end filtering workflow and comprehensive query execution.
  */
-class ComprehensiveFiltersTest extends TestBase {
-
-  private def isNativeLibraryAvailable(): Boolean =
-    try {
-      import io.indextables.spark.search.TantivyNative
-      TantivyNative.ensureLibraryLoaded()
-    } catch {
-      case _: Exception => false
-    }
-
+class ComprehensiveFiltersTest extends TestBase with io.indextables.spark.testutils.NativeLibraryTestGuard {
   private def createComprehensiveTestDataFrame(): DataFrame = {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
@@ -125,7 +116,7 @@ class ComprehensiveFiltersTest extends TestBase {
       // Step 1: Write comprehensive test data
       println("💾 Writing comprehensive test data...")
       testData.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -134,7 +125,7 @@ class ComprehensiveFiltersTest extends TestBase {
       // Step 2: Read data back and execute comprehensive queries
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tempPath)
 
       println(s"📊 Read back ${readData.count()} rows")

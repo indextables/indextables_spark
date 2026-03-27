@@ -34,7 +34,7 @@ import org.scalatest.funsuite.AnyFunSuite
  * Expected: StatsAggregation should only aggregate over documents matching the query Actual: StatsAggregation
  * aggregates over ALL documents, ignoring the query filter
  */
-class FilteredAggregationBugTest extends AnyFunSuite {
+class FilteredAggregationBugTest extends AnyFunSuite with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("BUG: Filtered StatsAggregation ignores query filter") {
     val tempDir = Files.createTempDirectory("tantivy-filtered-agg-bug").toFile
@@ -196,12 +196,5 @@ class FilteredAggregationBugTest extends AnyFunSuite {
 
     } finally
       searcher.close()
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      file.listFiles.foreach(deleteRecursively)
-    }
-    file.delete()
   }
 }

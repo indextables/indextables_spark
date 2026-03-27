@@ -129,7 +129,7 @@ class CloudS3PurgeStateRetentionBugTest extends CloudS3TestBase {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
       println(s"  Batch $i written")
@@ -222,7 +222,7 @@ class CloudS3PurgeStateRetentionBugTest extends CloudS3TestBase {
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -300,7 +300,7 @@ class CloudS3PurgeStateRetentionBugTest extends CloudS3TestBase {
     (1 to 6).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -372,7 +372,7 @@ class CloudS3PurgeStateRetentionBugTest extends CloudS3TestBase {
     (1 to 6).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
       data.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }

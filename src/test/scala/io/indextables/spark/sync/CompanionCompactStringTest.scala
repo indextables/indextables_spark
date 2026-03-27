@@ -39,7 +39,7 @@ import org.scalatest.BeforeAndAfterAll
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -91,13 +91,6 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       f(path)
     } finally
       deleteRecursively(new File(path))
-  }
-
-  private def deleteRecursively(file: File): Unit = {
-    if (file.isDirectory) {
-      Option(file.listFiles()).foreach(_.foreach(deleteRecursively))
-    }
-    file.delete()
   }
 
   /** Create parquet data with UUID columns. */
@@ -161,7 +154,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Read companion and verify EqualTo filter works
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       val filtered = companionDf.filter(col("trace_id") === targetTraceId).collect()
@@ -191,7 +184,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       // Read companion and verify count is correct
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 10
@@ -225,7 +218,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       row(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 10
@@ -260,7 +253,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       row(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 5
@@ -336,7 +329,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       row(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 5
@@ -437,7 +430,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // EqualTo on exact_only field should be pushed down and return correct result
@@ -468,7 +461,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // EqualTo on text_uuid_exactonly should work (deferred to Spark post-filter)
@@ -495,7 +488,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // COUNT(*) should return total rows
@@ -570,7 +563,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       result.collect()(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 5
@@ -625,7 +618,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Text search for non-UUID content should still work
@@ -670,7 +663,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("uuid_exactonly_verify")
@@ -720,7 +713,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Range queries on exact_only should not crash — Spark handles them as post-filters
@@ -764,7 +757,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Range on regular string field 'name' should not crash (not blocked by exact_only validation).
@@ -801,7 +794,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Range on text_uuid_exactonly should not crash (not blocked by exact_only validation).
@@ -835,7 +828,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Range filter on exact_only should NOT appear in pushed filters
@@ -871,7 +864,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Separate filters: range on exact_only (deferred to Spark) + equality on string (pushed)
@@ -913,7 +906,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
         .getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // GreaterThan on numeric 'id' (Long → INTEGER type) should still work
@@ -978,7 +971,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       row(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 10
@@ -1002,7 +995,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       row(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 10
@@ -1060,6 +1053,173 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("should fail when too many string columns would be hashed without INCLUDE/EXCLUDE") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      // Create data with 12 string columns (exceeds default limit of 10)
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"AT LOCATION '$indexPath'"
+      )
+      val row = result.collect()
+      row.length shouldBe 1
+      row(0).getString(2) shouldBe "error"
+      val message = row(0).getString(10)
+      message should include("12 string columns")
+      message should include("exceeds the limit of 10")
+      message should include("HASHED FASTFIELDS INCLUDE")
+    }
+  }
+
+  test("should succeed with many string columns when INCLUDE is specified") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings_inc").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings_inc").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS INCLUDE ('s1', 's2') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("should succeed with many string columns when EXCLUDE is specified") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings_exc").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings_exc").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+          s"HASHED FASTFIELDS EXCLUDE ('s1') " +
+          s"AT LOCATION '$indexPath'"
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("should allow overriding maxAutomaticHashedFastfields limit via spark property") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_many_strings_override").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_many_strings_override").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      val data = (0 until 5).map { i =>
+        (
+          i.toLong,
+          s"s1_$i",
+          s"s2_$i",
+          s"s3_$i",
+          s"s4_$i",
+          s"s5_$i",
+          s"s6_$i",
+          s"s7_$i",
+          s"s8_$i",
+          s"s9_$i",
+          s"s10_$i",
+          s"s11_$i",
+          s"s12_$i"
+        )
+      }
+      data
+        .toDF("id", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      // Override limit to 15
+      spark.conf.set("spark.indextables.companion.maxAutomaticHashedFastfields", "15")
+      try {
+        val result = spark.sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"AT LOCATION '$indexPath'"
+        )
+        result.collect()(0).getString(2) shouldBe "success"
+      } finally {
+        spark.conf.unset("spark.indextables.companion.maxAutomaticHashedFastfields")
+      }
+    }
+  }
+
   test("text field should support COUNT aggregation with HYBRID fast fields") {
     withTempPath { tempDir =>
       val parquetPath = new File(tempDir, "parquet_text_count").getAbsolutePath
@@ -1079,7 +1239,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       result.collect()(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.count() shouldBe 15
@@ -1114,7 +1274,7 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
       result.collect()(0).getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       // Total count should be correct

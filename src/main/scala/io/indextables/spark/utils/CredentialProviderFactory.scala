@@ -346,7 +346,7 @@ object CredentialProviderFactory {
     tablePath: String
   ): Option[BasicAWSCredentials] = {
     def getConfig(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase))
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGetRaw(configs, key)
 
     // Priority 1: Use explicit credentials if present
     (
@@ -429,7 +429,7 @@ object CredentialProviderFactory {
     parquetTablePath: String
   ): Option[BasicAWSCredentials] = {
     def getConfig(key: String): Option[String] =
-      configs.get(key).orElse(configs.get(key.toLowerCase))
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGetRaw(configs, key)
 
     // Priority 1: Explicit companion credentials
     (
@@ -565,8 +565,20 @@ object CredentialProviderFactory {
     providerClass match {
       case Some(className) if className.nonEmpty =>
         try {
-          val normalizedPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
-          val credentials    = resolveAWSCredentialsFromConfig(config, normalizedPath)
+          val tableLevelPath = io.indextables.spark.util.TablePathNormalizer.normalizeToTablePath(tablePath)
+          // Normalize cloud schemes (s3a→s3, abfss→azure) for consistent provider URIs
+          val normalizedPath = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(tableLevelPath)
+
+          // Invoke the custom provider directly — do NOT fall through to explicit credentials.
+          // The provider class was set intentionally and should take precedence. Explicit
+          // credentials from other config layers (Hadoop/Spark) must not short-circuit the
+          // provider, because the native Rust txlog cannot invoke Java credential providers
+          // and relies on this resolution to supply credentials each time they are needed.
+          val configWithoutExplicitCreds = config -
+            "spark.indextables.aws.accessKey" - "spark.indextables.aws.accesskey" -
+            "spark.indextables.aws.secretKey" - "spark.indextables.aws.secretkey" -
+            "spark.indextables.aws.sessionToken" - "spark.indextables.aws.sessiontoken"
+          val credentials = resolveAWSCredentialsFromConfig(configWithoutExplicitCreds, normalizedPath)
 
           credentials match {
             case Some(creds) =>

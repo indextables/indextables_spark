@@ -413,7 +413,7 @@ class TantivyDirectInterface(
     // First try options (highest precedence)
     Option(options.get(key)).filter(_.nonEmpty).getOrElse {
       // Then try configMap (includes table properties, serialized from driver)
-      configMap.get(key).orElse(configMap.get(key.toLowerCase)).filter(_.nonEmpty).getOrElse {
+      io.indextables.spark.util.ConfigParsingUtils.caseInsensitiveGet(configMap, key).getOrElse {
         // Then try spark session config (if available)
         try {
           val sparkSession = org.apache.spark.sql.SparkSession.active

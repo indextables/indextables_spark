@@ -51,12 +51,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("text = 'value1'")
@@ -81,12 +81,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val japanese = result.filter("text = '日本語テキスト'")
@@ -111,12 +111,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.filter("text = 'test@email.com'").count() shouldBe 1
@@ -137,12 +137,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val emptyRows = result.filter("text = ''")
@@ -167,12 +167,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.filter(s"id = ${Long.MinValue}").count() shouldBe 1
@@ -197,12 +197,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "value")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.filter("value = 0.0").count() shouldBe 1
@@ -220,12 +220,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id % 10 AS STRING) as category")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // id >= 50 AND id < 60 should give 10 rows
@@ -248,12 +248,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "category")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("category = 'A' OR category = 'B'")
@@ -274,12 +274,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "status")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("NOT status = 'exclude'")
@@ -301,12 +301,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "category", "value")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // (category = 'A' AND value > 150) OR (category = 'B' AND value < 150)
@@ -325,12 +325,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // id >= 10 AND id <= 20 should give 11 rows (inclusive both ends)
@@ -345,12 +345,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
 
     val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // id > 10 AND id < 20 should give 9 rows (exclusive both ends)
@@ -377,12 +377,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "color")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("color IN ('red', 'blue')")
@@ -404,12 +404,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "color")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("color NOT IN ('red', 'blue')")
@@ -433,12 +433,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "event_date")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("event_date = '2024-01-15'")
@@ -459,12 +459,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "event_date")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     val filtered = result.filter("event_date >= '2024-01-15' AND event_date < '2024-01-25'")
@@ -488,12 +488,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // LIKE may not be pushed down, but should still work
@@ -514,12 +514,12 @@ class FilterPushdownEdgeCaseTest extends TestBase {
     val df = spark.createDataFrame(data).toDF("id", "text", "value")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     // Combine pushable (value > 150) with non-pushable (LIKE)

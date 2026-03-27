@@ -27,8 +27,8 @@ import org.slf4j.LoggerFactory
 /**
  * Shared utility encapsulating the Arrow FFI aggregation protocol.
  *
- * Manages FFI struct allocation, tantivy4java FFI calls, and Arrow import. Methods return ColumnarBatch (zero-copy Arrow
- * data) with no InternalRow conversion.
+ * Manages FFI struct allocation, tantivy4java FFI calls, and Arrow import. Methods return ColumnarBatch (zero-copy
+ * Arrow data) with no InternalRow conversion.
  *
  * Requires tantivy4java 0.31.2+ which provides:
  *   - `SplitSearcher.getAggregationArrowSchema()` — schema introspection
@@ -62,9 +62,7 @@ class AggregationArrowFfiHelper extends AutoCloseable {
    *   JSON string: {"name1": <json1>, "name2": <json2>, ...}
    */
   def buildMultiAggJson(aggregations: Seq[(String, SplitAggregation)]): String = {
-    val entries = aggregations.map {
-      case (name, agg) => s""""$name": ${agg.toAggregationJson()}"""
-    }
+    val entries = aggregations.map { case (name, agg) => s""""$name": ${agg.toAggregationJson()}""" }
     s"{${entries.mkString(", ")}}"
   }
 
@@ -72,8 +70,8 @@ class AggregationArrowFfiHelper extends AutoCloseable {
    * Query the Arrow schema that would be returned for a given aggregation.
    *
    * @return
-   *   (numCols, columnNames, columnTypes, rowCount)
-   *   columnTypes are Arrow type names: "Utf8", "Int64", "Float64", "Int32", etc.
+   *   (numCols, columnNames, columnTypes, rowCount) columnTypes are Arrow type names: "Utf8", "Int64", "Float64",
+   *   "Int32", etc.
    */
   def querySchema(
     searcher: SplitSearcher,
@@ -114,8 +112,14 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     } catch {
       case ex: Exception =>
         // Clean up FFI structs that were not consumed by importAsColumnarBatch
-        arrays.foreach(a => try a.close() catch { case _: Exception => })
-        schemas.foreach(s => try s.close() catch { case _: Exception => })
+        arrays.foreach(a =>
+          try a.close()
+          catch { case _: Exception => }
+        )
+        schemas.foreach(s =>
+          try s.close()
+          catch { case _: Exception => }
+        )
         throw ex
     }
   }
@@ -124,9 +128,8 @@ class AggregationArrowFfiHelper extends AutoCloseable {
    * Execute multi-split aggregation via Arrow FFI with native merge.
    *
    * Uses `SplitCacheManager.multiSplitAggregateArrowFfi()` which:
-   *   1. Searches each split with limit=0 (aggregation-only)
-   *   2. Merges intermediate results via native `merge_fruits()`
-   *   3. Exports merged result as Arrow columnar data
+   *   1. Searches each split with limit=0 (aggregation-only) 2. Merges intermediate results via native `merge_fruits()`
+   *      3. Exports merged result as Arrow columnar data
    *
    * This eliminates O(N * buckets) JNI crossings, replacing them with a single call.
    *
@@ -141,9 +144,11 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     aggJson: String
   ): ColumnarBatch = {
     // Query schema from first searcher
-    val firstSearcher = searchers.get(0)
+    val firstSearcher                = searchers.get(0)
     val (numCols, columnNames, _, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
-    logger.debug(s"Multi-split aggregation FFI schema: $numCols columns: ${columnNames.mkString(", ")}, ${searchers.size()} splits")
+    logger.debug(
+      s"Multi-split aggregation FFI schema: $numCols columns: ${columnNames.mkString(", ")}, ${searchers.size()} splits"
+    )
 
     // Allocate FFI structs
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
@@ -151,7 +156,12 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     try {
       // Execute multi-split FFI call — native merge_fruits merges across all splits
       val numRows = cacheManager.multiSplitAggregateArrowFfi(
-        searchers, queryAstJson, aggName, aggJson, arrayAddrs, schemaAddrs
+        searchers,
+        queryAstJson,
+        aggName,
+        aggJson,
+        arrayAddrs,
+        schemaAddrs
       )
       logger.debug(s"Multi-split aggregation FFI returned $numRows rows from ${searchers.size()} splits")
 
@@ -159,8 +169,14 @@ class AggregationArrowFfiHelper extends AutoCloseable {
       bridge.importAsColumnarBatch(arrays, schemas, numRows)
     } catch {
       case ex: Exception =>
-        arrays.foreach(a => try a.close() catch { case _: Exception => })
-        schemas.foreach(s => try s.close() catch { case _: Exception => })
+        arrays.foreach(a =>
+          try a.close()
+          catch { case _: Exception => }
+        )
+        schemas.foreach(s =>
+          try s.close()
+          catch { case _: Exception => }
+        )
         throw ex
     }
   }
@@ -168,8 +184,8 @@ class AggregationArrowFfiHelper extends AutoCloseable {
   /**
    * Execute multi-split, multi-aggregation single-pass via Arrow FFI (FR-C).
    *
-   * Searches each split ONCE with all aggregations combined, merges intermediate results
-   * in native code, and exports each named aggregation as a separate Arrow RecordBatch.
+   * Searches each split ONCE with all aggregations combined, merges intermediate results in native code, and exports
+   * each named aggregation as a separate Arrow RecordBatch.
    *
    * For 3 aggregations across 100 splits: 100 searches instead of 300.
    *
@@ -186,16 +202,19 @@ class AggregationArrowFfiHelper extends AutoCloseable {
   ): Array[ColumnarBatch] = {
     // Query schema for each aggregation from the first searcher to determine column counts
     val firstSearcher = searchers.get(0)
-    val aggInfos = aggregations.map { case (aggName, agg) =>
-      val aggJson = buildAggJson(aggName, agg)
-      val (numCols, columnNames, _, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
-      (aggName, numCols, columnNames)
+    val aggInfos = aggregations.map {
+      case (aggName, agg) =>
+        val aggJson                      = buildAggJson(aggName, agg)
+        val (numCols, columnNames, _, _) = querySchema(firstSearcher, queryAstJson, aggName, aggJson)
+        (aggName, numCols, columnNames)
     }
 
     val totalCols = aggInfos.map(_._2).sum
     val colCounts = aggInfos.map(_._2)
 
-    logger.debug(s"Multi-split multi-agg FFI: ${aggregations.length} aggs, $totalCols total columns, ${searchers.size()} splits")
+    logger.debug(
+      s"Multi-split multi-agg FFI: ${aggregations.length} aggs, $totalCols total columns, ${searchers.size()} splits"
+    )
 
     // Allocate FFI structs for all columns
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(totalCols)
@@ -210,27 +229,40 @@ class AggregationArrowFfiHelper extends AutoCloseable {
 
       // Execute single-pass multi-agg FFI
       val resultJson = cacheManager.multiSplitMultiAggregateArrowFfi(
-        searchers, queryAstJson, aggNames, combinedAggJson, colCounts, arrayAddrs, schemaAddrs
+        searchers,
+        queryAstJson,
+        aggNames,
+        combinedAggJson,
+        colCounts,
+        arrayAddrs,
+        schemaAddrs
       )
       logger.debug(s"Multi-split multi-agg FFI result: $resultJson")
 
       // Parse row counts per aggregation from result JSON: {"agg_name":rowCount,...}
       val rowCountPattern = """"([^"]+)"\s*:\s*(\d+)""".r
-      val rowCountMap = rowCountPattern.findAllMatchIn(resultJson).map(m => m.group(1) -> m.group(2).toInt).toMap
+      val rowCountMap     = rowCountPattern.findAllMatchIn(resultJson).map(m => m.group(1) -> m.group(2).toInt).toMap
 
       // Import each aggregation's columns as a separate ColumnarBatch
       var colOffset = 0
-      aggregations.zip(aggInfos).map { case ((aggName, _), (_, numCols, _)) =>
-        val aggArrays  = arrays.slice(colOffset, colOffset + numCols)
-        val aggSchemas = schemas.slice(colOffset, colOffset + numCols)
-        val numRows    = rowCountMap.getOrElse(aggName, 0)
-        colOffset += numCols
-        bridge.importAsColumnarBatch(aggArrays, aggSchemas, numRows)
+      aggregations.zip(aggInfos).map {
+        case ((aggName, _), (_, numCols, _)) =>
+          val aggArrays  = arrays.slice(colOffset, colOffset + numCols)
+          val aggSchemas = schemas.slice(colOffset, colOffset + numCols)
+          val numRows    = rowCountMap.getOrElse(aggName, 0)
+          colOffset += numCols
+          bridge.importAsColumnarBatch(aggArrays, aggSchemas, numRows)
       }
     } catch {
       case ex: Exception =>
-        arrays.foreach(a => try a.close() catch { case _: Exception => })
-        schemas.foreach(s => try s.close() catch { case _: Exception => })
+        arrays.foreach(a =>
+          try a.close()
+          catch { case _: Exception => }
+        )
+        schemas.foreach(s =>
+          try s.close()
+          catch { case _: Exception => }
+        )
         throw ex
     }
   }
@@ -264,8 +296,10 @@ class AggregationArrowFfiHelper extends AutoCloseable {
     targetSchema: StructType,
     arrowTypes: Array[String] = Array.empty
   ): ColumnarBatch = {
-    require(ffiBatches.length == targetSchema.fields.length,
-      s"Expected ${targetSchema.fields.length} batches but got ${ffiBatches.length}")
+    require(
+      ffiBatches.length == targetSchema.fields.length,
+      s"Expected ${targetSchema.fields.length} batches but got ${ffiBatches.length}"
+    )
 
     val vectors = new Array[ColumnVector](targetSchema.fields.length)
     targetSchema.fields.zipWithIndex.foreach {
@@ -280,10 +314,14 @@ class AggregationArrowFfiHelper extends AutoCloseable {
   }
 
   /**
-   * Cast a single-row, single-column FFI result to the target Spark type.
-   * Uses Arrow type name for schema-driven dispatch (no exception probing).
+   * Cast a single-row, single-column FFI result to the target Spark type. Uses Arrow type name for schema-driven
+   * dispatch (no exception probing).
    */
-  private def castSingleValue(source: ColumnVector, targetType: DataType, arrowType: String): ColumnVector = {
+  private def castSingleValue(
+    source: ColumnVector,
+    targetType: DataType,
+    arrowType: String
+  ): ColumnVector = {
     val onHeap = new OnHeapColumnVector(1, targetType)
     if (source.isNullAt(0)) {
       onHeap.putNull(0)

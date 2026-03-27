@@ -55,7 +55,7 @@ class OutputMetricsTest extends TestBase {
     try {
       // Write the data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
 
@@ -78,7 +78,7 @@ class OutputMetricsTest extends TestBase {
 
       // Also verify data was written correctly
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
       result.count() shouldBe numRows
 
@@ -114,7 +114,7 @@ class OutputMetricsTest extends TestBase {
     try {
       // Write partitioned data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .partitionBy("partition_col")
         .mode("overwrite")
         .save(tablePath)
@@ -166,7 +166,7 @@ class OutputMetricsTest extends TestBase {
     try {
       // Write empty data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(tablePath)
 
@@ -200,7 +200,7 @@ class OutputMetricsTest extends TestBase {
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -234,7 +234,7 @@ class OutputMetricsTest extends TestBase {
 
       // Read the data
       val _result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
         .collect()
 
@@ -271,7 +271,7 @@ class OutputMetricsTest extends TestBase {
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -302,7 +302,7 @@ class OutputMetricsTest extends TestBase {
 
       // Read with filter - should only return ~100 rows (id < 100)
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
         .filter("id < 100")
         .collect()
@@ -344,7 +344,7 @@ class OutputMetricsTest extends TestBase {
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tablePath)
 
@@ -375,7 +375,7 @@ class OutputMetricsTest extends TestBase {
 
       // Execute count aggregation
       val count = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(tablePath)
         .count()
 

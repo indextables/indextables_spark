@@ -177,7 +177,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Write to real S3 with explicit credentials using V2 provider
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -187,7 +187,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Read back from S3 with explicit credentials using V2 provider
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -224,7 +224,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Write to real S3 with explicit credentials
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -234,7 +234,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Read back and verify with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -278,7 +278,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     datasets.foreach {
       case (data, path) =>
         data.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .options(writeOptions)
           .mode("overwrite")
           .save(path)
@@ -290,7 +290,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     val totalRecords = datasets.map {
       case (_, path) =>
         val df = spark.read
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
           .options(readOptions)
           .load(path)
         val count = df.count()
@@ -324,7 +324,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
 
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -334,7 +334,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Read and test complex queries with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -404,7 +404,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
 
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -414,7 +414,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Read and test IndexQuery operations with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -455,7 +455,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
 
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -465,7 +465,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Read multiple times to test cache behavior with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -506,7 +506,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
 
     val writeOptions = getWriteOptions()
     data1.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .option("spark.indextables.indexing.fastfields", "batch") // Configure batch as fast field
       .mode("overwrite")
@@ -524,7 +524,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     println(s"✍️  Appending second batch to S3...")
 
     data2.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .option("spark.indextables.indexing.fastfields", "batch") // Configure batch as fast field for append
       .mode("append")
@@ -533,7 +533,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Read final result with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -607,7 +607,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     )
 
     data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(s3Path)
@@ -689,7 +689,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -697,7 +697,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -707,7 +707,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
     // Verify data exists before merge
     val readOptions = getReadOptions()
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 
@@ -729,7 +729,7 @@ class CloudS3IntegrationTest extends CloudS3TestBase {
 
     // Verify data integrity after merge
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .options(readOptions)
       .load(tablePath)
 

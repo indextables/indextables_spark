@@ -47,7 +47,7 @@ import io.indextables.spark.expressions.{
   RangeConfig
 }
 import io.indextables.spark.filters.MixedBooleanFilter
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.TransactionLogInterface
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator}
 import io.indextables.tantivy4java.aggregation._
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
@@ -63,7 +63,7 @@ import org.slf4j.LoggerFactory
  */
 class IndexTables4SparkGroupByAggregateScan(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
@@ -301,7 +301,7 @@ class IndexTables4SparkGroupByAggregateScan(
 /** Batch implementation for GROUP BY aggregations. */
 class IndexTables4SparkGroupByAggregateBatch(
   sparkSession: SparkSession,
-  transactionLog: TransactionLog,
+  transactionLog: TransactionLogInterface,
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
@@ -411,10 +411,14 @@ class IndexTables4SparkGroupByAggregateBatch(
         case (host, hostSplits) =>
           val groupedSplits = if (partitionGroupByCols.nonEmpty) {
             // Sub-group by partition values so splits from different partitions aren't merged
-            hostSplits.groupBy { split =>
-              val pv = Option(split.partitionValues).getOrElse(Map.empty[String, String])
-              partitionGroupByCols.map(col => pv.getOrElse(col, "")).mkString("|")
-            }.values.flatMap(_.grouped(splitsPerTask)).toSeq
+            hostSplits
+              .groupBy { split =>
+                val pv = Option(split.partitionValues).getOrElse(Map.empty[String, String])
+                partitionGroupByCols.map(col => pv.getOrElse(col, "")).mkString("|")
+              }
+              .values
+              .flatMap(_.grouped(splitsPerTask))
+              .toSeq
           } else {
             hostSplits.grouped(splitsPerTask).toSeq
           }
@@ -535,10 +539,12 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
   bucketConfig: Option[BucketAggregationConfig] = None)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
+  private val logger          = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
   private val arrowFfiEnabled = io.indextables.spark.arrow.AggregationArrowFfiConfig.isEnabled(config)
 
-  logger.debug(s"GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled")
+  logger.debug(
+    s"GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters, arrowFfi=$arrowFfiEnabled"
+  )
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =

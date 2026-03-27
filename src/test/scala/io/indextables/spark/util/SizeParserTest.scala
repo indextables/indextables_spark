@@ -90,9 +90,8 @@ class SizeParserTest extends TestBase {
     intercept[IllegalArgumentException] {
       SizeParser.parseSize("M100")
     }
-    intercept[IllegalArgumentException] {
-      SizeParser.parseSize("100.5M") // No decimal support
-    }
+    // Fractional values are now supported (e.g., "100.5M" = 105381888 bytes)
+    SizeParser.parseSize("100.5M") shouldBe (100.5 * 1024 * 1024).toLong
   }
 
   test("SizeParser should throw exception for zero or negative values") {

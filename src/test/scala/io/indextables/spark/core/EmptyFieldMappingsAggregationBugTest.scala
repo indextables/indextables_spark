@@ -73,7 +73,7 @@ class EmptyFieldMappingsAggregationBugTest extends TestBase {
 
       // Write the data
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
@@ -81,7 +81,7 @@ class EmptyFieldMappingsAggregationBugTest extends TestBase {
 
       // Read back
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Regular query should work (doesn't use DocMapper)
@@ -133,14 +133,14 @@ class EmptyFieldMappingsAggregationBugTest extends TestBase {
       println(s"Writing ${df.count()} rows with always-null array field 'tags'")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       println("Write completed successfully")
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Aggregation query
@@ -189,12 +189,12 @@ class EmptyFieldMappingsAggregationBugTest extends TestBase {
       println(s"Writing ${df.count()} rows with struct field that has SOME non-null values")
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // This should work because the struct field has actual data to discover sub-fields from
@@ -234,12 +234,12 @@ class EmptyFieldMappingsAggregationBugTest extends TestBase {
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .mode("overwrite")
         .save(path)
 
       val result = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(INDEXTABLES_FORMAT)
         .load(path)
 
       // Even a simple COUNT(*) fails due to the empty field_mappings

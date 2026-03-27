@@ -129,21 +129,21 @@ class CloudS3AvroPurgeOnWriteTest extends CloudS3TestBase {
 
     // Write 1: counter = 1
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
     assert(PurgeOnWriteTransactionCounter.get(tablePath) === 1)
 
     // Write 2: counter = 2
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
     assert(PurgeOnWriteTransactionCounter.get(tablePath) === 2)
 
     // Write 3: counter should reset to 0 after purge triggers
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
     assert(
@@ -173,7 +173,7 @@ class CloudS3AvroPurgeOnWriteTest extends CloudS3TestBase {
 
     // Write 1: creates split files with Avro state
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Overwrite)
       .save(tablePath)
 
@@ -192,7 +192,7 @@ class CloudS3AvroPurgeOnWriteTest extends CloudS3TestBase {
 
     // Write 2: should trigger purge and clean up old orphaned files
     df.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode(SaveMode.Append)
       .save(tablePath)
 
@@ -217,7 +217,7 @@ class CloudS3AvroPurgeOnWriteTest extends CloudS3TestBase {
     // Write 8 times to trigger checkpoint (interval=5) and create Avro state directories
     (1 to 8).foreach { i =>
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
         .option("spark.indextables.aws.accessKey", accessKey)
         .option("spark.indextables.aws.secretKey", secretKey)
@@ -245,7 +245,7 @@ class CloudS3AvroPurgeOnWriteTest extends CloudS3TestBase {
     // Write 2 more times to reach triggerAfterWrites=10 and trigger purge
     (1 to 2).foreach { _ =>
       df.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .mode(SaveMode.Append)
         .option("spark.indextables.aws.accessKey", accessKey)
         .option("spark.indextables.aws.secretKey", secretKey)
@@ -266,7 +266,7 @@ class CloudS3AvroPurgeOnWriteTest extends CloudS3TestBase {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .load(tablePath)
     val count = result.count()
     assert(count === 100, s"Expected 100 records (10 writes × 10 each), got $count")

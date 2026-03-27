@@ -44,13 +44,13 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
     // Write without merge-on-write
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "false")
       .save(tablePath)
 
     // Read back and verify
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -77,7 +77,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
     // We'll only have 1-2 groups, so merge should NOT trigger
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "100.0")
       .option("spark.indextables.mergeOnWrite.targetSize", "1M") // Small target to create multiple groups
@@ -85,7 +85,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     // Read back and verify - data should be intact
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100
@@ -114,7 +114,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", multiplier.toString)
       .option("spark.indextables.mergeOnWrite.targetSize", "100K") // Small target to create groups
@@ -122,7 +122,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity regardless of whether merge triggered
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 500
@@ -143,7 +143,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
     // Write with custom merge options
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold to ensure merge
       .option("spark.indextables.mergeOnWrite.targetSize", "50K")           // Small target
@@ -153,7 +153,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 200
@@ -178,7 +178,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
     // Write with partitioning and merge-on-write
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .partitionBy("partition_col")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.5")
@@ -187,7 +187,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity and partition structure
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 1000
@@ -211,7 +211,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     df1.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "5.0") // High threshold
       .option("spark.indextables.mergeOnWrite.targetSize", "50K")
@@ -224,7 +224,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     df2.write
       .mode("append")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "5.0")
       .option("spark.indextables.mergeOnWrite.targetSize", "50K")
@@ -237,7 +237,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     df3.write
       .mode("append")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold - should merge
       .option("spark.indextables.mergeOnWrite.targetSize", "50K")
@@ -245,7 +245,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     // Verify all data is present
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 300
@@ -269,7 +269,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
     // Write with invalid merge config (should not break the write)
     df.write
       .mode("overwrite")
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "invalid_size") // Invalid - should cause parse error
@@ -277,7 +277,7 @@ class PostCommitMergeOnWriteTest extends TestBase with BeforeAndAfterEach {
 
     // Data should still be written successfully despite merge failure
     val result = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(INDEXTABLES_FORMAT)
       .load(tablePath)
 
     result.count() shouldBe 100

@@ -17,6 +17,8 @@
 
 package io.indextables.spark.util
 
+import java.time.Instant
+
 import scala.jdk.CollectionConverters._
 
 import io.indextables.spark.transaction.AddAction
@@ -53,27 +55,43 @@ object SplitMetadataFactory {
     // Extract or compute footer offsets
     val (footerStartOffset, footerEndOffset) = extractFooterOffsets(addAction, tablePath)
 
+    // Use splitTags (tantivy4java tags) when available, fall back to tags map keys
+    val tags: java.util.Set[String] = addAction.splitTags match {
+      case Some(st) => st.asJava
+      case None     => addAction.tags.getOrElse(Map.empty[String, String]).keySet.asJava
+    }
+
     new QuickwitSplit.SplitMetadata(
-      splitId,                                                           // splitId
-      "tantivy4spark-index",                                             // indexUid
-      0L,                                                                // partitionId
-      "tantivy4spark-source",                                            // sourceId
-      "tantivy4spark-node",                                              // nodeId
-      addAction.numRecords.getOrElse(0L),                                // numDocs
-      addAction.size,                                                    // uncompressedSizeBytes
-      null,                                                              // timeRangeStart
-      null,                                                              // timeRangeEnd
-      addAction.modificationTime / 1000,                                 // createTimestamp
-      "Mature",                                                          // maturity
-      addAction.tags.getOrElse(Map.empty[String, String]).keySet.asJava, // tags
-      footerStartOffset,                                                 // footerStartOffset
-      footerEndOffset,                                                   // footerEndOffset
-      0L,                                                                // deleteOpstamp
-      0,                                                                 // numMergeOps
-      "doc-mapping-uid",                                                 // docMappingUid
-      addAction.docMappingJson.orNull,                                   // docMappingJson - REAL VALUE from AddAction
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()      // skippedSplits
+      splitId,                                                              // splitId
+      "tantivy4spark-index",                                                // indexUid
+      0L,                                                                   // partitionId
+      "tantivy4spark-source",                                               // sourceId
+      "tantivy4spark-node",                                                 // nodeId
+      toLongSafe(addAction.numRecords),                                     // numDocs
+      toLongSafe(addAction.uncompressedSizeBytes, addAction.size),          // uncompressedSizeBytes
+      addAction.timeRangeStart.map(Instant.parse).orNull,                   // timeRangeStart
+      addAction.timeRangeEnd.map(Instant.parse).orNull,                     // timeRangeEnd
+      System.currentTimeMillis() / 1000,                                    // createTimestamp
+      "Mature",                                                             // maturity
+      tags,                                                                 // tags
+      footerStartOffset,                                                    // footerStartOffset
+      footerEndOffset,                                                      // footerEndOffset
+      toLongSafe(addAction.deleteOpstamp),                                  // deleteOpstamp
+      addAction.numMergeOps.getOrElse(0),                                   // numMergeOps
+      "doc-mapping-uid",                                                    // docMappingUid
+      addAction.docMappingJson.orNull,                                      // docMappingJson
+      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()         // skippedSplits
     )
+  }
+
+  /** Safely convert Option[Any] to Long, handling Integer/Long type mismatches from JSON deserialization. */
+  private def toLongSafe(opt: Option[Any], fallback: Long = 0L): Long = opt match {
+    case Some(l: Long)              => l
+    case Some(i: Int)               => i.toLong
+    case Some(i: java.lang.Integer) => i.toLong
+    case Some(l: java.lang.Long)    => l
+    case Some(other)                => try { other.toString.toLong } catch { case _: NumberFormatException => fallback }
+    case None                       => fallback
   }
 
   /**
@@ -110,8 +128,8 @@ object SplitMetadataFactory {
       logger.debug(s"Using pre-computed footer offsets for ${addAction.path}: $start-$end")
       (start, end)
     } else {
-      // Use defaults when offsets not available
-      logger.debug(s"Footer offsets not in transaction log for ${addAction.path}, using defaults")
+      // Use defaults when offsets not available — warn since callers previously threw on missing offsets
+      logger.warn(s"Footer offsets not in transaction log for ${addAction.path}, using defaults (0, 0)")
       (0L, 0L)
     }
 

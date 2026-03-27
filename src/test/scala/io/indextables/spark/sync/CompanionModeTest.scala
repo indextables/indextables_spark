@@ -17,18 +17,9 @@
 
 package io.indextables.spark.sync
 
-import java.io.File
-import java.nio.file.Files
-
-import scala.jdk.CollectionConverters._
-
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLogFactory}
-import io.indextables.spark.transaction.avro.{AvroManifestReader, AvroManifestWriter, FileEntry}
 import io.indextables.spark.TestBase
 
 /**
@@ -36,8 +27,8 @@ import io.indextables.spark.TestBase
  *
  * Validates:
  *   - AddAction companion fields (companionSourceFiles, companionDeltaVersion, companionFastFieldMode)
- *   - FileEntry <-> AddAction round-trip with companion fields
- *   - Avro manifest serialization/deserialization of companion fields
+ *   - Transaction log round-trip with companion fields
+ *   - Mixed companion and regular entry storage
  *   - Transaction log storage and retrieval of companion fields
  *   - Write guard: rejection of normal writes to companion-mode tables
  *   - SyncConfig and SyncIndexingGroup serialization
@@ -92,157 +83,124 @@ class CompanionModeTest extends TestBase {
     }
   }
 
-  // --- FileEntry <-> AddAction Round-Trip Tests ---
+  // --- Transaction Log Round-Trip Tests for Companion Fields ---
 
-  test("FileEntry.fromAddAction should preserve companion fields") {
-    val addAction = AddAction(
-      path = "companion-split.split",
-      partitionValues = Map("year" -> "2024"),
-      size = 100000L,
-      modificationTime = 1700000000000L,
-      dataChange = true,
-      numRecords = Some(500L),
-      companionSourceFiles = Some(Seq("year=2024/part-00001.parquet", "year=2024/part-00002.parquet")),
-      companionDeltaVersion = Some(10L),
-      companionFastFieldMode = Some("HYBRID")
-    )
-
-    val entry = FileEntry.fromAddAction(addAction, version = 5L, timestamp = 1700000000000L)
-
-    entry.companionSourceFiles shouldBe Some(Seq("year=2024/part-00001.parquet", "year=2024/part-00002.parquet"))
-    entry.companionDeltaVersion shouldBe Some(10L)
-    entry.companionFastFieldMode shouldBe Some("HYBRID")
-  }
-
-  test("FileEntry.toAddAction should preserve companion fields") {
-    val entry = FileEntry(
-      path = "companion-split.split",
-      partitionValues = Map("year" -> "2024"),
-      size = 100000L,
-      modificationTime = 1700000000000L,
-      dataChange = true,
-      numRecords = Some(500L),
-      addedAtVersion = 5L,
-      addedAtTimestamp = 1700000000000L,
-      companionSourceFiles = Some(Seq("part-00001.parquet")),
-      companionDeltaVersion = Some(7L),
-      companionFastFieldMode = Some("PARQUET_ONLY")
-    )
-
-    val addAction = FileEntry.toAddAction(entry)
-
-    addAction.companionSourceFiles shouldBe Some(Seq("part-00001.parquet"))
-    addAction.companionDeltaVersion shouldBe Some(7L)
-    addAction.companionFastFieldMode shouldBe Some("PARQUET_ONLY")
-  }
-
-  test("FileEntry round-trip should preserve all companion fields") {
-    val original = AddAction(
-      path = "split.split",
-      partitionValues = Map("region" -> "us-east"),
-      size = 50000L,
-      modificationTime = 1700000000000L,
-      dataChange = true,
-      numRecords = Some(200L),
-      companionSourceFiles = Some(Seq("a.parquet", "b.parquet", "c.parquet")),
-      companionDeltaVersion = Some(99L),
-      companionFastFieldMode = Some("DISABLED")
-    )
-
-    val entry    = FileEntry.fromAddAction(original, version = 10L, timestamp = 1700000000000L)
-    val restored = FileEntry.toAddAction(entry)
-
-    restored.companionSourceFiles shouldBe original.companionSourceFiles
-    restored.companionDeltaVersion shouldBe original.companionDeltaVersion
-    restored.companionFastFieldMode shouldBe original.companionFastFieldMode
-    restored.path shouldBe original.path
-    restored.partitionValues shouldBe original.partitionValues
-    restored.size shouldBe original.size
-    restored.numRecords shouldBe original.numRecords
-  }
-
-  test("FileEntry round-trip with None companion fields") {
-    val original = AddAction(
-      path = "regular-split.split",
-      partitionValues = Map.empty,
-      size = 10000L,
-      modificationTime = 1700000000000L,
-      dataChange = true,
-      numRecords = Some(100L)
-    )
-
-    val entry    = FileEntry.fromAddAction(original, version = 1L, timestamp = 1700000000000L)
-    val restored = FileEntry.toAddAction(entry)
-
-    restored.companionSourceFiles shouldBe None
-    restored.companionDeltaVersion shouldBe None
-    restored.companionFastFieldMode shouldBe None
-  }
-
-  // --- Avro Manifest Serialization Tests ---
-
-  test("Avro manifest should serialize and deserialize companion fields") {
+  test("transaction log round-trip should preserve companion fields") {
     withTempPath { tempPath =>
-      val cloudProvider = CloudStorageProviderFactory.createProvider(
-        tempPath,
-        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-        spark.sparkContext.hadoopConfiguration
-      )
+      val tablePath      = new Path(tempPath)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
-        val writer = new AvroManifestWriter(cloudProvider)
-        val entries = Seq(
-          FileEntry(
-            path = "companion-1.split",
-            partitionValues = Map("date" -> "2024-01-01"),
-            size = 50000L,
-            modificationTime = 1700000000000L,
-            dataChange = true,
-            numRecords = Some(1000L),
-            addedAtVersion = 1L,
-            addedAtTimestamp = 1700000000000L,
-            companionSourceFiles =
-              Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")),
-            companionDeltaVersion = Some(42L),
-            companionFastFieldMode = Some("HYBRID")
-          ),
-          FileEntry(
-            path = "companion-2.split",
-            partitionValues = Map("date" -> "2024-01-02"),
-            size = 60000L,
-            modificationTime = 1700000100000L,
-            dataChange = true,
-            numRecords = Some(2000L),
-            addedAtVersion = 1L,
-            addedAtTimestamp = 1700000100000L,
-            companionSourceFiles = Some(Seq("date=2024-01-02/part-00003.parquet")),
-            companionDeltaVersion = Some(42L),
-            companionFastFieldMode = Some("PARQUET_ONLY")
-          ),
-          // Regular (non-companion) entry to verify mixed compatibility
-          FileEntry(
-            path = "regular.split",
-            partitionValues = Map.empty,
-            size = 30000L,
-            modificationTime = 1700000200000L,
-            dataChange = true,
-            numRecords = Some(500L),
-            addedAtVersion = 1L,
-            addedAtTimestamp = 1700000200000L
-          )
+        transactionLog.initialize(getTestSchema())
+
+        val original = AddAction(
+          path = "companion-split.split",
+          partitionValues = Map("year" -> "2024"),
+          size = 100000L,
+          modificationTime = 1700000000000L,
+          dataChange = true,
+          numRecords = Some(500L),
+          companionSourceFiles = Some(Seq("year=2024/part-00001.parquet", "year=2024/part-00002.parquet")),
+          companionDeltaVersion = Some(10L),
+          companionFastFieldMode = Some("HYBRID")
         )
 
-        val manifestPath = s"$tempPath/manifest-companion-test.avro"
-        val bytesWritten = writer.writeManifest(manifestPath, entries)
-        bytesWritten should be > 0L
+        transactionLog.addFile(original)
 
-        // Read back and verify
-        val reader = new AvroManifestReader(cloudProvider)
-        val result = reader.readManifest(manifestPath)
-        result should have size 3
+        val files = transactionLog.listFiles()
+        files should have length 1
+
+        val restored = files.head
+        restored.companionSourceFiles shouldBe Some(Seq("year=2024/part-00001.parquet", "year=2024/part-00002.parquet"))
+        restored.companionDeltaVersion shouldBe Some(10L)
+        restored.companionFastFieldMode shouldBe Some("HYBRID")
+        restored.path shouldBe original.path
+        restored.partitionValues shouldBe original.partitionValues
+        restored.size shouldBe original.size
+        restored.numRecords shouldBe original.numRecords
+      } finally
+        transactionLog.close()
+    }
+  }
+
+  test("transaction log round-trip with None companion fields") {
+    withTempPath { tempPath =>
+      val tablePath      = new Path(tempPath)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+
+      try {
+        transactionLog.initialize(getTestSchema())
+
+        val original = AddAction(
+          path = "regular-split.split",
+          partitionValues = Map.empty,
+          size = 10000L,
+          modificationTime = 1700000000000L,
+          dataChange = true,
+          numRecords = Some(100L)
+        )
+
+        transactionLog.addFile(original)
+
+        val files = transactionLog.listFiles()
+        files should have length 1
+
+        val restored = files.head
+        restored.companionSourceFiles shouldBe None
+        restored.companionDeltaVersion shouldBe None
+        restored.companionFastFieldMode shouldBe None
+      } finally
+        transactionLog.close()
+    }
+  }
+
+  test("transaction log should store mixed companion and regular entries") {
+    withTempPath { tempPath =>
+      val tablePath      = new Path(tempPath)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+
+      try {
+        transactionLog.initialize(getTestSchema())
+
+        transactionLog.addFile(AddAction(
+          path = "companion-1.split",
+          partitionValues = Map("date" -> "2024-01-01"),
+          size = 50000L,
+          modificationTime = 1700000000000L,
+          dataChange = true,
+          numRecords = Some(1000L),
+          companionSourceFiles =
+            Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")),
+          companionDeltaVersion = Some(42L),
+          companionFastFieldMode = Some("HYBRID")
+        ))
+
+        transactionLog.addFile(AddAction(
+          path = "companion-2.split",
+          partitionValues = Map("date" -> "2024-01-02"),
+          size = 60000L,
+          modificationTime = 1700000100000L,
+          dataChange = true,
+          numRecords = Some(2000L),
+          companionSourceFiles = Some(Seq("date=2024-01-02/part-00003.parquet")),
+          companionDeltaVersion = Some(42L),
+          companionFastFieldMode = Some("PARQUET_ONLY")
+        ))
+
+        transactionLog.addFile(AddAction(
+          path = "regular.split",
+          partitionValues = Map.empty,
+          size = 30000L,
+          modificationTime = 1700000200000L,
+          dataChange = true,
+          numRecords = Some(500L)
+        ))
+
+        val files = transactionLog.listFiles()
+        files should have size 3
 
         // Verify companion entry 1
-        val entry1 = result.find(_.path == "companion-1.split").get
+        val entry1 = files.find(_.path == "companion-1.split").get
         entry1.companionSourceFiles shouldBe Some(
           Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")
         )
@@ -250,49 +208,19 @@ class CompanionModeTest extends TestBase {
         entry1.companionFastFieldMode shouldBe Some("HYBRID")
 
         // Verify companion entry 2
-        val entry2 = result.find(_.path == "companion-2.split").get
+        val entry2 = files.find(_.path == "companion-2.split").get
         entry2.companionSourceFiles shouldBe Some(Seq("date=2024-01-02/part-00003.parquet"))
         entry2.companionDeltaVersion shouldBe Some(42L)
         entry2.companionFastFieldMode shouldBe Some("PARQUET_ONLY")
 
         // Verify regular entry has no companion fields
-        val entry3 = result.find(_.path == "regular.split").get
+        val entry3 = files.find(_.path == "regular.split").get
         entry3.companionSourceFiles shouldBe None
         entry3.companionDeltaVersion shouldBe None
         entry3.companionFastFieldMode shouldBe None
       } finally
-        cloudProvider.close()
+        transactionLog.close()
     }
-  }
-
-  test("Avro manifest writeToBytes/readFromBytes round-trip with companion fields") {
-    val writer = new AvroManifestWriter(null)
-    val entries = Seq(
-      FileEntry(
-        path = "companion.split",
-        partitionValues = Map.empty,
-        size = 10000L,
-        modificationTime = 1700000000000L,
-        dataChange = true,
-        addedAtVersion = 1L,
-        addedAtTimestamp = 1700000000000L,
-        companionSourceFiles = Some(Seq("file1.parquet", "file2.parquet", "file3.parquet")),
-        companionDeltaVersion = Some(100L),
-        companionFastFieldMode = Some("DISABLED")
-      )
-    )
-
-    val bytes = writer.writeToBytes(entries)
-    bytes.length should be > 0
-
-    val reader = new AvroManifestReader(null)
-    val result = reader.readFromBytes(bytes)
-    result should have size 1
-
-    val entry = result.head
-    entry.companionSourceFiles shouldBe Some(Seq("file1.parquet", "file2.parquet", "file3.parquet"))
-    entry.companionDeltaVersion shouldBe Some(100L)
-    entry.companionFastFieldMode shouldBe Some("DISABLED")
   }
 
   // --- Transaction Log Integration Tests ---
@@ -467,7 +395,7 @@ class CompanionModeTest extends TestBase {
       val df = createTestDataFrame()
       val ex = intercept[Exception] {
         df.write
-          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .format(INDEXTABLES_FORMAT)
           .mode("append")
           .save(tempPath)
       }

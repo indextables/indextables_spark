@@ -97,12 +97,12 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
 
     // Write test data (this creates splits)
     testDataDF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
     // Read with default configuration (pre-warm should be enabled by default)
-    val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
+    val df      = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tempTablePath)
     val results = df.filter(col("content").contains("search")).collect()
 
     // Verify that we got results and pre-warm was executed by default
@@ -131,13 +131,13 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
 
     // Write test data to create multiple splits
     testDataDF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
     // Read with pre-warm explicitly enabled
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.prewarm.enabled", "true")
       .option("spark.indextables.cache.maxSize", "50000000")
       .load(tempTablePath)
@@ -167,13 +167,13 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
 
     // Write test data
     testDataDF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
     // Read with pre-warm explicitly disabled
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.prewarm.enabled", "false")
       .load(tempTablePath)
 
@@ -200,13 +200,13 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
 
     // Write test data
     testDataDF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
     // Read with pre-warm enabled
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.prewarm.enabled", "true")
       .load(tempTablePath)
 
@@ -234,13 +234,13 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
 
     // Write test data
     testDataDF.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(tempTablePath)
 
     // Read with pre-warm enabled but with configuration that might cause issues
     val df = spark.read
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.cache.prewarm.enabled", "true")
       .option("spark.indextables.cache.maxSize", "1000") // Very small cache
       .load(tempTablePath)
