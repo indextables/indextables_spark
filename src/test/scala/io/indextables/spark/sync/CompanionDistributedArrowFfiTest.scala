@@ -144,28 +144,24 @@ class CompanionDistributedArrowFfiTest
     df.write.format("delta").save(deltaPath)
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  Distributed vs non-distributed Iceberg companion parity
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  test("distributed and non-distributed should produce identical Iceberg companion") {
-    val root         = Files.createTempDirectory("iceberg-dist-parity").toFile
+  /**
+   * Sets up an Iceberg table with test data via an embedded REST catalog, then calls the test body with the server and
+   * root temp directory. Handles all cleanup (Spark config, server, temp files) in the finally block.
+   */
+  private def withIcebergSource(tableName: String)(f: (EmbeddedIcebergRestServer, File) => Unit): Unit = {
+    val root         = Files.createTempDirectory(s"iceberg-$tableName").toFile
     val warehouseDir = new File(root, "warehouse").getAbsolutePath
-    val distPath     = new File(root, "index-dist").getAbsolutePath
-    val nonDistPath  = new File(root, "index-nondist").getAbsolutePath
     new File(warehouseDir).mkdirs()
 
     val server = new EmbeddedIcebergRestServer(warehouseDir)
     try {
       flushCaches()
 
-      // Create Iceberg table
       val ns      = Namespace.of("default")
-      val tableId = TableIdentifier.of(ns, "test")
+      val tableId = TableIdentifier.of(ns, tableName)
       server.catalog.createNamespace(ns, java.util.Collections.emptyMap())
       server.catalog.buildTable(tableId, icebergSchema).create()
 
-      // Write parquet data and register as snapshot
       val parquetDir = new File(root, "parquet-data").getAbsolutePath
       val df         = spark.createDataFrame(spark.sparkContext.parallelize(testRows), sparkSchema)
       df.coalesce(1).write.parquet(s"file://$parquetDir")
@@ -189,18 +185,35 @@ class CompanionDistributedArrowFfiTest
       }
       appendOp.commit()
 
-      // Configure Spark for embedded catalog
       spark.conf.set("spark.indextables.iceberg.catalogType", "rest")
       spark.conf.set("spark.indextables.iceberg.uri", server.restUri)
 
-      // Build with distributed enabled (default)
+      f(server, root)
+    } finally {
+      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      catch { case _: Exception => }
+      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      catch { case _: Exception => }
+      server.close()
+      deleteRecursively(root)
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Distributed vs non-distributed Iceberg companion parity
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  test("distributed and non-distributed should produce identical Iceberg companion") {
+    withIcebergSource("test") { (_, root) =>
+      val distPath    = new File(root, "index-dist").getAbsolutePath
+      val nonDistPath = new File(root, "index-nondist").getAbsolutePath
+
       val distResult = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.test' AT LOCATION '$distPath'"
       ).collect()
 
       flushCaches()
 
-      // Build with distributed disabled
       spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
       try {
         val nonDistResult = spark.sql(
@@ -210,15 +223,16 @@ class CompanionDistributedArrowFfiTest
         distResult(0).getString(2) shouldBe "success"
         nonDistResult(0).getString(2) shouldBe "success"
         distResult(0).getInt(6) shouldBe nonDistResult(0).getInt(6) // same parquet_files_indexed
+
+        // Verify companion data matches, not just build metadata
+        flushCaches()
+        val distDf    = readCompanion(distPath)
+        val nonDistDf = readCompanion(nonDistPath)
+        distDf.count() shouldBe nonDistDf.count()
+        distDf.agg(sum("score")).collect()(0).getDouble(0) shouldBe
+          nonDistDf.agg(sum("score")).collect()(0).getDouble(0) +- 0.01
       } finally
         spark.conf.unset("spark.indextables.companion.sync.distributedLogRead.enabled")
-    } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
-      catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
-      catch { case _: Exception => }
-      server.close()
-      deleteRecursively(root)
     }
   }
 
@@ -268,50 +282,9 @@ class CompanionDistributedArrowFfiTest
   // ═══════════════════════════════════════════════════════════════════════════
 
   test("Iceberg companion aggregation parity with Arrow FFI toggle") {
-    val root         = Files.createTempDirectory("iceberg-ffi-parity").toFile
-    val warehouseDir = new File(root, "warehouse").getAbsolutePath
-    val indexPath    = new File(root, "index").getAbsolutePath
-    new File(warehouseDir).mkdirs()
+    withIcebergSource("ffi_test") { (_, root) =>
+      val indexPath = new File(root, "index").getAbsolutePath
 
-    val server = new EmbeddedIcebergRestServer(warehouseDir)
-    try {
-      flushCaches()
-
-      // Create Iceberg table
-      val ns      = Namespace.of("default")
-      val tableId = TableIdentifier.of(ns, "ffi_test")
-      server.catalog.createNamespace(ns, java.util.Collections.emptyMap())
-      server.catalog.buildTable(tableId, icebergSchema).create()
-
-      // Write parquet data and register as snapshot
-      val parquetDir = new File(root, "parquet-data").getAbsolutePath
-      val df         = spark.createDataFrame(spark.sparkContext.parallelize(testRows), sparkSchema)
-      df.coalesce(1).write.parquet(s"file://$parquetDir")
-
-      val parquetFiles = new File(parquetDir)
-        .listFiles()
-        .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-
-      val table    = server.catalog.loadTable(tableId)
-      val appendOp = table.newAppend()
-      parquetFiles.foreach { pf =>
-        appendOp.appendFile(
-          DataFiles
-            .builder(table.spec())
-            .withPath(s"file://${pf.getAbsolutePath}")
-            .withFileSizeInBytes(pf.length())
-            .withRecordCount(testRows.size.toLong)
-            .withFormat(FileFormat.PARQUET)
-            .build()
-        )
-      }
-      appendOp.commit()
-
-      // Configure Spark for embedded catalog
-      spark.conf.set("spark.indextables.iceberg.catalogType", "rest")
-      spark.conf.set("spark.indextables.iceberg.uri", server.restUri)
-
-      // Build companion with FASTFIELDS MODE HYBRID
       val buildResult = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.ffi_test' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
       ).collect()
@@ -340,13 +313,6 @@ class CompanionDistributedArrowFfiTest
 
       countFfiOn shouldBe countFfiOff
       sumFfiOn shouldBe sumFfiOff +- 0.01
-    } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
-      catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
-      catch { case _: Exception => }
-      server.close()
-      deleteRecursively(root)
     }
   }
 }

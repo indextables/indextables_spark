@@ -17,6 +17,7 @@
 
 package io.indextables.spark.sql
 
+import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 
@@ -31,12 +32,35 @@ import io.indextables.spark.TestBase
  * Uses a controllable syncFn lambda to simulate failures without requiring actual Delta/Iceberg tables. The parquet
  * source format is used so cheapSourceVersion always returns None, ensuring syncFn is called every cycle.
  */
-class StreamingCompanionErrorRecoveryTest extends TestBase {
+class StreamingCompanionErrorRecoveryTest
+    extends TestBase
+    with io.indextables.spark.testutils.FileCleanupHelper {
+
+  override protected def deleteRecursively(file: File): Unit = super[FileCleanupHelper].deleteRecursively(file)
+
+  private val tempDirs = new java.util.concurrent.CopyOnWriteArrayList[File]()
+  private var sharedSourcePath: String = _
+
+  private def makeTempDir(prefix: String): String = {
+    val dir = Files.createTempDirectory(prefix).toFile
+    tempDirs.add(dir)
+    dir.getAbsolutePath
+  }
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    sharedSourcePath = makeTempDir("streaming-src")
+  }
+
+  override def afterAll(): Unit = {
+    tempDirs.forEach(deleteRecursively)
+    super.afterAll()
+  }
 
   private def makeCommand(destPath: String): SyncToExternalCommand =
     SyncToExternalCommand(
       sourceFormat = "parquet",
-      sourcePath = Files.createTempDirectory("streaming-src").toString,
+      sourcePath = sharedSourcePath,
       destPath = destPath,
       indexingModes = Map.empty,
       fastFieldMode = "HYBRID",
@@ -67,7 +91,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
   test("stream should stop after maxConsecutiveErrors") {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "3")
     try {
-      val destPath  = Files.createTempDirectory("streaming-dest").toString
+      val destPath  = makeTempDir("streaming-dest")
       val callCount = new AtomicInteger(0)
 
       val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
@@ -90,7 +114,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
   test("maxConsecutiveErrors config set to 2 should stop after 2 errors") {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "2")
     try {
-      val destPath  = Files.createTempDirectory("streaming-dest2").toString
+      val destPath  = makeTempDir("streaming-dest2")
       val callCount = new AtomicInteger(0)
 
       val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
@@ -117,7 +141,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
   test("successful sync should reset consecutive error counter") {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "3")
     try {
-      val destPath  = Files.createTempDirectory("streaming-reset").toString
+      val destPath  = makeTempDir("streaming-reset")
       val callCount = new AtomicInteger(0)
 
       // Pattern: fail, fail, succeed, fail, fail, succeed, fail, fail, succeed...
@@ -144,8 +168,9 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
       thread.setDaemon(true)
       thread.start()
 
-      // Wait long enough for several fail-fail-succeed cycles to complete
-      Thread.sleep(5000)
+      // Poll until enough fail-fail-succeed cycles complete
+      val deadline = System.currentTimeMillis() + 10000
+      while (callCount.get() < 9 && System.currentTimeMillis() < deadline) Thread.sleep(50)
       thread.interrupt()
       thread.join(5000L)
 
@@ -163,7 +188,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "4")
     spark.conf.set("spark.indextables.companion.stream.errorBackoffMultiplier", "2")
     try {
-      val destPath   = Files.createTempDirectory("streaming-backoff").toString
+      val destPath   = makeTempDir("streaming-backoff")
       val timestamps = new java.util.concurrent.CopyOnWriteArrayList[Long]()
 
       val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
@@ -186,11 +211,14 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
       // With multiplier=2 and pollInterval=500ms:
       // After error 1: sleep = 2^1 * 500 = 1000ms
       // After error 2: sleep = 2^2 * 500 = 2000ms
-      // After error 3: sleep = 2^3 * 500 = 4000ms (but hits maxConsecutiveErrors, no sleep)
+      // After error 3: sleep = 2^3 * 500 = 4000ms
+      // Error 4 hits maxConsecutiveErrors and throws immediately
       // 80% of expected value to allow JVM jitter while catching broken backoff
       intervals(0) should be >= 800L  // first backoff: ~1000ms (2^1 * 500)
       intervals(1) should be >= 1600L // second backoff: ~2000ms (2^2 * 500)
-      // Third interval is just the time to throw, no sleep
+      // Current impl is sleep-then-check, so the 3rd interval also includes backoff sleep.
+      // Asserting this explicitly so a change to check-then-sleep would be caught.
+      intervals(2) should be >= 3200L // third backoff: ~4000ms (2^3 * 500)
     } finally {
       spark.conf.unset("spark.indextables.companion.stream.maxConsecutiveErrors")
       spark.conf.unset("spark.indextables.companion.stream.errorBackoffMultiplier")
@@ -204,7 +232,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
   test("exactly maxConsecutiveErrors sync calls should be made before abort") {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "5")
     try {
-      val destPath  = Files.createTempDirectory("streaming-exact-count").toString
+      val destPath  = makeTempDir("streaming-exact-count")
       val callCount = new AtomicInteger(0)
 
       val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
@@ -224,7 +252,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
   }
 
   test("successful sync cycles should complete without errors") {
-    val destPath  = Files.createTempDirectory("streaming-success").toString
+    val destPath  = makeTempDir("streaming-success")
     val callCount = new AtomicInteger(0)
 
     val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
@@ -234,12 +262,11 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
 
     val manager = new StreamingCompanionManager(makeCommand(destPath), pollIntervalMs = 100L, syncFn)
 
-    val thread = new Thread(() => manager.runStreaming(spark))
-    thread.setDaemon(true)
-    thread.start()
+    val thread = runOnThread(manager)
 
-    // Let several successful cycles complete
-    Thread.sleep(3000)
+    // Poll until enough successful cycles complete
+    val deadline = System.currentTimeMillis() + 10000
+    while (callCount.get() < 5 && System.currentTimeMillis() < deadline) Thread.sleep(50)
     thread.interrupt()
     thread.join(5000L)
 
@@ -254,7 +281,7 @@ class StreamingCompanionErrorRecoveryTest extends TestBase {
   test("interrupt during backoff sleep should exit cleanly") {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "100")
     try {
-      val destPath = Files.createTempDirectory("streaming-interrupt").toString
+      val destPath = makeTempDir("streaming-interrupt")
       val firstCallDone = new AtomicBoolean(false)
 
       val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
