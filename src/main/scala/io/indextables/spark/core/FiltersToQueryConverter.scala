@@ -1540,7 +1540,7 @@ object FiltersToQueryConverter {
               Some(new SplitTermQuery(attribute, convertedValue.toString))
           }
         } else {
-          // For string fields and other types, use exact term matching.
+          // For string fields and other types, use exact term matching
           Some(new SplitTermQuery(attribute, convertedValue.toString))
         }
 
@@ -1557,6 +1557,7 @@ object FiltersToQueryConverter {
             splitSearchEngine.parseQuery(queryString)
           }.toList
 
+          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
           val boolQuery = new SplitBooleanQuery()
           parseQueries.foreach(query => boolQuery.addShould(query))
           Some(boolQuery)
@@ -1567,6 +1568,7 @@ object FiltersToQueryConverter {
             new SplitTermQuery(attribute, converted.toString)
           }.toList
 
+          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
           val boolQuery = new SplitBooleanQuery()
           termQueries.foreach(query => boolQuery.addShould(query))
           Some(boolQuery)
