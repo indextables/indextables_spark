@@ -190,10 +190,8 @@ class CompanionDistributedArrowFfiTest
 
       f(server, root)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
-      catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
-      catch { case _: Exception => }
+      spark.conf.unset("spark.indextables.iceberg.catalogType")
+      spark.conf.unset("spark.indextables.iceberg.uri")
       server.close()
       deleteRecursively(root)
     }
