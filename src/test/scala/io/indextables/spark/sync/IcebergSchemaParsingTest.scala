@@ -95,6 +95,19 @@ class IcebergSchemaParsingTest extends AnyFunSuite with Matchers {
     result2.fields(0).dataType shouldBe BinaryType
   }
 
+  test("convertIcebergSchemaToSpark should map fixed[N] to BinaryType") {
+    val result1 = IcebergSourceReader.convertIcebergSchemaToSpark(icebergSchemaWithType("uuid_col", "fixed[16]"))
+    result1.fields(0).dataType shouldBe BinaryType
+
+    val result2 = IcebergSourceReader.convertIcebergSchemaToSpark(icebergSchemaWithType("hash_col", "fixed[32]"))
+    result2.fields(0).dataType shouldBe BinaryType
+  }
+
+  test("convertIcebergSchemaToSpark should map fixed[1] to BinaryType") {
+    val result = IcebergSourceReader.convertIcebergSchemaToSpark(icebergSchemaWithType("flag_col", "fixed[1]"))
+    result.fields(0).dataType shouldBe BinaryType
+  }
+
   test("convertIcebergSchemaToSpark should map date to DateType") {
     val result = IcebergSourceReader.convertIcebergSchemaToSpark(icebergSchemaWithType("x", "date"))
     result.fields(0).dataType shouldBe DateType

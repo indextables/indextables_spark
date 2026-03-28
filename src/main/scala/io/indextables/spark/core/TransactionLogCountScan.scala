@@ -24,6 +24,7 @@ import org.apache.spark.sql.types.{DateType, LongType, StringType, StructField, 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
+import io.indextables.spark.sync.DistributedSourceScanner
 import io.indextables.spark.transaction.TransactionLogInterface
 import org.slf4j.LoggerFactory
 
@@ -349,15 +350,17 @@ class TransactionLogGroupByCountPartitionReader(
           localDate.toEpochDay.toInt
         } catch {
           case _: Exception =>
-            try {
-              value.toInt // epoch day number
-            } catch {
-              case e2: NumberFormatException =>
+            val n = try { value.toInt } catch {
+              case e: NumberFormatException =>
                 throw new IllegalArgumentException(
-                  s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e2.getMessage}",
-                  e2
+                  s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e.getMessage}",
+                  e
                 )
             }
+            if (!DistributedSourceScanner.isPlausibleEpochDay(n))
+              throw new IllegalArgumentException(
+                s"Partition value '$value' for column '$columnName' is numeric but not a plausible epoch day (range: -100000..100000)")
+            n
         }
 
       case TimestampType =>

@@ -162,4 +162,24 @@ class TransactionLogCountDatePartitionTest extends TestBase {
     val result = invokeConvertPartitionValue("0", DateType, "event_date")
     result shouldBe 0
   }
+
+  test("convertPartitionValue should throw for compact ISO date 20260322 (implausible epoch day)") {
+    val ex = intercept[InvocationTargetException] {
+      invokeConvertPartitionValue("20260322", DateType, "event_date")
+    }
+    ex.getCause shouldBe a[IllegalArgumentException]
+    ex.getCause.getMessage should include("plausible epoch day")
+  }
+
+  test("convertPartitionValue should throw for compact ISO date 20240115") {
+    val ex = intercept[InvocationTargetException] {
+      invokeConvertPartitionValue("20240115", DateType, "event_date")
+    }
+    ex.getCause shouldBe a[IllegalArgumentException]
+  }
+
+  test("convertPartitionValue should accept boundary epoch day 100000") {
+    val result = invokeConvertPartitionValue("100000", DateType, "event_date")
+    result shouldBe 100000
+  }
 }

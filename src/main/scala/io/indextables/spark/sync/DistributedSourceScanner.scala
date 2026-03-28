@@ -197,7 +197,11 @@ object DistributedSourceScanner {
       if (dateColumns.contains(key)) {
         try {
           val epochDay = value.toLong
-          key -> LocalDate.ofEpochDay(epochDay).toString
+          if (isPlausibleEpochDay(epochDay)) {
+            key -> LocalDate.ofEpochDay(epochDay).toString
+          } else {
+            key -> value // implausibly large — likely a compact ISO date, pass through
+          }
         } catch {
           case _: NumberFormatException => key -> value
         }
@@ -206,6 +210,10 @@ object DistributedSourceScanner {
       }
     }
   }
+
+  /** Plausibility check: epoch days outside -100000..100000 (~year -304 to ~2243) are likely
+    * compact ISO dates (e.g., 20260322) rather than real epoch days. */
+  private[spark] def isPlausibleEpochDay(n: Long): Boolean = n >= -100000 && n <= 100000
 
   /** Extract the set of DATE column names from a Spark StructType schema. */
   private[sync] def extractDateColumns(schema: Option[StructType]): Set[String] =

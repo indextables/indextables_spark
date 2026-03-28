@@ -96,12 +96,61 @@ class IcebergDatePartitionNormalizationTest extends AnyFunSuite with Matchers {
     result("end_date") shouldBe LocalDate.ofEpochDay(20530).toString
   }
 
-  test("normalizeIcebergDatePartitions should handle large epoch day (far future)") {
+  test("normalizeIcebergDatePartitions should handle large epoch day at boundary (100000)") {
     val result = DistributedSourceScanner.normalizeIcebergDatePartitions(
       Map("dt" -> "100000"),
       Set("dt")
     )
     result("dt") shouldBe LocalDate.ofEpochDay(100000).toString
+  }
+
+  test("normalizeIcebergDatePartitions should pass through compact ISO date 20260322 (implausible epoch day)") {
+    val result = DistributedSourceScanner.normalizeIcebergDatePartitions(
+      Map("dt" -> "20260322"),
+      Set("dt")
+    )
+    result("dt") shouldBe "20260322"
+  }
+
+  test("normalizeIcebergDatePartitions should pass through compact ISO date 20240115") {
+    val result = DistributedSourceScanner.normalizeIcebergDatePartitions(
+      Map("dt" -> "20240115"),
+      Set("dt")
+    )
+    result("dt") shouldBe "20240115"
+  }
+
+  test("normalizeIcebergDatePartitions should pass through epoch day just above boundary (100001)") {
+    val result = DistributedSourceScanner.normalizeIcebergDatePartitions(
+      Map("dt" -> "100001"),
+      Set("dt")
+    )
+    result("dt") shouldBe "100001"
+  }
+
+  test("normalizeIcebergDatePartitions should convert negative boundary epoch day -100000") {
+    val result = DistributedSourceScanner.normalizeIcebergDatePartitions(
+      Map("dt" -> "-100000"),
+      Set("dt")
+    )
+    result("dt") shouldBe LocalDate.ofEpochDay(-100000).toString
+  }
+
+  // ── isPlausibleEpochDay ───────────────────────────────────────────────
+
+  test("isPlausibleEpochDay should return true for values in plausible range") {
+    DistributedSourceScanner.isPlausibleEpochDay(0) shouldBe true
+    DistributedSourceScanner.isPlausibleEpochDay(20527) shouldBe true
+    DistributedSourceScanner.isPlausibleEpochDay(-365) shouldBe true
+    DistributedSourceScanner.isPlausibleEpochDay(100000) shouldBe true
+    DistributedSourceScanner.isPlausibleEpochDay(-100000) shouldBe true
+  }
+
+  test("isPlausibleEpochDay should return false for compact ISO dates and large values") {
+    DistributedSourceScanner.isPlausibleEpochDay(20260322) shouldBe false
+    DistributedSourceScanner.isPlausibleEpochDay(20240115) shouldBe false
+    DistributedSourceScanner.isPlausibleEpochDay(100001) shouldBe false
+    DistributedSourceScanner.isPlausibleEpochDay(-100001) shouldBe false
   }
 
   // ── extractDateColumns ─────────────────────────────────────────────────
