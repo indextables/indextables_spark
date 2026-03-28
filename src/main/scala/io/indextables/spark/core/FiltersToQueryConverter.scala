@@ -1951,7 +1951,7 @@ object FiltersToQueryConverter {
       case sparkFilter: Filter =>
         convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine, options)
 
-      case IndexQueryFilter(columnName, queryString) =>
+      case IndexQueryFilter(columnName, queryString, _ /* searchType: all types execute identically; type safety validated on driver */) =>
         // Parse the custom IndexQuery using the split searcher with field-specific parsing
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
@@ -1982,7 +1982,7 @@ object FiltersToQueryConverter {
             throw IndexQueryParseException.forField(queryString, columnName, e)
         }
 
-      case IndexQueryAllFilter(queryString) =>
+      case IndexQueryAllFilter(queryString, _ /* searchType: all types execute identically; type safety validated on driver */) =>
         // Safety check for unqualified queries on wide tables
         validateIndexQueryAllSafety(queryString, schema, options)
 

@@ -318,10 +318,10 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
               case (Some(columnName), Some(queryString)) =>
                 if (columnName == "_indexall") {
                   logger.debug(s"V2IndexQueryExpressionRule: Storing _indexall IndexQuery")
-                  indexQueries += IndexQueryAllFilter(queryString)
+                  indexQueries += IndexQueryAllFilter(queryString, indexQuery.searchType)
                 } else {
                   logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQuery")
-                  indexQueries += IndexQueryFilter(columnName, queryString)
+                  indexQueries += IndexQueryFilter(columnName, queryString, indexQuery.searchType)
                 }
                 Literal(true)
               case _ =>
@@ -337,7 +337,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
             indexQueryAll.getQueryString match {
               case Some(queryString) =>
                 logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQueryAll")
-                indexQueries += IndexQueryAllFilter(queryString)
+                indexQueries += IndexQueryAllFilter(queryString, indexQueryAll.searchType)
                 Literal(true)
               case _ =>
                 logger.debug(
@@ -373,15 +373,15 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
           case (Some(columnName), Some(queryString)) =>
             if (columnName == "_indexall") {
-              Some(MixedIndexQueryAll(IndexQueryAllFilter(queryString)))
+              Some(MixedIndexQueryAll(IndexQueryAllFilter(queryString, indexQuery.searchType)))
             } else {
-              Some(MixedIndexQuery(IndexQueryFilter(columnName, queryString)))
+              Some(MixedIndexQuery(IndexQueryFilter(columnName, queryString, indexQuery.searchType)))
             }
           case _ => None
         }
 
       case indexQueryAll: IndexQueryAllExpression =>
-        indexQueryAll.getQueryString.map(qs => MixedIndexQueryAll(IndexQueryAllFilter(qs)))
+        indexQueryAll.getQueryString.map(qs => MixedIndexQueryAll(IndexQueryAllFilter(qs, indexQueryAll.searchType)))
 
       // Boolean combinations
       case Or(left, right) =>

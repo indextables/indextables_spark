@@ -91,6 +91,78 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
       )
     )
 
+    // Register tantivy4spark_textsearch function for tokenized text field search
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("tantivy4spark_textsearch"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.IndexQueryExpression",
+          "tantivy4spark_textsearch",
+          "tantivy4spark_textsearch(column, query) - Creates a TEXTSEARCH expression for tokenized text fields."
+        ),
+        (children: Seq[Expression]) =>
+          if (children.length == 2) {
+            IndexQueryExpression(children(0), children(1), "textsearch")
+          } else {
+            throw new IllegalArgumentException("tantivy4spark_textsearch requires exactly 2 arguments")
+          }
+      )
+    )
+
+    // Register tantivy4spark_fieldmatch function for non-tokenized field search
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("tantivy4spark_fieldmatch"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.IndexQueryExpression",
+          "tantivy4spark_fieldmatch",
+          "tantivy4spark_fieldmatch(column, query) - Creates a FIELDMATCH expression for non-tokenized fields."
+        ),
+        (children: Seq[Expression]) =>
+          if (children.length == 2) {
+            IndexQueryExpression(children(0), children(1), "fieldmatch")
+          } else {
+            throw new IllegalArgumentException("tantivy4spark_fieldmatch requires exactly 2 arguments")
+          }
+      )
+    )
+
+    // Register tantivy4spark_textsearchall function for all-fields tokenized text search
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("tantivy4spark_textsearchall"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.IndexQueryAllExpression",
+          "tantivy4spark_textsearchall",
+          "tantivy4spark_textsearchall(query) - Creates a TEXTSEARCH expression for searching across all fields."
+        ),
+        (children: Seq[Expression]) =>
+          if (children.length == 1) {
+            IndexQueryAllExpression(children(0), "textsearch")
+          } else {
+            throw new IllegalArgumentException("tantivy4spark_textsearchall requires exactly 1 argument")
+          }
+      )
+    )
+
+    // Register tantivy4spark_fieldmatchall function for all-fields non-tokenized search
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("tantivy4spark_fieldmatchall"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.IndexQueryAllExpression",
+          "tantivy4spark_fieldmatchall",
+          "tantivy4spark_fieldmatchall(query) - Creates a FIELDMATCH expression for searching across all fields."
+        ),
+        (children: Seq[Expression]) =>
+          if (children.length == 1) {
+            IndexQueryAllExpression(children(0), "fieldmatch")
+          } else {
+            throw new IllegalArgumentException("tantivy4spark_fieldmatchall requires exactly 1 argument")
+          }
+      )
+    )
+
     // Register V2 IndexQuery expression conversion rule in resolution phase
     // This runs during analysis, before scan planning
     extensions.injectResolutionRule(session => V2IndexQueryExpressionRule)

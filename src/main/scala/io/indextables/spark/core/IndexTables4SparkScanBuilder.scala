@@ -633,6 +633,7 @@ class IndexTables4SparkScanBuilder(
         // This prevents task failures on executors when fields don't exist
         // Same pattern as PR #122's syntax validation - fail fast on driver
         validateIndexQueryFieldsExist()
+        validateIndexQueryFieldTypes()
         logger.debug(s"BUILD: IndexQuery field validation passed for regular scan")
 
         // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
@@ -1150,6 +1151,7 @@ class IndexTables4SparkScanBuilder(
       // Validate IndexQuery filter fields exist in schema - throw exception if not
       // This prevents silent failures where queries with non-existent fields return all data
       validateIndexQueryFieldsExist()
+      validateIndexQueryFieldTypes()
       logger.debug(s"AGGREGATE PUSHDOWN: IndexQuery field validation passed")
 
       // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
@@ -2030,6 +2032,112 @@ class IndexTables4SparkScanBuilder(
         extractedFilters.foreach(f => validateField(f.columnName))
 
       case _ => // IndexQueryAllFilter and other types don't reference specific fields
+    }
+  }
+
+  /**
+   * Validate that IndexQuery filter field types match the search type.
+   * - textsearch requires a tokenized field (mode where supportsExactMatchPushdown == false)
+   * - fieldmatch requires a non-tokenized field (mode where supportsExactMatchPushdown == true)
+   * - indexquery skips validation (backwards compat)
+   */
+  private def validateIndexQueryFieldTypes(): Unit = {
+    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    if (indexQueryFilters.isEmpty) return
+
+    // Collect all IndexQueryFilter instances (including from MixedBooleanFilter trees)
+    val allFilters: Seq[IndexQueryFilter] = indexQueryFilters.flatMap {
+      case filter: IndexQueryFilter =>
+        Seq(filter)
+      case mixedFilter: MixedBooleanFilter =>
+        MixedBooleanFilter.extractIndexQueryFilters(mixedFilter)
+      case _ =>
+        Seq.empty
+    }.toSeq
+
+    allFilters.foreach { filter =>
+      if (filter.searchType == "textsearch" || filter.searchType == "fieldmatch") {
+        val fieldTypeKey = s"spark.indextables.indexing.typemap.${filter.columnName.toLowerCase}"
+        val fieldType    = effectiveConfig.get(fieldTypeKey)
+
+        fieldType match {
+          case Some(mode) =>
+            val isExactMatch = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
+            if (filter.searchType == "textsearch" && isExactMatch) {
+              throw new IllegalArgumentException(
+                s"Cannot use TEXTSEARCH on field '${filter.columnName}': " +
+                  s"this field is configured for exact matching (not tokenized). " +
+                  s"Use FIELDMATCH instead, or update the field's typemap to a tokenized type (e.g., 'text')."
+              )
+            }
+            if (filter.searchType == "fieldmatch" && !isExactMatch) {
+              throw new IllegalArgumentException(
+                s"Cannot use FIELDMATCH on field '${filter.columnName}': " +
+                  s"this field is configured for full-text search (tokenized). " +
+                  s"Use TEXTSEARCH instead, or update the field's typemap to an exact-match type (e.g., 'string')."
+              )
+            }
+          case None =>
+            // No explicit typemap config — can't validate field type.
+            // This commonly happens when typemap was set at write time but not at read time.
+            // Warn so users know validation was skipped.
+            val fieldLower = filter.columnName.toLowerCase
+            logger.warn(
+              s"Cannot validate ${filter.searchType.toUpperCase} on field '${filter.columnName}': " +
+                s"no typemap configuration found at read time. " +
+                "Add .option(\"spark.indextables.indexing.typemap." + fieldLower + "\", \"text\" or \"string\") " +
+                "to your read options to enable type validation."
+            )
+        }
+      }
+      // searchType == "indexquery" → skip validation (backwards compat)
+    }
+
+    // Warn about potential field type mismatches for * TEXTSEARCH / * FIELDMATCH queries
+    val allQueryAllFilters: Seq[IndexQueryAllFilter] = indexQueryFilters.flatMap {
+      case filter: IndexQueryAllFilter => Seq(filter)
+      case mixedFilter: MixedBooleanFilter =>
+        MixedBooleanFilter.extractIndexQueryAllFilters(mixedFilter)
+      case _ => Seq.empty
+    }.toSeq
+
+    val typemapPrefix = "spark.indextables.indexing.typemap."
+    val typemapEntries: Map[String, String] = effectiveConfig.collect {
+      case (key, value) if key.startsWith(typemapPrefix) =>
+        key.stripPrefix(typemapPrefix) -> value
+    }
+
+    if (typemapEntries.nonEmpty) {
+      allQueryAllFilters.foreach { filter =>
+        if (filter.searchType == "textsearch" || filter.searchType == "fieldmatch") {
+          val mismatchedFields = typemapEntries.collect {
+            case (field, mode) =>
+              val isExactMatch = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
+              if (filter.searchType == "textsearch" && isExactMatch) Some(field)
+              else if (filter.searchType == "fieldmatch" && !isExactMatch) Some(field)
+              else None
+          }.flatten.toSeq.sorted
+
+          if (mismatchedFields.nonEmpty) {
+            val searchOp = filter.searchType.toUpperCase
+            val (fieldDesc, suggestedOp) =
+              if (filter.searchType == "textsearch")
+                ("non-tokenized", "FIELDMATCH")
+              else
+                ("tokenized", "TEXTSEARCH")
+            val expectedBehavior =
+              if (filter.searchType == "textsearch") "full-text search"
+              else "exact matching"
+
+            logger.warn(
+              s"* $searchOp query will search across ${mismatchedFields.size} $fieldDesc field(s) " +
+                s"[${mismatchedFields.mkString(", ")}] where $expectedBehavior may not produce expected results. " +
+                s"Consider using column-specific syntax (e.g., ${mismatchedFields.head} $suggestedOp '${filter.queryString}') " +
+                s"or 'indexqueryall' to suppress this warning."
+            )
+          }
+        }
+      }
     }
   }
 

@@ -272,7 +272,7 @@ df.filter($"status" === "error").show()
 
 // Full-text search (for text fields)
 df.createOrReplaceTempView("events")
-spark.sql("SELECT * FROM events WHERE message indexquery 'connection timeout'").show()
+spark.sql("SELECT * FROM events WHERE message TEXTSEARCH 'connection timeout'").show()
 ```
 
 ### Read Path
@@ -360,9 +360,9 @@ val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
 // exact_only: EqualTo pushed down (hash-based)
 df.filter($"trace_id" === "abc-123-def-456").show()
 
-// text_uuid_exactonly: Use IndexQuery for text search
+// text_uuid_exactonly: Use TEXTSEARCH for text search
 df.createOrReplaceTempView("logs")
-spark.sql("SELECT * FROM logs WHERE message indexquery 'error timeout'").show()
+spark.sql("SELECT * FROM logs WHERE message TEXTSEARCH 'error timeout'").show()
 ```
 
 ---

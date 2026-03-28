@@ -29,7 +29,7 @@ package io.indextables.spark.filters
  * @param queryString
  *   The Tantivy query string to search across all fields
  */
-case class IndexQueryAllFilter(queryString: String) {
+case class IndexQueryAllFilter(queryString: String, searchType: String = "indexqueryall") {
 
   /**
    * Returns an empty array since this filter doesn't reference specific columns. The search operates across all

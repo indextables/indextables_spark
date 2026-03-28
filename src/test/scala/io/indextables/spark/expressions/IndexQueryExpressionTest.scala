@@ -85,23 +85,42 @@ class IndexQueryExpressionTest extends AnyFunSuite {
     assert(expr.nullable == false) // Predicates are typically not nullable
   }
 
-  test("IndexQueryExpression should have correct symbol and pretty name") {
+  test("IndexQueryExpression should have correct pretty name for each searchType") {
     val column = AttributeReference("title", StringType, nullable = true)()
     val query  = Literal(UTF8String.fromString("test"), StringType)
-    val expr   = IndexQueryExpression(column, query)
 
-    assert(expr.prettyName == "indexquery")
+    assert(IndexQueryExpression(column, query).prettyName == "indexquery")
+    assert(IndexQueryExpression(column, query, "textsearch").prettyName == "textsearch")
+    assert(IndexQueryExpression(column, query, "fieldmatch").prettyName == "fieldmatch")
+    assert(IndexQueryExpression(column, query, "indexquery").prettyName == "indexquery")
   }
 
-  test("IndexQueryExpression should generate correct SQL representation") {
+  test("IndexQueryExpression should generate correct SQL representation for each searchType") {
     val column = AttributeReference("title", StringType, nullable = true)()
     val query  = Literal(UTF8String.fromString("machine learning"), StringType)
-    val expr   = IndexQueryExpression(column, query)
 
-    val sql = expr.sql
-    assert(sql.contains("indexquery"))
-    assert(sql.contains("title"))
-    assert(sql.contains("'machine learning'"))
+    val defaultExpr = IndexQueryExpression(column, query)
+    assert(defaultExpr.sql.contains("INDEXQUERY"))
+
+    val textsearchExpr = IndexQueryExpression(column, query, "textsearch")
+    assert(textsearchExpr.sql.contains("TEXTSEARCH"))
+
+    val fieldmatchExpr = IndexQueryExpression(column, query, "fieldmatch")
+    assert(fieldmatchExpr.sql.contains("FIELDMATCH"))
+  }
+
+  test("IndexQueryExpression should preserve searchType through copy") {
+    val column    = AttributeReference("title", StringType, nullable = true)()
+    val query     = Literal(UTF8String.fromString("test"), StringType)
+    val newColumn = AttributeReference("content", StringType, nullable = true)()
+    val newQuery  = Literal(UTF8String.fromString("updated"), StringType)
+
+    val textsearchExpr = IndexQueryExpression(column, query, "textsearch")
+    val updated        = textsearchExpr.copy(left = newColumn, right = newQuery)
+
+    assert(updated.searchType == "textsearch")
+    assert(updated.getColumnName.contains("content"))
+    assert(updated.getQueryString.contains("updated"))
   }
 
   test("IndexQueryExpression should evaluate to true by default") {
@@ -163,11 +182,16 @@ class IndexQueryExpressionTest extends AnyFunSuite {
   test("IndexQueryExpression toString should be human readable") {
     val column = AttributeReference("title", StringType, nullable = true)()
     val query  = Literal(UTF8String.fromString("test query"), StringType)
-    val expr   = IndexQueryExpression(column, query)
 
-    val str = expr.toString
-    assert(str.contains("indexquery"))
-    assert(str.contains("title"))
-    assert(str.contains("test query"))
+    val defaultExpr = IndexQueryExpression(column, query)
+    assert(defaultExpr.toString.contains("INDEXQUERY"))
+    assert(defaultExpr.toString.contains("title"))
+    assert(defaultExpr.toString.contains("test query"))
+
+    val textsearchExpr = IndexQueryExpression(column, query, "textsearch")
+    assert(textsearchExpr.toString.contains("TEXTSEARCH"))
+
+    val fieldmatchExpr = IndexQueryExpression(column, query, "fieldmatch")
+    assert(fieldmatchExpr.toString.contains("FIELDMATCH"))
   }
 }
