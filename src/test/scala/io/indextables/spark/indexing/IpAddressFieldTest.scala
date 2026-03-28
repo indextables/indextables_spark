@@ -431,6 +431,360 @@ class IpAddressFieldTest extends TestBase {
     }
   }
 
+  test("IP address CIDR /24 equality filter") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // IPs at and around 192.168.1.0/24 boundaries
+      val data = Seq(
+        ("outside-low",  "192.168.0.255"),
+        ("boundary-low", "192.168.1.0"),
+        ("inside1",      "192.168.1.1"),
+        ("inside2",      "192.168.1.128"),
+        ("boundary-hi",  "192.168.1.255"),
+        ("outside-hi",   "192.168.2.0"),
+        ("unrelated",    "10.0.0.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // CIDR notation transparently expands to range [192.168.1.0, 192.168.1.255]
+      val cidrResult = df.filter($"ip" === "192.168.1.0/24").collect()
+      cidrResult.length shouldBe 4 // boundary-low, inside1, inside2, boundary-hi
+
+      val names = cidrResult.map(_.getString(0)).toSet
+      names should contain("boundary-low")
+      names should contain("inside1")
+      names should contain("inside2")
+      names should contain("boundary-hi")
+      names should not contain "outside-low"
+      names should not contain "outside-hi"
+      names should not contain "unrelated"
+    }
+  }
+
+  test("IP address CIDR /8 equality filter") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("ten-a",    "10.0.0.1"),
+        ("ten-b",    "10.255.255.254"),
+        ("other",    "172.16.0.1"),
+        ("other2",   "192.168.1.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      val cidrResult = df.filter($"ip" === "10.0.0.0/8")
+      cidrResult.count() shouldBe 2
+      cidrResult.collect().map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b")
+    }
+  }
+
+  test("IP address CIDR /32 is exact match") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("s1", "192.168.1.1"),
+        ("s2", "192.168.1.2"),
+        ("s3", "192.168.1.3")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // /32 should be equivalent to exact term match
+      val cidrResult = df.filter($"ip" === "192.168.1.2/32")
+      cidrResult.count() shouldBe 1
+      cidrResult.collect()(0).getString(0) shouldBe "s2"
+    }
+  }
+
+  test("IP address wildcard last octet") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("outside-low",  "192.168.0.255"),
+        ("boundary-low", "192.168.1.0"),
+        ("inside1",      "192.168.1.1"),
+        ("inside2",      "192.168.1.128"),
+        ("boundary-hi",  "192.168.1.255"),
+        ("outside-hi",   "192.168.2.0"),
+        ("unrelated",    "10.0.0.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // Wildcard expands to same range as 192.168.1.0/24
+      val wildcardResult = df.filter($"ip" === "192.168.1.*").collect()
+      wildcardResult.length shouldBe 4
+
+      val names = wildcardResult.map(_.getString(0)).toSet
+      names should contain("boundary-low")
+      names should contain("inside1")
+      names should contain("inside2")
+      names should contain("boundary-hi")
+    }
+  }
+
+  test("IP address wildcard multi-octet") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("ten-a",  "10.0.0.1"),
+        ("ten-b",  "10.0.1.5"),
+        ("other",  "172.16.0.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      df.filter($"ip" === "10.0.*.*").count() shouldBe 2
+    }
+  }
+
+  test("IP address CIDR and wildcard equivalence") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = (1 to 10).map(i => (s"server$i", s"192.168.1.$i")).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      val cidrIds      = df.filter($"ip" === "192.168.1.0/24").collect().map(_.getString(0)).toSet
+      val wildcardIds  = df.filter($"ip" === "192.168.1.*").collect().map(_.getString(0)).toSet
+      val explicitIds  = df
+        .filter($"ip" >= "192.168.1.0" && $"ip" <= "192.168.1.255")
+        .collect()
+        .map(_.getString(0))
+        .toSet
+
+      cidrIds shouldBe explicitIds
+      wildcardIds shouldBe explicitIds
+    }
+  }
+
+  test("IP address CIDR in isin()") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("ten-a",     "10.0.0.1"),
+        ("ten-b",     "10.0.0.2"),
+        ("private-a", "192.168.1.1"),
+        ("private-b", "192.168.1.2"),
+        ("other",     "172.16.0.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // isin() with CIDR values — each is expanded to a range; results are unioned
+      val isinResult = df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24"))
+      isinResult.count() shouldBe 4
+      isinResult.collect().map(_.getString(0)).toSet shouldBe
+        Set("ten-a", "ten-b", "private-a", "private-b")
+    }
+  }
+
+  test("IP address CIDR and literal in isin()") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("ten-a",     "10.0.0.1"),
+        ("ten-b",     "10.0.0.2"),
+        ("private-a", "192.168.1.1"),
+        ("other",     "172.16.0.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // CIDR + exact IP literal in isin() — CIDR expands to range, literal is exact match
+      val result = df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1"))
+      result.count() shouldBe 3
+      result.collect().map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b", "other")
+    }
+  }
+
+  test("IP address wildcard in isin()") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("ten-a",     "10.0.0.1"),
+        ("ten-b",     "10.0.0.2"),
+        ("private-a", "192.168.1.1"),
+        ("private-b", "192.168.1.2"),
+        ("other",     "172.16.0.1")
+      ).toDF("name", "ip")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // Multiple wildcards in isin() — each expanded independently
+      val result = df.filter($"ip".isin("10.0.*.*", "192.168.1.*"))
+      result.count() shouldBe 4
+      result.collect().map(_.getString(0)).toSet shouldBe
+        Set("ten-a", "ten-b", "private-a", "private-b")
+
+      // Mixed wildcard and literal in isin()
+      val mixedResult = df.filter($"ip".isin("10.0.*.*", "172.16.0.1"))
+      mixedResult.count() shouldBe 3
+      mixedResult.collect().map(_.getString(0)).toSet shouldBe
+        Set("ten-a", "ten-b", "other")
+    }
+  }
+
+  test("IP address wildcard groupBy") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("s1", "10.0.0.1", 100),
+        ("s2", "10.0.0.1", 200),
+        ("s3", "10.0.1.5", 150),
+        ("s4", "192.168.1.1", 50)
+      ).toDF("name", "ip", "requests")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      // groupBy on IP field with wildcard filter
+      val result = df
+        .filter($"ip" === "10.0.*.*")
+        .groupBy("ip")
+        .count()
+        .collect()
+
+      // 10.0.0.1 appears twice; 10.0.1.5 appears once; 192.168.1.1 excluded
+      result.length shouldBe 2
+      val countByIp = result.map(r => r.getString(0) -> r.getLong(1)).toMap
+      countByIp("10.0.0.1") shouldBe 2
+      countByIp("10.0.1.5") shouldBe 1
+    }
+  }
+
+  test("IP address CIDR aggregation") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val data = Seq(
+        ("s1", "192.168.1.1", 100),
+        ("s2", "192.168.1.2", 200),
+        ("s3", "192.168.2.1", 50)
+      ).toDF("name", "ip", "requests")
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      val result = df
+        .filter($"ip" === "192.168.1.0/24")
+        .agg(functions.count("*"), functions.sum("requests"))
+        .collect()(0)
+
+      result.getLong(0) shouldBe 2
+      result.getLong(1) shouldBe 300
+    }
+  }
+
   test("IP address scan with select and filter") {
     withTempPath { tablePath =>
       val spark = this.spark
