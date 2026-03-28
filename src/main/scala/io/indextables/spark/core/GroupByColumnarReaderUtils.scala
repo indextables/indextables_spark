@@ -343,8 +343,10 @@ object GroupByColumnarReaderUtils {
     val numRows = ffiBatch.numRows()
 
     if (numRows == 0) {
-      val numKeyColumns = columnNames.count(n => n == "key" || n.startsWith("key_"))
-      return createEmptyBatch(Math.max(numKeyColumns, 1) + aggExprs.length, dataGroupByCols, aggExprs, schema)
+      // Empty split: size the output batch from the actual output schema (GROUP BY cols + aggregates),
+      // not the FFI column count (which is 0 for empty splits and causes ArrayIndexOutOfBoundsException).
+      val numOutCols = dataGroupByCols.length + aggExprs.length
+      return createEmptyBatch(numOutCols, dataGroupByCols, aggExprs, schema)
     }
 
     val isRange = columnNames.contains("from") || columnNames.contains("to")
