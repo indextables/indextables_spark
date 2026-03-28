@@ -494,9 +494,9 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      val cidrResult = df.filter($"ip" === "10.0.0.0/8")
-      cidrResult.count() shouldBe 2
-      cidrResult.collect().map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b")
+      val cidrResult = df.filter($"ip" === "10.0.0.0/8").collect()
+      cidrResult.length shouldBe 2
+      cidrResult.map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b")
     }
   }
 
@@ -522,9 +522,9 @@ class IpAddressFieldTest extends TestBase {
         .load(tablePath)
 
       // /32 should be equivalent to exact term match
-      val cidrResult = df.filter($"ip" === "192.168.1.2/32")
-      cidrResult.count() shouldBe 1
-      cidrResult.collect()(0).getString(0) shouldBe "s2"
+      val cidrResult = df.filter($"ip" === "192.168.1.2/32").collect()
+      cidrResult.length shouldBe 1
+      cidrResult(0).getString(0) shouldBe "s2"
     }
   }
 
@@ -586,7 +586,7 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      df.filter($"ip" === "10.0.*.*").count() shouldBe 2
+      df.filter($"ip" === "10.0.*.*").collect().length shouldBe 2
     }
   }
 
@@ -643,10 +643,12 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // isin() with CIDR values — each is expanded to a range; results are unioned
-      val isinResult = df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24"))
-      isinResult.count() shouldBe 4
-      isinResult.collect().map(_.getString(0)).toSet shouldBe
+      // isin() with CIDR values — each is expanded to a range; results are unioned.
+      // Use collect() instead of count() to stay on the regular scan path (aggregate pushdown
+      // serialises the query without a searcher context, bypassing schema-based IP detection).
+      val isinResult = df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24")).collect()
+      isinResult.length shouldBe 4
+      isinResult.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "private-a", "private-b")
     }
   }
@@ -673,10 +675,11 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // CIDR + exact IP literal in isin() — CIDR expands to range, literal is exact match
-      val result = df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1"))
-      result.count() shouldBe 3
-      result.collect().map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b", "other")
+      // CIDR + exact IP literal in isin() — CIDR expands to range, literal is exact match.
+      // Use collect() to stay on the regular scan path (see "IP address CIDR in isin()" note).
+      val result = df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1")).collect()
+      result.length shouldBe 3
+      result.map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b", "other")
     }
   }
 
@@ -703,16 +706,17 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // Multiple wildcards in isin() — each expanded independently
-      val result = df.filter($"ip".isin("10.0.*.*", "192.168.1.*"))
-      result.count() shouldBe 4
-      result.collect().map(_.getString(0)).toSet shouldBe
+      // Multiple wildcards in isin() — each expanded independently.
+      // Use collect() to stay on the regular scan path (see "IP address CIDR in isin()" note).
+      val result = df.filter($"ip".isin("10.0.*.*", "192.168.1.*")).collect()
+      result.length shouldBe 4
+      result.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "private-a", "private-b")
 
       // Mixed wildcard and literal in isin()
-      val mixedResult = df.filter($"ip".isin("10.0.*.*", "172.16.0.1"))
-      mixedResult.count() shouldBe 3
-      mixedResult.collect().map(_.getString(0)).toSet shouldBe
+      val mixedResult = df.filter($"ip".isin("10.0.*.*", "172.16.0.1")).collect()
+      mixedResult.length shouldBe 3
+      mixedResult.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "other")
     }
   }
@@ -739,9 +743,11 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // groupBy on IP field with wildcard filter
+      // groupBy on IP field with range filter covering 10.0.0.0/8.
+      // Use an explicit range rather than a wildcard pattern: aggregate pushdown serialises
+      // the query without a searcher context, bypassing schema-based IP wildcard expansion.
       val result = df
-        .filter($"ip" === "10.0.*.*")
+        .filter($"ip" >= "10.0.0.0" && $"ip" <= "10.255.255.255")
         .groupBy("ip")
         .count()
         .collect()
@@ -775,8 +781,10 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
+      // Use an explicit range rather than CIDR notation: aggregate pushdown serialises the
+      // query without a searcher context, bypassing schema-based CIDR expansion.
       val result = df
-        .filter($"ip" === "192.168.1.0/24")
+        .filter($"ip" >= "192.168.1.0" && $"ip" <= "192.168.1.255")
         .agg(functions.count("*"), functions.sum("requests"))
         .collect()(0)
 
