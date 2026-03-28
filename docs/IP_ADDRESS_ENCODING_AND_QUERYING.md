@@ -630,21 +630,33 @@ CIDR notation and IPv4 wildcard patterns are transparently expanded by tantivy4j
 
 IPv6 CIDR (`2001:db8::/32`) is also supported. IPv6 wildcards are not standard and are not supported.
 
+> **IPv6 in IndexQuery requires quoting.** Colons in IPv6 addresses confuse Tantivy's query parser (it interprets them as field separators). Wrap any IPv6 address or CIDR in double quotes inside the IndexQuery string:
+> ```sql
+> -- Correct
+> WHERE ip indexquery '"2001:db8::/32"'
+> WHERE ip indexquery '"2001:db8::1"'
+>
+> -- Wrong — colons will be misinterpreted
+> WHERE ip indexquery '2001:db8::/32'
+> ```
+> `EqualTo` and `IN` filter pushdown do **not** require quoting because they bypass the query parser entirely.
+
 **Usage examples — all three query surfaces:**
 
 ```scala
-// EqualTo (Spark filter pushdown)
+// EqualTo (Spark filter pushdown) — no quoting needed
 df.filter($"ip" === "192.168.1.0/24")
 df.filter($"ip" === "192.168.1.*")
 
-// IN (expanded to a union of ranges)
+// IN (expanded to a union of ranges) — no quoting needed
 df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24"))
 df.filter($"ip".isin("10.0.0.0/8", "192.168.1.1"))  // CIDR + exact IP
 
-// IndexQuery SQL
+// IndexQuery SQL — IPv4 CIDR/wildcard unquoted, IPv6 must be quoted
 spark.sql("SELECT * FROM t WHERE ip indexquery '192.168.1.0/24'")
 spark.sql("SELECT * FROM t WHERE ip indexquery '192.168.1.*'")
 spark.sql("SELECT * FROM t WHERE ip indexquery '192.168.1.0/24 OR 10.0.0.0/8'")
+spark.sql("""SELECT * FROM t WHERE ip indexquery '"2001:db8::/32"'""")
 ```
 
 **Boundary behaviour:** Both the network address (`192.168.1.0`) and the broadcast address (`192.168.1.255`) are **included** in the range.
