@@ -1541,9 +1541,7 @@ object FiltersToQueryConverter {
           }
         } else {
           // For string fields and other types, use exact term matching.
-          // Pass fieldType.getValue() so the native layer can apply IP CIDR/wildcard expansion
-          // without a separate schema lookup — avoids a shadow string mapping contract.
-          Some(new SplitTermQuery(attribute, convertedValue.toString, fieldType.getValue()))
+          Some(new SplitTermQuery(attribute, convertedValue.toString))
         }
 
       case EqualNullSafe(attribute, value) if value != null =>
@@ -1566,7 +1564,7 @@ object FiltersToQueryConverter {
           // For STRING fields (raw tokenizer) and other non-tokenized fields, use term queries
           val termQueries = values.map { value =>
             val converted = convertSparkValueToTantivy(value, fieldType)
-            new SplitTermQuery(attribute, converted.toString, fieldType.getValue())
+            new SplitTermQuery(attribute, converted.toString)
           }.toList
 
           val boolQuery = new SplitBooleanQuery()
