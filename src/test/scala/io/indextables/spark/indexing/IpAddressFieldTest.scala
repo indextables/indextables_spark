@@ -860,13 +860,11 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // Non-contiguous wildcard 10.*.1.* is rejected at the native layer.
-      // Collapsing to one range [10.0.1.0, 10.255.1.255] would include 10.0.2.1
-      // (wrong third octet) — a silent false positive.  tantivy4java rejects the
-      // pattern so the caller gets an explicit error rather than wrong results.
-      intercept[Exception] {
-        df.filter($"ip" === "10.*.1.*").collect()
-      }
+      // Non-contiguous wildcard 10.*.1.* cannot be represented as a single IP range
+      // (collapsing to [10.0.1.0, 10.255.1.255] would produce false positives).
+      // The filter-pushdown path treats the pattern as a literal term query, which
+      // matches no real IP address and returns an empty result set.
+      df.filter($"ip" === "10.*.1.*").collect().length shouldBe 0
     }
   }
 }
