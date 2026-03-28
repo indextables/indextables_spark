@@ -644,12 +644,11 @@ class IpAddressFieldTest extends TestBase {
         .load(tablePath)
 
       // isin() with CIDR values — each is expanded to a range; results are unioned.
-      // Use collect() instead of count() to stay on the regular scan path (aggregate pushdown
-      // serialises the query without a searcher context, bypassing schema-based IP detection).
       val isinResult = df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24")).collect()
       isinResult.length shouldBe 4
       isinResult.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "private-a", "private-b")
+      df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24")).count() shouldBe 4
     }
   }
 
@@ -676,10 +675,10 @@ class IpAddressFieldTest extends TestBase {
         .load(tablePath)
 
       // CIDR + exact IP literal in isin() — CIDR expands to range, literal is exact match.
-      // Use collect() to stay on the regular scan path (see "IP address CIDR in isin()" note).
       val result = df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1")).collect()
       result.length shouldBe 3
       result.map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b", "other")
+      df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1")).count() shouldBe 3
     }
   }
 
@@ -707,15 +706,14 @@ class IpAddressFieldTest extends TestBase {
         .load(tablePath)
 
       // Multiple wildcards in isin() — each expanded independently.
-      // Use collect() to stay on the regular scan path (see "IP address CIDR in isin()" note).
+      df.filter($"ip".isin("10.0.*.*", "192.168.1.*")).count() shouldBe 4
       val result = df.filter($"ip".isin("10.0.*.*", "192.168.1.*")).collect()
-      result.length shouldBe 4
       result.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "private-a", "private-b")
 
       // Mixed wildcard and literal in isin()
+      df.filter($"ip".isin("10.0.*.*", "172.16.0.1")).count() shouldBe 3
       val mixedResult = df.filter($"ip".isin("10.0.*.*", "172.16.0.1")).collect()
-      mixedResult.length shouldBe 3
       mixedResult.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "other")
     }
@@ -743,11 +741,9 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // groupBy on IP field with range filter covering 10.0.0.0/8.
-      // Use an explicit range rather than a wildcard pattern: aggregate pushdown serialises
-      // the query without a searcher context, bypassing schema-based IP wildcard expansion.
+      // groupBy on IP field with wildcard filter covering 10.0.0.0/8.
       val result = df
-        .filter($"ip" >= "10.0.0.0" && $"ip" <= "10.255.255.255")
+        .filter($"ip" === "10.0.*.*")
         .groupBy("ip")
         .count()
         .collect()
@@ -781,10 +777,8 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // Use an explicit range rather than CIDR notation: aggregate pushdown serialises the
-      // query without a searcher context, bypassing schema-based CIDR expansion.
       val result = df
-        .filter($"ip" >= "192.168.1.0" && $"ip" <= "192.168.1.255")
+        .filter($"ip" === "192.168.1.0/24")
         .agg(functions.count("*"), functions.sum("requests"))
         .collect()(0)
 
@@ -836,6 +830,50 @@ class IpAddressFieldTest extends TestBase {
       rangeScanResult.length shouldBe 2
       rangeScanResult(0).getString(0) shouldBe "server3"
       rangeScanResult(1).getString(0) shouldBe "server4"
+    }
+  }
+
+  test("IP address CIDR with group-by aggregation on numeric field") {
+    withTempPath { tablePath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Two subnets, multiple IPs per subnet, each with a distinct region.
+      // CIDR filter selects only the 192.168.1.0/24 subnet; group-by on region
+      // exercises the GroupByAggregateColumnarReader / nativeAggregateArrowFfi path
+      // to confirm rewrite_ip_term_queries runs correctly on the group-by aggregate path.
+      val data = Seq(
+        ("192.168.1.1", "us-east", 100),
+        ("192.168.1.2", "us-east", 200),
+        ("192.168.1.3", "eu-west",  50),
+        ("10.0.0.1",    "us-east", 999)  // outside CIDR — must not appear in results
+      ).toDF("ip", "region", "requests")
+
+      data.write
+        .format(INDEXTABLES_FORMAT)
+        .option("spark.indextables.indexing.typemap.ip", "ip")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format(INDEXTABLES_FORMAT)
+        .load(tablePath)
+
+      val result = df
+        .filter($"ip" === "192.168.1.0/24")
+        .groupBy("region")
+        .agg(functions.count("*").as("cnt"), functions.sum("requests").as("total"))
+        .orderBy("region")
+        .collect()
+
+      // 10.0.0.1 must be excluded; only the two 192.168.1.x regions remain
+      result.length shouldBe 2
+      result(0).getString(0) shouldBe "eu-west"
+      result(0).getLong(1)   shouldBe 1
+      result(0).getLong(2)   shouldBe 50
+      result(1).getString(0) shouldBe "us-east"
+      result(1).getLong(1)   shouldBe 2
+      result(1).getLong(2)   shouldBe 300
     }
   }
 
