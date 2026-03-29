@@ -142,13 +142,24 @@ class IcebergRoundTripTest
     batchId: Int,
     partitionPath: Option[String] = None
   ): Seq[String] = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
+    // Write parquet to a staging directory, then move files into the table's data/ directory.
+    // Real Iceberg tables keep all data files under a single data/ root — mirroring that layout
+    // ensures extractTableBasePath() derives the correct storage root for companion reads.
+    val stagingDir = new File(rootDir, s"staging/batch-$batchId")
     val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
+    df.coalesce(1).write.parquet(s"file://${stagingDir.getAbsolutePath}")
 
-    val parquetFiles = new File(parquetDir)
+    val dataDir = new File(rootDir, "data")
+    dataDir.mkdirs()
+
+    val parquetFiles = stagingDir
       .listFiles()
       .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
+      .map { src =>
+        val dest = new File(dataDir, src.getName)
+        java.nio.file.Files.move(src.toPath, dest.toPath)
+        dest
+      }
 
     val table    = server.catalog.loadTable(tableId)
     val appendOp = table.newAppend()
