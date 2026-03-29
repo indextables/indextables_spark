@@ -218,7 +218,7 @@ class IndexTables4SparkSimpleAggregateBatch(
 
     // Get filtered splits — separate partition vs data filters for proper native evaluation
     val (partFilters, dataFilters) = io.indextables.spark.transaction.SparkFilterToNativeFilter
-      .splitFilters(pushedFilters, transactionLog.getPartitionColumns())
+      .splitFilters(pushedFilters, transactionLog.getPartitionColumns(), transactionLog.getSchema())
     val filteredSplits = transactionLog.listFilesWithAllFilters(partFilters, dataFilters)
     logger.debug(s"SIMPLE AGGREGATE BATCH: ${filteredSplits.length} splits after native filtering")
 

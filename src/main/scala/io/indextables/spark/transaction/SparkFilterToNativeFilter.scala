@@ -18,6 +18,7 @@
 package io.indextables.spark.transaction
 
 import org.apache.spark.sql.sources._
+import org.apache.spark.sql.types._
 import io.indextables.tantivy4java.filter.PartitionFilter
 
 /**
@@ -32,21 +33,59 @@ object SparkFilterToNativeFilter {
   /**
    * Split pushed filters into partition filters and data (non-partition) filters.
    * Partition filters reference only partition columns; data filters reference non-partition columns.
+   *
+   * Data filters are further restricted to only include filters on fields where native
+   * data skipping (can_skip_by_stats) works correctly. Fields with type-dependent
+   * serialization (Date, Timestamp, Binary) are excluded because filter.value.toString()
+   * produces a different format than the stored min/max stats strings.
+   *
+   * @param schema Optional table schema for type-aware data filter selection
    */
   def splitFilters(
     pushedFilters: Array[Filter],
-    partitionColumns: Seq[String]
+    partitionColumns: Seq[String],
+    schema: Option[StructType] = None
   ): (Seq[Filter], Seq[Filter]) = {
-    if (partitionColumns.isEmpty || pushedFilters.isEmpty)
-      return (Seq.empty, pushedFilters.toSeq)
+    if (pushedFilters.isEmpty)
+      return (Seq.empty, Seq.empty)
 
     val partColSet = partitionColumns.toSet
-    val (partF, dataF) = pushedFilters.partition { filter =>
-      val referencedCols = extractReferencedColumns(filter)
-      referencedCols.nonEmpty && referencedCols.forall(partColSet.contains)
+    val (partF, nonPartF) = if (partitionColumns.nonEmpty) {
+      pushedFilters.partition { filter =>
+        val referencedCols = extractReferencedColumns(filter)
+        referencedCols.nonEmpty && referencedCols.forall(partColSet.contains)
+      }
+    } else {
+      (Array.empty[Filter], pushedFilters)
     }
+
+    // Only pass data filters for fields where native data skipping comparison works.
+    // Date/Timestamp stats are stored as numeric epoch values but filter.value.toString()
+    // produces human-readable strings — the format mismatch causes false positives.
+    val dataF = schema match {
+      case Some(s) =>
+        nonPartF.filter { filter =>
+          val cols = extractReferencedColumns(filter)
+          cols.nonEmpty && cols.forall(col => isDataSkippingSafe(col, s))
+        }
+      case None =>
+        // No schema available — don't pass data filters to avoid false positives
+        Array.empty[Filter]
+    }
+
     (partF.toSeq, dataF.toSeq)
   }
+
+  /** Check if a column's type is compatible with native data skipping comparison. */
+  private def isDataSkippingSafe(colName: String, schema: StructType): Boolean =
+    schema.fields.find(_.name == colName) match {
+      case Some(field) => field.dataType match {
+        case StringType | IntegerType | LongType | FloatType | DoubleType | ShortType | ByteType => true
+        case BooleanType => true
+        case _ => false // Date, Timestamp, Binary, complex types — format mismatch
+      }
+      case None => false // Unknown field — don't use for data skipping
+    }
 
   /** Extract all column names referenced by a filter. */
   def extractReferencedColumns(filter: Filter): Set[String] = filter match {

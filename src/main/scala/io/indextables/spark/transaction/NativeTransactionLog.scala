@@ -196,11 +196,14 @@ class NativeTransactionLog(
   }
 
   override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long =
-    // Must re-read metadata on each retry to compose safely with concurrent updates
+    // Must re-read metadata on each retry to compose safely with concurrent updates.
+    // Uses JSON path because MetadataAction has fields (name, description, format)
+    // not yet supported in the Arrow write schema.
     retryWithBackoff("commit metadata update") { () =>
       val currentMetadata = getMetadata()
       val updatedMetadata = transform(currentMetadata)
-      writeActionsViaArrowOnce(Seq(updatedMetadata))
+      val actionsJson     = ActionJsonSerializer.actionsToJsonLines(Seq(updatedMetadata))
+      TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
     }
 
   override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
@@ -246,7 +249,8 @@ class NativeTransactionLog(
   // Read Operations
   // ------------------------------------------------------------------------------------
 
-  override def listFiles(): Seq[AddAction] =
+  override def listFiles(): Seq[AddAction] = {
+    assertTableReadable()
     // Include stats — admin commands, statistics, REPAIR need minValues/maxValues
     listFilesArrow(
       partitionFilters = null,
@@ -254,6 +258,7 @@ class NativeTransactionLog(
       excludeCooldown = false,
       includeStats = true
     ).files
+  }
 
   override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] =
     listFilesWithAllFilters(partitionFilters, Seq.empty)
@@ -307,9 +312,10 @@ class NativeTransactionLog(
     excludeCooldown: Boolean,
     includeStats: Boolean
   ): NativeListFilesResult = {
-    // Allocate Arrow FFI structs — dynamic based on partition columns + stats
-    val partColCount = try { getPartitionColumns().size } catch { case _: Exception => 0 }
-    val maxCols = 19 + partColCount + (if (includeStats) 2 else 0)
+    // Allocate Arrow FFI structs — generous upper bound since native determines actual columns.
+    // Native returns numColumns in result JSON; we only import that many.
+    // 19 base + up to 20 partition cols + 2 stats = 41
+    val maxCols = 41
     val bridge = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)

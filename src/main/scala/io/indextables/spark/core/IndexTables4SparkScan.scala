@@ -79,7 +79,8 @@ class IndexTables4SparkScan(
   private lazy val cachedListFilesResult: NativeListFilesResult = {
     // Separate partition vs data filters using shared utility
     val partitionColumns = transactionLog.getPartitionColumns()
-    val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
+    val tableSchema = transactionLog.getSchema()
+    val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns, tableSchema)
 
     // Single native call: partition pruning + data skipping + cooldown filtering + metadata
     val result = transactionLog match {
