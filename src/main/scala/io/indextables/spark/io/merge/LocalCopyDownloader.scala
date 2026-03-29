@@ -21,6 +21,7 @@ import java.io.File
 import java.nio.file.{Files, StandardCopyOption}
 import java.util.concurrent.CompletableFuture
 
+import io.indextables.spark.util.CloudPathUtils
 import org.slf4j.LoggerFactory
 
 /**
@@ -48,7 +49,7 @@ class LocalCopyDownloader extends AsyncDownloader {
           val startTime = System.currentTimeMillis()
 
           try {
-            val sourcePath = normalizeLocalPath(request.sourcePath)
+            val sourcePath = CloudPathUtils.stripFileScheme(request.sourcePath)
             val destPath   = request.destinationPath
 
             val sourceFile = new File(sourcePath)
@@ -105,11 +106,4 @@ class LocalCopyDownloader extends AsyncDownloader {
     future
   }
 
-  /** Normalize a local path by removing file:// prefix if present. */
-  private def normalizeLocalPath(path: String): String =
-    if (path.startsWith("file://")) {
-      path.stripPrefix("file://")
-    } else {
-      path
-    }
 }

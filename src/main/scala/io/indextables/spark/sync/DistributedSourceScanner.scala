@@ -24,6 +24,7 @@ import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.arrow.ArrowFfiBridge
+import io.indextables.spark.util.CloudPathUtils
 import io.indextables.tantivy4java.delta.{DeltaFileEntry, DeltaSnapshotInfo, DeltaTableReader}
 import io.indextables.tantivy4java.filter.PartitionFilter
 import io.indextables.tantivy4java.iceberg.{IcebergFileEntry, IcebergTableReader}
@@ -112,8 +113,8 @@ object DistributedSourceScanner {
     // Normalize: strip file: URI scheme, ensure consistent leading-slash handling.
     // The native ParquetTableReader may return local paths without leading slash (e.g. "var/folders/...")
     // while the basePath has one ("/var/folders/...").
-    val absolutePath   = normalizeLocalPath(stripFileScheme(rawPath))
-    val normalizedBase = normalizeLocalPath(stripFileScheme(basePath)).stripSuffix("/")
+    val absolutePath   = normalizeLocalPath(CloudPathUtils.stripFileScheme(rawPath))
+    val normalizedBase = normalizeLocalPath(CloudPathUtils.stripFileScheme(basePath)).stripSuffix("/")
     val normalizedAbs  = absolutePath.stripSuffix("/")
     val relativePath = if (normalizedAbs.startsWith(normalizedBase)) {
       normalizedAbs.substring(normalizedBase.length).stripPrefix("/")
@@ -136,11 +137,6 @@ object DistributedSourceScanner {
       size = entry.getSize
     )
   }
-
-  private[sync] def stripFileScheme(path: String): String =
-    if (path.startsWith("file:///")) path.substring(7)
-    else if (path.startsWith("file:/")) path.substring(5)
-    else path
 
   /** Ensure local filesystem paths have a leading slash for consistent comparison. */
   private[sync] def normalizeLocalPath(path: String): String =
