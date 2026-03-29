@@ -91,18 +91,35 @@ object SparkFilterToNativeFilter {
     else PartitionFilter.and(converted: _*).toJson
   }
 
+  /**
+   * Convert a value to the same string format used by transaction log min/max statistics.
+   * This ensures native can_skip_by_stats compares like-for-like.
+   */
+  private def toStatCompatibleString(value: Any): String = value match {
+    case ts: java.sql.Timestamp =>
+      // Stats store timestamps as epoch microseconds. Timestamp.toString() uses JVM-local
+      // timezone which doesn't match — convert to epoch micros directly.
+      (ts.getTime * 1000 + (ts.getNanos % 1000000) / 1000).toString
+    case d: java.sql.Date =>
+      // Stats store dates as ISO strings or epoch days. ISO format works for both
+      // native string comparison and typed date comparison.
+      d.toLocalDate.toString
+    case null => null
+    case other => other.toString
+  }
+
   /** Convert a single Spark Filter to a PartitionFilter. Returns None for unsupported filters. */
   def convert(filter: Filter): Option[PartitionFilter] = filter match {
-    case EqualTo(attr, value)            => Some(PartitionFilter.eq(attr, value.toString))
+    case EqualTo(attr, value)            => Some(PartitionFilter.eq(attr, toStatCompatibleString(value)))
     case EqualNullSafe(attr, value)      =>
       if (value == null) Some(PartitionFilter.isNull(attr))
-      else Some(PartitionFilter.eq(attr, value.toString))
-    case GreaterThan(attr, value)        => Some(PartitionFilter.gt(attr, value.toString))
-    case GreaterThanOrEqual(attr, value) => Some(PartitionFilter.gte(attr, value.toString))
-    case LessThan(attr, value)           => Some(PartitionFilter.lt(attr, value.toString))
-    case LessThanOrEqual(attr, value)    => Some(PartitionFilter.lte(attr, value.toString))
+      else Some(PartitionFilter.eq(attr, toStatCompatibleString(value)))
+    case GreaterThan(attr, value)        => Some(PartitionFilter.gt(attr, toStatCompatibleString(value)))
+    case GreaterThanOrEqual(attr, value) => Some(PartitionFilter.gte(attr, toStatCompatibleString(value)))
+    case LessThan(attr, value)           => Some(PartitionFilter.lt(attr, toStatCompatibleString(value)))
+    case LessThanOrEqual(attr, value)    => Some(PartitionFilter.lte(attr, toStatCompatibleString(value)))
     case In(attr, values)                =>
-      val strValues = values.filter(_ != null).map(_.toString)
+      val strValues = values.filter(_ != null).map(toStatCompatibleString)
       if (strValues.nonEmpty) Some(PartitionFilter.in(attr, strValues: _*))
       else None
     case IsNull(attr)                    => Some(PartitionFilter.isNull(attr))
