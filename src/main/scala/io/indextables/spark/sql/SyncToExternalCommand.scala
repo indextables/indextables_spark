@@ -313,16 +313,15 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            // fromSnapshot means "return changes added after this snapshot" (incremental filter),
-            // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
+            // fromSnapshot is time-travel: build the companion from the state at that specific snapshot.
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
-              snapshotId = None,
+              snapshotId = fromSnapshot,
               wherePredicates = wherePredicates,
-              fromSnapshotId = fromSnapshot
+              fromSnapshotId = None
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)

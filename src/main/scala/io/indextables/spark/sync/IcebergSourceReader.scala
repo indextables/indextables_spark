@@ -97,11 +97,12 @@ class IcebergSourceReader(
     entries
   }
 
-  override def sourceVersion(): Option[Long] = {
-    val entries = fileEntries
-    if (entries.isEmpty) snapshotId
-    else Some(entries.get(0).getSnapshotId)
-  }
+  override def sourceVersion(): Option[Long] =
+    snapshotId.orElse {
+      val entries = fileEntries
+      if (entries.isEmpty) None
+      else Some(entries.get(0).getSnapshotId)
+    }
 
   // Lazily compute the S3/Azure storage root from the first file's absolute path.
   // This is the base path with partition segments stripped, e.g.:
