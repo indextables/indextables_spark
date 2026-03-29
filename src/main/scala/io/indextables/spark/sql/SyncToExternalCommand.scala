@@ -313,8 +313,11 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            // fromSnapshot means "return changes added after this snapshot" (incremental filter),
-            // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
+            // For non-streaming syncs (fromSnapshot = None), read the last synced snapshot ID
+            // from companion metadata to enable the incremental fast-path. This allows:
+            // - "no_action" when the snapshot hasn't changed (same snapshot ID)
+            // - Full-scan anti-join when the snapshot has changed (correct deletion detection)
+            val effectiveFromSnapshot = fromSnapshot.orElse(readLastSyncedVersionFromLog(sparkSession))
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
               ns,
@@ -322,7 +325,7 @@ case class SyncToExternalCommand(
               icebergConfig,
               snapshotId = None,
               wherePredicates = wherePredicates,
-              fromSnapshotId = fromSnapshot
+              fromSnapshotId = effectiveFromSnapshot
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -698,6 +701,41 @@ case class SyncToExternalCommand(
           s"${parquetFilesToIndex.size} parquet files, " +
           s"${splitsToInvalidate.size} splits to invalidate"
       )
+
+      // 8b. Handle invalidation-only sync (splits to remove but no new files to index).
+      // Without this, the remove actions would never be committed because
+      // dispatchSyncTasksBatched only commits during batch processing.
+      if (groups.isEmpty && splitsToInvalidate.nonEmpty) {
+        logger.info(s"Invalidation-only sync: removing ${splitsToInvalidate.size} stale splits")
+        val removeActions = buildRemoveActions(splitsToInvalidate)
+        val metadataAction = buildCompanionMetadata(
+          transactionLog,
+          effectiveIndexingModes,
+          effectiveWherePredicates,
+          effectiveHfInclude,
+          effectiveHfExclude,
+          sourceVersion,
+          externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
+        )
+        transactionLog.commitSyncActions(removeActions, Seq.empty, Some(metadataAction))
+        transactionLog.invalidateCache()
+        val durationMs = System.currentTimeMillis() - startTime
+        return Seq(
+          Row(
+            destPath,
+            sourcePath,
+            "success",
+            sourceVersionLong,
+            0,
+            splitsToInvalidate.size,
+            0,
+            0L,
+            0L,
+            durationMs,
+            s"Invalidated ${splitsToInvalidate.size} stale splits"
+          )
+        )
+      }
 
       // 9. Pass raw merged config to executors for JIT credential resolution.
       // Executors resolve credentials just-in-time before each download/upload via
