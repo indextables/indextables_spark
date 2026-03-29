@@ -29,6 +29,45 @@ import io.indextables.tantivy4java.filter.PartitionFilter
  */
 object SparkFilterToNativeFilter {
 
+  /**
+   * Split pushed filters into partition filters and data (non-partition) filters.
+   * Partition filters reference only partition columns; data filters reference non-partition columns.
+   */
+  def splitFilters(
+    pushedFilters: Array[Filter],
+    partitionColumns: Seq[String]
+  ): (Seq[Filter], Seq[Filter]) = {
+    if (partitionColumns.isEmpty || pushedFilters.isEmpty)
+      return (Seq.empty, pushedFilters.toSeq)
+
+    val partColSet = partitionColumns.toSet
+    val (partF, dataF) = pushedFilters.partition { filter =>
+      val referencedCols = extractReferencedColumns(filter)
+      referencedCols.nonEmpty && referencedCols.forall(partColSet.contains)
+    }
+    (partF.toSeq, dataF.toSeq)
+  }
+
+  /** Extract all column names referenced by a filter. */
+  def extractReferencedColumns(filter: Filter): Set[String] = filter match {
+    case EqualTo(attr, _)            => Set(attr)
+    case EqualNullSafe(attr, _)      => Set(attr)
+    case GreaterThan(attr, _)        => Set(attr)
+    case GreaterThanOrEqual(attr, _) => Set(attr)
+    case LessThan(attr, _)           => Set(attr)
+    case LessThanOrEqual(attr, _)    => Set(attr)
+    case In(attr, _)                 => Set(attr)
+    case IsNull(attr)                => Set(attr)
+    case IsNotNull(attr)             => Set(attr)
+    case StringStartsWith(attr, _)   => Set(attr)
+    case StringEndsWith(attr, _)     => Set(attr)
+    case StringContains(attr, _)     => Set(attr)
+    case And(left, right)            => extractReferencedColumns(left) ++ extractReferencedColumns(right)
+    case Or(left, right)             => extractReferencedColumns(left) ++ extractReferencedColumns(right)
+    case Not(child)                  => extractReferencedColumns(child)
+    case _                           => Set.empty
+  }
+
   /** Convert filters to JSON string, or null if empty. */
   def convertOrNull(filters: Seq[Filter]): String = {
     if (filters.isEmpty) return null

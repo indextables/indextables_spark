@@ -35,7 +35,7 @@ import io.indextables.spark.metrics._
 import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.stats.DataSkippingMetrics
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, NativeFilteringMetrics, NativeListFilesResult, NativeTransactionLog, PartitionPredicateUtils, TransactionLogInterface}
+import io.indextables.spark.transaction.{AddAction, NativeFilteringMetrics, NativeListFilesResult, NativeTransactionLog, PartitionPredicateUtils, SparkFilterToNativeFilter, TransactionLogInterface}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -77,17 +77,9 @@ class IndexTables4SparkScan(
   // Full result including metadata and metrics — computed once via single native JNI call
   // Replaces: getPartitionColumns + listFilesWithPartitionFilters + applyDataSkipping + getSchema
   private lazy val cachedListFilesResult: NativeListFilesResult = {
-    // Separate partition vs data filters
+    // Separate partition vs data filters using shared utility
     val partitionColumns = transactionLog.getPartitionColumns()
-    val (partitionFilters, dataFilters) = if (partitionColumns.nonEmpty && pushedFilters.nonEmpty) {
-      val (partF, dataF) = pushedFilters.partition { filter =>
-        val referencedCols = getFilterReferencedColumns(filter)
-        referencedCols.nonEmpty && referencedCols.forall(partitionColumns.contains)
-      }
-      (partF.toSeq, dataF.toSeq)
-    } else {
-      (Seq.empty[Filter], pushedFilters.toSeq)
-    }
+    val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
 
     // Single native call: partition pruning + data skipping + cooldown filtering + metadata
     val result = transactionLog match {
@@ -135,18 +127,6 @@ class IndexTables4SparkScan(
 
   // Pre-computed filter hash for cache lookups (computed once in constructor)
   // This avoids recomputing O(filters) hash on every cache lookup in applyDataSkipping
-  private val precomputedFilterHash: Long = computeFilterHash(pushedFilters)
-
-  /**
-   * Compute a hash for the filter array (computed once in constructor). Uses toString to capture full filter structure,
-   * matching PartitionFilterCache pattern.
-   */
-  private def computeFilterHash(filters: Array[Filter]): Long = {
-    if (filters.isEmpty) return 0L
-    val filterString = filters.map(_.toString).sorted.mkString("|")
-    filterString.hashCode.toLong & 0xffffffffL
-  }
-
   /**
    * Get filtered actions from the lazy cache. Thread-safe via lazy val initialization.
    *
@@ -499,27 +479,8 @@ class IndexTables4SparkScan(
   // Filter utilities
   // ============================================================================
 
-  private def getFilterReferencedColumns(filter: Filter): Set[String] = {
-    import org.apache.spark.sql.sources._
-    filter match {
-      case EqualTo(attr, _)            => Set(attr)
-      case EqualNullSafe(attr, _)      => Set(attr)
-      case GreaterThan(attr, _)        => Set(attr)
-      case GreaterThanOrEqual(attr, _) => Set(attr)
-      case LessThan(attr, _)           => Set(attr)
-      case LessThanOrEqual(attr, _)    => Set(attr)
-      case In(attr, _)                 => Set(attr)
-      case IsNull(attr)                => Set(attr)
-      case IsNotNull(attr)             => Set(attr)
-      case StringStartsWith(attr, _)   => Set(attr)
-      case StringEndsWith(attr, _)     => Set(attr)
-      case StringContains(attr, _)     => Set(attr)
-      case And(left, right)            => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Or(left, right)             => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Not(child)                  => getFilterReferencedColumns(child)
-      case _                           => Set.empty
-    }
-  }
+  private def getFilterReferencedColumns(filter: Filter): Set[String] =
+    SparkFilterToNativeFilter.extractReferencedColumns(filter)
 
   // ============================================================================
   // DataSource V2 Custom Metrics for Spark UI

@@ -305,112 +305,114 @@ class NativeTransactionLog(
     // (19 base + up to 10 partition cols + optional 2 stats cols)
     val maxCols = 31
     val bridge = new ArrowFfiBridge()
-    val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
+    try {
+      val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
 
-    val resultJson = try {
-      TransactionLogReader.listFilesArrowFfi(
-        nativeTablePath, nativeConfig,
-        partitionFilters,
-        dataFilters,
-        excludeCooldown,
-        false, // includeStats — not needed on JVM side (data skipping done natively)
-        arrayAddrs, schemaAddrs
-      )
-    } catch {
-      case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
-        logger.debug(s"Table not yet initialized at $nativeTablePath")
-        null
-    }
-
-    if (resultJson == null) {
-      bridge.close()
-      return NativeListFilesResult(
-        files = Seq.empty,
-        schema = None,
-        partitionColumns = Seq.empty,
-        protocol = ProtocolVersion.defaultProtocol(),
-        metadataConfig = Map.empty,
-        metrics = NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
-      )
-    }
-
-    // Parse result metadata
-    val resultNode = mapper.readTree(resultJson)
-    val numRows = resultNode.get("numRows").asLong()
-    val numColumns = resultNode.get("numColumns").asInt()
-
-    // Extract table metadata (eliminates separate getSchema/getPartitionColumns/getProtocol calls)
-    val schemaJson = if (resultNode.has("schemaJson") && !resultNode.get("schemaJson").isNull)
-      resultNode.get("schemaJson").asText() else null
-    val schema = if (schemaJson != null && schemaJson.nonEmpty) {
-      try {
-        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+      val resultJson = try {
+        TransactionLogReader.listFilesArrowFfi(
+          nativeTablePath, nativeConfig,
+          partitionFilters,
+          dataFilters,
+          excludeCooldown,
+          false, // includeStats — not needed on JVM side (data skipping done natively)
+          arrayAddrs, schemaAddrs
+        )
       } catch {
-        case _: Exception =>
-          logger.debug(s"Could not parse schemaJson from native, falling back to getSchema()")
-          getSchema()
+        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
+          logger.debug(s"Table not yet initialized at $nativeTablePath")
+          null
       }
-    } else getSchema()
 
-    val partitionColumns = if (resultNode.has("partitionColumns")) {
-      val arr = resultNode.get("partitionColumns")
-      (0 until arr.size()).map(i => arr.get(i).asText()).toSeq
-    } else Seq.empty
-
-    val protocol = if (resultNode.has("protocolJson") && !resultNode.get("protocolJson").isNull) {
-      mapper.readValue(resultNode.get("protocolJson").asText(), classOf[ProtocolAction])
-    } else ProtocolVersion.defaultProtocol()
-
-    val metadataConfig = if (resultNode.has("metadataConfigJson") && !resultNode.get("metadataConfigJson").isNull) {
-      val configNode = mapper.readTree(resultNode.get("metadataConfigJson").asText())
-      val entries = scala.collection.mutable.Map[String, String]()
-      val it = configNode.fields()
-      while (it.hasNext) {
-        val entry = it.next()
-        entries.put(entry.getKey, entry.getValue.asText())
+      if (resultJson == null) {
+        return NativeListFilesResult(
+          files = Seq.empty,
+          schema = None,
+          partitionColumns = Seq.empty,
+          protocol = ProtocolVersion.defaultProtocol(),
+          metadataConfig = Map.empty,
+          metrics = NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
+        )
       }
-      entries.toMap
-    } else Map.empty[String, String]
 
-    // Extract filtering metrics
-    val metricsNode = resultNode.get("metrics")
-    val metrics = if (metricsNode != null) {
-      NativeFilteringMetrics(
-        totalFilesBeforeFiltering = metricsNode.get("totalFilesBeforeFiltering").asLong(),
-        filesAfterPartitionPruning = metricsNode.get("filesAfterPartitionPruning").asLong(),
-        filesAfterDataSkipping = metricsNode.get("filesAfterDataSkipping").asLong(),
-        filesAfterCooldownFiltering = metricsNode.get("filesAfterCooldownFiltering").asLong(),
-        manifestsTotal = metricsNode.get("manifestsTotal").asLong(),
-        manifestsPruned = metricsNode.get("manifestsPruned").asLong()
-      )
-    } else NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
+      // Parse result metadata
+      val resultNode = mapper.readTree(resultJson)
+      val numRows = resultNode.get("numRows").asLong()
+      val numColumns = resultNode.get("numColumns").asInt()
 
-    // Import Arrow batch and extract AddAction objects (only for surviving files)
-    val files = if (numRows > 0 && numColumns > 0) {
-      val batch = bridge.importAsColumnarBatch(
-        arrays.take(numColumns),
-        schemas.take(numColumns),
-        numRows.toInt
-      )
-      try {
-        ArrowFileEntryExtractor.extract(batch, partitionColumns)
-      } finally {
-        batch.close()
+      // Extract table metadata (eliminates separate getSchema/getPartitionColumns/getProtocol calls)
+      val schemaJson = if (resultNode.has("schemaJson") && !resultNode.get("schemaJson").isNull)
+        resultNode.get("schemaJson").asText() else null
+      val schema = if (schemaJson != null && schemaJson.nonEmpty) {
+        try {
+          Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+        } catch {
+          case _: Exception =>
+            logger.debug(s"Could not parse schemaJson from native, falling back to getSchema()")
+            getSchema()
+        }
+      } else getSchema()
+
+      val partitionColumns = if (resultNode.has("partitionColumns")) {
+        val arr = resultNode.get("partitionColumns")
+        (0 until arr.size()).map(i => arr.get(i).asText()).toSeq
+      } else Seq.empty
+
+      val protocol = if (resultNode.has("protocolJson") && !resultNode.get("protocolJson").isNull) {
+        mapper.readValue(resultNode.get("protocolJson").asText(), classOf[ProtocolAction])
+      } else ProtocolVersion.defaultProtocol()
+
+      val metadataConfig = if (resultNode.has("metadataConfigJson") && !resultNode.get("metadataConfigJson").isNull) {
+        val configNode = mapper.readTree(resultNode.get("metadataConfigJson").asText())
+        val entries = scala.collection.mutable.Map[String, String]()
+        val it = configNode.fields()
+        while (it.hasNext) {
+          val entry = it.next()
+          entries.put(entry.getKey, entry.getValue.asText())
+        }
+        entries.toMap
+      } else Map.empty[String, String]
+
+      // Extract filtering metrics
+      val metricsNode = resultNode.get("metrics")
+      val metrics = if (metricsNode != null) {
+        NativeFilteringMetrics(
+          totalFilesBeforeFiltering = metricsNode.get("totalFilesBeforeFiltering").asLong(),
+          filesAfterPartitionPruning = metricsNode.get("filesAfterPartitionPruning").asLong(),
+          filesAfterDataSkipping = metricsNode.get("filesAfterDataSkipping").asLong(),
+          filesAfterCooldownFiltering = metricsNode.get("filesAfterCooldownFiltering").asLong(),
+          manifestsTotal = metricsNode.get("manifestsTotal").asLong(),
+          manifestsPruned = metricsNode.get("manifestsPruned").asLong()
+        )
+      } else NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
+
+      // Import Arrow batch and extract AddAction objects (only for surviving files)
+      val files = if (numRows > 0 && numColumns > 0) {
+        require(numRows <= Int.MaxValue, s"numRows $numRows exceeds Int.MaxValue")
+        val batch = bridge.importAsColumnarBatch(
+          arrays.take(numColumns),
+          schemas.take(numColumns),
+          numRows.toInt
+        )
+        try {
+          ArrowFileEntryExtractor.extract(batch, partitionColumns)
+        } finally {
+          batch.close()
+        }
+      } else {
+        Seq.empty
       }
-    } else {
-      Seq.empty
-    }
 
-    bridge.close()
-
-    NativeListFilesResult(
-      files = files,
-      schema = schema,
-      partitionColumns = partitionColumns,
+      NativeListFilesResult(
+        files = files,
+        schema = schema,
+        partitionColumns = partitionColumns,
       protocol = protocol,
       metadataConfig = metadataConfig,
       metrics = metrics
     )
+    } finally {
+      bridge.close()
+    }
   }
 
   override def getTotalRowCount(): Long =
@@ -640,62 +642,8 @@ class NativeTransactionLog(
   private def parseMetadataJson(metadataJson: String): MetadataAction =
     mapper.readValue(metadataJson, classOf[MetadataAction])
 
-  private def extractMetadataConfigJson(snapshot: TxLogSnapshotInfo): String = {
-    val metadataJson = snapshot.getMetadataJson
-    if (metadataJson == null || metadataJson.isEmpty) return null
-
-    try {
-      val metadata = parseMetadataJson(metadataJson)
-      if (metadata.configuration.isEmpty) return null
-
-      // Extract schema registry entries for manifest reads
-      val schemaKeyPrefix = "docMappingSchema."
-      val schemaEntries = metadata.configuration.filter { case (k, _) =>
-        k.startsWith(schemaKeyPrefix)
-      }
-      if (schemaEntries.isEmpty) return null
-
-      mapper.writeValueAsString(schemaEntries.asJava)
-    } catch {
-      case _: Exception => null
-    }
-  }
-
-  private def restoreSchemas(files: Seq[AddAction], snapshot: TxLogSnapshotInfo): Seq[AddAction] = {
-    // Check if any files use schema dedup refs
-    val hasRefs = files.exists(_.docMappingRef.isDefined)
-    if (!hasRefs) return files
-
-    val metadataJson = snapshot.getMetadataJson
-    if (metadataJson == null) return files
-
-    try {
-      val metadata = parseMetadataJson(metadataJson)
-      val schemaKeyPrefix = "docMappingSchema."
-      val registry = metadata.configuration.collect {
-        case (key, value) if key.startsWith(schemaKeyPrefix) =>
-          key.stripPrefix(schemaKeyPrefix) -> value
-      }
-      if (registry.isEmpty) return files
-
-      files.map { file =>
-        file.docMappingRef match {
-          case Some(ref) if file.docMappingJson.isEmpty =>
-            registry.get(ref) match {
-              case Some(schema) => file.copy(docMappingJson = Some(schema))
-              case None         =>
-                logger.warn(s"Schema ref '$ref' not found in registry for file ${file.path}")
-                file
-            }
-          case _ => file
-        }
-      }
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to restore schemas from registry: ${e.getMessage}")
-        files
-    }
-  }
+  // extractMetadataConfigJson and restoreSchemas removed — native listFilesArrowFfi
+  // handles schema deduplication restoration (step 8 in the developer guide).
 
   private def parseActionsFromContent(content: String): Seq[Action] =
     content

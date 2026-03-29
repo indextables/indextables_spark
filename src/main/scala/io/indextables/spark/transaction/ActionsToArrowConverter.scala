@@ -20,12 +20,13 @@ package io.indextables.spark.transaction
 import scala.jdk.CollectionConverters._
 
 import org.apache.arrow.c.{ArrowArray, ArrowSchema, Data}
-import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector._
 import org.apache.arrow.vector.complex.ListVector
 import org.apache.arrow.vector.complex.impl.UnionListWriter
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 
+import io.indextables.spark.arrow.ArrowFfiBridge
 import io.indextables.spark.util.JsonUtil
 
 /**
@@ -40,7 +41,7 @@ import io.indextables.spark.util.JsonUtil
 object ActionsToArrowConverter {
 
   private val mapper = JsonUtil.mapper
-  private val allocator: BufferAllocator = new RootAllocator(Long.MaxValue)
+  private val allocator: BufferAllocator = ArrowFfiBridge.allocator
 
   /**
    * Export actions as Arrow FFI structs for writeVersionArrowFfi.
@@ -64,7 +65,6 @@ object ActionsToArrowConverter {
   private def buildVectorSchemaRoot(actions: Seq[Action]): VectorSchemaRoot = {
     val schema = buildSchema()
     val root = VectorSchemaRoot.create(schema, allocator)
-    root.setRowCount(actions.size)
 
     val actionTypeVec = root.getVector("action_type").asInstanceOf[VarCharVector]
     val pathVec = root.getVector("path").asInstanceOf[VarCharVector]
@@ -162,6 +162,8 @@ object ActionsToArrowConverter {
           setString(actionTypeVec, i, "protocol")
           minReaderVersionVec.setSafe(i, p.minReaderVersion)
           minWriterVersionVec.setSafe(i, p.minWriterVersion)
+          p.readerFeatures.foreach(features => writeStringList(readerFeaturesVec, i, features.toSeq))
+          p.writerFeatures.foreach(features => writeStringList(writerFeaturesVec, i, features.toSeq))
 
         case m: MetadataAction =>
           setString(actionTypeVec, i, "metadata")

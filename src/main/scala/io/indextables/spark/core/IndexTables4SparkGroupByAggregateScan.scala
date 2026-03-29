@@ -340,16 +340,9 @@ class IndexTables4SparkGroupByAggregateBatch(
     logger.debug(s"GROUP BY BATCH: Available hosts: ${availableHosts.mkString(", ")}")
 
     // Get filtered splits — separate partition vs data filters for proper native evaluation
-    val partCols = transactionLog.getPartitionColumns()
-    val (partFilters, dataFilters) = if (partCols.nonEmpty && pushedFilters.nonEmpty) {
-      pushedFilters.partition { f =>
-        val cols = io.indextables.spark.util.FilterUtils.extractFieldNames(f)
-        cols.nonEmpty && cols.forall(partCols.contains)
-      }
-    } else {
-      (Array.empty[Filter], pushedFilters)
-    }
-    val filteredSplits = transactionLog.listFilesWithAllFilters(partFilters.toSeq, dataFilters.toSeq)
+    val (partFilters, dataFilters) = io.indextables.spark.transaction.SparkFilterToNativeFilter
+      .splitFilters(pushedFilters, transactionLog.getPartitionColumns())
+    val filteredSplits = transactionLog.listFilesWithAllFilters(partFilters, dataFilters)
     logger.debug(s"GROUP BY BATCH: ${filteredSplits.length} splits after native filtering")
 
     // Calculate optimal splitsPerTask now that we know the split count
