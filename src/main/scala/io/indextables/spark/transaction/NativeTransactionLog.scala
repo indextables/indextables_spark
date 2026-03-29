@@ -59,7 +59,7 @@ class NativeTransactionLog(
   /** Native table path string (with scheme normalization) */
   private val nativeTablePath: String = ConfigMapper.normalizeTablePath(tablePath)
 
-  /** Native config map (credentials + cache TTL + checkpoint interval) */
+  /** Native config map (credentials + cache TTL + checkpoint interval + timezone) */
   private val nativeConfig: java.util.Map[String, String] = {
     val config = ConfigMapper.toNativeConfig(options)
     // Pass cache TTL from Spark config to native layer
@@ -68,6 +68,16 @@ class NativeTransactionLog(
     // Pass checkpoint interval to native layer for auto-checkpoint
     val checkpointInterval = options.getInt("spark.indextables.checkpoint.interval", 10)
     config.put("checkpoint_interval", checkpointInterval.toString)
+    // Pass session timezone offset for timestamp data skipping.
+    // Enables native compare_values_typed to parse bare datetime strings like "2025-11-07 05:00:00".
+    // Without this, timestamp data skipping is conservative (never skips) — safe but suboptimal.
+    try {
+      val tz = org.apache.spark.sql.SparkSession.active.sessionState.conf.sessionLocalTimeZone
+      val offsetSeconds = java.util.TimeZone.getTimeZone(tz).getRawOffset / 1000
+      config.put("session.timezone.offset.seconds", offsetSeconds.toString)
+    } catch {
+      case _: Exception => // No active SparkSession (e.g., direct API usage) — skip
+    }
     config
   }
 
