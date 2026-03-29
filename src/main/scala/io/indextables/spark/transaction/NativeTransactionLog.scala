@@ -317,23 +317,13 @@ class NativeTransactionLog(
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
 
-      // Build field types JSON for type-aware data skipping on date/timestamp columns
-      val fieldTypesJson: String = if (dataFilters != null) {
-        getSchema().map { schema =>
-          val typeMap = schema.fields.collect {
-            case f if f.dataType == org.apache.spark.sql.types.DateType => f.name -> "date"
-            case f if f.dataType == org.apache.spark.sql.types.TimestampType => f.name -> "timestamp"
-          }.toMap
-          if (typeMap.nonEmpty) mapper.writeValueAsString(typeMap.asJava) else null
-        }.orNull
-      } else null
-
+      // Field types for type-aware data skipping are auto-extracted from
+      // MetadataAction.schema_string by the native layer — no JVM-side work needed.
       val resultJson = try {
         TransactionLogReader.listFilesArrowFfi(
           nativeTablePath, nativeConfig,
           partitionFilters,
           dataFilters,
-          fieldTypesJson,
           excludeCooldown,
           includeStats,
           arrayAddrs, schemaAddrs
