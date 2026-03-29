@@ -126,13 +126,10 @@ class TransactionLogCountBatch(
       // No filters - return total count from transaction log
       transactionLog.getTotalRowCount()
     } else {
-      // Get filtered files (native filtering handles partition pruning)
-      val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog)).toSeq
-      val matchingFiles = if (partitionFilters.nonEmpty) {
-        transactionLog.listFilesWithPartitionFilters(partitionFilters)
-      } else {
-        transactionLog.listFiles()
-      }
+      // Split into partition + data filters for native partition pruning + data skipping
+      val (partFilters, dataFilters) = io.indextables.spark.transaction.SparkFilterToNativeFilter
+        .splitFilters(pushedFilters, transactionLog.getPartitionColumns())
+      val matchingFiles = transactionLog.listFilesWithAllFilters(partFilters, dataFilters)
 
       matchingFiles.map { file =>
         file.numRecords
@@ -153,11 +150,9 @@ class TransactionLogCountBatch(
   private def computeGroupByCountFromTransactionLog(groupByCols: Array[String]): Seq[(Array[String], Long)] = {
     // Get filtered files from transaction log (native filtering handles partition pruning)
     val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog)).toSeq
-    val matchingFiles = if (partitionFilters.nonEmpty) {
-      transactionLog.listFilesWithPartitionFilters(partitionFilters)
-    } else {
-      transactionLog.listFiles()
-    }
+    val (partFilters2, dataFilters2) = io.indextables.spark.transaction.SparkFilterToNativeFilter
+      .splitFilters(pushedFilters, transactionLog.getPartitionColumns())
+    val matchingFiles = transactionLog.listFilesWithAllFilters(partFilters2, dataFilters2)
 
     // Group by partition values and sum record counts
     val grouped = matchingFiles.groupBy { file =>

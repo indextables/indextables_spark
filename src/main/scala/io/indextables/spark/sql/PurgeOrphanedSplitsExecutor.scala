@@ -114,25 +114,36 @@ class PurgeOrphanedSplitsExecutor(
           var continue = true
           while (continue) {
             val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
-            val rowCount = TransactionLogReader.readNextRetainedFilesBatchArrowFfi(
-              cursor, 10000, arrayAddrs, schemaAddrs
-            )
-            if (rowCount > 0) {
-              val batch = bridge.importAsColumnarBatchStreaming(arrays.take(numCols), schemas.take(numCols), rowCount)
-              try {
-                val pathVec = batch.column(0).asInstanceOf[
-                  org.apache.spark.sql.vectorized.ArrowColumnVector
-                ].getValueVector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
-                var i = 0
-                while (i < rowCount) {
-                  if (!pathVec.isNull(i)) paths += new String(pathVec.get(i))
-                  i += 1
+            try {
+              val rowCount = TransactionLogReader.readNextRetainedFilesBatchArrowFfi(
+                cursor, 10000, arrayAddrs, schemaAddrs
+              )
+              if (rowCount > 0) {
+                // importAsColumnarBatchStreaming transfers ownership of all structs
+                val batch = bridge.importAsColumnarBatchStreaming(arrays.take(numCols), schemas.take(numCols), rowCount)
+                try {
+                  val pathVec = batch.column(0).asInstanceOf[
+                    org.apache.spark.sql.vectorized.ArrowColumnVector
+                  ].getValueVector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
+                  var i = 0
+                  while (i < rowCount) {
+                    if (!pathVec.isNull(i)) paths += new String(pathVec.get(i))
+                    i += 1
+                  }
+                } finally {
+                  batch.close()
                 }
-              } finally {
-                batch.close()
+              } else {
+                continue = false
+                // Close unused structs — native didn't fill them
+                arrays.foreach(a => try a.close() catch { case _: Exception => })
+                schemas.foreach(s => try s.close() catch { case _: Exception => })
               }
-            } else {
-              continue = false
+            } catch {
+              case e: Exception =>
+                arrays.foreach(a => try a.close() catch { case _: Exception => })
+                schemas.foreach(s => try s.close() catch { case _: Exception => })
+                throw e
             }
           }
         } finally {

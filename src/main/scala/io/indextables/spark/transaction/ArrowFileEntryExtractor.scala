@@ -23,6 +23,8 @@ import org.apache.arrow.vector._
 import org.apache.arrow.vector.complex.ListVector
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatch}
 
+import io.indextables.spark.util.JsonUtil
+
 /**
  * Extracts AddAction objects from an Arrow ColumnarBatch produced by nativeListFilesArrowFfi.
  *
@@ -30,6 +32,8 @@ import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatch}
  * This extractor reads Arrow vectors directly — no JSON parsing per row.
  */
 object ArrowFileEntryExtractor {
+
+  private val mapper = JsonUtil.mapper
 
   /**
    * Extract AddAction objects from an Arrow batch.
@@ -70,6 +74,13 @@ object ArrowFileEntryExtractor {
 
     // Dynamic partition columns start at index 19
     val partColVecs = partitionColumns.indices.map(i => root(19 + i).asInstanceOf[VarCharVector])
+
+    // Optional stats columns follow partition columns (present when includeStats=true)
+    val statsBaseIdx = 19 + partitionColumns.size
+    val hasStatsColumns = batch.numCols() > statsBaseIdx
+    val minValuesVec = if (hasStatsColumns) Some(root(statsBaseIdx).asInstanceOf[VarCharVector]) else None
+    val maxValuesVec = if (hasStatsColumns && batch.numCols() > statsBaseIdx + 1)
+      Some(root(statsBaseIdx + 1).asInstanceOf[VarCharVector]) else None
 
     val result = new Array[AddAction](numRows)
 
@@ -116,15 +127,23 @@ object ArrowFileEntryExtractor {
         }
       }
 
+      require(!pathVec.isNull(i), s"path column must not be null at row $i")
+
       result(i) = AddAction(
         path = new String(pathVec.get(i)),
         partitionValues = partitionValues,
         size = sizeVec.get(i),
         modificationTime = modTimeVec.get(i),
         dataChange = dataChangeVec.get(i) != 0,
-        stats = None, // Not exported (consumed during native data skipping)
-        minValues = None, // Not exported (consumed during native data skipping)
-        maxValues = None, // Not exported (consumed during native data skipping)
+        stats = None,
+        minValues = minValuesVec.flatMap { v =>
+          if (v.isNull(i)) None
+          else Some(mapper.readValue(new String(v.get(i)), classOf[java.util.Map[String, String]]).asScala.toMap)
+        },
+        maxValues = maxValuesVec.flatMap { v =>
+          if (v.isNull(i)) None
+          else Some(mapper.readValue(new String(v.get(i)), classOf[java.util.Map[String, String]]).asScala.toMap)
+        },
         numRecords = if (numRecordsVec.isNull(i)) None else Some(numRecordsVec.get(i)),
         footerStartOffset = if (footerStartVec.isNull(i) || footerStartVec.get(i) <= 0) None else Some(footerStartVec.get(i)),
         footerEndOffset = if (footerEndVec.isNull(i) || footerEndVec.get(i) <= 0) None else Some(footerEndVec.get(i)),

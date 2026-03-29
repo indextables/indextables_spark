@@ -247,21 +247,24 @@ class NativeTransactionLog(
   // ------------------------------------------------------------------------------------
 
   override def listFiles(): Seq[AddAction] =
-    // Delegate to Arrow FFI path — no filtering, just list all files
+    // Include stats — admin commands, statistics, REPAIR need minValues/maxValues
     listFilesArrow(
       partitionFilters = null,
       dataFilters = null,
-      excludeCooldown = false
+      excludeCooldown = false,
+      includeStats = true
     ).files
 
   override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] =
     listFilesWithAllFilters(partitionFilters, Seq.empty)
 
   override def listFilesWithAllFilters(partitionFilters: Seq[Filter], dataFilters: Seq[Filter]): Seq[AddAction] = {
+    // Data skipping already applied natively — no need to export stats back to JVM
     listFilesArrow(
       partitionFilters = SparkFilterToNativeFilter.convertOrNull(partitionFilters),
       dataFilters = SparkFilterToNativeFilter.convertOrNull(dataFilters),
-      excludeCooldown = false
+      excludeCooldown = false,
+      includeStats = false
     ).files
   }
 
@@ -281,7 +284,8 @@ class NativeTransactionLog(
     listFilesArrow(
       partitionFilters = SparkFilterToNativeFilter.convertOrNull(partitionFilters),
       dataFilters = SparkFilterToNativeFilter.convertOrNull(dataFilters),
-      excludeCooldown = excludeCooldown
+      excludeCooldown = excludeCooldown,
+      includeStats = false // scan path — data skipping already applied natively
     )
 
   /**
@@ -292,18 +296,20 @@ class NativeTransactionLog(
     listFilesArrow(
       partitionFilters = SparkFilterToNativeFilter.convertOrNull(filters),
       dataFilters = null,
-      excludeCooldown = true
+      excludeCooldown = true,
+      includeStats = true // merge path needs full metadata
     ).files
   }
 
   private def listFilesArrow(
     partitionFilters: String,
     dataFilters: String,
-    excludeCooldown: Boolean
+    excludeCooldown: Boolean,
+    includeStats: Boolean
   ): NativeListFilesResult = {
-    // Allocate Arrow FFI structs — generous upper bound for column count
-    // (19 base + up to 10 partition cols + optional 2 stats cols)
-    val maxCols = 31
+    // Allocate Arrow FFI structs — dynamic based on partition columns + stats
+    val partColCount = try { getPartitionColumns().size } catch { case _: Exception => 0 }
+    val maxCols = 19 + partColCount + (if (includeStats) 2 else 0)
     val bridge = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
@@ -314,7 +320,7 @@ class NativeTransactionLog(
           partitionFilters,
           dataFilters,
           excludeCooldown,
-          false, // includeStats — not needed on JVM side (data skipping done natively)
+          includeStats,
           arrayAddrs, schemaAddrs
         )
       } catch {
@@ -324,6 +330,7 @@ class NativeTransactionLog(
       }
 
       if (resultJson == null) {
+        closeUnusedStructs(arrays, schemas, 0)
         return NativeListFilesResult(
           files = Seq.empty,
           schema = None,
@@ -386,7 +393,11 @@ class NativeTransactionLog(
       } else NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
 
       // Import Arrow batch and extract AddAction objects (only for surviving files)
-      val files = if (numRows > 0 && numColumns > 0) {
+      // Close unused Arrow structs that native didn't fill
+      val usedCols = if (numRows > 0 && numColumns > 0) numColumns else 0
+      closeUnusedStructs(arrays, schemas, usedCols)
+
+      val files = if (usedCols > 0) {
         require(numRows <= Int.MaxValue, s"numRows $numRows exceeds Int.MaxValue")
         val batch = bridge.importAsColumnarBatch(
           arrays.take(numColumns),
@@ -406,10 +417,10 @@ class NativeTransactionLog(
         files = files,
         schema = schema,
         partitionColumns = partitionColumns,
-      protocol = protocol,
-      metadataConfig = metadataConfig,
-      metrics = metrics
-    )
+        protocol = protocol,
+        metadataConfig = metadataConfig,
+        metrics = metrics
+      )
     } finally {
       bridge.close()
     }
@@ -468,11 +479,14 @@ class NativeTransactionLog(
   }
 
   override def getCheckpointActions(): Option[Seq[Action]] = {
+    // Use listFiles (Arrow FFI path with stats) for file entries
     val addActions = listFiles()
     if (addActions.isEmpty) return None
 
     // Include protocol and metadata actions alongside file entries,
-    // since checkpoint represents the complete consolidated state
+    // since checkpoint represents the complete consolidated state.
+    // Note: RemoveActions and SkipActions are not included — they are
+    // only visible through readVersion() for individual version files.
     val protocol = getProtocol()
     val metadata = getMetadata()
     Some(Seq(protocol, metadata) ++ addActions)
@@ -641,6 +655,20 @@ class NativeTransactionLog(
 
   private def parseMetadataJson(metadataJson: String): MetadataAction =
     mapper.readValue(metadataJson, classOf[MetadataAction])
+
+  /** Close Arrow FFI structs that weren't consumed by importAsColumnarBatch. */
+  private def closeUnusedStructs(
+    arrays: Array[org.apache.arrow.c.ArrowArray],
+    schemas: Array[org.apache.arrow.c.ArrowSchema],
+    usedCount: Int
+  ): Unit = {
+    var i = usedCount
+    while (i < arrays.length) {
+      try { arrays(i).close() } catch { case _: Exception => }
+      try { schemas(i).close() } catch { case _: Exception => }
+      i += 1
+    }
+  }
 
   // extractMetadataConfigJson and restoreSchemas removed — native listFilesArrowFfi
   // handles schema deduplication restoration (step 8 in the developer guide).
