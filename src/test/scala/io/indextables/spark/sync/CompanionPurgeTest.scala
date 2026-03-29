@@ -542,7 +542,6 @@ class CompanionPurgeTest
       flushCaches()
 
       // Verify all rows (original + new) are present via count
-      // (Iceberg companion file:// paths may not support .collect() reads)
       val df = readCompanion(indexPath)
       df.count() shouldBe 7
     }

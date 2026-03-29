@@ -415,7 +415,7 @@ object SyncTaskExecutor {
    */
   def extractTableBasePath(filePath: String): String = {
     // Strip scheme prefix, remember it for reconstruction
-    val schemePattern     = "^(s3a?://|abfss?://|wasbs?://)".r
+    val schemePattern     = "^(s3a?://|abfss?://|wasbs?://|file://)".r
     val scheme            = schemePattern.findFirstIn(filePath).getOrElse("")
     val pathWithoutScheme = filePath.substring(scheme.length)
 

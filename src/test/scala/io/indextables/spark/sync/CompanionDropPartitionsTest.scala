@@ -524,8 +524,6 @@ class CompanionDropPartitionsTest
 
       val ss = spark; import ss.implicits._
 
-      // Verify remaining count after drop (use count() since Iceberg companion parquet reads
-      // may fail with file:// paths — count() uses the tantivy index directly)
       val afterDrop = readCompanion(indexPath)
       afterDrop.count() shouldBe 6
 

@@ -315,13 +315,26 @@ class CompanionMergeSplitsTest
     rootDir: File,
     batchId: Int
   ): Unit = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
+    // Write parquet to a staging directory (Spark needs its own output directory)
+    val stagingDir = new File(rootDir, s"staging-$batchId")
     val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), sparkSchema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
+    df.coalesce(1).write.parquet(s"file://${stagingDir.getAbsolutePath}")
 
-    val parquetFiles = new File(parquetDir)
+    // Move parquet files to a common data directory so all files share
+    // the same parent — extractTableBasePath() computes the storage root
+    // from the first file's path, and companion reads resolve all source
+    // files relative to that root.
+    val dataDir = new File(rootDir, "data")
+    dataDir.mkdirs()
+
+    val parquetFiles = stagingDir
       .listFiles()
       .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
+      .map { src =>
+        val dest = new File(dataDir, src.getName)
+        java.nio.file.Files.move(src.toPath, dest.toPath)
+        dest
+      }
 
     val table    = server.catalog.loadTable(tableId)
     val appendOp = table.newAppend()
@@ -425,8 +438,6 @@ class CompanionMergeSplitsTest
     }
   }
 
-  // Known bug: Merged Iceberg companion splits fail to read parquet source files
-  // (file:// path relativization issue).
   test("all data accessible after merge on Iceberg companion") {
     withIcebergMerge { (_, df) =>
       val rows = df.collect()
@@ -438,8 +449,6 @@ class CompanionMergeSplitsTest
 
   test("aggregations correct after merge on Iceberg companion") {
     withIcebergMerge { (_, df) =>
-      // Aggregation pushdown reads from tantivy fast fields, not parquet source files,
-      // so it should work even when parquet reads fail.
       val row = df
         .agg(count("*"), sum("score"), min("score"), max("score"))
         .collect()(0)
