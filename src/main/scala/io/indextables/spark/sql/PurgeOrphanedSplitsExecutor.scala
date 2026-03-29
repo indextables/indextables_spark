@@ -108,7 +108,7 @@ class PurgeOrphanedSplitsExecutor(
       val paths   = scala.collection.mutable.Set[String]()
       val cursor  = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
       try {
-        val numCols = 19 // base schema (no partitions for purge)
+        val numCols = 20 // base schema including partition_values (no dynamic partitions for purge)
         val bridge = new io.indextables.spark.arrow.ArrowFfiBridge()
         try {
           var continue = true

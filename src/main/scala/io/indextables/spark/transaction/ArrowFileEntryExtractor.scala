@@ -51,7 +51,8 @@ object ArrowFileEntryExtractor {
       batch.column(i).asInstanceOf[ArrowColumnVector].getValueVector
     }
 
-    // Fixed columns (indices 0-18)
+    // Fixed columns (indices 0-19). Base count is 20 as of tantivy4java 0.31.1.
+    // Column 19 is partition_values (JSON map of ALL partition values).
     val pathVec = root(0).asInstanceOf[VarCharVector]
     val sizeVec = root(1).asInstanceOf[BigIntVector]
     val modTimeVec = root(2).asInstanceOf[BigIntVector]
@@ -71,12 +72,13 @@ object ArrowFileEntryExtractor {
     val companionSourceFilesVec = root(16) // ListVector of Utf8
     val companionDeltaVersionVec = root(17).asInstanceOf[BigIntVector]
     val companionFastFieldModeVec = root(18).asInstanceOf[VarCharVector]
+    val partitionValuesJsonVec = root(19).asInstanceOf[VarCharVector] // JSON map of ALL partition values
 
-    // Dynamic partition columns start at index 19
-    val partColVecs = partitionColumns.indices.map(i => root(19 + i).asInstanceOf[VarCharVector])
+    // Dynamic partition columns start at index 20
+    val partColVecs = partitionColumns.indices.map(i => root(20 + i).asInstanceOf[VarCharVector])
 
     // Optional stats columns follow partition columns (present when includeStats=true)
-    val statsBaseIdx = 19 + partitionColumns.size
+    val statsBaseIdx = 20 + partitionColumns.size
     val hasStatsColumns = batch.numCols() > statsBaseIdx
     val minValuesVec = if (hasStatsColumns) Some(root(statsBaseIdx).asInstanceOf[VarCharVector]) else None
     val maxValuesVec = if (hasStatsColumns && batch.numCols() > statsBaseIdx + 1)
@@ -86,17 +88,15 @@ object ArrowFileEntryExtractor {
 
     var i = 0
     while (i < numRows) {
-      // Build partition values map from dynamic columns
-      val partitionValues = if (partitionColumns.nonEmpty) {
-        val map = scala.collection.mutable.Map[String, String]()
-        var j = 0
-        while (j < partitionColumns.length) {
-          if (!partColVecs(j).isNull(i)) {
-            map.put(partitionColumns(j), new String(partColVecs(j).get(i)))
-          }
-          j += 1
+      // Build partition values from the JSON column (index 19) which contains ALL partition values,
+      // including undeclared ones. Dynamic partition:{name} columns are redundant but available.
+      val partitionValues = if (!partitionValuesJsonVec.isNull(i)) {
+        val jsonStr = new String(partitionValuesJsonVec.get(i))
+        try {
+          mapper.readValue(jsonStr, classOf[java.util.Map[String, String]]).asScala.toMap
+        } catch {
+          case _: Exception => Map.empty[String, String]
         }
-        map.toMap
       } else Map.empty[String, String]
 
       // Extract split tags from List<Utf8>

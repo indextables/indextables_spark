@@ -94,9 +94,13 @@ object ActionsToArrowConverter {
     val minReaderVersionVec = root.getVector("min_reader_version").asInstanceOf[IntVector]
     val minWriterVersionVec = root.getVector("min_writer_version").asInstanceOf[IntVector]
     val metadataIdVec = root.getVector("id").asInstanceOf[VarCharVector]
+    val metadataNameVec = root.getVector("metadata_name").asInstanceOf[VarCharVector]
+    val metadataDescriptionVec = root.getVector("metadata_description").asInstanceOf[VarCharVector]
     val schemaStringVec = root.getVector("schema_string").asInstanceOf[VarCharVector]
     val configurationVec = root.getVector("configuration").asInstanceOf[VarCharVector]
     val createdTimeVec = root.getVector("created_time").asInstanceOf[BigIntVector]
+    val formatProviderVec = root.getVector("format_provider").asInstanceOf[VarCharVector]
+    val formatOptionsVec = root.getVector("format_options").asInstanceOf[VarCharVector]
     // List vectors for split_tags, companion_source_files, partition_columns, reader/writer_features
     val splitTagsVec = root.getVector("split_tags").asInstanceOf[ListVector]
     val companionSourceFilesVec = root.getVector("companion_source_files").asInstanceOf[ListVector]
@@ -168,6 +172,8 @@ object ActionsToArrowConverter {
         case m: MetadataAction =>
           setString(actionTypeVec, i, "metadata")
           setString(metadataIdVec, i, m.id)
+          m.name.foreach(n => setString(metadataNameVec, i, n))
+          m.description.foreach(d => setString(metadataDescriptionVec, i, d))
           setString(schemaStringVec, i, m.schemaString)
           if (m.partitionColumns.nonEmpty) {
             writeStringList(partitionColumnsVec, i, m.partitionColumns)
@@ -176,6 +182,10 @@ object ActionsToArrowConverter {
             setString(configurationVec, i, mapper.writeValueAsString(m.configuration.asJava))
           }
           m.createdTime.foreach(createdTimeVec.setSafe(i, _))
+          setString(formatProviderVec, i, m.format.provider)
+          if (m.format.options.nonEmpty) {
+            setString(formatOptionsVec, i, mapper.writeValueAsString(m.format.options.asJava))
+          }
 
         case _ => // Unknown action type — skip
       }
@@ -234,9 +244,13 @@ object ActionsToArrowConverter {
     fields.add(Field.nullable("min_reader_version", new ArrowType.Int(32, true)))
     fields.add(Field.nullable("min_writer_version", new ArrowType.Int(32, true)))
     fields.add(Field.nullable("id", new ArrowType.Utf8()))
+    fields.add(Field.nullable("metadata_name", new ArrowType.Utf8()))
+    fields.add(Field.nullable("metadata_description", new ArrowType.Utf8()))
     fields.add(Field.nullable("schema_string", new ArrowType.Utf8()))
     fields.add(Field.nullable("configuration", new ArrowType.Utf8()))
     fields.add(Field.nullable("created_time", new ArrowType.Int(64, true)))
+    fields.add(Field.nullable("format_provider", new ArrowType.Utf8()))
+    fields.add(Field.nullable("format_options", new ArrowType.Utf8()))
     // List<Utf8> columns
     val listField = new FieldType(true, new ArrowType.List(), null)
     val utf8Child = new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)

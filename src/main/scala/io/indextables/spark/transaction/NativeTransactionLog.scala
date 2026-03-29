@@ -196,14 +196,11 @@ class NativeTransactionLog(
   }
 
   override def commitMetadataUpdate(transform: MetadataAction => MetadataAction): Long =
-    // Must re-read metadata on each retry to compose safely with concurrent updates.
-    // Uses JSON path because MetadataAction has fields (name, description, format)
-    // not yet supported in the Arrow write schema.
+    // Must re-read metadata on each retry to compose safely with concurrent updates
     retryWithBackoff("commit metadata update") { () =>
       val currentMetadata = getMetadata()
       val updatedMetadata = transform(currentMetadata)
-      val actionsJson     = ActionJsonSerializer.actionsToJsonLines(Seq(updatedMetadata))
-      TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
+      writeActionsViaArrowOnce(Seq(updatedMetadata))
     }
 
   override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
@@ -314,17 +311,29 @@ class NativeTransactionLog(
   ): NativeListFilesResult = {
     // Allocate Arrow FFI structs — generous upper bound since native determines actual columns.
     // Native returns numColumns in result JSON; we only import that many.
-    // 19 base + up to 20 partition cols + 2 stats = 41
-    val maxCols = 41
+    // 20 base (including partition_values JSON col) + up to 20 partition cols + 2 stats = 42
+    val maxCols = 42
     val bridge = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
+
+      // Build field types JSON for type-aware data skipping on date/timestamp columns
+      val fieldTypesJson: String = if (dataFilters != null) {
+        getSchema().map { schema =>
+          val typeMap = schema.fields.collect {
+            case f if f.dataType == org.apache.spark.sql.types.DateType => f.name -> "date"
+            case f if f.dataType == org.apache.spark.sql.types.TimestampType => f.name -> "timestamp"
+          }.toMap
+          if (typeMap.nonEmpty) mapper.writeValueAsString(typeMap.asJava) else null
+        }.orNull
+      } else null
 
       val resultJson = try {
         TransactionLogReader.listFilesArrowFfi(
           nativeTablePath, nativeConfig,
           partitionFilters,
           dataFilters,
+          fieldTypesJson,
           excludeCooldown,
           includeStats,
           arrayAddrs, schemaAddrs
@@ -353,17 +362,12 @@ class NativeTransactionLog(
       val numColumns = resultNode.get("numColumns").asInt()
 
       // Extract table metadata (eliminates separate getSchema/getPartitionColumns/getProtocol calls)
+      // schemaJson now returns the table data schema (MetadataAction.schema_string) in Spark StructType JSON format
       val schemaJson = if (resultNode.has("schemaJson") && !resultNode.get("schemaJson").isNull)
         resultNode.get("schemaJson").asText() else null
       val schema = if (schemaJson != null && schemaJson.nonEmpty) {
-        try {
-          Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
-        } catch {
-          case _: Exception =>
-            logger.debug(s"Could not parse schemaJson from native, falling back to getSchema()")
-            getSchema()
-        }
-      } else getSchema()
+        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+      } else None
 
       val partitionColumns = if (resultNode.has("partitionColumns")) {
         val arr = resultNode.get("partitionColumns")
