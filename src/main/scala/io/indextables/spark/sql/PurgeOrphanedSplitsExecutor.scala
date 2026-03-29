@@ -108,13 +108,35 @@ class PurgeOrphanedSplitsExecutor(
       val paths   = scala.collection.mutable.Set[String]()
       val cursor  = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
       try {
-        var batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
-        while (batch != null) {
-          batch.asScala.foreach { entry =>
-            val path = entry.get("path")
-            if (path != null) paths += path.toString
+        val numCols = 19 // base schema (no partitions for purge)
+        val bridge = new io.indextables.spark.arrow.ArrowFfiBridge()
+        try {
+          var continue = true
+          while (continue) {
+            val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
+            val rowCount = TransactionLogReader.readNextRetainedFilesBatchArrowFfi(
+              cursor, 10000, arrayAddrs, schemaAddrs
+            )
+            if (rowCount > 0) {
+              val batch = bridge.importAsColumnarBatchStreaming(arrays.take(numCols), schemas.take(numCols), rowCount)
+              try {
+                val pathVec = batch.column(0).asInstanceOf[
+                  org.apache.spark.sql.vectorized.ArrowColumnVector
+                ].getValueVector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
+                var i = 0
+                while (i < rowCount) {
+                  if (!pathVec.isNull(i)) paths += new String(pathVec.get(i))
+                  i += 1
+                }
+              } finally {
+                batch.close()
+              }
+            } else {
+              continue = false
+            }
           }
-          batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
+        } finally {
+          bridge.close()
         }
       } finally
         TransactionLogReader.closeRetainedFilesCursor(cursor)

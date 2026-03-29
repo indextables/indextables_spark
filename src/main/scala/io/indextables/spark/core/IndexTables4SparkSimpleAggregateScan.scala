@@ -216,24 +216,18 @@ class IndexTables4SparkSimpleAggregateBatch(
     val availableHosts = io.indextables.spark.storage.DriverSplitLocalityManager.getAvailableHosts(sparkContext)
     logger.debug(s"SIMPLE AGGREGATE BATCH: Available hosts: ${availableHosts.mkString(", ")}")
 
-    // Get all splits from transaction log
-    val allSplits = transactionLog.listFiles()
-    logger.debug(s"SIMPLE AGGREGATE BATCH: Found ${allSplits.length} total splits")
-
-    // Apply data skipping using the same logic as regular scan by creating a helper scan instance
-    // Use the full table schema to ensure proper field type detection for data skipping
-    val helperScan = new IndexTables4SparkScan(
-      sparkSession,
-      transactionLog,
-      schema,
-      pushedFilters,
-      options,
-      None,
-      config,
-      indexQueryFilters
-    )
-    val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
-    logger.debug(s"SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
+    // Get filtered splits — separate partition vs data filters for proper native evaluation
+    val partCols = transactionLog.getPartitionColumns()
+    val (partFilters, dataFilters) = if (partCols.nonEmpty && pushedFilters.nonEmpty) {
+      pushedFilters.partition { f =>
+        val cols = io.indextables.spark.util.FilterUtils.extractFieldNames(f)
+        cols.nonEmpty && cols.forall(partCols.contains)
+      }
+    } else {
+      (Array.empty[Filter], pushedFilters)
+    }
+    val filteredSplits = transactionLog.listFilesWithAllFilters(partFilters.toSeq, dataFilters.toSeq)
+    logger.debug(s"SIMPLE AGGREGATE BATCH: ${filteredSplits.length} splits after native filtering")
 
     // Calculate optimal splitsPerTask now that we know the split count
     val splitsPerTask = SplitsPerTaskCalculator.calculate(

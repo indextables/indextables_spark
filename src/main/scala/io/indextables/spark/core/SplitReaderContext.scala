@@ -17,8 +17,6 @@
 
 package io.indextables.spark.core
 
-import java.time.Instant
-
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.sources.Filter
@@ -188,17 +186,10 @@ class SplitReaderContext(
       filters
     }
 
-    // Filter out range filters redundant by statistics
-    val optimizedFilters = if (addAction.minValues.nonEmpty && addAction.maxValues.nonEmpty) {
-      val (redundantByStats, remaining) = nonPartitionFilters.partition(f =>
-        isRangeFilterRedundantByStats(f, addAction.minValues.get, addAction.maxValues.get, fullTableSchema)
-      )
-      if (redundantByStats.nonEmpty)
-        logger.info(s"Excluding ${redundantByStats.length} range filter(s) redundant by statistics: ${redundantByStats.mkString(", ")}")
-      remaining
-    } else {
-      nonPartitionFilters
-    }
+    // Range filter elimination by min/max statistics is now handled natively (FR4).
+    // The native split search engine automatically eliminates redundant range filters
+    // using per-file stats cached during listFilesArrowFfi().
+    val optimizedFilters = nonPartitionFilters
 
     // Strip partition-only filters from IndexQuery filters
     val cleanedIndexQueryFilters = if (partitionColumnNames.nonEmpty && indexQueryFilters.nonEmpty) {
@@ -399,122 +390,11 @@ class SplitReaderContext(
 
   /**
    * Check if a range filter is redundant based on min/max statistics. A filter is redundant if the split's entire data
-   * range is within the filter's range, meaning all records in the split would pass the filter anyway.
-   *
-   * Only applies to Date and Timestamp columns to avoid type conversion complexity.
+   * Redundant range filter elimination is now handled natively (FR4).
+   * The native split search engine automatically uses per-file stats
+   * cached during listFilesArrowFfi() to eliminate redundant range filters.
+   * See: TANTIVY4JAVA_FR4_API_GAP.md (resolved)
    */
-  private def isRangeFilterRedundantByStats(
-    filter: Filter,
-    minValues: Map[String, String],
-    maxValues: Map[String, String],
-    schema: StructType
-  ): Boolean = {
-    import org.apache.spark.sql.sources._
-
-    def isDateOrTimestampColumn(attribute: String): Boolean =
-      schema.fields.find(_.name == attribute).exists { field =>
-        field.dataType match {
-          case DateType | TimestampType => true
-          case _                        => false
-        }
-      }
-
-    def getColumnType(attribute: String): Option[DataType] =
-      schema.fields.find(_.name == attribute).map(_.dataType)
-
-    def parseTimestamp(value: Any, fromStats: Boolean): Option[Long] = value match {
-      case ts: java.sql.Timestamp =>
-        val epochSeconds = ts.getTime / 1000
-        Some(epochSeconds * 1000000 + ts.getNanos / 1000)
-      case s: String =>
-        try {
-          val micros = s.toLong
-          Some(micros)
-        } catch {
-          case _: NumberFormatException =>
-            try {
-              val instant = Instant.parse(s)
-              Some(instant.getEpochSecond * 1000000 + instant.getNano / 1000)
-            } catch {
-              case _: Exception =>
-                try {
-                  val ts           = java.sql.Timestamp.valueOf(s)
-                  val epochSeconds = ts.getTime / 1000
-                  Some(epochSeconds * 1000000 + ts.getNanos / 1000)
-                } catch { case _: Exception => None }
-            }
-        }
-      case l: Long => Some(if (fromStats) l else l * 1000)
-      case i: Int  => Some(i.toLong * 1000)
-      case _       => None
-    }
-
-    def parseDate(value: Any, fromStats: Boolean): Option[Long] = value match {
-      case d: java.sql.Date => Some(d.toLocalDate.toEpochDay)
-      case s: String =>
-        try {
-          val days = s.toLong
-          Some(days)
-        } catch {
-          case _: NumberFormatException =>
-            try Some(java.time.LocalDate.parse(s).toEpochDay)
-            catch {
-              case _: Exception =>
-                try Some(java.sql.Date.valueOf(s).toLocalDate.toEpochDay)
-                catch { case _: Exception => None }
-            }
-        }
-      case l: Long => Some(l)
-      case i: Int  => Some(i.toLong)
-      case _       => None
-    }
-
-    def parseValue(
-      value: Any,
-      dataType: DataType,
-      fromStats: Boolean
-    ): Option[Long] = dataType match {
-      case TimestampType => parseTimestamp(value, fromStats)
-      case DateType      => parseDate(value, fromStats)
-      case _             => None
-    }
-
-    filter match {
-      case GreaterThan(attribute, value) if isDateOrTimestampColumn(attribute) =>
-        (for {
-          dataType  <- getColumnType(attribute)
-          splitMin  <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal <- parseValue(value, dataType, fromStats = false)
-        } yield splitMin > filterVal).getOrElse(false)
-
-      case GreaterThanOrEqual(attribute, value) if isDateOrTimestampColumn(attribute) =>
-        (for {
-          dataType  <- getColumnType(attribute)
-          splitMin  <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal <- parseValue(value, dataType, fromStats = false)
-        } yield splitMin >= filterVal).getOrElse(false)
-
-      case LessThan(attribute, value) if isDateOrTimestampColumn(attribute) =>
-        (for {
-          dataType  <- getColumnType(attribute)
-          splitMax  <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal <- parseValue(value, dataType, fromStats = false)
-        } yield splitMax < filterVal).getOrElse(false)
-
-      case LessThanOrEqual(attribute, value) if isDateOrTimestampColumn(attribute) =>
-        (for {
-          dataType  <- getColumnType(attribute)
-          splitMax  <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal <- parseValue(value, dataType, fromStats = false)
-        } yield splitMax <= filterVal).getOrElse(false)
-
-      case And(left, right) =>
-        isRangeFilterRedundantByStats(left, minValues, maxValues, schema) &&
-        isRangeFilterRedundantByStats(right, minValues, maxValues, schema)
-
-      case _ => false
-    }
-  }
 }
 
 object SplitReaderContext {
