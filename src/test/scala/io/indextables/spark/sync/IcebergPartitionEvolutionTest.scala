@@ -29,7 +29,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec}
+import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
@@ -52,7 +52,8 @@ class IcebergPartitionEvolutionTest
     extends AnyFunSuite
     with Matchers
     with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
+    with io.indextables.spark.testutils.FileCleanupHelper
+    with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 
@@ -135,80 +136,6 @@ class IcebergPartitionEvolutionTest
     DriverSplitLocalityManager.clear()
   }
 
-  /** Write parquet rows and register as an unpartitioned Iceberg snapshot. */
-  private def appendSnapshot(
-    server: EmbeddedIcebergRestServer,
-    tableId: TableIdentifier,
-    rows: Seq[Row],
-    schema: StructType,
-    rootDir: File,
-    batchId: Int
-  ): Seq[String] = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
-    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
-
-    val parquetFiles = new File(parquetDir)
-      .listFiles()
-      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-
-    val table    = server.catalog.loadTable(tableId)
-    val appendOp = table.newAppend()
-    val paths    = parquetFiles.map { pf =>
-      val path = s"file://${pf.getAbsolutePath}"
-      appendOp.appendFile(
-        DataFiles
-          .builder(table.spec())
-          .withPath(path)
-          .withFileSizeInBytes(pf.length())
-          .withRecordCount(rows.size.toLong)
-          .withFormat(FileFormat.PARQUET)
-          .build()
-      )
-      path
-    }
-    appendOp.commit()
-    paths.toSeq
-  }
-
-  /** Write parquet rows and register as a partitioned Iceberg snapshot with a single partition path. */
-  private def appendPartitioned(
-    server: EmbeddedIcebergRestServer,
-    tableId: TableIdentifier,
-    rootDir: File,
-    batchId: Int,
-    partitionPath: String,
-    rows: Seq[Row],
-    schema: StructType
-  ): Seq[String] = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
-    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
-
-    val parquetFiles = new File(parquetDir)
-      .listFiles()
-      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-
-    val table    = server.catalog.loadTable(tableId)
-    val appendOp = table.newAppend()
-    val paths    = parquetFiles.map { pf =>
-      val path = s"file://${pf.getAbsolutePath}"
-      appendOp.appendFile(
-        DataFiles
-          .builder(table.spec())
-          .withPath(path)
-          .withFileSizeInBytes(pf.length())
-          .withRecordCount(rows.size.toLong)
-          .withFormat(FileFormat.PARQUET)
-          .withPartitionPath(partitionPath)
-          .build()
-      )
-      path
-    }
-    appendOp.commit()
-    paths.toSeq
-  }
-
   private def syncIceberg(tableName: String, indexPath: String): Row = {
     val result = spark
       .sql(s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.$tableName' AT LOCATION '$indexPath'")
@@ -271,7 +198,7 @@ class IcebergPartitionEvolutionTest
         Row(2L, "bob", 90.5, "us-west"),
         Row(3L, "carol", 78.2, "eu-west")
       )
-      appendSnapshot(server, tableId, unpartRows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, unpartRows, sparkSchema, root, 1)
 
       // First sync
       val row1 = syncIceberg("unpart_to_part", indexPath)
@@ -282,10 +209,10 @@ class IcebergPartitionEvolutionTest
       table.updateSpec().addField("region").commit()
 
       // Append 3 more rows WITH partition paths
-      appendPartitioned(server, tableId, root, 2, "region=us-east",
-        Seq(Row(4L, "dave", 92.1, "us-east"), Row(5L, "eve", 88.3, "us-east")), sparkSchema)
-      appendPartitioned(server, tableId, root, 3, "region=us-west",
-        Seq(Row(6L, "frank", 77.0, "us-west")), sparkSchema)
+      appendIcebergSnapshot(server, tableId,
+        Seq(Row(4L, "dave", 92.1, "us-east"), Row(5L, "eve", 88.3, "us-east")), sparkSchema, root, 2, partitionPath = Some("region=us-east"))
+      appendIcebergSnapshot(server, tableId,
+        Seq(Row(6L, "frank", 77.0, "us-west")), sparkSchema, root, 3, partitionPath = Some("region=us-west"))
 
       flushCaches()
 
@@ -319,15 +246,15 @@ class IcebergPartitionEvolutionTest
       server.catalog.buildTable(tableId, icebergSchemaWithYear).withPartitionSpec(spec).create()
 
       // Append data partitioned by region
-      appendPartitioned(server, tableId, root, 1, "region=us-east",
+      appendIcebergSnapshot(server, tableId,
         Seq(
           Row(1L, "alice", 85.0, "us-east", "2025"),
           Row(2L, "bob", 90.5, "us-east", "2025")
-        ), sparkSchemaWithYear)
-      appendPartitioned(server, tableId, root, 2, "region=us-west",
+        ), sparkSchemaWithYear, root, 1, partitionPath = Some("region=us-east"))
+      appendIcebergSnapshot(server, tableId,
         Seq(
           Row(3L, "carol", 78.2, "us-west", "2025")
-        ), sparkSchemaWithYear)
+        ), sparkSchemaWithYear, root, 2, partitionPath = Some("region=us-west"))
 
       // First sync
       val row1 = syncIceberg("add_second_part", indexPath)
@@ -338,15 +265,15 @@ class IcebergPartitionEvolutionTest
       table.updateSpec().addField("year").commit()
 
       // Append data with both partitions
-      appendPartitioned(server, tableId, root, 3, "region=us-east/year=2026",
+      appendIcebergSnapshot(server, tableId,
         Seq(
           Row(4L, "dave", 92.1, "us-east", "2026"),
           Row(5L, "eve", 88.3, "us-east", "2026")
-        ), sparkSchemaWithYear)
-      appendPartitioned(server, tableId, root, 4, "region=eu-west/year=2026",
+        ), sparkSchemaWithYear, root, 3, partitionPath = Some("region=us-east/year=2026"))
+      appendIcebergSnapshot(server, tableId,
         Seq(
           Row(6L, "frank", 77.0, "eu-west", "2026")
-        ), sparkSchemaWithYear)
+        ), sparkSchemaWithYear, root, 4, partitionPath = Some("region=eu-west/year=2026"))
 
       flushCaches()
 
@@ -384,17 +311,17 @@ class IcebergPartitionEvolutionTest
         Row(2L, "bob", 90.5, "us-west"),
         Row(3L, "carol", 78.2, "eu-west")
       )
-      appendSnapshot(server, tableId, unpartRows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, unpartRows, sparkSchema, root, 1)
 
       // Evolve spec to add "region" partition
       val table = server.catalog.loadTable(tableId)
       table.updateSpec().addField("region").commit()
 
       // Append 3 more rows (with region partition)
-      appendPartitioned(server, tableId, root, 2, "region=us-east",
-        Seq(Row(4L, "dave", 92.1, "us-east"), Row(5L, "eve", 88.3, "us-east")), sparkSchema)
-      appendPartitioned(server, tableId, root, 3, "region=eu-west",
-        Seq(Row(6L, "frank", 77.0, "eu-west")), sparkSchema)
+      appendIcebergSnapshot(server, tableId,
+        Seq(Row(4L, "dave", 92.1, "us-east"), Row(5L, "eve", 88.3, "us-east")), sparkSchema, root, 2, partitionPath = Some("region=us-east"))
+      appendIcebergSnapshot(server, tableId,
+        Seq(Row(6L, "frank", 77.0, "eu-west")), sparkSchema, root, 3, partitionPath = Some("region=eu-west"))
 
       // Sync ONCE (covers files from both partition specs)
       val row = syncIceberg("mixed_specs", indexPath)

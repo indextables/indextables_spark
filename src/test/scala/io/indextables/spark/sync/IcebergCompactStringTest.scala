@@ -24,7 +24,6 @@ import java.util.Collections
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 
-import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
@@ -45,7 +44,8 @@ class IcebergCompactStringTest
     extends AnyFunSuite
     with Matchers
     with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
+    with io.indextables.spark.testutils.FileCleanupHelper
+    with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 
@@ -128,42 +128,6 @@ class IcebergCompactStringTest
     DriverSplitLocalityManager.clear()
   }
 
-  /** Write parquet rows and register as an Iceberg snapshot. */
-  private def appendSnapshot(
-    server: EmbeddedIcebergRestServer,
-    tableId: TableIdentifier,
-    rows: Seq[Row],
-    schema: StructType,
-    rootDir: File,
-    batchId: Int
-  ): Seq[String] = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
-    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
-
-    val parquetFiles = new File(parquetDir)
-      .listFiles()
-      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-
-    val table    = server.catalog.loadTable(tableId)
-    val appendOp = table.newAppend()
-    val paths    = parquetFiles.map { pf =>
-      val path = s"file://${pf.getAbsolutePath}"
-      appendOp.appendFile(
-        DataFiles
-          .builder(table.spec())
-          .withPath(path)
-          .withFileSizeInBytes(pf.length())
-          .withRecordCount(rows.size.toLong)
-          .withFormat(FileFormat.PARQUET)
-          .build()
-      )
-      path
-    }
-    appendOp.commit()
-    paths.toSeq
-  }
-
   private def syncIceberg(tableName: String, indexPath: String, indexingModes: String = ""): Row = {
     val modeClause = if (indexingModes.nonEmpty) s" INDEXING MODES ($indexingModes)" else ""
     val result = spark
@@ -219,7 +183,7 @@ class IcebergCompactStringTest
   test("exact_only mode should support equality filter on Iceberg companion") {
     withIcebergTable("exact_only_ice") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val row = syncIceberg("exact_only_ice", indexPath, "'trace_id':'exact_only'")
       row.getString(2) shouldBe "success"
@@ -238,7 +202,7 @@ class IcebergCompactStringTest
   test("text_uuid_exactonly mode should index text and preserve UUIDs") {
     withIcebergTable("text_uuid_exactonly_ice") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val row = syncIceberg("text_uuid_exactonly_ice", indexPath, "'message':'text_uuid_exactonly'")
       row.getString(2) shouldBe "success"
@@ -265,7 +229,7 @@ class IcebergCompactStringTest
   test("text_uuid_strip mode should index text but strip UUIDs") {
     withIcebergTable("text_uuid_strip_ice") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val row = syncIceberg("text_uuid_strip_ice", indexPath, "'message':'text_uuid_strip'")
       row.getString(2) shouldBe "success"
@@ -292,7 +256,7 @@ class IcebergCompactStringTest
   test("multiple indexing modes on Iceberg companion") {
     withIcebergTable("multi_mode_ice") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val row = syncIceberg(
         "multi_mode_ice",

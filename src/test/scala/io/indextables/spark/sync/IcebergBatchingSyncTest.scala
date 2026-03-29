@@ -24,7 +24,6 @@ import java.util.Collections
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 
-import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
@@ -44,7 +43,8 @@ class IcebergBatchingSyncTest
     extends AnyFunSuite
     with Matchers
     with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
+    with io.indextables.spark.testutils.FileCleanupHelper
+    with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 
@@ -117,41 +117,6 @@ class IcebergBatchingSyncTest
       .getOrElse(0)
   }
 
-  /** Write parquet rows and register as an Iceberg snapshot. Returns paths of registered data files. */
-  private def appendSnapshot(
-    server: EmbeddedIcebergRestServer,
-    tableId: TableIdentifier,
-    rows: Seq[Row],
-    rootDir: File,
-    batchId: Int
-  ): Seq[String] = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
-    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), sparkSchema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
-
-    val parquetFiles = new File(parquetDir)
-      .listFiles()
-      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-
-    val table    = server.catalog.loadTable(tableId)
-    val appendOp = table.newAppend()
-    val paths    = parquetFiles.map { pf =>
-      val path = s"file://${pf.getAbsolutePath}"
-      appendOp.appendFile(
-        DataFiles
-          .builder(table.spec())
-          .withPath(path)
-          .withFileSizeInBytes(pf.length())
-          .withRecordCount(rows.size.toLong)
-          .withFormat(FileFormat.PARQUET)
-          .build()
-      )
-      path
-    }
-    appendOp.commit()
-    paths.toSeq
-  }
-
   private def syncIcebergWithTargetSize(tableName: String, indexPath: String, targetSize: String = "1M"): Row = {
     val result = spark.sql(
       s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.$tableName' TARGET INPUT SIZE $targetSize AT LOCATION '$indexPath'"
@@ -204,7 +169,7 @@ class IcebergBatchingSyncTest
 
       // Create 4 separate snapshots (1 file each via coalesce(1))
       for (i <- 1 to 4)
-        appendSnapshot(server, tableId, makeBatch(i * 10, 1), root, i)
+        appendIcebergSnapshot(server, tableId, makeBatch(i * 10, 1), sparkSchema, root, i)
 
       // Force batchSize=1 so each indexing task is its own batch (= its own commit)
       // TARGET INPUT SIZE 1 forces each parquet file into its own indexing group
@@ -228,7 +193,7 @@ class IcebergBatchingSyncTest
 
       // Create 4 separate snapshots (1 file each via coalesce(1))
       for (i <- 1 to 4)
-        appendSnapshot(server, tableId, makeBatch(i * 10, 1), root, i)
+        appendIcebergSnapshot(server, tableId, makeBatch(i * 10, 1), sparkSchema, root, i)
 
       // Force sequential execution: 1 batch at a time, 1 task per batch
       spark.conf.set("spark.indextables.companion.sync.batchSize", "1")
@@ -255,7 +220,7 @@ class IcebergBatchingSyncTest
 
       // Create 4 separate snapshots (1 file each via coalesce(1))
       for (i <- 1 to 4)
-        appendSnapshot(server, tableId, makeBatch(i * 10, 1), root, i)
+        appendIcebergSnapshot(server, tableId, makeBatch(i * 10, 1), sparkSchema, root, i)
 
       // Build with default config (larger batch size groups tasks together)
       val row1 = syncIcebergWithTargetSize("batch_default", indexPath1, "1")
@@ -285,7 +250,7 @@ class IcebergBatchingSyncTest
 
       // Create 4 separate snapshots (1 file each via coalesce(1))
       for (i <- 1 to 4)
-        appendSnapshot(server, tableId, makeBatch(i * 10, 1), root, i)
+        appendIcebergSnapshot(server, tableId, makeBatch(i * 10, 1), sparkSchema, root, i)
 
       // Initial sync (all 4 files)
       val row1 = syncIcebergWithTargetSize("batch_incr", indexPath, "1")
@@ -295,7 +260,7 @@ class IcebergBatchingSyncTest
 
       // Append 3 more snapshots
       for (i <- 5 to 7)
-        appendSnapshot(server, tableId, makeBatch(i * 10, 1), root, i)
+        appendIcebergSnapshot(server, tableId, makeBatch(i * 10, 1), sparkSchema, root, i)
 
       flushCaches()
 

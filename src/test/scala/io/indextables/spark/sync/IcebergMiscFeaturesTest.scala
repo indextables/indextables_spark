@@ -26,7 +26,6 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
-import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
@@ -44,7 +43,8 @@ class IcebergMiscFeaturesTest
     extends AnyFunSuite
     with Matchers
     with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
+    with io.indextables.spark.testutils.FileCleanupHelper
+    with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 
@@ -113,42 +113,6 @@ class IcebergMiscFeaturesTest
     import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
     GlobalSplitCacheManager.flushAllCaches()
     DriverSplitLocalityManager.clear()
-  }
-
-  /** Write parquet rows and register as an Iceberg snapshot. Returns paths of registered data files. */
-  private def appendSnapshot(
-    server: EmbeddedIcebergRestServer,
-    tableId: TableIdentifier,
-    rows: Seq[Row],
-    schema: StructType,
-    rootDir: File,
-    batchId: Int
-  ): Seq[String] = {
-    val parquetDir = new File(rootDir, s"parquet-data/batch-$batchId").getAbsolutePath
-    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
-    df.coalesce(1).write.parquet(s"file://$parquetDir")
-
-    val parquetFiles = new File(parquetDir)
-      .listFiles()
-      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-
-    val table    = server.catalog.loadTable(tableId)
-    val appendOp = table.newAppend()
-    val paths    = parquetFiles.map { pf =>
-      val path = s"file://${pf.getAbsolutePath}"
-      appendOp.appendFile(
-        DataFiles
-          .builder(table.spec())
-          .withPath(path)
-          .withFileSizeInBytes(pf.length())
-          .withRecordCount(rows.size.toLong)
-          .withFormat(FileFormat.PARQUET)
-          .build()
-      )
-      path
-    }
-    appendOp.commit()
-    paths.toSeq
   }
 
   private def syncIceberg(tableName: String, indexPath: String): Row = {
@@ -240,7 +204,7 @@ class IcebergMiscFeaturesTest
   test("write to Iceberg companion table should be rejected") {
     withIcebergTable("write_guard") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, testRows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, testRows, sparkSchema, root, 1)
 
       // Build companion
       syncIceberg("write_guard", indexPath).getString(2) shouldBe "success"
@@ -266,7 +230,7 @@ class IcebergMiscFeaturesTest
   test("FASTFIELDS MODE DISABLED should store mode in companion splits") {
     withIcebergTable("ff_disabled") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, testRows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, testRows, sparkSchema, root, 1)
 
       spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.ff_disabled' FASTFIELDS MODE DISABLED AT LOCATION '$indexPath'"
@@ -282,7 +246,7 @@ class IcebergMiscFeaturesTest
   test("FASTFIELDS MODE PARQUET_ONLY should store mode in companion splits") {
     withIcebergTable("ff_parquet_only") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, testRows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, testRows, sparkSchema, root, 1)
 
       spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.ff_parquet_only' FASTFIELDS MODE PARQUET_ONLY AT LOCATION '$indexPath'"
@@ -299,7 +263,7 @@ class IcebergMiscFeaturesTest
     for (mode <- Seq("HYBRID", "DISABLED", "PARQUET_ONLY")) {
       withIcebergTable(s"ff_$mode") { (server, tableId, root, indexPath) =>
         server.catalog.buildTable(tableId, icebergSchema).create()
-        appendSnapshot(server, tableId, testRows, sparkSchema, root, 1)
+        appendIcebergSnapshot(server, tableId, testRows, sparkSchema, root, 1)
 
         spark.sql(
           s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.ff_$mode' FASTFIELDS MODE $mode AT LOCATION '$indexPath'"
@@ -324,7 +288,7 @@ class IcebergMiscFeaturesTest
         Row(2L, "bob", 90.5),
         Row(3L, "carol", 75.0)
       )
-      appendSnapshot(server, tableId, rows1, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows1, sparkSchema, root, 1)
       val snap1Id = server.catalog.loadTable(tableId).currentSnapshot().snapshotId()
 
       // Snapshot 2: 2 more rows
@@ -332,7 +296,7 @@ class IcebergMiscFeaturesTest
         Row(4L, "dave", 80.0),
         Row(5L, "eve", 88.3)
       )
-      appendSnapshot(server, tableId, rows2, sparkSchema, root, 2)
+      appendIcebergSnapshot(server, tableId, rows2, sparkSchema, root, 2)
       val snap2Id = server.catalog.loadTable(tableId).currentSnapshot().snapshotId()
       snap2Id should not equal snap1Id
 
@@ -352,7 +316,7 @@ class IcebergMiscFeaturesTest
   test("FROM SNAPSHOT with non-existent snapshot should return error") {
     withIcebergTable("bad_snapshot") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
-      appendSnapshot(server, tableId, testRows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, testRows, sparkSchema, root, 1)
 
       val result = spark.sql(
         s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.bad_snapshot' FROM SNAPSHOT 9999999999999 AT LOCATION '$indexPath'"

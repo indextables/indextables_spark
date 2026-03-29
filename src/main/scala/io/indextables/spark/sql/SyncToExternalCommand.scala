@@ -313,7 +313,6 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            // fromSnapshot is time-travel: build the companion from the state at that specific snapshot.
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
               ns,

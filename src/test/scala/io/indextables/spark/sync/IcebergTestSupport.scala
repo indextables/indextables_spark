@@ -17,11 +17,15 @@
 
 package io.indextables.spark.sync
 
+import java.io.File
 import java.nio.file.{Files, Paths}
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.types.StructType
+import org.apache.iceberg.{DataFiles, FileFormat}
+import org.apache.iceberg.catalog.TableIdentifier
 
 /**
  * Configuration for an Iceberg catalog test endpoint.
@@ -220,5 +224,58 @@ trait IcebergTestSupport {
       try spark.conf.unset(key)
       catch { case _: Exception => }
     }
+  }
+}
+
+/**
+ * Shared helper for appending parquet files to an Iceberg table in tests.
+ *
+ * Writes to a staging directory then moves files into a common `data/` directory so
+ * `extractTableBasePath()` derives the correct storage root for companion reads.
+ */
+trait IcebergSnapshotHelper {
+  protected def spark: SparkSession
+
+  def appendIcebergSnapshot(
+    server: EmbeddedIcebergRestServer,
+    tableId: TableIdentifier,
+    rows: Seq[Row],
+    schema: StructType,
+    rootDir: File,
+    batchId: Int,
+    partitionPath: Option[String] = None
+  ): Seq[String] = {
+    val stagingDir = new File(rootDir, s"staging/batch-$batchId")
+    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+    df.coalesce(1).write.parquet(s"file://${stagingDir.getAbsolutePath}")
+
+    val dataDir = new File(rootDir, "data")
+    dataDir.mkdirs()
+
+    val parquetFiles = stagingDir
+      .listFiles()
+      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
+      .map { src =>
+        val dest = new File(dataDir, src.getName)
+        java.nio.file.Files.move(src.toPath, dest.toPath)
+        dest
+      }
+
+    val table    = server.catalog.loadTable(tableId)
+    val appendOp = table.newAppend()
+    val paths = parquetFiles.map { pf =>
+      val path = s"file://${pf.getAbsolutePath}"
+      val builder = DataFiles
+        .builder(table.spec())
+        .withPath(path)
+        .withFileSizeInBytes(pf.length())
+        .withRecordCount(rows.size.toLong)
+        .withFormat(FileFormat.PARQUET)
+      partitionPath.foreach(builder.withPartitionPath)
+      appendOp.appendFile(builder.build())
+      path
+    }
+    appendOp.commit()
+    paths.toSeq
   }
 }

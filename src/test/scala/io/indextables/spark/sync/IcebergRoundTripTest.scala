@@ -25,7 +25,7 @@ import java.util.Collections
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types._
 
-import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec}
+import org.apache.iceberg.{PartitionSpec}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
@@ -45,7 +45,8 @@ class IcebergRoundTripTest
     extends AnyFunSuite
     with Matchers
     with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
+    with io.indextables.spark.testutils.FileCleanupHelper
+    with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 
@@ -130,53 +131,6 @@ class IcebergRoundTripTest
         }
       }
     }
-  }
-
-  /** Write parquet rows and register as an Iceberg snapshot. Returns paths of registered data files. */
-  private def appendSnapshot(
-    server: EmbeddedIcebergRestServer,
-    tableId: TableIdentifier,
-    rows: Seq[Row],
-    schema: StructType,
-    rootDir: File,
-    batchId: Int,
-    partitionPath: Option[String] = None
-  ): Seq[String] = {
-    // Write parquet to a staging directory, then move files into the table's data/ directory.
-    // Real Iceberg tables keep all data files under a single data/ root — mirroring that layout
-    // ensures extractTableBasePath() derives the correct storage root for companion reads.
-    val stagingDir = new File(rootDir, s"staging/batch-$batchId")
-    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
-    df.coalesce(1).write.parquet(s"file://${stagingDir.getAbsolutePath}")
-
-    val dataDir = new File(rootDir, "data")
-    dataDir.mkdirs()
-
-    val parquetFiles = stagingDir
-      .listFiles()
-      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
-      .map { src =>
-        val dest = new File(dataDir, src.getName)
-        java.nio.file.Files.move(src.toPath, dest.toPath)
-        dest
-      }
-
-    val table    = server.catalog.loadTable(tableId)
-    val appendOp = table.newAppend()
-    val paths = parquetFiles.map { pf =>
-      val path = s"file://${pf.getAbsolutePath}"
-      val builder = DataFiles
-        .builder(table.spec())
-        .withPath(path)
-        .withFileSizeInBytes(pf.length())
-        .withRecordCount(rows.size.toLong)
-        .withFormat(FileFormat.PARQUET)
-      partitionPath.foreach(builder.withPartitionPath)
-      appendOp.appendFile(builder.build())
-      path
-    }
-    appendOp.commit()
-    paths.toSeq
   }
 
   private def syncIceberg(tableName: String, indexPath: String): Row = {
@@ -267,7 +221,7 @@ class IcebergRoundTripTest
         Row(5, "eve",     500L, 99.9,  true,  "epsilon")
       )
 
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val syncRow = syncIceberg("scalar_cols", indexPath)
       syncRow.getString(2) shouldBe "success"
@@ -303,7 +257,7 @@ class IcebergRoundTripTest
         Row(3, Date.valueOf("2024-12-25"), Timestamp.valueOf("2024-12-25 23:59:59"))
       )
 
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val syncRow = syncIceberg("date_ts_cols", indexPath)
       syncRow.getString(2) shouldBe "success"
@@ -339,7 +293,7 @@ class IcebergRoundTripTest
         Row(3, "charlie", Seq("rust", "go", "c"))
       )
 
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val syncRow = syncIceberg("array_col", indexPath)
       syncRow.getString(2) shouldBe "success"
@@ -394,7 +348,7 @@ class IcebergRoundTripTest
         Row(3, Row("Charlie", 35))
       )
 
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val syncRow = syncIceberg("struct_col", indexPath)
       syncRow.getString(2) shouldBe "success"
@@ -447,7 +401,7 @@ class IcebergRoundTripTest
         Row(3, "charlie", Map("color" -> "green", "size" -> "large", "weight" -> "heavy"))
       )
 
-      appendSnapshot(server, tableId, rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, rows, sparkSchema, root, 1)
 
       val syncRow = syncIceberg("map_col", indexPath)
       syncRow.getString(2) shouldBe "success"
@@ -503,21 +457,21 @@ class IcebergRoundTripTest
         Row(1, "alice", 85.5, true,  "us-east"),
         Row(2, "bob",   92.0, false, "us-east")
       )
-      appendSnapshot(server, tableId, usEastRows, sparkSchema, root, 1, partitionPath = Some("region=us-east"))
+      appendIcebergSnapshot(server, tableId, usEastRows, sparkSchema, root, 1, partitionPath = Some("region=us-east"))
 
       // us-west rows
       val usWestRows = Seq(
         Row(3, "charlie", 78.3,  true,  "us-west"),
         Row(4, "dave",    95.1,  false, "us-west")
       )
-      appendSnapshot(server, tableId, usWestRows, sparkSchema, root, 2, partitionPath = Some("region=us-west"))
+      appendIcebergSnapshot(server, tableId, usWestRows, sparkSchema, root, 2, partitionPath = Some("region=us-west"))
 
       // eu-west rows
       val euWestRows = Seq(
         Row(5, "eve",   88.8, true,  "eu-west"),
         Row(6, "frank", 70.0, false, "eu-west")
       )
-      appendSnapshot(server, tableId, euWestRows, sparkSchema, root, 3, partitionPath = Some("region=eu-west"))
+      appendIcebergSnapshot(server, tableId, euWestRows, sparkSchema, root, 3, partitionPath = Some("region=eu-west"))
 
       val syncRow = syncIceberg("partitioned_mixed", indexPath)
       syncRow.getString(2) shouldBe "success"
