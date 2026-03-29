@@ -313,10 +313,7 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            // For non-streaming syncs (fromSnapshot = None), read the last synced snapshot ID
-            // from companion metadata to enable the incremental fast-path. This allows:
-            // - "no_action" when the snapshot hasn't changed (same snapshot ID)
-            // - Full-scan anti-join when the snapshot has changed (correct deletion detection)
+            // Fall back to last synced snapshot for incremental fast-path.
             val effectiveFromSnapshot = fromSnapshot.orElse(readLastSyncedVersionFromLog(sparkSession))
             scanner.scanIcebergTable(
               effectiveCatalogName.getOrElse("default"),
@@ -702,6 +699,10 @@ case class SyncToExternalCommand(
           s"${splitsToInvalidate.size} splits to invalidate"
       )
 
+      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
+      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
+      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
+
       // 8b. Handle invalidation-only sync (splits to remove but no new files to index).
       // Without this, the remove actions would never be committed because
       // dispatchSyncTasksBatched only commits during batch processing.
@@ -715,26 +716,11 @@ case class SyncToExternalCommand(
           effectiveHfInclude,
           effectiveHfExclude,
           sourceVersion,
-          externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
+          externalStorageRoot
         )
         transactionLog.commitSyncActions(removeActions, Seq.empty, Some(metadataAction))
         transactionLog.invalidateCache()
-        val durationMs = System.currentTimeMillis() - startTime
-        return Seq(
-          Row(
-            destPath,
-            sourcePath,
-            "success",
-            sourceVersionLong,
-            0,
-            splitsToInvalidate.size,
-            0,
-            0L,
-            0L,
-            durationMs,
-            s"Invalidated ${splitsToInvalidate.size} stale splits"
-          )
-        )
+        return buildResultRow(Seq.empty, splitsToInvalidate.size, sourceVersion, startTime)
       }
 
       // 9. Pass raw merged config to executors for JIT credential resolution.
@@ -825,9 +811,6 @@ case class SyncToExternalCommand(
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
-      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
-      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
-      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
       dispatchSyncTasksBatched(
         sparkSession,
         groups,

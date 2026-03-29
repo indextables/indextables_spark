@@ -49,8 +49,7 @@ case class DistributedScanResult(
   isIncremental: Boolean = false,
   /**
    * Source file paths removed from the source table since the last sync (Delta only). Companion splits that indexed
-   * these files must be invalidated. Empty for full-scan results. Iceberg deletion detection uses the full-scan
-   * anti-join path instead of this field.
+   * these files must be invalidated. Empty for full-scan results and Iceberg (which uses the full-scan anti-join).
    */
   removedSourcePaths: Seq[String] = Seq.empty,
   /**
@@ -666,12 +665,7 @@ class DistributedSourceScanner(spark: SparkSession) {
         else None
       } catch { case _: Exception => None }
 
-    // ── Incremental fast-path ──────────────────────────────────────────────
-    // When fromSnapshotId is provided and matches the current snapshot, return an empty
-    // incremental result (triggers "no_action" in SyncToExternalCommand).
-    // When the snapshot has changed, fall through to the full scan below. The full-scan
-    // anti-join in SyncToExternalCommand correctly detects both new files and deleted files
-    // (files tracked by companion splits but absent from the current snapshot).
+    // ── Incremental fast-path: return empty result if snapshot unchanged ──
     fromSnapshotId match {
       case Some(fsnap) =>
         val currentSnapId = snapshotInfo.getSnapshotId
@@ -689,7 +683,6 @@ class DistributedSourceScanner(spark: SparkSession) {
             isIncremental = true
           )
         }
-        // Snapshot changed: fall through to full scan for correct deletion detection.
         logger.info(
           s"Iceberg incremental: snapshot changed ($fsnap -> $currentSnapId), " +
             s"using full scan for deletion detection"
