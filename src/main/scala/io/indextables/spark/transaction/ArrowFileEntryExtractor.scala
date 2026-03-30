@@ -17,6 +17,8 @@
 
 package io.indextables.spark.transaction
 
+import java.nio.charset.StandardCharsets.UTF_8
+
 import scala.jdk.CollectionConverters._
 
 import org.apache.arrow.vector._
@@ -91,7 +93,7 @@ object ArrowFileEntryExtractor {
       // Build partition values from the JSON column (index 19) which contains ALL partition values,
       // including undeclared ones. Dynamic partition:{name} columns are redundant but available.
       val partitionValues = if (!partitionValuesJsonVec.isNull(i)) {
-        val jsonStr = new String(partitionValuesJsonVec.get(i))
+        val jsonStr = new String(partitionValuesJsonVec.get(i), UTF_8)
         try {
           mapper.readValue(jsonStr, classOf[java.util.Map[String, String]]).asScala.toMap
         } catch {
@@ -130,7 +132,7 @@ object ArrowFileEntryExtractor {
       require(!pathVec.isNull(i), s"path column must not be null at row $i")
 
       result(i) = AddAction(
-        path = new String(pathVec.get(i)),
+        path = new String(pathVec.get(i), UTF_8),
         partitionValues = partitionValues,
         size = sizeVec.get(i),
         modificationTime = modTimeVec.get(i),
@@ -138,11 +140,11 @@ object ArrowFileEntryExtractor {
         stats = None,
         minValues = minValuesVec.flatMap { v =>
           if (v.isNull(i)) None
-          else Some(mapper.readValue(new String(v.get(i)), classOf[java.util.Map[String, String]]).asScala.toMap)
+          else Some(mapper.readValue(new String(v.get(i), UTF_8), classOf[java.util.Map[String, String]]).asScala.toMap)
         },
         maxValues = maxValuesVec.flatMap { v =>
           if (v.isNull(i)) None
-          else Some(mapper.readValue(new String(v.get(i)), classOf[java.util.Map[String, String]]).asScala.toMap)
+          else Some(mapper.readValue(new String(v.get(i), UTF_8), classOf[java.util.Map[String, String]]).asScala.toMap)
         },
         numRecords = if (numRecordsVec.isNull(i)) None else Some(numRecordsVec.get(i)),
         footerStartOffset = if (footerStartVec.isNull(i) || footerStartVec.get(i) <= 0) None else Some(footerStartVec.get(i)),
@@ -153,14 +155,14 @@ object ArrowFileEntryExtractor {
         deleteOpstamp = if (deleteOpstampVec.isNull(i)) None else Some(deleteOpstampVec.get(i)),
         splitTags = splitTags,
         numMergeOps = if (numMergeOpsVec.isNull(i)) None else Some(numMergeOpsVec.get(i)),
-        docMappingJson = if (docMappingJsonVec.isNull(i)) None else Some(new String(docMappingJsonVec.get(i))),
-        docMappingRef = if (docMappingRefVec.isNull(i)) None else Some(new String(docMappingRefVec.get(i))),
+        docMappingJson = if (docMappingJsonVec.isNull(i)) None else Some(new String(docMappingJsonVec.get(i), UTF_8)),
+        docMappingRef = if (docMappingRefVec.isNull(i)) None else Some(new String(docMappingRefVec.get(i), UTF_8)),
         uncompressedSizeBytes = if (uncompressedSizeVec.isNull(i)) None else Some(uncompressedSizeVec.get(i)),
         timeRangeStart = if (timeRangeStartVec.isNull(i)) None else Some(timeRangeStartVec.get(i).toString),
         timeRangeEnd = if (timeRangeEndVec.isNull(i)) None else Some(timeRangeEndVec.get(i).toString),
         companionSourceFiles = companionSourceFiles,
         companionDeltaVersion = if (companionDeltaVersionVec.isNull(i)) None else Some(companionDeltaVersionVec.get(i)),
-        companionFastFieldMode = if (companionFastFieldModeVec.isNull(i)) None else Some(new String(companionFastFieldModeVec.get(i)))
+        companionFastFieldMode = if (companionFastFieldModeVec.isNull(i)) None else Some(new String(companionFastFieldModeVec.get(i), UTF_8))
       )
 
       i += 1

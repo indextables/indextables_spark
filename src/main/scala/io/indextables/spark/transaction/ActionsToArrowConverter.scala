@@ -20,6 +20,7 @@ package io.indextables.spark.transaction
 import scala.jdk.CollectionConverters._
 
 import org.apache.arrow.c.{ArrowArray, ArrowSchema, Data}
+import org.slf4j.LoggerFactory
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector._
 import org.apache.arrow.vector.complex.ListVector
@@ -40,6 +41,7 @@ import io.indextables.spark.util.JsonUtil
  */
 object ActionsToArrowConverter {
 
+  private val logger = LoggerFactory.getLogger(ActionsToArrowConverter.getClass)
   private val mapper = JsonUtil.mapper
   private val allocator: BufferAllocator = ArrowFfiBridge.allocator
 
@@ -137,10 +139,16 @@ object ActionsToArrowConverter {
           a.docMappingRef.foreach(s => setString(docMappingRefVec, i, s))
           a.uncompressedSizeBytes.foreach(uncompressedSizeVec.setSafe(i, _))
           a.timeRangeStart.foreach { t =>
-            try { timeRangeStartVec.setSafe(i, t.toLong) } catch { case _: NumberFormatException => }
+            try { timeRangeStartVec.setSafe(i, t.toLong) } catch {
+              case _: NumberFormatException =>
+                logger.warn(s"Cannot parse timeRangeStart '$t' as Long for ${a.path}, time-based pruning disabled for this split")
+            }
           }
           a.timeRangeEnd.foreach { t =>
-            try { timeRangeEndVec.setSafe(i, t.toLong) } catch { case _: NumberFormatException => }
+            try { timeRangeEndVec.setSafe(i, t.toLong) } catch {
+              case _: NumberFormatException =>
+                logger.warn(s"Cannot parse timeRangeEnd '$t' as Long for ${a.path}, time-based pruning disabled for this split")
+            }
           }
           a.companionDeltaVersion.foreach(companionDeltaVersionVec.setSafe(i, _))
           a.companionFastFieldMode.foreach(s => setString(companionFastFieldModeVec, i, s))

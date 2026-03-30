@@ -127,7 +127,7 @@ class PurgeOrphanedSplitsExecutor(
                   ].getValueVector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
                   var i = 0
                   while (i < rowCount) {
-                    if (!pathVec.isNull(i)) paths += new String(pathVec.get(i))
+                    if (!pathVec.isNull(i)) paths += new String(pathVec.get(i), java.nio.charset.StandardCharsets.UTF_8)
                     i += 1
                   }
                 } finally {

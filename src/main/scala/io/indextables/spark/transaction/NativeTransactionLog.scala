@@ -443,11 +443,11 @@ class NativeTransactionLog(
     val cached = cachedParsedSchema
     if (cached != null) return cached
     val result = withSnapshot[Option[StructType]](None) { snapshot =>
-      val metadataJson = snapshot.getMetadataJson
-      if (metadataJson == null || metadataJson.isEmpty) return None
-      val metadata = parseMetadataJson(metadataJson)
-      if (metadata.schemaString == null || metadata.schemaString.isEmpty) None
-      else Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
+      Option(snapshot.getMetadataJson).filter(_.nonEmpty).flatMap { metadataJson =>
+        val metadata = parseMetadataJson(metadataJson)
+        if (metadata.schemaString == null || metadata.schemaString.isEmpty) None
+        else Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
+      }
     }
     cachedParsedSchema = result
     result
