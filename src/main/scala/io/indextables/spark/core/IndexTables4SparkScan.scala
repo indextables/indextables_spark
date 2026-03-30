@@ -63,7 +63,7 @@ class IndexTables4SparkScan(
   // Set via enableMetricsCollection() for testing/monitoring
   private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
 
-  // Data skipping metrics for Spark UI reporting (captured during applyDataSkipping)
+  // Data skipping metrics for Spark UI reporting (captured from native filtering metrics)
   @volatile private var lastScanTotalFiles: Long           = 0L
   @volatile private var lastScanPartitionPrunedFiles: Long = 0L
   @volatile private var lastScanDataSkippedFiles: Long     = 0L
@@ -125,8 +125,6 @@ class IndexTables4SparkScan(
     result
   }
 
-  // Pre-computed filter hash for cache lookups (computed once in constructor)
-  // This avoids recomputing O(filters) hash on every cache lookup in applyDataSkipping
   /**
    * Get filtered actions from the lazy cache. Thread-safe via lazy val initialization.
    *
@@ -172,7 +170,7 @@ class IndexTables4SparkScan(
       }
     }
 
-    // Use cached filtered actions (avoids duplicate listFiles + applyDataSkipping calls)
+    // Use cached filtered actions (avoids duplicate native listFiles calls)
     val filteredActions = getFilteredActions()
 
     // Check if pre-warm is enabled (supports both old and new config paths)
@@ -449,7 +447,7 @@ class IndexTables4SparkScan(
     try {
       logger.info("Estimating statistics for IndexTables4Spark table")
 
-      // Use cached filtered actions (avoids duplicate listFiles + applyDataSkipping calls)
+      // Use cached filtered actions (avoids duplicate native listFiles calls)
       // This is the same filtered dataset that will be read, reused from planInputPartitions
       val filteredActions = getFilteredActions()
 

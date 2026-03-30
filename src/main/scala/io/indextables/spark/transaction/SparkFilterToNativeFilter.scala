@@ -57,8 +57,8 @@ object SparkFilterToNativeFilter {
     }
 
     // All non-partition filters are passed as data filters for native can_skip_by_stats.
-    // The native layer handles type-aware comparison via the fieldTypesJson parameter
-    // (date→epoch days, timestamp→epoch microseconds, numeric, string fallback).
+    // toStatCompatibleString converts filter values to match stat storage format
+    // (Timestamp→epoch micros, Date→ISO string). Native does numeric or string comparison.
     (partF.toSeq, nonPartF.toSeq)
   }
 

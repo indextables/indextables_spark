@@ -51,15 +51,19 @@ object ActionsToArrowConverter {
    */
   def exportAsFfi(actions: Seq[Action]): (ArrowArray, ArrowSchema, Long, Long) = {
     val root = buildVectorSchemaRoot(actions)
-
     val arrowArray = ArrowArray.allocateNew(allocator)
     val arrowSchema = ArrowSchema.allocateNew(allocator)
-
-    Data.exportVectorSchemaRoot(allocator, root, null, arrowArray, arrowSchema)
-
-    root.close()
-
-    (arrowArray, arrowSchema, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
+    try {
+      Data.exportVectorSchemaRoot(allocator, root, null, arrowArray, arrowSchema)
+      (arrowArray, arrowSchema, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
+    } catch {
+      case e: Exception =>
+        arrowArray.close()
+        arrowSchema.close()
+        throw e
+    } finally {
+      root.close() // always close root; caller owns arrowArray/arrowSchema on success
+    }
   }
 
   private def buildVectorSchemaRoot(actions: Seq[Action]): VectorSchemaRoot = {

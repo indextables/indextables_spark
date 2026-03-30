@@ -73,7 +73,7 @@ class NativeTransactionLog(
     // Without this, timestamp data skipping is conservative (never skips) — safe but suboptimal.
     try {
       val tz = org.apache.spark.sql.SparkSession.active.sessionState.conf.sessionLocalTimeZone
-      val offsetSeconds = java.util.TimeZone.getTimeZone(tz).getRawOffset / 1000
+      val offsetSeconds = java.util.TimeZone.getTimeZone(tz).getOffset(System.currentTimeMillis()) / 1000
       config.put("session.timezone.offset.seconds", offsetSeconds.toString)
     } catch {
       case _: Exception => // No active SparkSession (e.g., direct API usage) — skip
