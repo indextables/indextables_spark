@@ -89,7 +89,7 @@ object ArrowFfiWriteConfig {
     val config = ArrowFfiWriteConfig(
       batchSize = batchSize,
       heapSize = heapSize
-    )
+    ).validate()
 
     logger.info(s"ArrowFfiWriteConfig: batchSize=$batchSize")
     config

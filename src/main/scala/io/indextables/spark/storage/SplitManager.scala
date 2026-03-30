@@ -77,9 +77,11 @@ object SplitConversionThrottle {
    */
   def withThrottle[T](block: => T): T = {
     val sem = semaphore.getOrElse {
-      // Auto-initialize with conservative default if not explicitly configured
-      initialize(DEFAULT_MAX_PARALLELISM)
-      semaphore.get
+      // Auto-initialize inside the lock for thread safety
+      lock.synchronized {
+        if (semaphore.isEmpty) initialize(DEFAULT_MAX_PARALLELISM)
+        semaphore.get
+      }
     }
 
     sem.acquire()

@@ -215,13 +215,13 @@ class IndexTables4SparkWriterFactory(
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkWriterFactory])
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    logger.info(s"Creating writer for partition $partitionId, task $taskId")
+    logger.debug(s"Creating writer for partition $partitionId, task $taskId")
     if (partitionColumns.nonEmpty) {
-      logger.info(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
+      logger.debug(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
     }
 
     val arrowFfiConfig = io.indextables.spark.write.ArrowFfiWriteConfig.fromMap(serializedOptions)
-    logger.info(s"Using Arrow FFI write path (batchSize=${arrowFfiConfig.batchSize})")
+    logger.debug(s"Arrow FFI write path (batchSize=${arrowFfiConfig.batchSize})")
 
     new IndexTables4SparkArrowDataWriter(
       tablePath,
