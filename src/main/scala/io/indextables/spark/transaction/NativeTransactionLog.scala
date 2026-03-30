@@ -23,11 +23,14 @@ import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 import io.indextables.spark.util.JsonUtil
+import io.indextables.spark.arrow.ArrowFfiBridge
+import io.indextables.spark.stats.DataSkippingMetrics
 import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter, TxLogSnapshotInfo, WriteResult}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.slf4j.LoggerFactory
 
 /**
@@ -56,7 +59,7 @@ class NativeTransactionLog(
   /** Native table path string (with scheme normalization) */
   private val nativeTablePath: String = ConfigMapper.normalizeTablePath(tablePath)
 
-  /** Native config map (credentials + cache TTL + checkpoint interval) */
+  /** Native config map (credentials + cache TTL + checkpoint interval + timezone) */
   private val nativeConfig: java.util.Map[String, String] = {
     val config = ConfigMapper.toNativeConfig(options)
     // Pass cache TTL from Spark config to native layer
@@ -65,11 +68,24 @@ class NativeTransactionLog(
     // Pass checkpoint interval to native layer for auto-checkpoint
     val checkpointInterval = options.getInt("spark.indextables.checkpoint.interval", 10)
     config.put("checkpoint_interval", checkpointInterval.toString)
+    // Pass session timezone offset for timestamp data skipping.
+    // Enables native compare_values_typed to parse bare datetime strings like "2025-11-07 05:00:00".
+    // Without this, timestamp data skipping is conservative (never skips) — safe but suboptimal.
+    try {
+      val tz = org.apache.spark.sql.SparkSession.active.sessionState.conf.sessionLocalTimeZone
+      val offsetSeconds = java.util.TimeZone.getTimeZone(tz).getOffset(System.currentTimeMillis()) / 1000
+      config.put("session.timezone.offset.seconds", offsetSeconds.toString)
+    } catch {
+      case _: Exception => // No active SparkSession (e.g., direct API usage) — skip
+    }
     config
   }
 
   /** Last retry metrics from the most recent write operation */
   @volatile private var lastRetryMetrics: Option[TxRetryMetrics] = None
+
+  /** Cached parsed table schema — invalidated on cache invalidation */
+  @volatile private var cachedParsedSchema: Option[StructType] = null // null = not yet computed
 
   // ------------------------------------------------------------------------------------
   // Lifecycle
@@ -129,8 +145,7 @@ class NativeTransactionLog(
 
   override def addFiles(addActions: Seq[AddAction]): Long = {
     assertTableWritable()
-    val addsJson = ActionJsonSerializer.addActionsToJson(addActions)
-    val result   = TransactionLogWriter.addFiles(nativeTablePath, nativeConfig, addsJson)
+    val result = writeActionsViaArrow(addActions, retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
@@ -138,7 +153,7 @@ class NativeTransactionLog(
   override def overwriteFiles(addActions: Seq[AddAction]): Long = {
     assertTableWritable()
     // overwriteFiles must re-read the file list on each retry attempt to capture
-    // files added by concurrent writers. Use writeVersionOnce in a manual retry loop.
+    // files added by concurrent writers. Use single-attempt in a manual retry loop.
     retryWithBackoff("overwrite files") { () =>
       val currentFiles = listFiles()
       val removeActions = currentFiles.map { f =>
@@ -153,8 +168,7 @@ class NativeTransactionLog(
         )
       }
       val actions: Seq[Action] = removeActions ++ addActions
-      val actionsJson          = ActionJsonSerializer.actionsToJsonLines(actions)
-      TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
+      writeActionsViaArrowOnce(actions)
     }
   }
 
@@ -168,16 +182,14 @@ class NativeTransactionLog(
       size = None,
       tags = None
     )
-    val actionsJson = ActionJsonSerializer.actionsToJsonLines(Seq(removeAction))
-    val result      = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
+    val result = writeActionsViaArrow(Seq(removeAction), retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
 
   override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
     val actions: Seq[Action] = removeActions ++ addActions
-    val actionsJson          = ActionJsonSerializer.actionsToJsonLines(actions)
-    val result               = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
+    val result = writeActionsViaArrow(actions, retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
@@ -188,8 +200,7 @@ class NativeTransactionLog(
     metadataUpdate: Option[MetadataAction]
   ): Long = {
     val actions: Seq[Action] = removeActions ++ addActions ++ metadataUpdate.toSeq
-    val actionsJson          = ActionJsonSerializer.actionsToJsonLines(actions)
-    val result               = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
+    val result = writeActionsViaArrow(actions, retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
@@ -199,16 +210,29 @@ class NativeTransactionLog(
     retryWithBackoff("commit metadata update") { () =>
       val currentMetadata = getMetadata()
       val updatedMetadata = transform(currentMetadata)
-      val actionsJson     = ActionJsonSerializer.actionsToJsonLines(Seq(updatedMetadata))
-      TransactionLogWriter.writeVersionOnce(nativeTablePath, nativeConfig, actionsJson)
+      writeActionsViaArrowOnce(Seq(updatedMetadata))
     }
 
   override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
-    val actionsJson = ActionJsonSerializer.actionsToJsonLines(removeActions)
-    val result      = TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
+    val result = writeActionsViaArrow(removeActions, retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
+
+  /** Write actions via Arrow FFI (unified schema with action_type discriminator). */
+  private def writeActionsViaArrow(actions: Seq[Action], retry: Boolean): WriteResult = {
+    val (arrowArray, arrowSchema, arrayAddr, schemaAddr) = ActionsToArrowConverter.exportAsFfi(actions)
+    try {
+      TransactionLogWriter.writeVersionArrowFfi(nativeTablePath, nativeConfig, arrayAddr, schemaAddr, retry)
+    } finally {
+      arrowArray.close()
+      arrowSchema.close()
+    }
+  }
+
+  /** Write actions via Arrow FFI, single attempt (for retryWithBackoff loops). */
+  private def writeActionsViaArrowOnce(actions: Seq[Action]): WriteResult =
+    writeActionsViaArrow(actions, retry = false)
 
   override def upgradeProtocol(newMinReaderVersion: Int, newMinWriterVersion: Int): Unit = {
     val autoUpgrade = options.getBoolean(ProtocolVersion.PROTOCOL_AUTO_UPGRADE, true)
@@ -232,56 +256,201 @@ class NativeTransactionLog(
   // Read Operations
   // ------------------------------------------------------------------------------------
 
-  override def listFiles(): Seq[AddAction] = withSnapshot[Seq[AddAction]](Seq.empty) { snapshot =>
+  override def listFiles(): Seq[AddAction] = {
     assertTableReadable()
-    val metadataConfigJson = extractMetadataConfigJson(snapshot)
-
-    // Read manifests (checkpoint state)
-    val manifestEntries = snapshot.getManifestPaths.asScala.flatMap { manifestPath =>
-      TransactionLogReader
-        .readManifest(nativeTablePath, nativeConfig, snapshot.getStateDir, manifestPath, metadataConfigJson)
-        .asScala
-    }
-
-    // Read post-checkpoint changes
-    val postCheckpointPaths = snapshot.getPostCheckpointPaths
-    val changes = if (postCheckpointPaths.isEmpty) {
-      None
-    } else {
-      val versionPathsJson = mapper.writeValueAsString(postCheckpointPaths)
-      Some(TransactionLogReader.readPostCheckpointChanges(nativeTablePath, nativeConfig, versionPathsJson, metadataConfigJson))
-    }
-
-    // Merge: checkpoint entries + added files - removed paths
-    val checkpointFiles = manifestEntries.map(AddActionConverter.toAddAction)
-    val addedFiles      = changes.map(c => AddActionConverter.toAddActions(c.getAddedFiles)).getOrElse(Seq.empty)
-    val removedPaths    = changes.map(_.getRemovedPaths.asScala.toSet).getOrElse(Set.empty)
-
-    val allFiles = (checkpointFiles ++ addedFiles).filterNot(f => removedPaths.contains(f.path))
-
-    // Restore schemas via deduplication registry
-    restoreSchemas(allFiles, snapshot)
+    // Include stats — admin commands, statistics, REPAIR need minValues/maxValues
+    listFilesArrow(
+      partitionFilters = null,
+      dataFilters = null,
+      excludeCooldown = false,
+      includeStats = true
+    ).files
   }
 
-  override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = {
-    val allFiles = listFiles()
-    if (partitionFilters.isEmpty) return allFiles
+  override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] =
+    listFilesWithAllFilters(partitionFilters, Seq.empty)
 
-    val partitionColumns = getPartitionColumns()
-    if (partitionColumns.isEmpty) return allFiles
+  override def listFilesWithAllFilters(partitionFilters: Seq[Filter], dataFilters: Seq[Filter]): Seq[AddAction] = {
+    // Data skipping already applied natively — no need to export stats back to JVM
+    listFilesArrow(
+      partitionFilters = SparkFilterToNativeFilter.convertOrNull(partitionFilters),
+      dataFilters = SparkFilterToNativeFilter.convertOrNull(dataFilters),
+      excludeCooldown = false,
+      includeStats = false
+    ).files
+  }
 
-    PartitionPruning.prunePartitions(allFiles, partitionColumns, partitionFilters.toArray)
+  /**
+   * List files with all filtering applied natively in a single JNI call.
+   * Returns files + table metadata + filtering metrics.
+   *
+   * Replaces the old multi-step pipeline:
+   * getSnapshotInfo → readManifest × N → readPostCheckpointChanges →
+   * JVM log replay → partition pruning → data skipping → cooldown filtering → schema restore
+   */
+  def listFilesWithMetadata(
+    partitionFilters: Seq[Filter],
+    dataFilters: Seq[Filter],
+    excludeCooldown: Boolean
+  ): NativeListFilesResult =
+    listFilesArrow(
+      partitionFilters = SparkFilterToNativeFilter.convertOrNull(partitionFilters),
+      dataFilters = SparkFilterToNativeFilter.convertOrNull(dataFilters),
+      excludeCooldown = excludeCooldown,
+      includeStats = false // scan path — data skipping already applied natively
+    )
+
+  /**
+   * List files excluding those in cooldown/skip state.
+   * Replaces the old pattern: listFiles() then filterFilesInCooldown().
+   */
+  def listFilesExcludingCooldown(filters: Seq[Filter] = Seq.empty): Seq[AddAction] = {
+    listFilesArrow(
+      partitionFilters = SparkFilterToNativeFilter.convertOrNull(filters),
+      dataFilters = null,
+      excludeCooldown = true,
+      includeStats = true // merge path needs full metadata
+    ).files
+  }
+
+  private def listFilesArrow(
+    partitionFilters: String,
+    dataFilters: String,
+    excludeCooldown: Boolean,
+    includeStats: Boolean
+  ): NativeListFilesResult = {
+    // Allocate Arrow FFI structs — generous upper bound since native determines actual columns.
+    // Native returns numColumns in result JSON; we only import that many.
+    // 20 base (including partition_values JSON col) + up to 20 partition cols + 2 stats = 42
+    val maxCols = 42
+    val bridge = new ArrowFfiBridge()
+    try {
+      val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
+
+      // Field types for type-aware data skipping are auto-extracted from
+      // MetadataAction.schema_string by the native layer — no JVM-side work needed.
+      val resultJson = try {
+        TransactionLogReader.listFilesArrowFfi(
+          nativeTablePath, nativeConfig,
+          partitionFilters,
+          dataFilters,
+          excludeCooldown,
+          includeStats,
+          arrayAddrs, schemaAddrs
+        )
+      } catch {
+        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
+          logger.debug(s"Table not yet initialized at $nativeTablePath")
+          null
+      }
+
+      if (resultJson == null) {
+        closeUnusedStructs(arrays, schemas, 0)
+        return NativeListFilesResult(
+          files = Seq.empty,
+          schema = None,
+          partitionColumns = Seq.empty,
+          protocol = ProtocolVersion.defaultProtocol(),
+          metadataConfig = Map.empty,
+          metrics = NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
+        )
+      }
+
+      // Parse result metadata
+      val resultNode = mapper.readTree(resultJson)
+      val numRows = resultNode.get("numRows").asLong()
+      val numColumns = resultNode.get("numColumns").asInt()
+
+      // Extract table metadata (eliminates separate getSchema/getPartitionColumns/getProtocol calls)
+      // schemaJson now returns the table data schema (MetadataAction.schema_string) in Spark StructType JSON format
+      val schemaJson = if (resultNode.has("schemaJson") && !resultNode.get("schemaJson").isNull)
+        resultNode.get("schemaJson").asText() else null
+      val schema = if (schemaJson != null && schemaJson.nonEmpty) {
+        Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+      } else None
+
+      val partitionColumns = if (resultNode.has("partitionColumns")) {
+        val arr = resultNode.get("partitionColumns")
+        (0 until arr.size()).map(i => arr.get(i).asText()).toSeq
+      } else Seq.empty
+
+      val protocol = if (resultNode.has("protocolJson") && !resultNode.get("protocolJson").isNull) {
+        mapper.readValue(resultNode.get("protocolJson").asText(), classOf[ProtocolAction])
+      } else ProtocolVersion.defaultProtocol()
+
+      val metadataConfig = if (resultNode.has("metadataConfigJson") && !resultNode.get("metadataConfigJson").isNull) {
+        val configNode = mapper.readTree(resultNode.get("metadataConfigJson").asText())
+        val entries = scala.collection.mutable.Map[String, String]()
+        val it = configNode.fields()
+        while (it.hasNext) {
+          val entry = it.next()
+          entries.put(entry.getKey, entry.getValue.asText())
+        }
+        entries.toMap
+      } else Map.empty[String, String]
+
+      // Extract filtering metrics
+      val metricsNode = resultNode.get("metrics")
+      val metrics = if (metricsNode != null) {
+        NativeFilteringMetrics(
+          totalFilesBeforeFiltering = metricsNode.get("totalFilesBeforeFiltering").asLong(),
+          filesAfterPartitionPruning = metricsNode.get("filesAfterPartitionPruning").asLong(),
+          filesAfterDataSkipping = metricsNode.get("filesAfterDataSkipping").asLong(),
+          filesAfterCooldownFiltering = metricsNode.get("filesAfterCooldownFiltering").asLong(),
+          manifestsTotal = metricsNode.get("manifestsTotal").asLong(),
+          manifestsPruned = metricsNode.get("manifestsPruned").asLong()
+        )
+      } else NativeFilteringMetrics(0, 0, 0, 0, 0, 0)
+
+      // Import Arrow batch and extract AddAction objects (only for surviving files)
+      // Close unused Arrow structs that native didn't fill
+      val usedCols = if (numRows > 0 && numColumns > 0) numColumns else 0
+      closeUnusedStructs(arrays, schemas, usedCols)
+
+      val files = if (usedCols > 0) {
+        require(numRows <= Int.MaxValue, s"numRows $numRows exceeds Int.MaxValue")
+        val batch = bridge.importAsColumnarBatch(
+          arrays.take(numColumns),
+          schemas.take(numColumns),
+          numRows.toInt
+        )
+        try {
+          ArrowFileEntryExtractor.extract(batch, partitionColumns)
+        } finally {
+          batch.close()
+        }
+      } else {
+        Seq.empty
+      }
+
+      NativeListFilesResult(
+        files = files,
+        schema = schema,
+        partitionColumns = partitionColumns,
+        protocol = protocol,
+        metadataConfig = metadataConfig,
+        metrics = metrics
+      )
+    } finally {
+      bridge.close()
+    }
   }
 
   override def getTotalRowCount(): Long =
     listFiles().flatMap(_.numRecords).sum
 
-  override def getSchema(): Option[StructType] = withSnapshot[Option[StructType]](None) { snapshot =>
-    val metadataJson = snapshot.getMetadataJson
-    if (metadataJson == null || metadataJson.isEmpty) return None
-    val metadata = parseMetadataJson(metadataJson)
-    if (metadata.schemaString == null || metadata.schemaString.isEmpty) None
-    else Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
+  override def getSchema(): Option[StructType] = {
+    val cached = cachedParsedSchema
+    if (cached != null) return cached
+    val result = withSnapshot[Option[StructType]](None) { snapshot =>
+      Option(snapshot.getMetadataJson).filter(_.nonEmpty).flatMap { metadataJson =>
+        val metadata = parseMetadataJson(metadataJson)
+        if (metadata.schemaString == null || metadata.schemaString.isEmpty) None
+        else Some(DataType.fromJson(metadata.schemaString).asInstanceOf[StructType])
+      }
+    }
+    cachedParsedSchema = result
+    result
   }
 
   override def getPartitionColumns(): Seq[String] = withSnapshot[Seq[String]](Seq.empty) { snapshot =>
@@ -319,20 +488,15 @@ class NativeTransactionLog(
     if (checkEnabled) ProtocolVersion.validateWriterVersion(getProtocol())
   }
 
-  override def getCheckpointActions(): Option[Seq[Action]] = withSnapshot[Option[Seq[Action]]](None) { snapshot =>
-    if (snapshot.getManifestPaths.isEmpty) return None
-
-    val metadataConfigJson = extractMetadataConfigJson(snapshot)
-    val entries = snapshot.getManifestPaths.asScala.flatMap { manifestPath =>
-      TransactionLogReader
-        .readManifest(nativeTablePath, nativeConfig, snapshot.getStateDir, manifestPath, metadataConfigJson)
-        .asScala
-    }
-
-    val addActions = entries.map(AddActionConverter.toAddAction).toSeq
+  override def getCheckpointActions(): Option[Seq[Action]] = {
+    // Use listFiles (Arrow FFI path with stats) for file entries
+    val addActions = listFiles()
+    if (addActions.isEmpty) return None
 
     // Include protocol and metadata actions alongside file entries,
-    // since checkpoint represents the complete consolidated state
+    // since checkpoint represents the complete consolidated state.
+    // Note: RemoveActions and SkipActions are not included — they are
+    // only visible through readVersion() for individual version files.
     val protocol = getProtocol()
     val metadata = getMetadata()
     Some(Seq(protocol, metadata) ++ addActions)
@@ -413,8 +577,10 @@ class NativeTransactionLog(
   // Cache Management
   // ------------------------------------------------------------------------------------
 
-  override def invalidateCache(): Unit =
+  override def invalidateCache(): Unit = {
+    cachedParsedSchema = null
     TransactionLogReader.invalidateCache(nativeTablePath)
+  }
 
   override def getCacheStats(): Option[CacheStats] = {
     val expirationSecs = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)
@@ -500,62 +666,22 @@ class NativeTransactionLog(
   private def parseMetadataJson(metadataJson: String): MetadataAction =
     mapper.readValue(metadataJson, classOf[MetadataAction])
 
-  private def extractMetadataConfigJson(snapshot: TxLogSnapshotInfo): String = {
-    val metadataJson = snapshot.getMetadataJson
-    if (metadataJson == null || metadataJson.isEmpty) return null
-
-    try {
-      val metadata = parseMetadataJson(metadataJson)
-      if (metadata.configuration.isEmpty) return null
-
-      // Extract schema registry entries for manifest reads
-      val schemaKeyPrefix = "docMappingSchema."
-      val schemaEntries = metadata.configuration.filter { case (k, _) =>
-        k.startsWith(schemaKeyPrefix)
-      }
-      if (schemaEntries.isEmpty) return null
-
-      mapper.writeValueAsString(schemaEntries.asJava)
-    } catch {
-      case _: Exception => null
+  /** Close Arrow FFI structs that weren't consumed by importAsColumnarBatch. */
+  private def closeUnusedStructs(
+    arrays: Array[org.apache.arrow.c.ArrowArray],
+    schemas: Array[org.apache.arrow.c.ArrowSchema],
+    usedCount: Int
+  ): Unit = {
+    var i = usedCount
+    while (i < arrays.length) {
+      try { arrays(i).close() } catch { case _: Exception => }
+      try { schemas(i).close() } catch { case _: Exception => }
+      i += 1
     }
   }
 
-  private def restoreSchemas(files: Seq[AddAction], snapshot: TxLogSnapshotInfo): Seq[AddAction] = {
-    // Check if any files use schema dedup refs
-    val hasRefs = files.exists(_.docMappingRef.isDefined)
-    if (!hasRefs) return files
-
-    val metadataJson = snapshot.getMetadataJson
-    if (metadataJson == null) return files
-
-    try {
-      val metadata = parseMetadataJson(metadataJson)
-      val schemaKeyPrefix = "docMappingSchema."
-      val registry = metadata.configuration.collect {
-        case (key, value) if key.startsWith(schemaKeyPrefix) =>
-          key.stripPrefix(schemaKeyPrefix) -> value
-      }
-      if (registry.isEmpty) return files
-
-      files.map { file =>
-        file.docMappingRef match {
-          case Some(ref) if file.docMappingJson.isEmpty =>
-            registry.get(ref) match {
-              case Some(schema) => file.copy(docMappingJson = Some(schema))
-              case None         =>
-                logger.warn(s"Schema ref '$ref' not found in registry for file ${file.path}")
-                file
-            }
-          case _ => file
-        }
-      }
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to restore schemas from registry: ${e.getMessage}")
-        files
-    }
-  }
+  // extractMetadataConfigJson and restoreSchemas removed — native listFilesArrowFfi
+  // handles schema deduplication restoration (step 8 in the developer guide).
 
   private def parseActionsFromContent(content: String): Seq[Action] =
     content

@@ -141,6 +141,22 @@ trait TransactionLogInterface extends AutoCloseable {
   def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = listFiles()
 
   /**
+   * List visible files with both partition and data filters applied natively.
+   *
+   * Partition filters are evaluated against partition_values (exact match).
+   * Data filters are evaluated against min_values/max_values (range overlap / data skipping).
+   *
+   * @param partitionFilters
+   *   Filters on partition columns
+   * @param dataFilters
+   *   Non-partition filters for min/max data skipping
+   * @return
+   *   Sequence of add actions for files surviving both filter stages
+   */
+  def listFilesWithAllFilters(partitionFilters: Seq[Filter], dataFilters: Seq[Filter]): Seq[AddAction] =
+    listFilesWithPartitionFilters(partitionFilters) // Default: only partition filtering
+
+  /**
    * Gets the total row count across all visible files.
    *
    * This sums the record counts from all visible AddActions in the transaction log.
