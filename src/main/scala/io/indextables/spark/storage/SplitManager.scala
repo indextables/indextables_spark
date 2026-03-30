@@ -69,13 +69,17 @@ object SplitConversionThrottle {
     }
   }
 
+  private val DEFAULT_MAX_PARALLELISM = 1
+
   /**
    * Execute a block of code with throttling applied. Acquires a permit before execution and releases it after
-   * completion.
+   * completion. Auto-initializes with a conservative default (1) if not explicitly initialized.
    */
   def withThrottle[T](block: => T): T = {
     val sem = semaphore.getOrElse {
-      throw new IllegalStateException("SplitConversionThrottle not initialized. Call initialize() first.")
+      // Auto-initialize with conservative default if not explicitly configured
+      initialize(DEFAULT_MAX_PARALLELISM)
+      semaphore.get
     }
 
     sem.acquire()
