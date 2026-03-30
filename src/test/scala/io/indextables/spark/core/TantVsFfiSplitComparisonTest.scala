@@ -1,28 +1,15 @@
 package io.indextables.spark.core
 
-import scala.jdk.CollectionConverters._
-
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
-import org.apache.hadoop.fs.Path
-
-import io.indextables.spark.search.SplitSearchEngine
-import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
-import io.indextables.spark.util.SplitMetadataFactory
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitWildcardQuery}
 
 /**
  * Validates Arrow FFI split behavior:
- *   1. Wildcard queries (leading, trailing, contains) on splits 2. Partition column presence/absence in split schemas 3.
- *      Partition filters don't leak to tantivy on FFI splits (which don't index partition cols)
+ *   1. EndsWith/Contains pushdown on FFI-written splits
+ *   2. Partition filters don't leak to tantivy on FFI splits (which don't index partition cols)
  */
 class TantVsFfiSplitComparisonTest extends TestBase {
 
   private val format = INDEXTABLES_FORMAT
-
-  private def getTransactionLog(tablePath: String) =
-    TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
 
   test("End-to-end: FFI-written table supports EndsWith/Contains pushdown") {
     withTempPath { tempPath =>

@@ -71,8 +71,10 @@ object ArrowFfiWriteConfig {
 
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 
+  private val deprecatedKeyWarned = new java.util.concurrent.atomic.AtomicBoolean(false)
+
   private def warnIfDeprecatedKeyPresent(hasKey: String => Boolean): Unit =
-    if (hasKey(KEY_ENABLED_DEPRECATED)) {
+    if (hasKey(KEY_ENABLED_DEPRECATED) && deprecatedKeyWarned.compareAndSet(false, true)) {
       logger.warn(
         s"Configuration key '$KEY_ENABLED_DEPRECATED' is deprecated and ignored. " +
           "The legacy TANT batch write path has been removed; Arrow FFI is now the only write path. " +
