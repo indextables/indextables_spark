@@ -338,7 +338,8 @@ object GroupByColumnarReaderUtils {
     aggExprs: Array[AggregateFunc],
     dataGroupByCols: Array[String],
     schema: StructType,
-    columnTypes: Array[String] = Array.empty
+    columnTypes: Array[String] = Array.empty,
+    isRangeAggregation: Boolean = false
   ): ColumnarBatch = {
     val numRows = ffiBatch.numRows()
 
@@ -347,7 +348,7 @@ object GroupByColumnarReaderUtils {
       return createEmptyBatch(Math.max(numKeyColumns, 1) + aggExprs.length, dataGroupByCols, aggExprs, schema)
     }
 
-    val isRange = columnNames.contains("from") || columnNames.contains("to")
+    val isRange = isRangeAggregation || columnNames.contains("from") || columnNames.contains("to")
 
     val ffiKeyIndices = columnNames.zipWithIndex.collect {
       case (name, idx) if name == "key" || name.startsWith("key_") => idx
