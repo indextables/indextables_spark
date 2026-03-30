@@ -877,7 +877,7 @@ class IpAddressFieldTest extends TestBase {
     }
   }
 
-  test("IP address non-contiguous wildcard is rejected via filter pushdown") {
+  test("IP address non-contiguous wildcard throws at execution time") {
     withTempPath { tablePath =>
       val spark = this.spark
       import spark.implicits._
@@ -898,11 +898,11 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      // Non-contiguous wildcard 10.*.1.* cannot be represented as a single IP range
-      // (collapsing to [10.0.1.0, 10.255.1.255] would produce false positives).
-      // The filter-pushdown path treats the pattern as a literal term query, which
-      // matches no real IP address and returns an empty result set.
-      df.filter($"ip" === "10.*.1.*").collect().length shouldBe 0
+      // Non-contiguous wildcard 10.*.1.* is rejected by tantivy4java at execution time.
+      val ex = intercept[org.apache.spark.SparkException] {
+        df.filter($"ip" === "10.*.1.*").collect()
+      }
+      ex.getMessage should include("Non-contiguous IP wildcard")
     }
   }
 }

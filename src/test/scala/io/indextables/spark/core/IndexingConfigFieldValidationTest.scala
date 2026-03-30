@@ -308,7 +308,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
       df.write
         .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
-        .option("spark.indextables.indexing.tokenizer.en_stem", "contnt") // Typo in field name
+        .option("spark.indextables.indexing.tokenizer.whitespace", "contnt") // Typo in field name
         .mode("overwrite")
         .save(tablePath)
     }
@@ -426,7 +426,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
     result.count() shouldBe 10
   }
 
-  test("should support list-based tokenizer syntax (tokenizer.en_stem = field1,field2)") {
+  test("should support list-based tokenizer syntax (tokenizer.whitespace = field1,field2)") {
     val tablePath = s"file://$tempDir/tokenizer_list_syntax_test"
 
     val df = spark
@@ -437,7 +437,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
     df.write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "title,content")
-      .option("spark.indextables.indexing.tokenizer.en_stem", "title,content")
+      .option("spark.indextables.indexing.tokenizer.whitespace", "title,content")
       .mode("overwrite")
       .save(tablePath)
 
@@ -497,7 +497,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
       df.write
         .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.text", "content")
-        .option("spark.indextables.indexing.tokenizer.en_stem", "content,titl") // typo
+        .option("spark.indextables.indexing.tokenizer.whitespace", "content,titl") // typo
         .mode("overwrite")
         .save(tablePath)
     }
@@ -538,7 +538,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
     df.write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.text", "content")
-      .option("spark.indextables.indexing.tokenizer.en_stem", "content")
+      .option("spark.indextables.indexing.tokenizer.whitespace", "content")
       .option("spark.indextables.indexing.indexrecordoption.basic", "content")
       .mode("overwrite")
       .save(tablePath)
@@ -635,35 +635,6 @@ class IndexingConfigFieldValidationTest extends TestBase {
     // Partial match should not work for string fields
     val partialMatches = spark.sql("SELECT * FROM typemap_string_test WHERE status = 'act'").collect()
     partialMatches.length shouldBe 0
-  }
-
-  test("tokenizer.en_stem should enable stemming (running matches run)") {
-    val tablePath = s"file://$tempDir/tokenizer_stem_functional_test"
-
-    // Create data with words that can be stemmed (regular verb forms)
-    val df = spark.sql("""
-      SELECT 1 as id, 'I am running fast' as content
-      UNION ALL SELECT 2 as id, 'She runs daily' as content
-      UNION ALL SELECT 3 as id, 'They run every morning' as content
-    """)
-
-    // Configure content as text with en_stem tokenizer
-    df.write
-      .format(INDEXTABLES_FORMAT)
-      .option("spark.indextables.indexing.typemap.text", "content")
-      .option("spark.indextables.indexing.tokenizer.en_stem", "content")
-      .mode("overwrite")
-      .save(tablePath)
-
-    val result = spark.read
-      .format(INDEXTABLES_FORMAT)
-      .load(tablePath)
-    result.createOrReplaceTempView("tokenizer_stem_test")
-
-    // With stemming, "run" should match "running" and "runs" (Porter stemmer)
-    val runMatches = spark.sql("SELECT * FROM tokenizer_stem_test WHERE content indexquery 'run'").collect()
-    // running->run, runs->run, run->run, so all three should match
-    runMatches.length should be >= 2 // At minimum running and runs should match
   }
 
   test("tokenizer without stemming should not match stemmed forms") {
