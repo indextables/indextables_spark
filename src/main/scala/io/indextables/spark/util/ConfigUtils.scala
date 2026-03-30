@@ -407,7 +407,8 @@ object ConfigUtils {
    * This converts them to the standard protocols that the native layer expects.
    */
   private def normalizeStorageUrl(url: String): String =
-    if (url.startsWith("s3a://")) url.replaceFirst("s3a://", "s3://")
+    if (url.startsWith("file:")) CloudPathUtils.stripFileScheme(url)
+    else if (url.startsWith("s3a://")) url.replaceFirst("s3a://", "s3://")
     else if (url.startsWith("s3n://")) url.replaceFirst("s3n://", "s3://")
     else if (url.startsWith("abfss://")) url.replaceFirst("abfss://", "azure://")
     else if (url.startsWith("abfs://")) url.replaceFirst("abfs://", "azure://")

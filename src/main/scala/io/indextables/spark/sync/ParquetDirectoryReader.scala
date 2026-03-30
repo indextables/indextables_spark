@@ -22,6 +22,7 @@ import scala.collection.mutable
 import org.apache.spark.sql.types._
 
 import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.util.CloudPathUtils
 import io.indextables.tantivy4java.parquet.ParquetSchemaReader
 import org.slf4j.LoggerFactory
 
@@ -159,7 +160,7 @@ class ParquetDirectoryReader(
       val parquetFiles = allFiles
         .filter(f => !f.isDirectory && isParquetFile(f.path))
         .map { fileInfo =>
-          val strippedPath    = stripFileScheme(fileInfo.path)
+          val strippedPath    = CloudPathUtils.stripFileScheme(fileInfo.path)
           val relativePath    = extractRelativePath(strippedPath, rootPath)
           val partitionValues = extractPartitionValuesFromRelative(relativePath)
           CompanionSourceFile(
@@ -337,12 +338,4 @@ class ParquetDirectoryReader(
   private def normalizeForObjectStore(path: String): String =
     ParquetDirectoryReader.normalizeForObjectStore(path)
 
-  /**
-   * Strip `file:` URI scheme prefix from local filesystem paths. CloudStorageProvider returns paths with `file:` prefix
-   * on local filesystem, but tantivy4java expects plain filesystem paths.
-   */
-  private def stripFileScheme(path: String): String =
-    if (path.startsWith("file:///")) path.substring(7)
-    else if (path.startsWith("file:/")) path.substring(5)
-    else path
 }
