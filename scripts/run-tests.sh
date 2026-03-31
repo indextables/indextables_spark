@@ -130,12 +130,12 @@ for fqcn in "${all_class_names[@]}"; do
         if [[ "$simple_name" == $ONLY_PATTERN ]]; then
             class_names+=("$fqcn")
         else
-            ((skipped++))
+            ((skipped++)) || true
         fi
     elif [[ -n "$EXCLUDE_PATTERN" ]]; then
         # shellcheck disable=SC2053
         if [[ "$simple_name" == $EXCLUDE_PATTERN ]]; then
-            ((skipped++))
+            ((skipped++)) || true
         else
             class_names+=("$fqcn")
         fi

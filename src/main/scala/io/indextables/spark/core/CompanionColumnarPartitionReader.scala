@@ -33,6 +33,7 @@ import org.apache.spark.unsafe.types.UTF8String
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.arrow.ArrowFfiBridge
+import io.indextables.spark.sync.DistributedSourceScanner
 import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.SplitSearcher
@@ -399,7 +400,26 @@ class ColumnarPartitionReader(
         case ShortType   => vec.setShort(value.toShort)
         case ByteType    => vec.setByte(value.toByte)
         case DateType =>
-          vec.setInt(java.time.LocalDate.parse(value).toEpochDay.toInt)
+          // Handle both ISO date strings (e.g., "2026-03-22") and epoch-day numbers
+          // (e.g., "20527" from older companion indexes). The build-side fix in
+          // DistributedSourceScanner normalizes to ISO, so try that first to avoid
+          // exception allocation on the common path.
+          val epochDay = try {
+            val dateStr = if (value.contains("T")) value.substring(0, 10) else value
+            java.time.LocalDate.parse(dateStr).toEpochDay.toInt // ISO date string (common case)
+          } catch {
+            case _: Exception =>
+              val n = try { value.toInt } catch {
+                case e: NumberFormatException =>
+                  throw new IllegalArgumentException(
+                    s"Cannot convert partition value '$value' to DateType: ${e.getMessage}", e)
+              }
+              if (!DistributedSourceScanner.isPlausibleEpochDay(n))
+                throw new IllegalArgumentException(
+                  s"Partition value '$value' is numeric but not a plausible epoch day (range: -100000..100000)")
+              n
+          }
+          vec.setInt(epochDay)
         case TimestampType =>
           val instant = if (value.contains("T")) {
             java.time.LocalDateTime.parse(value).atZone(java.time.ZoneOffset.UTC).toInstant

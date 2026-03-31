@@ -108,13 +108,46 @@ class PurgeOrphanedSplitsExecutor(
       val paths   = scala.collection.mutable.Set[String]()
       val cursor  = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
       try {
-        var batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
-        while (batch != null) {
-          batch.asScala.foreach { entry =>
-            val path = entry.get("path")
-            if (path != null) paths += path.toString
+        val numCols = 20 // base schema including partition_values (no dynamic partitions for purge)
+        val bridge = new io.indextables.spark.arrow.ArrowFfiBridge()
+        try {
+          var continue = true
+          while (continue) {
+            val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
+            try {
+              val rowCount = TransactionLogReader.readNextRetainedFilesBatchArrowFfi(
+                cursor, 10000, arrayAddrs, schemaAddrs
+              )
+              if (rowCount > 0) {
+                // importAsColumnarBatchStreaming transfers ownership of all structs
+                val batch = bridge.importAsColumnarBatchStreaming(arrays.take(numCols), schemas.take(numCols), rowCount)
+                try {
+                  val pathVec = batch.column(0).asInstanceOf[
+                    org.apache.spark.sql.vectorized.ArrowColumnVector
+                  ].getValueVector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
+                  var i = 0
+                  while (i < rowCount) {
+                    if (!pathVec.isNull(i)) paths += new String(pathVec.get(i), java.nio.charset.StandardCharsets.UTF_8)
+                    i += 1
+                  }
+                } finally {
+                  batch.close()
+                }
+              } else {
+                continue = false
+                // Close unused structs — native didn't fill them
+                arrays.foreach(a => try a.close() catch { case _: Exception => })
+                schemas.foreach(s => try s.close() catch { case _: Exception => })
+              }
+            } catch {
+              case e: Exception =>
+                arrays.foreach(a => try a.close() catch { case _: Exception => })
+                schemas.foreach(s => try s.close() catch { case _: Exception => })
+                throw e
+            }
           }
-          batch = TransactionLogReader.readNextRetainedFilesBatch(cursor, 10000)
+        } finally {
+          bridge.close()
         }
       } finally
         TransactionLogReader.closeRetainedFilesCursor(cursor)
