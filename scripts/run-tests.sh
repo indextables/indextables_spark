@@ -233,6 +233,8 @@ echo ""
 # ---------------------------------------------------------------------------
 LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/indextables-tests.XXXXXX")
 echo "[INFO] Per-test log files: $LOG_DIR"
+# Export for CI artifact upload
+[[ -n "${GITHUB_OUTPUT:-}" ]] && echo "log_dir=$LOG_DIR" >> "$GITHUB_OUTPUT"
 echo "[INFO] Parallelism: $PARALLEL_JOBS"
 echo "=================================================================="
 echo ""
