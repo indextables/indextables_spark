@@ -527,7 +527,9 @@ class IpAddressIndexQueryTest extends TestBase {
     // Collapsing to a single range [10.0.1.0, 10.255.1.255] would produce false positives
     // (e.g. 10.0.2.5 would match despite the wrong third octet), so tantivy4java rejects
     // the pattern entirely and the caller receives an explicit error.
-    val ex = intercept[org.apache.spark.SparkException] {
+    // IndexQuery failures are caught driver-side and wrapped in IndexQueryParseException,
+    // not executor-side SparkException (which is what the filter-pushdown path produces).
+    val ex = intercept[io.indextables.spark.exceptions.IndexQueryParseException] {
       spark
         .sql("SELECT * FROM ip_servers WHERE ip indexquery '10.*.1.*'")
         .collect()
