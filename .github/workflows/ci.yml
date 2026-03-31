@@ -27,6 +27,14 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-logs
+          path: /tmp/indextables-tests.*/
+          retention-days: 7
+
   build-and-test-linux:
     name: Build & Test (Linux X64)
     runs-on: [self-hosted, Linux, X64]
@@ -46,3 +54,11 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-logs
+          path: /tmp/indextables-tests.*/
+          retention-days: 7
