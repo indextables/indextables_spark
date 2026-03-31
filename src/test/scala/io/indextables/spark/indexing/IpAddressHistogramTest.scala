@@ -89,8 +89,7 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
       result(1).getAs[Long]("cnt") shouldBe 1
 
     } finally {
-      deleteRecursively(tempDir)
-      spark.stop()
+      try { deleteRecursively(tempDir) } finally { spark.stop() }
     }
   }
 
@@ -141,8 +140,7 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
       result(2).getAs[Long]("cnt") shouldBe 1
 
     } finally {
-      deleteRecursively(tempDir)
-      spark.stop()
+      try { deleteRecursively(tempDir) } finally { spark.stop() }
     }
   }
 }

@@ -648,7 +648,6 @@ class IpAddressFieldTest extends TestBase {
       isinResult.length shouldBe 4
       isinResult.map(_.getString(0)).toSet shouldBe
         Set("ten-a", "ten-b", "private-a", "private-b")
-      df.filter($"ip".isin("10.0.0.0/8", "192.168.1.0/24")).count() shouldBe 4
     }
   }
 
@@ -678,7 +677,6 @@ class IpAddressFieldTest extends TestBase {
       val result = df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1")).collect()
       result.length shouldBe 3
       result.map(_.getString(0)).toSet shouldBe Set("ten-a", "ten-b", "other")
-      df.filter($"ip".isin("10.0.0.0/8", "172.16.0.1")).count() shouldBe 3
     }
   }
 

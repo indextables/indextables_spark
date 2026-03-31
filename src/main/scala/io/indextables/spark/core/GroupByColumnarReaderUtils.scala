@@ -350,7 +350,7 @@ object GroupByColumnarReaderUtils {
       return createEmptyBatch(numOutCols, dataGroupByCols, aggExprs, schema)
     }
 
-    val isRange = isRangeAggregation || columnNames.contains("from") || columnNames.contains("to")
+    val isRange = isRangeAggregation
 
     val ffiKeyIndices = columnNames.zipWithIndex.collect {
       case (name, idx) if name == "key" || name.startsWith("key_") => idx
@@ -375,7 +375,7 @@ object GroupByColumnarReaderUtils {
 
     val docCountIdx   = columnNames.indexOf("doc_count")
     val colNameToIdx  = columnNames.zipWithIndex.toMap
-    val reservedNames = Set("doc_count", "from", "to")
+    val reservedNames = Set("doc_count")
     val subAggColIndices = columnNames.zipWithIndex.collect {
       case (name, idx) if !reservedNames.contains(name) && name != "key" && !name.startsWith("key_") => idx
     }
