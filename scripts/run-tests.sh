@@ -19,13 +19,19 @@ set -euo pipefail
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@11}"
 export SPARK_LOCAL_IP="127.0.0.1"
 
-# Auto-detect CPU cores for default parallelism
+# Auto-detect CPU cores for default parallelism, capped at 16.
+# Each test JVM binds a SparkUI port (4040+). Spark retries 16 ports by default
+# (spark.port.maxRetries), so more than 16 parallel jobs risks port exhaustion.
 if command -v nproc &>/dev/null; then
     PARALLEL_JOBS=$(nproc)
 elif command -v sysctl &>/dev/null; then
     PARALLEL_JOBS=$(sysctl -n hw.ncpu)
 else
     PARALLEL_JOBS=4
+fi
+MAX_PARALLEL=16
+if [[ "$PARALLEL_JOBS" -gt "$MAX_PARALLEL" ]]; then
+    PARALLEL_JOBS="$MAX_PARALLEL"
 fi
 
 DRY_RUN=false
