@@ -697,6 +697,30 @@ case class SyncToExternalCommand(
           s"${splitsToInvalidate.size} splits to invalidate"
       )
 
+      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
+      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
+      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
+
+      // 8b. Handle invalidation-only sync (splits to remove but no new files to index).
+      // Without this, the remove actions would never be committed because
+      // dispatchSyncTasksBatched only commits during batch processing.
+      if (groups.isEmpty && splitsToInvalidate.nonEmpty) {
+        logger.info(s"Invalidation-only sync: removing ${splitsToInvalidate.size} stale splits")
+        val removeActions = buildRemoveActions(splitsToInvalidate)
+        val metadataAction = buildCompanionMetadata(
+          transactionLog,
+          effectiveIndexingModes,
+          effectiveWherePredicates,
+          effectiveHfInclude,
+          effectiveHfExclude,
+          sourceVersion,
+          externalStorageRoot
+        )
+        transactionLog.commitSyncActions(removeActions, Seq.empty, Some(metadataAction))
+        transactionLog.invalidateCache()
+        return buildResultRow(Seq.empty, splitsToInvalidate.size, sourceVersion, startTime)
+      }
+
       // 9. Pass raw merged config to executors for JIT credential resolution.
       // Executors resolve credentials just-in-time before each download/upload via
       // CredentialProviderFactory, ensuring temporary credentials (e.g., Unity Catalog)
@@ -785,9 +809,6 @@ case class SyncToExternalCommand(
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
-      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
-      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
-      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
       dispatchSyncTasksBatched(
         sparkSession,
         groups,

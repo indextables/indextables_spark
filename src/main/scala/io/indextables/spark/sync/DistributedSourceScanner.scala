@@ -50,8 +50,7 @@ case class DistributedScanResult(
   isIncremental: Boolean = false,
   /**
    * Source file paths removed from the source table since the last sync (Delta only). Companion splits that indexed
-   * these files must be invalidated. Empty for full-scan results and for Iceberg (Iceberg deletion tracking is a
-   * follow-up).
+   * these files must be invalidated. Empty for full-scan results and Iceberg (which uses the full-scan anti-join).
    */
   removedSourcePaths: Seq[String] = Seq.empty,
   /**
@@ -662,11 +661,7 @@ class DistributedSourceScanner(spark: SparkSession) {
         else None
       } catch { case _: Exception => None }
 
-    // ── Incremental fast-path ──────────────────────────────────────────────
-    // When fromSnapshotId is provided (streaming incremental cycle), compute new files via
-    // manifest-path set-difference (current snapshot manifests minus old snapshot manifests).
-    // Iceberg snapshot IDs are random 64-bit longs (non-monotonic), so addedSnapshotId numeric
-    // comparison is unreliable.
+    // ── Incremental fast-path: return empty result if snapshot unchanged ──
     fromSnapshotId match {
       case Some(fsnap) =>
         val currentSnapId = snapshotInfo.getSnapshotId
@@ -683,58 +678,11 @@ class DistributedSourceScanner(spark: SparkSession) {
             schema = icebergSchemaOpt,
             isIncremental = true
           )
-        } else {
-          logger.info(s"Iceberg incremental: reading changes since snapshot $fsnap (current=$currentSnapId)")
-          // Use path-based set-difference instead of addedSnapshotId comparison, because Iceberg
-          // snapshot IDs are random 64-bit longs (non-monotonic) — numeric comparison is incorrect.
-          val oldManifestPaths: Set[String] = {
-            val oldInfo = IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, fsnap)
-            oldInfo.getManifestFilePaths.asScala.toSet
-          }
-          val newManifestPaths = snapshotInfo.getManifestFilePaths.asScala
-            .filterNot(oldManifestPaths.contains)
-            .toSeq
-
-          // Check whether the manifest delta is small enough for incremental driver-side reads.
-          // For large catch-up scenarios a full distributed scan is faster.
-          val maxIncrementalManifests = scala.util
-            .Try(
-              spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
-            )
-            .getOrElse(50)
-          if (newManifestPaths.size > maxIncrementalManifests) {
-            logger.warn(
-              s"Iceberg incremental: new manifest count ${newManifestPaths.size} exceeds " +
-                s"maxIncrementalManifests=$maxIncrementalManifests — " +
-                s"falling back to full scan (from=$fsnap, current=$currentSnapId)"
-            )
-            // fall through to full scan below
-          } else {
-
-            val newEntries = newManifestPaths.flatMap { manifestPath =>
-              IcebergTableReader
-                .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
-                .asScala
-            }.toSeq
-            val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
-            val partCols =
-              newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
-            val files = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
-            logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
-            val sc = spark.sparkContext
-            return DistributedScanResult(
-              filesRDD = sc.parallelize(files),
-              version = Some(currentSnapId),
-              partitionColumns = partCols,
-              storageRoot = storageRoot,
-              sampleFilePath = newEntries.headOption.map(_.getPath),
-              numDistributedParts = 0,
-              schema = icebergSchemaOpt,
-              isIncremental = true,
-              driverFiles = Some(files)
-            )
-          } // end else (incremental path — newManifestPaths.size <= maxIncrementalManifests)
-        }   // end else (currentSnapId != fsnap)
+        }
+        logger.info(
+          s"Iceberg incremental: snapshot changed ($fsnap -> $currentSnapId), " +
+            s"using full scan for deletion detection"
+        )
       case None => // fall through to full scan below
     }
 
