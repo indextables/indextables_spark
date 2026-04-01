@@ -49,9 +49,9 @@ case class DistributedScanResult(
    */
   isIncremental: Boolean = false,
   /**
-   * Source file paths removed from the source table since the last sync (Delta only). Companion splits that indexed
-   * these files must be invalidated. Empty for full-scan results and for Iceberg (Iceberg deletion tracking is a
-   * follow-up).
+   * Source file paths removed from the source table since the last sync. Companion splits that indexed these files
+   * must be invalidated. Populated for Delta (via getChangesBetween) and Iceberg (via manifest set-difference).
+   * Empty for full-scan results and Parquet.
    */
   removedSourcePaths: Seq[String] = Seq.empty,
   /**
@@ -663,10 +663,10 @@ class DistributedSourceScanner(spark: SparkSession) {
       } catch { case _: Exception => None }
 
     // ── Incremental fast-path ──────────────────────────────────────────────
-    // When fromSnapshotId is provided (streaming incremental cycle), compute new files via
-    // manifest-path set-difference (current snapshot manifests minus old snapshot manifests).
-    // Iceberg snapshot IDs are random 64-bit longs (non-monotonic), so addedSnapshotId numeric
-    // comparison is unreliable.
+    // When fromSnapshotId is provided (streaming incremental cycle), compute changes via
+    // manifest-path set-difference. Reads entries from changed manifests only (old-only and
+    // new-only), then computes file-level adds and deletes. Shared manifests are skipped
+    // entirely since their contents are unchanged.
     fromSnapshotId match {
       case Some(fsnap) =>
         val currentSnapId = snapshotInfo.getSnapshotId
@@ -685,55 +685,115 @@ class DistributedSourceScanner(spark: SparkSession) {
           )
         } else {
           logger.info(s"Iceberg incremental: reading changes since snapshot $fsnap (current=$currentSnapId)")
-          // Use path-based set-difference instead of addedSnapshotId comparison, because Iceberg
-          // snapshot IDs are random 64-bit longs (non-monotonic) — numeric comparison is incorrect.
           val oldManifestPaths: Set[String] = {
             val oldInfo = IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, fsnap)
             oldInfo.getManifestFilePaths.asScala.toSet
           }
-          val newManifestPaths = snapshotInfo.getManifestFilePaths.asScala
-            .filterNot(oldManifestPaths.contains)
-            .toSeq
+          val currentManifestPaths: Set[String] = snapshotInfo.getManifestFilePaths.asScala.toSet
+
+          // Partition manifests into old-only (removed/replaced), new-only (added/replacement),
+          // and shared (unchanged — skip entirely).
+          val oldOnlyManifests = (oldManifestPaths -- currentManifestPaths).toSeq
+          val newOnlyManifests = (currentManifestPaths -- oldManifestPaths).toSeq
+          val totalChangedManifests = oldOnlyManifests.size + newOnlyManifests.size
 
           // Check whether the manifest delta is small enough for incremental driver-side reads.
-          // For large catch-up scenarios a full distributed scan is faster.
+          // Threshold counts old + new manifests (a compaction replacing N manifests counts 2N).
           val maxIncrementalManifests = scala.util
             .Try(
-              spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
+              spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "100").toInt
             )
-            .getOrElse(50)
-          if (newManifestPaths.size > maxIncrementalManifests) {
+            .getOrElse(100)
+          if (totalChangedManifests > maxIncrementalManifests) {
             logger.warn(
-              s"Iceberg incremental: new manifest count ${newManifestPaths.size} exceeds " +
+              s"Iceberg incremental: changed manifest count $totalChangedManifests " +
+                s"(${oldOnlyManifests.size} old + ${newOnlyManifests.size} new) exceeds " +
                 s"maxIncrementalManifests=$maxIncrementalManifests — " +
                 s"falling back to full scan (from=$fsnap, current=$currentSnapId)"
             )
             // fall through to full scan below
           } else {
+            // Filter: only Parquet data files (same as the full-scan path)
+            def isParquetEntry(e: io.indextables.tantivy4java.iceberg.IcebergFileEntry): Boolean = {
+              val fmt = e.getFileFormat; fmt == null || fmt.equalsIgnoreCase("parquet")
+            }
 
-            val newEntries = newManifestPaths.flatMap { manifestPath =>
-              IcebergTableReader
-                .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
-                .asScala
-            }.toSeq
-            val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
-            val partCols =
-              newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
-            val files = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
-            logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
-            val sc = spark.sparkContext
-            return DistributedScanResult(
-              filesRDD = sc.parallelize(files),
-              version = Some(currentSnapId),
-              partitionColumns = partCols,
-              storageRoot = storageRoot,
-              sampleFilePath = newEntries.headOption.map(_.getPath),
-              numDistributedParts = 0,
-              schema = icebergSchemaOpt,
-              isIncremental = true,
-              driverFiles = Some(files)
-            )
-          } // end else (incremental path — newManifestPaths.size <= maxIncrementalManifests)
+            // Read entries from old-only manifests (files that WERE in the old snapshot's changed manifests).
+            // If an old manifest has been garbage-collected (expire_snapshots), fall back to full scan.
+            val oldOnlyEntriesOpt: Option[Seq[io.indextables.tantivy4java.iceberg.IcebergFileEntry]] = try {
+              Some(oldOnlyManifests.flatMap { manifestPath =>
+                IcebergTableReader
+                  .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+                  .asScala
+                  .filter(isParquetEntry)
+              }.toSeq)
+            } catch {
+              case e: Exception =>
+                logger.warn(
+                  s"Iceberg incremental: cannot read old manifest (expired/GC'd?): ${e.getMessage} — falling back to full scan"
+                )
+                None
+            }
+            oldOnlyEntriesOpt.foreach { oldOnlyEntries =>
+              val oldOnlyFilePaths: Set[String] = oldOnlyEntries.map(_.getPath).toSet
+
+              // Read entries from new-only manifests (files that ARE in the current snapshot's changed manifests)
+              val newOnlyEntries = newOnlyManifests.flatMap { manifestPath =>
+                IcebergTableReader
+                  .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+                  .asScala
+                  .filter(isParquetEntry)
+              }.toSeq
+              val newOnlyFilePaths: Set[String] = newOnlyEntries.map(_.getPath).toSet
+
+              // Set difference: added = in new but not old, deleted = in old but not new
+              val addedEntries = newOnlyEntries.filter(e => !oldOnlyFilePaths.contains(e.getPath))
+              val removedPaths = (oldOnlyFilePaths -- newOnlyFilePaths).toSeq
+
+              // Derive storageRoot and partCols from any available entry (added, new-only, or
+              // old-only). Old-only entries are needed for the pure-deletion case where no new
+              // entries exist, so that removed paths can be correctly relativized.
+              val anyEntry = addedEntries.headOption
+                .orElse(newOnlyEntries.headOption)
+                .orElse(oldOnlyEntries.headOption)
+              val storageRoot = anyEntry.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
+              val partCols = anyEntry
+                .map(_.getPartitionValues.keySet.asScala.toSeq.sorted)
+                .getOrElse(Seq.empty)
+              val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
+
+              // Normalize removed paths relative to storage root (same as added files)
+              val normalizedRemovedPaths = storageRoot match {
+                case Some(basePath) =>
+                  val normalizedBase = basePath.stripSuffix("/")
+                  removedPaths.map { p =>
+                    val normalized = p.stripSuffix("/")
+                    if (normalized.startsWith(normalizedBase))
+                      normalized.substring(normalizedBase.length).stripPrefix("/")
+                    else p
+                  }
+                case None => removedPaths
+              }
+
+              logger.info(
+                s"Iceberg incremental: ${files.size} added, ${normalizedRemovedPaths.size} removed " +
+                  s"from ${totalChangedManifests} changed manifests (${oldOnlyManifests.size} old, ${newOnlyManifests.size} new)"
+              )
+              val sc = spark.sparkContext
+              return DistributedScanResult(
+                filesRDD = sc.parallelize(files),
+                version = Some(currentSnapId),
+                partitionColumns = partCols,
+                storageRoot = storageRoot,
+                sampleFilePath = addedEntries.headOption.orElse(newOnlyEntries.headOption).map(_.getPath),
+                numDistributedParts = 0,
+                schema = icebergSchemaOpt,
+                isIncremental = true,
+                removedSourcePaths = normalizedRemovedPaths,
+                driverFiles = Some(files)
+              )
+            } // end oldOnlyEntriesOpt.foreach — if None, falls through to full scan
+          } // end else (incremental path)
         }   // end else (currentSnapId != fsnap)
       case None => // fall through to full scan below
     }

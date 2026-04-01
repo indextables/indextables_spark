@@ -93,8 +93,8 @@ class CompanionAggregatePushdownCorrectnessTest
   //
   // department  | rows | SUM(score) | MIN(score) | MAX(score) | AVG(score)
   // engineering |   8  |   780.0    |   50.0     |   150.0    |   97.5
-  // marketing   |   6  |   510.0    |   60.0     |   120.0    |   85.0
-  // sales       |   6  |   510.0    |   55.0     |   130.0    |   85.0
+  // marketing   |   6  |   510.0    |   60.0     |   105.0    |   85.0
+  // sales       |   6  |   510.0    |   55.0     |   120.0    |   85.0
   // ────────────+──────+────────────+────────────+────────────+──────────
   // TOTAL       |  20  |  1800.0    |   50.0     |   150.0    |   90.0
 

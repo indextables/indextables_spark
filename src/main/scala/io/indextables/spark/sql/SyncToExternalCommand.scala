@@ -75,6 +75,7 @@ case class SyncToExternalCommand(
   writerHeapSize: Option[Long] = None,
   fromVersion: Option[Long] = None,
   fromSnapshot: Option[Long] = None,
+  lastSyncedVersion: Option[Long] = None,
   schemaSourcePath: Option[String] = None,
   catalogName: Option[String] = None,
   catalogType: Option[String] = None,
@@ -126,10 +127,8 @@ case class SyncToExternalCommand(
           lastSyncedVersion
         ) =>
           val cycleCommand = lastSyncedVersion match {
-            case Some(v) if sourceFormat == "delta" =>
-              copy(fromVersion = Some(v), streamingPollIntervalMs = None)
-            case Some(v) if sourceFormat == "iceberg" =>
-              copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
+            case Some(v) =>
+              copy(lastSyncedVersion = Some(v), streamingPollIntervalMs = None)
             case _ =>
               copy(streamingPollIntervalMs = None)
           }
@@ -143,7 +142,7 @@ case class SyncToExternalCommand(
     logger.info(
       s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
         s"source=$sourcePath, dest=$destPath, " +
-        s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, " +
+        s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, fromSnapshot=$fromSnapshot, lastSyncedVersion=$lastSyncedVersion, " +
         s"wherePredicates=${wherePredicates.mkString(",")}, dryRun=$dryRun"
     )
 
@@ -289,6 +288,18 @@ case class SyncToExternalCommand(
       .get("spark.indextables.companion.sync.distributedLogRead.enabled")
       .forall(_.equalsIgnoreCase("true"))
 
+    // For non-streaming re-syncs, read the last synced version from the companion transaction
+    // log so the scanner can use the incremental fast path and return no_action when unchanged.
+    // Streaming sets lastSyncedVersion directly; one-shot syncs need to read it from the log.
+    // Skip the log read when SQL already provides a version (FROM VERSION / FROM SNAPSHOT).
+    // Note: the stored value is a Delta version number or Iceberg snapshot ID depending on
+    // sourceFormat. Switching formats on the same companion index is not supported.
+    val effectiveLastSynced = lastSyncedVersion.orElse(
+      if (fromVersion.isDefined || fromSnapshot.isDefined) None
+      else if (sourceFormat == "iceberg" || sourceFormat == "delta") readLastSyncedVersionFromLog(sparkSession)
+      else None
+    )
+
     // Attempt distributed scan if enabled.
     // WHERE predicates are passed to the scanner so it can build the PartitionFilter
     // using lightweight snapshot metadata (getSnapshotInfo) — avoids triggering the
@@ -304,7 +315,7 @@ case class SyncToExternalCommand(
               deltaPath,
               sourceCredentials,
               wherePredicates = wherePredicates,
-              fromVersion = fromVersion
+              fromVersion = effectiveLastSynced.orElse(fromVersion)
             )
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
@@ -320,7 +331,7 @@ case class SyncToExternalCommand(
               icebergConfig,
               snapshotId = fromSnapshot,
               wherePredicates = wherePredicates,
-              fromSnapshotId = None
+              fromSnapshotId = effectiveLastSynced
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -600,10 +611,10 @@ case class SyncToExternalCommand(
 
       val (rawParquetFiles, splitsToInvalidate) = distributedResult match {
         case Some(dr) if dr.isIncremental =>
-          // Incremental changeset from getChangesBetween / getChangesSince.
+          // Incremental changeset from Delta getChangesBetween or Iceberg manifest set-difference.
           // New files are guaranteed additions — anti-join is skipped for those.
-          // Removed source paths (Delta only) require finding and invalidating the companion
-          // splits that indexed them, and re-indexing any sibling files from those splits.
+          // Removed source paths require finding and invalidating the companion splits that
+          // indexed them, and re-indexing any sibling files from those splits.
           val newFiles = dr.driverFiles.getOrElse(dr.filesRDD.collect().toSeq)
           if (newFiles.size > 10000)
             logger.warn(
@@ -683,6 +694,35 @@ case class SyncToExternalCommand(
             0L,
             durationMs,
             "No changes to sync"
+          )
+        )
+      }
+
+      // Invalidation-only: files were deleted from source but nothing new to index.
+      // Commit remove actions directly since the batch loop won't execute with empty groups.
+      if (parquetFilesToIndex.isEmpty && splitsToInvalidate.nonEmpty) {
+        logger.info(s"Invalidation-only sync: ${splitsToInvalidate.size} splits to remove, no new files to index")
+        val removeActions = buildRemoveActions(splitsToInvalidate)
+        val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
+        val metadata = buildCompanionMetadata(
+          transactionLog, effectiveIndexingModes, effectiveWherePredicates,
+          effectiveHfInclude, effectiveHfExclude, sourceVersion, externalStorageRoot
+        )
+        transactionLog.commitSyncActions(removeActions, Seq.empty, Some(metadata))
+        val durationMs = System.currentTimeMillis() - startTime
+        return Seq(
+          Row(
+            destPath,
+            sourcePath,
+            "success",
+            sourceVersionLong,
+            0,
+            splitsToInvalidate.size,
+            0,
+            0L,
+            0L,
+            durationMs,
+            s"Removed ${splitsToInvalidate.size} invalidated splits (no new files)"
           )
         )
       }

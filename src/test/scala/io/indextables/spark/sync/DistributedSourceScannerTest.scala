@@ -20,7 +20,12 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+
+import org.apache.iceberg.{Schema => IcebergSchema}
+import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
+import org.apache.iceberg.types.Types
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -30,7 +35,7 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for DistributedSourceScanner — verifies that distributed Delta and Parquet scans produce the same file set as
  * the existing single-call readers.
  */
-class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 
@@ -358,6 +363,102 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
     }
   }
 
+  // ─── Incremental Iceberg Tests (fromSnapshotId parameter) ───
+
+  private val icebergTestRows = Seq(Row(1L, "alice"), Row(2L, "bob"))
+
+  private def withIcebergTest(testName: String)(f: (EmbeddedIcebergRestServer, TableIdentifier, File, java.util.Map[String, String]) => Unit): Unit = {
+    withTempPath { tempDir =>
+      val root = new File(tempDir, testName)
+      root.mkdirs()
+      val server = new EmbeddedIcebergRestServer(new File(root, "warehouse").getAbsolutePath)
+      try {
+        val tableId = createIcebergTable(server)
+        spark.conf.set("spark.indextables.iceberg.catalogType", "rest")
+        spark.conf.set("spark.indextables.iceberg.uri", server.restUri)
+        try
+          f(server, tableId, root, buildTestIcebergConfig(server))
+        finally
+          clearIcebergConfig()
+      } finally
+        server.close()
+    }
+  }
+
+  private def clearIcebergConfig(): Unit =
+    Seq("spark.indextables.iceberg.catalogType", "spark.indextables.iceberg.uri").foreach { k =>
+      try spark.conf.unset(k) catch { case _: Exception => }
+    }
+
+  test("scanIcebergTable with fromSnapshotId equal to current snapshot returns empty incremental result") {
+    withIcebergTest("iceberg_incr_noop") { (server, tableId, root, icebergConfig) =>
+      appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 1)
+
+      val scanner       = new DistributedSourceScanner(spark)
+      val fullResult    = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None)
+      val currentSnapId = fullResult.version.get
+
+      val incrResult = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None, fromSnapshotId = Some(currentSnapId))
+
+      incrResult.isIncremental shouldBe true
+      incrResult.version shouldBe Some(currentSnapId)
+      incrResult.filesRDD.collect() shouldBe empty
+    }
+  }
+
+  test("scanIcebergTable incremental detects new files from appended snapshot") {
+    withIcebergTest("iceberg_incr_detect") { (server, tableId, root, icebergConfig) =>
+      appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 1)
+
+      val scanner      = new DistributedSourceScanner(spark)
+      val fullResult   = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None)
+      val syncedSnapId = fullResult.version.get
+
+      appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 2)
+
+      val incrResult = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None, fromSnapshotId = Some(syncedSnapId))
+
+      incrResult.isIncremental shouldBe true
+      incrResult.version.get should not equal syncedSnapId
+      incrResult.filesRDD.collect() should not be empty
+    }
+  }
+
+  test("scanIcebergTable incremental detects removed files after Iceberg delete") {
+    withIcebergTest("iceberg_incr_delete") { (server, tableId, root, icebergConfig) =>
+      val paths1 = appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 1)
+
+      val scanner      = new DistributedSourceScanner(spark)
+      val fullResult   = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None)
+      val syncedSnapId = fullResult.version.get
+      val syncedFiles  = fullResult.filesRDD.collect().map(_.path).toSet
+      syncedFiles should not be empty
+
+      // Delete the files from the Iceberg table (creates a new snapshot with a rewritten manifest)
+      val table = server.catalog.loadTable(tableId)
+      val deleteOp = table.newDelete()
+      val dataFiles = table.currentSnapshot().addedDataFiles(table.io()).iterator()
+      while (dataFiles.hasNext) deleteOp.deleteFile(dataFiles.next())
+      deleteOp.commit()
+
+      val incrResult = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None, fromSnapshotId = Some(syncedSnapId))
+
+      incrResult.isIncremental shouldBe true
+      incrResult.removedSourcePaths.size shouldBe paths1.size
+      incrResult.filesRDD.collect() shouldBe empty
+    }
+  }
+
+  test("scanIcebergTable without fromSnapshotId is not incremental") {
+    withIcebergTest("iceberg_non_incr") { (server, tableId, root, icebergConfig) =>
+      appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 1)
+
+      val scanner = new DistributedSourceScanner(spark)
+      val result  = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None)
+      result.isIncremental shouldBe false
+    }
+  }
+
   // ─── Parquet Tests ───
 
   test("distributed Parquet scan should produce same file count as ParquetDirectoryReader.getAllFiles()") {
@@ -527,5 +628,31 @@ class DistributedSourceScannerTest extends AnyFunSuite with Matchers with Before
       .write
       .partitionBy("region")
       .parquet(path)
+  }
+
+  // ─── Iceberg Helpers ───
+
+  private val icebergSparkSchema = StructType(Seq(
+    StructField("id", LongType, nullable = true),
+    StructField("name", StringType, nullable = true)
+  ))
+
+  private def createIcebergTable(server: EmbeddedIcebergRestServer): TableIdentifier = {
+    val ns      = Namespace.of("default")
+    val tableId = TableIdentifier.of(ns, "scanner_test")
+    server.catalog.createNamespace(ns, java.util.Collections.emptyMap())
+    val schema = new IcebergSchema(
+      Types.NestedField.optional(1, "id", Types.LongType.get()),
+      Types.NestedField.optional(2, "name", Types.StringType.get())
+    )
+    server.catalog.buildTable(tableId, schema).create()
+    tableId
+  }
+
+  private def buildTestIcebergConfig(server: EmbeddedIcebergRestServer): java.util.Map[String, String] = {
+    val config = new java.util.HashMap[String, String]()
+    config.put("catalog_type", "rest")
+    config.put("uri", server.restUri)
+    config
   }
 }
