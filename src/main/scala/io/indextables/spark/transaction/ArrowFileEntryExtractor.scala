@@ -69,8 +69,8 @@ object ArrowFileEntryExtractor {
     val docMappingJsonVec = root(11).asInstanceOf[VarCharVector]
     val docMappingRefVec = root(12).asInstanceOf[VarCharVector]
     val uncompressedSizeVec = root(13).asInstanceOf[BigIntVector]
-    val timeRangeStartVec = root(14).asInstanceOf[VarCharVector]
-    val timeRangeEndVec = root(15).asInstanceOf[VarCharVector]
+    val timeRangeStartVec = root(14).asInstanceOf[BigIntVector]
+    val timeRangeEndVec = root(15).asInstanceOf[BigIntVector]
     val companionSourceFilesVec = root(16) // ListVector of Utf8
     val companionDeltaVersionVec = root(17).asInstanceOf[BigIntVector]
     val companionFastFieldModeVec = root(18).asInstanceOf[VarCharVector]
@@ -158,8 +158,8 @@ object ArrowFileEntryExtractor {
         docMappingJson = if (docMappingJsonVec.isNull(i)) None else Some(new String(docMappingJsonVec.get(i), UTF_8)),
         docMappingRef = if (docMappingRefVec.isNull(i)) None else Some(new String(docMappingRefVec.get(i), UTF_8)),
         uncompressedSizeBytes = if (uncompressedSizeVec.isNull(i)) None else Some(uncompressedSizeVec.get(i)),
-        timeRangeStart = if (timeRangeStartVec.isNull(i)) None else Some(new String(timeRangeStartVec.get(i), UTF_8)),
-        timeRangeEnd = if (timeRangeEndVec.isNull(i)) None else Some(new String(timeRangeEndVec.get(i), UTF_8)),
+        timeRangeStart = if (timeRangeStartVec.isNull(i)) None else Some(timeRangeStartVec.get(i).toString),
+        timeRangeEnd = if (timeRangeEndVec.isNull(i)) None else Some(timeRangeEndVec.get(i).toString),
         companionSourceFiles = companionSourceFiles,
         companionDeltaVersion = if (companionDeltaVersionVec.isNull(i)) None else Some(companionDeltaVersionVec.get(i)),
         companionFastFieldMode = if (companionFastFieldModeVec.isNull(i)) None else Some(new String(companionFastFieldModeVec.get(i), UTF_8))

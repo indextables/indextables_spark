@@ -20,6 +20,7 @@ package io.indextables.spark.transaction
 import scala.jdk.CollectionConverters._
 
 import org.apache.arrow.c.{ArrowArray, ArrowSchema, Data}
+import org.slf4j.LoggerFactory
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector._
 import org.apache.arrow.vector.complex.ListVector
@@ -40,6 +41,7 @@ import io.indextables.spark.util.JsonUtil
  */
 object ActionsToArrowConverter {
 
+  private val logger = LoggerFactory.getLogger(ActionsToArrowConverter.getClass)
   private val mapper = JsonUtil.mapper
   private val allocator: BufferAllocator = ArrowFfiBridge.allocator
 
@@ -85,8 +87,8 @@ object ActionsToArrowConverter {
     val docMappingJsonVec = root.getVector("doc_mapping_json").asInstanceOf[VarCharVector]
     val docMappingRefVec = root.getVector("doc_mapping_ref").asInstanceOf[VarCharVector]
     val uncompressedSizeVec = root.getVector("uncompressed_size_bytes").asInstanceOf[BigIntVector]
-    val timeRangeStartVec = root.getVector("time_range_start").asInstanceOf[VarCharVector]
-    val timeRangeEndVec = root.getVector("time_range_end").asInstanceOf[VarCharVector]
+    val timeRangeStartVec = root.getVector("time_range_start").asInstanceOf[BigIntVector]
+    val timeRangeEndVec = root.getVector("time_range_end").asInstanceOf[BigIntVector]
     val companionDeltaVersionVec = root.getVector("companion_delta_version").asInstanceOf[BigIntVector]
     val companionFastFieldModeVec = root.getVector("companion_fast_field_mode").asInstanceOf[VarCharVector]
     val deletionTimestampVec = root.getVector("deletion_timestamp").asInstanceOf[BigIntVector]
@@ -136,8 +138,18 @@ object ActionsToArrowConverter {
           a.docMappingJson.foreach(s => setString(docMappingJsonVec, i, s))
           a.docMappingRef.foreach(s => setString(docMappingRefVec, i, s))
           a.uncompressedSizeBytes.foreach(uncompressedSizeVec.setSafe(i, _))
-          a.timeRangeStart.foreach(t => setString(timeRangeStartVec, i, t))
-          a.timeRangeEnd.foreach(t => setString(timeRangeEndVec, i, t))
+          a.timeRangeStart.foreach { t =>
+            try { timeRangeStartVec.setSafe(i, t.toLong) } catch {
+              case _: NumberFormatException =>
+                logger.warn(s"Cannot parse timeRangeStart '$t' as Long for ${a.path}, time-based pruning disabled for this split")
+            }
+          }
+          a.timeRangeEnd.foreach { t =>
+            try { timeRangeEndVec.setSafe(i, t.toLong) } catch {
+              case _: NumberFormatException =>
+                logger.warn(s"Cannot parse timeRangeEnd '$t' as Long for ${a.path}, time-based pruning disabled for this split")
+            }
+          }
           a.companionDeltaVersion.foreach(companionDeltaVersionVec.setSafe(i, _))
           a.companionFastFieldMode.foreach(s => setString(companionFastFieldModeVec, i, s))
           a.splitTags.foreach(tags => writeStringList(splitTagsVec, i, tags.toSeq))
@@ -231,8 +243,8 @@ object ActionsToArrowConverter {
     fields.add(Field.nullable("doc_mapping_json", new ArrowType.Utf8()))
     fields.add(Field.nullable("doc_mapping_ref", new ArrowType.Utf8()))
     fields.add(Field.nullable("uncompressed_size_bytes", new ArrowType.Int(64, true)))
-    fields.add(Field.nullable("time_range_start", new ArrowType.Utf8()))
-    fields.add(Field.nullable("time_range_end", new ArrowType.Utf8()))
+    fields.add(Field.nullable("time_range_start", new ArrowType.Int(64, true)))
+    fields.add(Field.nullable("time_range_end", new ArrowType.Int(64, true)))
     fields.add(Field.nullable("companion_delta_version", new ArrowType.Int(64, true)))
     fields.add(Field.nullable("companion_fast_field_mode", new ArrowType.Utf8()))
     fields.add(Field.nullable("deletion_timestamp", new ArrowType.Int(64, true)))
