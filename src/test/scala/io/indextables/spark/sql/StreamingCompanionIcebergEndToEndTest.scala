@@ -323,4 +323,106 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
         }
     }
   }
+
+  test("streaming Iceberg companion: FROM SNAPSHOT seeds initial sync, then streams new data") {
+    withTempDirs {
+      (
+        warehouseDir,
+        indexPath,
+        _
+      ) =>
+        val server = new EmbeddedIcebergRestServer(warehouseDir)
+        try {
+          val tableId = createTestTable(server)
+
+          // Snapshot 1: 2 rows.
+          appendIcebergSnapshot(server, tableId, Seq(Row(1L, "alice"), Row(2L, "bob")), batchId = 1)
+          val snap1Id = server.catalog.loadTable(tableId).currentSnapshot().snapshotId()
+
+          // Snapshot 2: 2 more rows (table now has 4 rows total).
+          appendIcebergSnapshot(server, tableId, Seq(Row(3L, "charlie"), Row(4L, "dave")), batchId = 2)
+
+          configureSparkForEmbeddedCatalog(server)
+
+          // Start streaming with FROM SNAPSHOT snap1 — first cycle should time-travel to snap1
+          // (only 2 rows), then subsequent cycles should incrementally pick up snap2.
+          val command = makeIcebergCommand(indexPath)
+            .copy(fromSnapshot = Some(snap1Id), streamingPollIntervalMs = Some(2000L))
+          val thread = new Thread(() => command.run(spark))
+          thread.setDaemon(true)
+          thread.start()
+
+          try {
+            // First cycle: FROM SNAPSHOT snap1 → time-travel → only 2 rows (not all 4).
+            val initialSynced = waitUntil(30000)(countCompanionRows(indexPath) == 2)
+            withClue("FROM SNAPSHOT should time-travel to snap1 (2 rows), not current (4 rows)") {
+              initialSynced shouldBe true
+            }
+
+            // Streaming continues: should incrementally pick up snap2 → 4 rows total.
+            val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 4)
+            withClue("streaming should incrementally pick up snap2 (4 total rows) within 30 s") {
+              secondSynced shouldBe true
+            }
+
+            // Snapshot 3: 1 more row appended while streaming.
+            appendIcebergSnapshot(server, tableId, Seq(Row(5L, "eve")), batchId = 3)
+
+            val thirdSynced = waitUntil(30000)(countCompanionRows(indexPath) == 5)
+            withClue("streaming should pick up snap3 (5 total rows) within 30 s") {
+              thirdSynced shouldBe true
+            }
+
+          } finally {
+            thread.interrupt()
+            thread.join(5000)
+          }
+        } finally {
+          clearSparkIcebergConfig()
+          server.close()
+        }
+    }
+  }
+
+  test("Iceberg companion: invalidation-only sync removes stale splits when source files are deleted") {
+    withTempDirs {
+      (
+        warehouseDir,
+        indexPath,
+        _
+      ) =>
+        val server = new EmbeddedIcebergRestServer(warehouseDir)
+        try {
+          val tableId = createTestTable(server)
+
+          // Snapshot 1: 2 rows.
+          appendIcebergSnapshot(server, tableId, Seq(Row(1L, "alice"), Row(2L, "bob")), batchId = 1)
+
+          configureSparkForEmbeddedCatalog(server)
+
+          // Initial sync — should index 2 rows.
+          val command = makeIcebergCommand(indexPath)
+          command.run(spark)
+          countCompanionRows(indexPath) shouldBe 2
+
+          // Delete all files from the Iceberg table.
+          val table = server.catalog.loadTable(tableId)
+          val files = table.currentSnapshot().addedDataFiles(table.io()).iterator()
+          val deleteOp = table.newDelete()
+          while (files.hasNext) deleteOp.deleteFile(files.next())
+          deleteOp.commit()
+
+          // Re-sync — should detect deletions and remove stale splits (invalidation-only path).
+          val result = command.run(spark).head
+          result.getString(2) shouldBe "success"
+          result.getString(10) should include("invalidated splits")
+
+          // Companion should now have 0 rows (all source files were deleted).
+          countCompanionRows(indexPath) shouldBe 0
+        } finally {
+          clearSparkIcebergConfig()
+          server.close()
+        }
+    }
+  }
 }
