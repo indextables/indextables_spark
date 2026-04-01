@@ -53,7 +53,7 @@ object ArrowFileEntryExtractor {
       batch.column(i).asInstanceOf[ArrowColumnVector].getValueVector
     }
 
-    // Fixed columns (indices 0-19). Base count is 20 as of tantivy4java 0.31.1.
+    // Fixed columns (indices 0-19). Base count is 20 as of tantivy4java 0.34.1.
     // Column 19 is partition_values (JSON map of ALL partition values).
     val pathVec = root(0).asInstanceOf[VarCharVector]
     val sizeVec = root(1).asInstanceOf[BigIntVector]
