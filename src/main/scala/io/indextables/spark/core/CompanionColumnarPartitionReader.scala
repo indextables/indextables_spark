@@ -278,11 +278,11 @@ class ColumnarPartitionReader(
   }
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = Array(
-    new TaskSplitEngineCreationTime(pipelineMetrics.splitEngineCreationMs.toLong),
-    new TaskQueryBuildTime(pipelineMetrics.queryBuildMs.toLong),
-    new TaskStreamingSessionStartTime(pipelineMetrics.streamingSessionStartMs.toLong),
-    new TaskNextBatchTime(pipelineMetrics.nextBatchTotalMs.toLong),
-    new TaskBatchAssemblyTime(pipelineMetrics.batchAssemblyTotalMs.toLong)
+    new TaskSplitEngineCreationTime(Math.round(pipelineMetrics.splitEngineCreationMs)),
+    new TaskQueryBuildTime(Math.round(pipelineMetrics.queryBuildMs)),
+    new TaskStreamingSessionStartTime(Math.round(pipelineMetrics.streamingSessionStartMs)),
+    new TaskNextBatchTime(Math.round(pipelineMetrics.nextBatchTotalMs)),
+    new TaskBatchAssemblyTime(Math.round(pipelineMetrics.batchAssemblyTotalMs))
   )
 
   def getReadPipelineMetrics: ReadPipelineMetrics = pipelineMetrics

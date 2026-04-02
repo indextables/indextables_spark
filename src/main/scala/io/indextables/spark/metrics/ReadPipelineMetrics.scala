@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory
  *   - Arrow batch assembly (FFI import + partition column interleave)
  *
  * All durations are in nanoseconds for precision, converted to milliseconds for logging.
+ * Callers are responsible for logging the `summary` string — this class does not log directly.
  */
 class ReadPipelineMetrics(val splitPath: String) {
 
@@ -63,17 +64,10 @@ class ReadPipelineMetrics(val splitPath: String) {
       nextBatchTotalMs + batchAssemblyTotalMs
 
   def summary: String = {
-    val sb = new StringBuilder()
-    sb.append(s"ReadPipelineMetrics for $splitPath:\n")
-    sb.append(f"  splitEngineCreation: ${splitEngineCreationMs}%.1f ms (S3 footer + index open)\n")
-    sb.append(f"  queryBuild:          ${queryBuildMs}%.1f ms (filter -> Tantivy AST)\n")
-    sb.append(f"  streamingStart:      ${streamingSessionStartMs}%.1f ms (segment open + query plan)\n")
-    sb.append(f"  nextBatch total:     ${nextBatchTotalMs}%.1f ms across $nextBatchCount batches (S3 GETs + parquet decode)\n")
-    if (nextBatchCount > 0)
-      sb.append(f"  nextBatch avg:       ${nextBatchTotalMs / nextBatchCount}%.1f ms/batch\n")
-    sb.append(f"  batchAssembly total: ${batchAssemblyTotalMs}%.1f ms (Arrow FFI import + partition cols)\n")
-    sb.append(f"  total tracked:       ${totalTrackedMs}%.1f ms, $totalRows rows returned")
-    sb.toString()
+    val avg = if (nextBatchCount > 0) f" avgBatch=${nextBatchTotalMs / nextBatchCount}%.1fms" else ""
+    f"ReadPipelineMetrics path=$splitPath engineCreation=${splitEngineCreationMs}%.1fms queryBuild=${queryBuildMs}%.1fms " +
+      f"streamingStart=${streamingSessionStartMs}%.1fms nextBatch=${nextBatchTotalMs}%.1fms(${nextBatchCount}batches$avg) " +
+      f"batchAssembly=${batchAssemblyTotalMs}%.1fms total=${totalTrackedMs}%.1fms rows=$totalRows"
   }
 }
 
@@ -103,10 +97,8 @@ class ScanPlanningMetrics(val tablePath: String) {
 
   def logSummary(): Unit = {
     logger.info(
-      s"ScanPlanningMetrics for $tablePath:\n" +
-      f"  nativeFiltering:    ${nativeFilteringMs}%.1f ms ($totalFilesBeforeFiltering -> $resultFiles files)\n" +
-      f"  localityAssignment: ${localityAssignmentMs}%.1f ms\n" +
-      f"  totalPlan:          ${totalPlanMs}%.1f ms -> $resultPartitions partitions"
+      f"ScanPlanningMetrics table=$tablePath nativeFiltering=${nativeFilteringMs}%.1fms($totalFilesBeforeFiltering->${resultFiles}files) " +
+        f"locality=${localityAssignmentMs}%.1fms totalPlan=${totalPlanMs}%.1fms partitions=$resultPartitions"
     )
   }
 }

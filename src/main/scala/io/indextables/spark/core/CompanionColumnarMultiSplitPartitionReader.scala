@@ -196,13 +196,16 @@ class ColumnarMultiSplitPartitionReader(
     )
   }
 
+  // Metrics reflect only completed splits. The in-progress split's metrics are
+  // merged on close, so Spark UI may show zeros until the first split finishes.
   override def currentMetricsValues(): Array[CustomTaskMetric] = Array(
-    new TaskSplitEngineCreationTime(aggregateMetrics.splitEngineCreationMs.toLong),
-    new TaskQueryBuildTime(aggregateMetrics.queryBuildMs.toLong),
-    new TaskStreamingSessionStartTime(aggregateMetrics.streamingSessionStartMs.toLong),
-    new TaskNextBatchTime(aggregateMetrics.nextBatchTotalMs.toLong),
-    new TaskBatchAssemblyTime(aggregateMetrics.batchAssemblyTotalMs.toLong)
+    new TaskSplitEngineCreationTime(Math.round(aggregateMetrics.splitEngineCreationMs)),
+    new TaskQueryBuildTime(Math.round(aggregateMetrics.queryBuildMs)),
+    new TaskStreamingSessionStartTime(Math.round(aggregateMetrics.streamingSessionStartMs)),
+    new TaskNextBatchTime(Math.round(aggregateMetrics.nextBatchTotalMs)),
+    new TaskBatchAssemblyTime(Math.round(aggregateMetrics.batchAssemblyTotalMs))
   )
 
+  /** Exposes aggregate metrics for test/debug access. */
   def getReadPipelineMetrics: ReadPipelineMetrics = aggregateMetrics
 }

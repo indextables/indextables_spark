@@ -85,7 +85,6 @@ class IndexTables4SparkScan(
     val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
 
     // Single native call: partition pruning + data skipping + cooldown filtering + metadata
-    val nativeFilterStart = System.nanoTime()
     val result = transactionLog match {
       case ntl: NativeTransactionLog =>
         ntl.listFilesWithMetadata(partitionFilters, dataFilters, excludeCooldown = false)
@@ -101,10 +100,6 @@ class IndexTables4SparkScan(
           metrics = NativeFilteringMetrics(files.size, files.size, files.size, files.size, 0, 0)
         )
     }
-
-    planningMetrics.nativeFilteringNs = System.nanoTime() - nativeFilterStart
-    planningMetrics.totalFilesBeforeFiltering = result.metrics.totalFilesBeforeFiltering
-    planningMetrics.resultFiles = result.files.size
 
     // Record native filtering metrics
     val m = result.metrics
@@ -181,7 +176,13 @@ class IndexTables4SparkScan(
     }
 
     // Use cached filtered actions (avoids duplicate native listFiles calls)
+    // Time this call to capture native filtering cost within the planInputPartitions window.
+    // If estimateStatistics() already triggered the lazy val, this returns instantly (0 ns).
+    val nativeFilterStart = System.nanoTime()
     val filteredActions = getFilteredActions()
+    planningMetrics.nativeFilteringNs = System.nanoTime() - nativeFilterStart
+    planningMetrics.totalFilesBeforeFiltering = cachedListFilesResult.metrics.totalFilesBeforeFiltering
+    planningMetrics.resultFiles = filteredActions.size
 
     // Check if pre-warm is enabled (supports both old and new config paths)
     val isPreWarmEnabled = config
@@ -531,7 +532,7 @@ class IndexTables4SparkScan(
       new TaskDataSkippedFiles(lastScanDataSkippedFiles),
       new TaskResultFiles(lastScanResultFiles),
       new TaskTotalSkipRate(lastScanTotalSkipRate),
-      new TaskNativeFilteringTime(planningMetrics.nativeFilteringMs.toLong),
-      new TaskScanPlanTotalTime(planningMetrics.totalPlanMs.toLong)
+      new TaskNativeFilteringTime(Math.round(planningMetrics.nativeFilteringMs)),
+      new TaskScanPlanTotalTime(Math.round(planningMetrics.totalPlanMs))
     )
 }
