@@ -32,7 +32,10 @@ import org.apache.spark.unsafe.types.UTF8String
  * explicit column specification. When evaluated in Spark (fallback), it returns true for all rows since the actual
  * filtering should happen at the data source level.
  */
-case class IndexQueryAllExpression(child: Expression) extends UnaryExpression with Predicate {
+case class IndexQueryAllExpression(
+  child: Expression,
+  searchType: String = "indexqueryall" // "indexqueryall", "textsearch", or "fieldmatch"
+) extends UnaryExpression with Predicate {
 
   override def dataType: DataType = BooleanType
 
@@ -42,11 +45,21 @@ case class IndexQueryAllExpression(child: Expression) extends UnaryExpression wi
   // This ensures the V2IndexQueryExpressionRule gets a chance to process it
   override lazy val deterministic: Boolean = false
 
-  override def prettyName: String = "indexqueryall"
+  override def prettyName: String = searchType match {
+    case "textsearch" => "textsearch_all"
+    case "fieldmatch" => "fieldmatch_all"
+    case _            => "indexqueryall"
+  }
 
-  override def sql: String = s"indexqueryall(${child.sql})"
+  private def displayKeyword: String = searchType match {
+    case "textsearch" => "TEXTSEARCH"
+    case "fieldmatch" => "FIELDMATCH"
+    case _            => "INDEXQUERYALL"
+  }
 
-  override def toString: String = s"indexqueryall($child)"
+  override def sql: String = s"(* $displayKeyword ${child.sql})"
+
+  override def toString: String = s"(* $displayKeyword $child)"
 
   // For pushdown, we primarily care about the structure, not evaluation
   override def nullSafeEval(input: Any): Any =
@@ -81,7 +94,7 @@ case class IndexQueryAllExpression(child: Expression) extends UnaryExpression wi
       case StringType => TypeCheckResult.TypeCheckSuccess
       case _ =>
         TypeCheckResult.TypeCheckFailure(
-          s"indexqueryall function requires a string literal argument, got ${child.dataType}"
+          s"$displayKeyword (all-fields) requires a string literal argument, got ${child.dataType}"
         )
     }
 
