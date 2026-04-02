@@ -1,0 +1,112 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package io.indextables.spark.metrics
+
+import org.slf4j.LoggerFactory
+
+/**
+ * Collects granular timing metrics for the read pipeline on executors.
+ *
+ * Tracks time spent in each phase:
+ *   - Split engine creation (S3 footer fetch + index open)
+ *   - Query building (filter conversion to Tantivy AST)
+ *   - Streaming session start (initial index lookup / segment open)
+ *   - Per-batch retrieval (nextBatch FFI calls — S3 GETs + parquet decode)
+ *   - Arrow batch assembly (FFI import + partition column interleave)
+ *
+ * All durations are in nanoseconds for precision, converted to milliseconds for logging.
+ */
+class ReadPipelineMetrics(val splitPath: String) {
+
+  var splitEngineCreationNs: Long = 0L
+  var queryBuildNs: Long = 0L
+  var streamingSessionStartNs: Long = 0L
+  var nextBatchTotalNs: Long = 0L
+  var nextBatchCount: Int = 0
+  var batchAssemblyTotalNs: Long = 0L
+  var totalRows: Long = 0L
+
+  /** Merge another instance's timings into this one (for multi-split aggregation). */
+  def mergeFrom(other: ReadPipelineMetrics): Unit = {
+    splitEngineCreationNs += other.splitEngineCreationNs
+    queryBuildNs += other.queryBuildNs
+    streamingSessionStartNs += other.streamingSessionStartNs
+    nextBatchTotalNs += other.nextBatchTotalNs
+    nextBatchCount += other.nextBatchCount
+    batchAssemblyTotalNs += other.batchAssemblyTotalNs
+    totalRows += other.totalRows
+  }
+
+  def splitEngineCreationMs: Double = splitEngineCreationNs / 1e6
+  def queryBuildMs: Double = queryBuildNs / 1e6
+  def streamingSessionStartMs: Double = streamingSessionStartNs / 1e6
+  def nextBatchTotalMs: Double = nextBatchTotalNs / 1e6
+  def batchAssemblyTotalMs: Double = batchAssemblyTotalNs / 1e6
+
+  def totalTrackedMs: Double =
+    splitEngineCreationMs + queryBuildMs + streamingSessionStartMs +
+      nextBatchTotalMs + batchAssemblyTotalMs
+
+  def summary: String = {
+    val sb = new StringBuilder()
+    sb.append(s"ReadPipelineMetrics for $splitPath:\n")
+    sb.append(f"  splitEngineCreation: ${splitEngineCreationMs}%.1f ms (S3 footer + index open)\n")
+    sb.append(f"  queryBuild:          ${queryBuildMs}%.1f ms (filter -> Tantivy AST)\n")
+    sb.append(f"  streamingStart:      ${streamingSessionStartMs}%.1f ms (segment open + query plan)\n")
+    sb.append(f"  nextBatch total:     ${nextBatchTotalMs}%.1f ms across $nextBatchCount batches (S3 GETs + parquet decode)\n")
+    if (nextBatchCount > 0)
+      sb.append(f"  nextBatch avg:       ${nextBatchTotalMs / nextBatchCount}%.1f ms/batch\n")
+    sb.append(f"  batchAssembly total: ${batchAssemblyTotalMs}%.1f ms (Arrow FFI import + partition cols)\n")
+    sb.append(f"  total tracked:       ${totalTrackedMs}%.1f ms, $totalRows rows returned")
+    sb.toString()
+  }
+}
+
+/**
+ * Collects granular timing metrics for driver-side scan planning.
+ *
+ * Tracks time spent in:
+ *   - Native filtering (single JNI call: partition pruning + data skipping + metadata)
+ *   - Locality assignment
+ *   - Total planInputPartitions wall time
+ */
+class ScanPlanningMetrics(val tablePath: String) {
+
+  private val logger = LoggerFactory.getLogger(classOf[ScanPlanningMetrics])
+
+  var nativeFilteringNs: Long = 0L
+  var localityAssignmentNs: Long = 0L
+  var totalPlanNs: Long = 0L
+
+  var totalFilesBeforeFiltering: Long = 0L
+  var resultFiles: Long = 0L
+  var resultPartitions: Int = 0
+
+  def nativeFilteringMs: Double = nativeFilteringNs / 1e6
+  def localityAssignmentMs: Double = localityAssignmentNs / 1e6
+  def totalPlanMs: Double = totalPlanNs / 1e6
+
+  def logSummary(): Unit = {
+    logger.info(
+      s"ScanPlanningMetrics for $tablePath:\n" +
+      f"  nativeFiltering:    ${nativeFilteringMs}%.1f ms ($totalFilesBeforeFiltering -> $resultFiles files)\n" +
+      f"  localityAssignment: ${localityAssignmentMs}%.1f ms\n" +
+      f"  totalPlan:          ${totalPlanMs}%.1f ms -> $resultPartitions partitions"
+    )
+  }
+}

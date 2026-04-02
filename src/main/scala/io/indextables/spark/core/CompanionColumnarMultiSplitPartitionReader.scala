@@ -17,6 +17,7 @@
 
 package io.indextables.spark.core
 
+import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
@@ -24,6 +25,7 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.metrics.{ReadPipelineMetrics, TaskSplitEngineCreationTime, TaskQueryBuildTime, TaskStreamingSessionStartTime, TaskNextBatchTime, TaskBatchAssemblyTime}
 import io.indextables.spark.transaction.AddAction
 import org.slf4j.LoggerFactory
 
@@ -59,6 +61,8 @@ class ColumnarMultiSplitPartitionReader(
   private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =
     if (metricsAccumulator.isDefined) io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
     else io.indextables.spark.storage.BatchOptMetrics.empty
+
+  private val aggregateMetrics = new ReadPipelineMetrics(s"multi-split[${addActions.length}]")
 
   logger.info(
     s"ColumnarMultiSplitPartitionReader created with ${addActions.length} splits, effectiveLimit=$effectiveLimit"
@@ -146,6 +150,7 @@ class ColumnarMultiSplitPartitionReader(
 
   private def closeCurrentReader(): Unit = {
     currentReader.foreach { reader =>
+      aggregateMetrics.mergeFrom(reader.getReadPipelineMetrics)
       try reader.close()
       catch {
         case ex: Exception =>
@@ -185,8 +190,19 @@ class ColumnarMultiSplitPartitionReader(
     val bytesRead = addActions.take(currentSplitIndex).map(_.size).sum
     org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)
 
+    logger.info(aggregateMetrics.summary)
     logger.info(
       s"ColumnarMultiSplitPartitionReader closed: processed $currentSplitIndex/${addActions.length} splits, returned $totalRowsReturned rows"
     )
   }
+
+  override def currentMetricsValues(): Array[CustomTaskMetric] = Array(
+    new TaskSplitEngineCreationTime(aggregateMetrics.splitEngineCreationMs.toLong),
+    new TaskQueryBuildTime(aggregateMetrics.queryBuildMs.toLong),
+    new TaskStreamingSessionStartTime(aggregateMetrics.streamingSessionStartMs.toLong),
+    new TaskNextBatchTime(aggregateMetrics.nextBatchTotalMs.toLong),
+    new TaskBatchAssemblyTime(aggregateMetrics.batchAssemblyTotalMs.toLong)
+  )
+
+  def getReadPipelineMetrics: ReadPipelineMetrics = aggregateMetrics
 }

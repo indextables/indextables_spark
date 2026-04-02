@@ -70,6 +70,9 @@ class IndexTables4SparkScan(
   @volatile private var lastScanResultFiles: Long          = 0L
   @volatile private var lastScanTotalSkipRate: Double      = 0.0
 
+  // Read pipeline timing metrics for driver-side planning
+  private val planningMetrics = new ScanPlanningMetrics(transactionLog.getTablePath().toString)
+
   // Cache for filtered actions (computed once, reused between planInputPartitions and estimateStatistics)
   // Uses lazy val for thread-safe, once-only initialization
   private lazy val cachedFilteredActions: Seq[AddAction] = cachedListFilesResult.files
@@ -82,6 +85,7 @@ class IndexTables4SparkScan(
     val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
 
     // Single native call: partition pruning + data skipping + cooldown filtering + metadata
+    val nativeFilterStart = System.nanoTime()
     val result = transactionLog match {
       case ntl: NativeTransactionLog =>
         ntl.listFilesWithMetadata(partitionFilters, dataFilters, excludeCooldown = false)
@@ -97,6 +101,10 @@ class IndexTables4SparkScan(
           metrics = NativeFilteringMetrics(files.size, files.size, files.size, files.size, 0, 0)
         )
     }
+
+    planningMetrics.nativeFilteringNs = System.nanoTime() - nativeFilterStart
+    planningMetrics.totalFilesBeforeFiltering = result.metrics.totalFilesBeforeFiltering
+    planningMetrics.resultFiles = result.files.size
 
     // Record native filtering metrics
     val m = result.metrics
@@ -143,6 +151,8 @@ class IndexTables4SparkScan(
   override def toBatch: Batch = this
 
   override def planInputPartitions(): Array[InputPartition] = {
+    val planStart = System.nanoTime()
+
     // Capture baseline metrics at scan start for delta computation
     // User can call getMetricsDelta() after query to get per-query metrics
     val tablePath = transactionLog.getTablePath().toString
@@ -294,8 +304,10 @@ class IndexTables4SparkScan(
     )
 
     // Batch-assign all splits for this query using per-query load balancing
+    val localityStart = System.nanoTime()
     val splitPaths  = filteredActions.map(_.path)
     val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    planningMetrics.localityAssignmentNs = System.nanoTime() - localityStart
     logger.debug(s"Assigned ${assignments.size} splits to hosts")
 
     // Group splits by assigned host for locality-aware batching
@@ -380,6 +392,10 @@ class IndexTables4SparkScan(
       logger.debug(s"Partition host distribution: $hostDistribution")
     }
     logger.info(s"Planned ${partitions.length} multi-split partitions (${filteredActions.length} splits, $splitsPerTask per task, $totalPreferred with locality hints)")
+
+    planningMetrics.totalPlanNs = System.nanoTime() - planStart
+    planningMetrics.resultPartitions = partitions.length
+    planningMetrics.logSummary()
 
     partitions.toArray[InputPartition]
   }
@@ -494,7 +510,14 @@ class IndexTables4SparkScan(
       new PartitionPrunedFiles(),
       new DataSkippedFiles(),
       new ResultFiles(),
-      new TotalSkipRate()
+      new TotalSkipRate(),
+      new NativeFilteringTime(),
+      new ScanPlanTotalTime(),
+      new SplitEngineCreationTime(),
+      new QueryBuildTime(),
+      new StreamingSessionStartTime(),
+      new NextBatchTime(),
+      new BatchAssemblyTime()
     )
 
   /**
@@ -507,6 +530,8 @@ class IndexTables4SparkScan(
       new TaskPartitionPrunedFiles(lastScanPartitionPrunedFiles),
       new TaskDataSkippedFiles(lastScanDataSkippedFiles),
       new TaskResultFiles(lastScanResultFiles),
-      new TaskTotalSkipRate(lastScanTotalSkipRate)
+      new TaskTotalSkipRate(lastScanTotalSkipRate),
+      new TaskNativeFilteringTime(planningMetrics.nativeFilteringMs.toLong),
+      new TaskScanPlanTotalTime(planningMetrics.totalPlanMs.toLong)
     )
 }
