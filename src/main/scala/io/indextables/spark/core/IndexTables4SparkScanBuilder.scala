@@ -44,7 +44,8 @@ import io.indextables.spark.expressions.{
   HistogramExpression,
   RangeBucket,
   RangeConfig,
-  RangeExpression
+  RangeExpression,
+  SearchType
 }
 import io.indextables.spark.filters.{
   IndexQueryAllFilter,
@@ -342,7 +343,23 @@ class IndexTables4SparkScanBuilder(
           logger.info(
             s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})"
           )
-          config
+          // For non-companion tables, enrich config with typemap entries stored in metadata
+          // at write time. This enables TEXTSEARCH/FIELDMATCH type validation at read time
+          // without requiring users to re-specify typemap options.
+          val typemapPrefix = "spark.indextables.indexing.typemap."
+          val metadataTypemap = metadata.configuration.filter {
+            case (key, _) => key.toLowerCase.startsWith(typemapPrefix)
+          }
+          if (metadataTypemap.nonEmpty) {
+            logger.info(s"effectiveConfig: loaded ${metadataTypemap.size} typemap entries from transaction log metadata")
+            // User-provided read options take precedence over stored metadata
+            metadataTypemap.foldLeft(config) {
+              case (cfg, (key, value)) =>
+                if (cfg.contains(key)) cfg else cfg + (key -> value)
+            }
+          } else {
+            config
+          }
         }
       } catch {
         case e: IllegalArgumentException =>
@@ -2056,24 +2073,24 @@ class IndexTables4SparkScanBuilder(
     }.toSeq
 
     allFilters.foreach { filter =>
-      if (filter.searchType == "textsearch" || filter.searchType == "fieldmatch") {
+      if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
         val fieldTypeKey = s"spark.indextables.indexing.typemap.${filter.columnName.toLowerCase}"
         val fieldType    = effectiveConfig.get(fieldTypeKey)
 
         fieldType match {
           case Some(mode) =>
             val isExactMatch = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
-            if (filter.searchType == "textsearch" && isExactMatch) {
+            if (filter.searchType == SearchType.TextSearch && isExactMatch) {
               throw new IllegalArgumentException(
                 s"Cannot use TEXTSEARCH on field '${filter.columnName}': " +
-                  s"this field is configured for exact matching (not tokenized). " +
+                  s"this field is configured for exact matching (mode='$mode', not tokenized). " +
                   s"Use FIELDMATCH instead, or update the field's typemap to a tokenized type (e.g., 'text')."
               )
             }
-            if (filter.searchType == "fieldmatch" && !isExactMatch) {
+            if (filter.searchType == SearchType.FieldMatch && !isExactMatch) {
               throw new IllegalArgumentException(
                 s"Cannot use FIELDMATCH on field '${filter.columnName}': " +
-                  s"this field is configured for full-text search (tokenized). " +
+                  s"this field is configured for full-text search (mode='$mode', tokenized). " +
                   s"Use TEXTSEARCH instead, or update the field's typemap to an exact-match type (e.g., 'string')."
               )
             }
@@ -2090,7 +2107,7 @@ class IndexTables4SparkScanBuilder(
             )
         }
       }
-      // searchType == "indexquery" → skip validation (backwards compat)
+      // searchType == SearchType.IndexQuery → skip validation (general-purpose, backwards compat)
     }
 
     // Warn about potential field type mismatches for * TEXTSEARCH / * FIELDMATCH queries
@@ -2109,24 +2126,24 @@ class IndexTables4SparkScanBuilder(
 
     if (typemapEntries.nonEmpty) {
       allQueryAllFilters.foreach { filter =>
-        if (filter.searchType == "textsearch" || filter.searchType == "fieldmatch") {
+        if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
           val mismatchedFields = typemapEntries.collect {
             case (field, mode) =>
               val isExactMatch = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
-              if (filter.searchType == "textsearch" && isExactMatch) Some(field)
-              else if (filter.searchType == "fieldmatch" && !isExactMatch) Some(field)
+              if (filter.searchType == SearchType.TextSearch && isExactMatch) Some(field)
+              else if (filter.searchType == SearchType.FieldMatch && !isExactMatch) Some(field)
               else None
           }.flatten.toSeq.sorted
 
           if (mismatchedFields.nonEmpty) {
             val searchOp = filter.searchType.toUpperCase
             val (fieldDesc, suggestedOp) =
-              if (filter.searchType == "textsearch")
+              if (filter.searchType == SearchType.TextSearch)
                 ("non-tokenized", "FIELDMATCH")
               else
                 ("tokenized", "TEXTSEARCH")
             val expectedBehavior =
-              if (filter.searchType == "textsearch") "full-text search"
+              if (filter.searchType == SearchType.TextSearch) "full-text search"
               else "exact matching"
 
             logger.warn(

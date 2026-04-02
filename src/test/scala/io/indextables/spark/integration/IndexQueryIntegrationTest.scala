@@ -144,7 +144,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
     )
 
     val sql = expr.sql
-    assert(sql.contains("INDEXQUERY"))
+    assert(sql.contains("indexquery"))
     assert(sql.contains("title"))
     assert(sql.contains("search query"))
   }

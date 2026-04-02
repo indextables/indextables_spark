@@ -17,6 +17,8 @@
 
 package io.indextables.spark.filters
 
+import io.indextables.spark.expressions.SearchType
+
 /**
  * Custom filter representing an indexquery operation for pushdown to Tantivy data source.
  *
@@ -39,7 +41,12 @@ package io.indextables.spark.filters
 case class IndexQueryFilter(
   columnName: String,
   queryString: String,
-  searchType: String = "indexquery") {
+  searchType: String = SearchType.IndexQuery) {
+
+  require(
+    SearchType.validSingleField.contains(searchType),
+    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validSingleField.mkString(", ")}"
+  )
 
   override def toString: String = s"IndexQuery[$searchType]($columnName, '$queryString')"
 

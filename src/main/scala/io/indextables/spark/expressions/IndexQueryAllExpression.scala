@@ -34,8 +34,13 @@ import org.apache.spark.unsafe.types.UTF8String
  */
 case class IndexQueryAllExpression(
   child: Expression,
-  searchType: String = "indexqueryall" // "indexqueryall", "textsearch", or "fieldmatch"
+  searchType: String = SearchType.IndexQueryAll // "indexqueryall", "textsearch", or "fieldmatch"
 ) extends UnaryExpression with Predicate {
+
+  require(
+    SearchType.validAllFields.contains(searchType),
+    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validAllFields.mkString(", ")}"
+  )
 
   override def dataType: DataType = BooleanType
 
@@ -46,15 +51,15 @@ case class IndexQueryAllExpression(
   override lazy val deterministic: Boolean = false
 
   override def prettyName: String = searchType match {
-    case "textsearch" => "textsearch_all"
-    case "fieldmatch" => "fieldmatch_all"
-    case _            => "indexqueryall"
+    case SearchType.TextSearch => "textsearch_all"
+    case SearchType.FieldMatch => "fieldmatch_all"
+    case _                     => "indexqueryall"
   }
 
   private def displayKeyword: String = searchType match {
-    case "textsearch" => "TEXTSEARCH"
-    case "fieldmatch" => "FIELDMATCH"
-    case _            => "INDEXQUERYALL"
+    case SearchType.TextSearch => "TEXTSEARCH"
+    case SearchType.FieldMatch => "FIELDMATCH"
+    case _                     => "indexqueryall"
   }
 
   override def sql: String = s"(* $displayKeyword ${child.sql})"

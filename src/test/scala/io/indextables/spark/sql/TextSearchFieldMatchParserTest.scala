@@ -1164,4 +1164,317 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       }
     }
   }
+
+  // --- * indexquery syntax ---
+
+  test("* indexquery should parse as all-fields expression") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
+
+    val expr = parser.parseExpression("* indexquery 'spark AND sql'")
+
+    assert(expr.isInstanceOf[IndexQueryAllExpression])
+    val allExpr = expr.asInstanceOf[IndexQueryAllExpression]
+    assert(allExpr.getQueryString.contains("spark AND sql"))
+    assert(allExpr.searchType == "indexquery")
+  }
+
+  test("* indexquery preprocessor should convert to tantivy4spark_indexqueryall") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation"),
+        (2, "machine learning algorithms"),
+        (3, "distributed computing systems")
+      ).toDF("id", "content")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("star_indexquery_test")
+
+      val starResults = spark.sql(
+        "SELECT id FROM star_indexquery_test WHERE * indexquery 'spark'"
+      ).collect().map(_.getInt(0)).sorted
+
+      val indexqueryallResults = spark.sql(
+        "SELECT id FROM star_indexquery_test WHERE indexqueryall('spark')"
+      ).collect().map(_.getInt(0)).sorted
+
+      assert(starResults.nonEmpty, "* indexquery should return results")
+      assert(starResults.sameElements(indexqueryallResults),
+        s"* indexquery and indexqueryall should return identical results")
+    }
+  }
+
+  // --- Type validation for text_uuid and text_custom modes ---
+
+  test("TEXTSEARCH on text_uuid_exactonly field should succeed") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "log entry with uuid 550e8400-e29b-41d4-a716-446655440000"),
+        (2, "another log entry with uuid 6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+      ).toDF("id", "message")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_uuid_exactonly")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_uuid_exactonly")
+        .load(tempPath)
+      df.createOrReplaceTempView("textsearch_uuid_test")
+
+      val results = spark.sql(
+        "SELECT id FROM textsearch_uuid_test WHERE message TEXTSEARCH 'log'"
+      ).collect()
+      assert(results.length >= 1, "TEXTSEARCH on text_uuid_exactonly field should return results")
+    }
+  }
+
+  test("FIELDMATCH on text_uuid_exactonly field should throw error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "log entry with uuid"),
+        (2, "another log entry")
+      ).toDF("id", "message")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_uuid_exactonly")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_uuid_exactonly")
+        .load(tempPath)
+      df.createOrReplaceTempView("fieldmatch_uuid_test")
+
+      val error = intercept[Exception] {
+        spark.sql(
+          "SELECT id FROM fieldmatch_uuid_test WHERE message FIELDMATCH 'log'"
+        ).collect()
+      }
+      assert(error.getMessage.contains("Cannot use FIELDMATCH") ||
+        error.getCause != null && error.getCause.getMessage.contains("Cannot use FIELDMATCH"),
+        s"Expected FIELDMATCH rejection error for text_uuid_exactonly, got: ${error.getMessage}")
+    }
+  }
+
+  test("TEXTSEARCH on text_uuid_strip field should succeed") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "log entry with uuid 550e8400-e29b-41d4-a716-446655440000"),
+        (2, "another log entry")
+      ).toDF("id", "message")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_uuid_strip")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_uuid_strip")
+        .load(tempPath)
+      df.createOrReplaceTempView("textsearch_uuid_strip_test")
+
+      val results = spark.sql(
+        "SELECT id FROM textsearch_uuid_strip_test WHERE message TEXTSEARCH 'log'"
+      ).collect()
+      assert(results.length >= 1, "TEXTSEARCH on text_uuid_strip field should return results")
+    }
+  }
+
+  test("FIELDMATCH on text_custom_exactonly field should throw error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "user logged in from 192.168.1.1"),
+        (2, "request from 10.0.0.1 failed")
+      ).toDF("id", "message")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_custom_exactonly:\\d+\\.\\d+\\.\\d+\\.\\d+")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.message", "text_custom_exactonly:\\d+\\.\\d+\\.\\d+\\.\\d+")
+        .load(tempPath)
+      df.createOrReplaceTempView("fieldmatch_custom_test")
+
+      val error = intercept[Exception] {
+        spark.sql(
+          "SELECT id FROM fieldmatch_custom_test WHERE message FIELDMATCH 'user'"
+        ).collect()
+      }
+      assert(error.getMessage.contains("Cannot use FIELDMATCH") ||
+        error.getCause != null && error.getCause.getMessage.contains("Cannot use FIELDMATCH"),
+        s"Expected FIELDMATCH rejection error for text_custom_exactonly, got: ${error.getMessage}")
+    }
+  }
+
+  // --- Typemap persistence in transaction log ---
+
+  test("Typemap should be persisted in transaction log and available at read time") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation", "active"),
+        (2, "machine learning algorithms", "inactive")
+      ).toDF("id", "content", "status")
+
+      // Write with typemap options
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Read WITHOUT specifying typemap options — should still validate
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("typemap_persist_test")
+
+      // TEXTSEARCH on text field should succeed (typemap loaded from metadata)
+      val results = spark.sql(
+        "SELECT id FROM typemap_persist_test WHERE content TEXTSEARCH 'spark'"
+      ).collect()
+      assert(results.length >= 1, "TEXTSEARCH should work with typemap from metadata")
+
+      // TEXTSEARCH on string field should throw (typemap loaded from metadata)
+      val error = intercept[Exception] {
+        spark.sql(
+          "SELECT id FROM typemap_persist_test WHERE status TEXTSEARCH 'active'"
+        ).collect()
+      }
+      assert(error.getMessage.contains("Cannot use TEXTSEARCH") ||
+        error.getCause != null && error.getCause.getMessage.contains("Cannot use TEXTSEARCH"),
+        s"Expected TEXTSEARCH rejection error for string field (typemap from metadata), got: ${error.getMessage}")
+    }
+  }
+
+  test("Typemap should be updated when appending to existing table with new typemap entries") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // First write: create table with content=text
+      val testData1 = Seq(
+        (1, "apache spark documentation", "active")
+      ).toDF("id", "content", "status")
+
+      testData1.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Second write: append with additional typemap status=string
+      val testData2 = Seq(
+        (2, "machine learning algorithms", "inactive")
+      ).toDF("id", "content", "status")
+
+      testData2.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("append")
+        .save(tempPath)
+
+      // Read WITHOUT specifying typemap options — both typemaps should be available
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("typemap_append_test")
+
+      // TEXTSEARCH on string field should throw (typemap from metadata includes status=string)
+      val error = intercept[Exception] {
+        spark.sql(
+          "SELECT id FROM typemap_append_test WHERE status TEXTSEARCH 'active'"
+        ).collect()
+      }
+      assert(error.getMessage.contains("Cannot use TEXTSEARCH") ||
+        error.getCause != null && error.getCause.getMessage.contains("Cannot use TEXTSEARCH"),
+        s"Expected TEXTSEARCH rejection for string field added via append, got: ${error.getMessage}")
+    }
+  }
+
+  // --- SearchType require() validation ---
+
+  test("Invalid searchType should throw IllegalArgumentException") {
+    import org.apache.spark.sql.catalyst.expressions._
+    import org.apache.spark.sql.types.StringType
+    import org.apache.spark.unsafe.types.UTF8String
+
+    val column = AttributeReference("title", StringType, nullable = true)()
+    val query  = Literal(UTF8String.fromString("test"), StringType)
+
+    // Valid searchTypes should work
+    IndexQueryExpression(column, query, "indexquery")
+    IndexQueryExpression(column, query, "textsearch")
+    IndexQueryExpression(column, query, "fieldmatch")
+
+    // Invalid searchType should throw
+    intercept[IllegalArgumentException] {
+      IndexQueryExpression(column, query, "textSearch")
+    }
+    intercept[IllegalArgumentException] {
+      IndexQueryExpression(column, query, "field_match")
+    }
+    intercept[IllegalArgumentException] {
+      IndexQueryExpression(column, query, "indexqueryall")
+    }
+  }
+
+  test("Invalid searchType on IndexQueryAllExpression should throw IllegalArgumentException") {
+    import org.apache.spark.sql.catalyst.expressions._
+    import org.apache.spark.sql.types.StringType
+    import org.apache.spark.unsafe.types.UTF8String
+
+    val query = Literal(UTF8String.fromString("test"), StringType)
+
+    // Valid searchTypes should work
+    IndexQueryAllExpression(query, "indexqueryall")
+    IndexQueryAllExpression(query, "textsearch")
+    IndexQueryAllExpression(query, "fieldmatch")
+
+    // Invalid searchType should throw
+    intercept[IllegalArgumentException] {
+      IndexQueryAllExpression(query, "textSearch")
+    }
+    intercept[IllegalArgumentException] {
+      IndexQueryAllExpression(query, "indexquery")
+    }
+  }
 }

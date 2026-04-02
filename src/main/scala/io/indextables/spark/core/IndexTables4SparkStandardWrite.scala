@@ -228,8 +228,23 @@ class IndexTables4SparkStandardWrite(
 
     logger.debug(s"SAVEMODE DEBUG: shouldOverwrite = $shouldOverwrite")
 
+    // Extract typemap entries from write options to persist in transaction log metadata.
+    // This enables TEXTSEARCH/FIELDMATCH type validation at read time without requiring
+    // users to re-specify typemap options on reads.
+    val typemapPrefix = "spark.indextables.indexing.typemap."
+    val typemapConfig = serializedOptions.collect {
+      case (key, value) if key.toLowerCase.startsWith(typemapPrefix) => key -> value
+    }
+
     // Initialize transaction log with schema if this is the first commit
-    transactionLog.initialize(writeSchema, partitionColumns)
+    transactionLog.initialize(writeSchema, partitionColumns, typemapConfig)
+
+    // For existing tables, merge new/changed typemap entries into metadata.
+    // initialize() is a no-op for existing tables, so typemap from later writes
+    // would be lost without this update.
+    if (transactionLog.mergeTypemapIntoMetadata(typemapConfig)) {
+      logger.info(s"Updated metadata with typemap entries from write options")
+    }
 
     // Convert serializedOptions Map to CaseInsensitiveStringMap
     val optionsMap = new java.util.HashMap[String, String]()

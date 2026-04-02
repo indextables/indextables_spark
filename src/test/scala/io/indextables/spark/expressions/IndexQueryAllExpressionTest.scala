@@ -71,7 +71,7 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     val query = Literal(UTF8String.fromString("machine learning"), StringType)
 
     val defaultExpr = IndexQueryAllExpression(query)
-    assert(defaultExpr.sql.contains("INDEXQUERYALL"))
+    assert(defaultExpr.sql.contains("indexqueryall"))
 
     val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
     assert(textsearchExpr.sql.contains("TEXTSEARCH"))
@@ -143,7 +143,7 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     val query = Literal(UTF8String.fromString("test query"), StringType)
 
     val defaultExpr = IndexQueryAllExpression(query)
-    assert(defaultExpr.toString.contains("INDEXQUERYALL"))
+    assert(defaultExpr.toString.contains("indexqueryall"))
     assert(defaultExpr.toString.contains("test query"))
 
     val textsearchExpr = IndexQueryAllExpression(query, "textsearch")

@@ -29,7 +29,8 @@ import io.indextables.spark.expressions.{
   HistogramExpression,
   IndexQueryAllExpression,
   IndexQueryExpression,
-  RangeExpression
+  RangeExpression,
+  SearchType
 }
 import io.indextables.spark.sql.IndexTables4SparkSqlParser
 
@@ -102,7 +103,7 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
         ),
         (children: Seq[Expression]) =>
           if (children.length == 2) {
-            IndexQueryExpression(children(0), children(1), "textsearch")
+            IndexQueryExpression(children(0), children(1), SearchType.TextSearch)
           } else {
             throw new IllegalArgumentException("tantivy4spark_textsearch requires exactly 2 arguments")
           }
@@ -120,7 +121,7 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
         ),
         (children: Seq[Expression]) =>
           if (children.length == 2) {
-            IndexQueryExpression(children(0), children(1), "fieldmatch")
+            IndexQueryExpression(children(0), children(1), SearchType.FieldMatch)
           } else {
             throw new IllegalArgumentException("tantivy4spark_fieldmatch requires exactly 2 arguments")
           }
@@ -138,7 +139,7 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
         ),
         (children: Seq[Expression]) =>
           if (children.length == 1) {
-            IndexQueryAllExpression(children(0), "textsearch")
+            IndexQueryAllExpression(children(0), SearchType.TextSearch)
           } else {
             throw new IllegalArgumentException("tantivy4spark_textsearchall requires exactly 1 argument")
           }
@@ -156,7 +157,7 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
         ),
         (children: Seq[Expression]) =>
           if (children.length == 1) {
-            IndexQueryAllExpression(children(0), "fieldmatch")
+            IndexQueryAllExpression(children(0), SearchType.FieldMatch)
           } else {
             throw new IllegalArgumentException("tantivy4spark_fieldmatchall requires exactly 1 argument")
           }

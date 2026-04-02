@@ -66,6 +66,48 @@ trait TransactionLogInterface extends AutoCloseable {
   def initialize(schema: StructType, partitionColumns: Seq[String]): Unit
 
   /**
+   * Initializes the transaction log with a schema, partition columns, and configuration.
+   *
+   * Creates the transaction log directory and writes initial protocol and metadata actions with partitioning and
+   * configuration (e.g., typemap entries for TEXTSEARCH/FIELDMATCH validation).
+   *
+   * @param schema
+   *   The table schema to initialize with
+   * @param partitionColumns
+   *   The partition column names (must exist in schema)
+   * @param configuration
+   *   Configuration entries to persist in metadata (e.g., typemap entries)
+   */
+  def initialize(schema: StructType, partitionColumns: Seq[String], configuration: Map[String, String]): Unit =
+    initialize(schema, partitionColumns) // Default: delegates to 2-param version for backwards compat
+
+  /**
+   * Merge typemap entries into metadata, adding new entries and updating changed values.
+   *
+   * initialize() only writes metadata on first table creation. For existing tables, this method
+   * ensures typemap entries from subsequent writes are persisted. Detects both missing keys
+   * and changed values (e.g., field type changed from string to text).
+   *
+   * @param typemapConfig
+   *   typemap entries to merge (e.g., "spark.indextables.indexing.typemap.content" -> "text")
+   * @return
+   *   true if metadata was updated, false if no changes needed or an error occurred
+   */
+  def mergeTypemapIntoMetadata(typemapConfig: Map[String, String]): Boolean = {
+    if (typemapConfig.isEmpty) return false
+    val metadata = getMetadata()
+    val changedEntries = typemapConfig.filter { case (k, v) =>
+      !metadata.configuration.get(k).contains(v)
+    }
+    if (changedEntries.nonEmpty) {
+      commitMetadataUpdate { current =>
+        current.copy(configuration = current.configuration ++ typemapConfig)
+      }
+      true
+    } else false
+  }
+
+  /**
    * Adds a single file to the transaction log.
    *
    * @param addAction

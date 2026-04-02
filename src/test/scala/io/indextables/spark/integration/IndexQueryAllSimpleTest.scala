@@ -190,11 +190,11 @@ class IndexQueryAllSimpleTest extends AnyFunSuite with TestBase with BeforeAndAf
     val expr  = IndexQueryAllExpression(query)
 
     val sqlString = expr.sql
-    assert(sqlString.contains("INDEXQUERYALL"))
+    assert(sqlString.contains("indexqueryall"))
     assert(sqlString.contains("machine learning"))
 
     val toStringResult = expr.toString
-    assert(toStringResult.contains("INDEXQUERYALL"))
+    assert(toStringResult.contains("indexqueryall"))
     assert(toStringResult.contains("machine learning"))
   }
 }

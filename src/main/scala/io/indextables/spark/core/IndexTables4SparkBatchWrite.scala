@@ -130,8 +130,26 @@ class IndexTables4SparkBatchWrite(
       case _: Exception                     => // Table may not exist yet, which is fine
     }
 
+    // Extract typemap entries from write options to persist in transaction log metadata.
+    // This enables TEXTSEARCH/FIELDMATCH type validation at read time without requiring
+    // users to re-specify typemap options on reads.
+    val typemapPrefix = "spark.indextables.indexing.typemap."
+    val typemapConfig: Map[String, String] = {
+      import scala.jdk.CollectionConverters._
+      options.asCaseSensitiveMap().asScala.collect {
+        case (key, value) if key.toLowerCase.startsWith(typemapPrefix) => key -> value
+      }.toMap
+    }
+
     // Initialize transaction log with schema and partition columns
-    transactionLog.initialize(writeInfo.schema(), partitionColumns)
+    transactionLog.initialize(writeInfo.schema(), partitionColumns, typemapConfig)
+
+    // For existing tables, merge new/changed typemap entries into metadata.
+    // initialize() is a no-op for existing tables, so typemap from later writes
+    // would be lost without this update.
+    if (transactionLog.mergeTypemapIntoMetadata(typemapConfig)) {
+      logger.info(s"Updated metadata with typemap entries from write options")
+    }
 
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: IndexTables4SparkCommitMessage => msg.addActions

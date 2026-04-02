@@ -70,7 +70,7 @@ spark.sql("SELECT * FROM my_table WHERE * TEXTSEARCH 'error'").show()
 # Exact match on non-tokenized fields
 spark.sql("SELECT * FROM my_table WHERE status FIELDMATCH 'active'").show()
 
-# Legacy syntax (still supported, no type validation)
+# General-purpose syntax (works on any field, no type validation)
 # spark.sql("SELECT * FROM my_table WHERE message indexquery 'error'").show()
 ```
 
