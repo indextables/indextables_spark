@@ -26,6 +26,32 @@ spark.indextables.checkpoint.interval: 10
 spark.indextables.transaction.compression.enabled: true (default)
 ```
 
+### Cache
+
+Controls the native in-process txlog cache. All keys are optional; omitted keys use native defaults.
+
+```scala
+spark.indextables.transaction.cache.enabled: "true"            // Set to "false" to disable all caching
+spark.indextables.transaction.cache.ttl.ms: 300000             // Override all cache TTLs at once (ms)
+spark.indextables.transaction.cache.version.ttl.ms: 300000     // Per-version-file cache TTL (ms)
+spark.indextables.transaction.cache.snapshot.ttl.ms: 600000    // Per-snapshot cache TTL (ms)
+spark.indextables.transaction.cache.fileList.ttl.ms: 120000    // Per-file-list cache TTL (ms)
+spark.indextables.transaction.cache.metadata.ttl.ms: 1800000   // Protocol/metadata cache TTL (ms)
+spark.indextables.transaction.cache.version.capacity: 1000     // Max cached version entries
+spark.indextables.transaction.cache.snapshot.capacity: 100      // Max cached snapshot entries
+spark.indextables.transaction.cache.fileList.capacity: 50       // Max cached file-list entries
+```
+
+> **Legacy key:** `spark.indextables.transaction.cache.expirationSeconds` (seconds) is still supported for backward compatibility. If `cache.ttl.ms` is also set, it takes precedence.
+
+### Concurrency
+
+```scala
+spark.indextables.transaction.maxConcurrentReads: 32  // Max parallel object-store GETs (range: 16–64)
+```
+
+Reduce if hitting S3/Azure rate limits; increase for high-bandwidth connections with many post-checkpoint versions. Values outside the recommended range are passed to the native layer as-is (no clamping).
+
 ### Concurrent Write Retry
 
 Automatic retry on version conflicts:
