@@ -472,7 +472,17 @@ case class SyncToExternalCommand(
       } else Map.empty
 
       def storedCsv(key: String): Seq[String] =
-        storedConfig.get(key).filter(_.nonEmpty).map(_.split(",").toSeq).getOrElse(Seq.empty)
+        storedConfig.get(key).filter(_.nonEmpty).map { value =>
+          if (value.startsWith("[")) {
+            // JSON array format (new)
+            import com.fasterxml.jackson.core.`type`.TypeReference
+            io.indextables.spark.util.JsonUtil.mapper
+              .readValue(value, new TypeReference[java.util.List[String]]() {}).asScala.toSeq
+          } else {
+            // CSV format (legacy)
+            value.split(",").toSeq
+          }
+        }.getOrElse(Seq.empty)
 
       def storedJsonMap(key: String): Map[String, String] =
         storedConfig.get(key).map { json =>
@@ -514,6 +524,18 @@ case class SyncToExternalCommand(
           effInclude // user-specified: will be validated later with error
         }
 
+        // R5: Warn and skip dropped columns for EXCLUDE — only for columns restored from metadata
+        val cleanedExclude = if (excludeColumns.isEmpty && storedExclude.nonEmpty) {
+          effExclude.filter { col =>
+            if (!allSourceColumnsLower.contains(col.toLowerCase)) {
+              logger.warn(s"Column '$col' in stored EXCLUDE COLUMNS no longer exists in source schema. Skipping.")
+              false
+            } else true
+          }
+        } else {
+          effExclude
+        }
+
         // R6: Warn on new columns with EXCLUDE COLUMNS and detect type changes
         if (!isInitialSync) {
           val storedColumnTypes: Map[String, String] = storedJsonMap("indextables.companion.columnTypes")
@@ -533,8 +555,18 @@ case class SyncToExternalCommand(
               }
             }
 
-            // R6: Detect type changes (widening vs breaking)
-            sourceSchema.fields.foreach { field =>
+            // R6: Detect type changes (widening vs breaking) — only for indexed columns
+            val indexedColumnsLower: Set[String] = if (cleanedInclude.nonEmpty) {
+              cleanedInclude.map(_.toLowerCase).toSet
+            } else if (cleanedExclude.nonEmpty) {
+              val excludedLower = cleanedExclude.map(_.toLowerCase).toSet
+              dataColumnsLower -- excludedLower
+            } else {
+              dataColumnsLower
+            }
+            sourceSchema.fields
+              .filter(f => indexedColumnsLower.contains(f.name.toLowerCase))
+              .foreach { field =>
               val colLower = field.name.toLowerCase
               storedColumnTypes.get(colLower).foreach { storedType =>
                 val currentType = field.dataType.simpleString
@@ -545,7 +577,13 @@ case class SyncToExternalCommand(
                     case ("smallint", "int") | ("smallint", "bigint")                         => true
                     case ("int", "bigint")                                                     => true
                     case ("float", "double")                                                   => true
-                    case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") => true
+                    case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
+                      val decPattern = """decimal\((\d+),(\d+)\)""".r
+                      (storedType, currentType) match {
+                        case (decPattern(sp, ss), decPattern(cp, cs)) =>
+                          cp.toInt >= sp.toInt && cs.toInt >= ss.toInt
+                        case _ => false
+                      }
                     case _                                                                     => false
                   }
                   if (isWidening) {
@@ -565,7 +603,7 @@ case class SyncToExternalCommand(
           }
         }
 
-        (cleanedInclude, effExclude)
+        (cleanedInclude, cleanedExclude)
       }
 
       // Helper: format available columns truncated at 20
@@ -627,7 +665,9 @@ case class SyncToExternalCommand(
         val included = filteredIncludeColumns.map(_.toLowerCase).toSet
         sourceSchema.fieldNames.filterNot(c => included.contains(c.toLowerCase)).toSeq
       } else {
-        filteredExcludeColumns
+        // Use actual schema field names for case-correct skip fields (Rust layer does exact matching)
+        val excludedLower = filteredExcludeColumns.map(_.toLowerCase).toSet
+        sourceSchema.fieldNames.filter(c => excludedLower.contains(c.toLowerCase)).toSeq
       }
 
       val skipFieldsLower = effectiveSkipFields.map(_.toLowerCase).toSet
@@ -751,6 +791,19 @@ case class SyncToExternalCommand(
         }
       }
 
+      // Validate INDEXING MODES fields are not in EXCLUDE COLUMNS
+      if (filteredExcludeColumns.nonEmpty && effectiveIndexingModes.nonEmpty) {
+        val excluded = filteredExcludeColumns.map(_.toLowerCase).toSet
+        effectiveIndexingModes.foreach {
+          case (field, _) =>
+            if (excluded.contains(field.toLowerCase)) {
+              throw new IllegalArgumentException(
+                s"Field '$field' in INDEXING MODES is in EXCLUDE COLUMNS and will not be indexed."
+              )
+            }
+        }
+      }
+
       // R3: Validate HASHED FASTFIELDS fields are within included columns and have string type
       if (filteredIncludeColumns.nonEmpty) {
         val included = filteredIncludeColumns.map(_.toLowerCase).toSet
@@ -759,6 +812,17 @@ case class SyncToExternalCommand(
             throw new IllegalArgumentException(
               s"Field '$field' in HASHED FASTFIELDS is not in INCLUDE COLUMNS. " +
                 s"Included columns: ${filteredIncludeColumns.mkString(", ")}"
+            )
+          }
+        }
+      }
+      // Validate HASHED FASTFIELDS fields are not in EXCLUDE COLUMNS
+      if (filteredExcludeColumns.nonEmpty) {
+        val excluded = filteredExcludeColumns.map(_.toLowerCase).toSet
+        (hashedFastfieldsInclude ++ hashedFastfieldsExclude).foreach { field =>
+          if (excluded.contains(field.toLowerCase)) {
+            throw new IllegalArgumentException(
+              s"Field '$field' in HASHED FASTFIELDS is in EXCLUDE COLUMNS and will not be indexed."
             )
           }
         }
@@ -1377,9 +1441,11 @@ case class SyncToExternalCommand(
           else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
                                 Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
                               else Map.empty) ++ (if (includeColumns.nonEmpty)
-                                                    Map("indextables.companion.includeColumns" -> includeColumns.mkString(","))
+                                                    Map("indextables.companion.includeColumns" ->
+                                                      io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(includeColumns.asJava))
                                                   else Map.empty) ++ (if (excludeColumns.nonEmpty)
-                                                                        Map("indextables.companion.excludeColumns" -> excludeColumns.mkString(","))
+                                                                        Map("indextables.companion.excludeColumns" ->
+                                                                          io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(excludeColumns.asJava))
                                                                       else Map.empty) ++ sourceSchema.map { schema =>
       Map(
         "indextables.companion.columnTypes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(

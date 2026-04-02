@@ -543,6 +543,301 @@ class CompanionIncludeExcludeColumnsTest extends AnyFunSuite with Matchers with 
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  Bug regression tests
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("BUG1: EXCLUDE COLUMNS with wrong casing normalizes skip fields to schema casing") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createWideDeltaTable(deltaPath)
+
+      // Use uppercase 'NAME' — schema has lowercase 'name'.
+      // Before the fix, the Rust layer received user-cased skip fields ('NAME') that
+      // didn't match the Parquet schema ('name'), silently indexing the "excluded" column.
+      // After the fix, skip fields are normalized to actual schema casing.
+      //
+      // Note: The companion reader presents the source schema (all columns) regardless of
+      // what's indexed, so we can't assert on df.schema to prove exclusion. Instead we verify
+      // the command succeeds and the non-excluded columns are queryable — the code fix itself
+      // is a direct substitution from user-cased strings to sourceSchema.fieldNames.filter().
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('NAME', 'Score', 'MESSAGE')
+           |  HASHED FASTFIELDS INCLUDE ('ip_addr')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .load(indexPath)
+
+      // Non-excluded columns should be searchable
+      val idFilter = df.filter(col("id") === 1).collect()
+      idFilter.length shouldBe 1
+      df.count() shouldBe 3
+
+      // Incremental sync should work — proves skip fields were stored with correct casing
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+      Seq((4, "dave", 400.0, 4000L, true, "new data", "10.0.0.4", "cat_d",
+        "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11", "e12"))
+        .toDF("id", "name", "score", "timestamp", "active", "message", "ip_addr", "category",
+          "col_09", "col_10", "col_11", "col_12", "col_13", "col_14", "col_15",
+          "col_16", "col_17", "col_18", "col_19", "col_20")
+        .write.format("delta").mode("append").save(deltaPath)
+
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "success"
+
+      val df2 = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .load(indexPath)
+      df2.count() shouldBe 4
+    }
+  }
+
+  test("BUG2: dropped column in stored EXCLUDE gracefully skips on incremental sync") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create table with 3 columns, EXCLUDE 'extra'
+      Seq((1, "alice", "x"), (2, "bob", "y")).toDF("id", "name", "extra")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result1 = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('extra')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+
+      // Recreate table WITHOUT 'extra' column — it's been dropped from the source schema
+      deleteRecursively(new java.io.File(deltaPath))
+      Seq((3, "charlie"), (4, "dave")).toDF("id", "name")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Incremental sync restores EXCLUDE from metadata; 'extra' no longer exists.
+      // Before the fix, this would throw "Column 'extra' in EXCLUDE COLUMNS does not exist".
+      // After the fix, it warns and skips the dropped column.
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("BUG3: INDEXING MODES on EXCLUDE'd column returns error") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createWideDeltaTable(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('message')
+           |  INDEXING MODES ('message': 'text')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "error"
+      result(0).getString(10) should include("INDEXING MODES")
+      result(0).getString(10) should include("EXCLUDE COLUMNS")
+    }
+  }
+
+  test("BUG3: HASHED FASTFIELDS on EXCLUDE'd column returns error") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createWideDeltaTable(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('name')
+           |  HASHED FASTFIELDS INCLUDE ('name')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "error"
+      result(0).getString(10) should include("HASHED FASTFIELDS")
+      result(0).getString(10) should include("EXCLUDE COLUMNS")
+    }
+  }
+
+  test("BUG4: decimal precision reduction is a breaking change") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create initial table with decimal(10,2)
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+      import org.apache.spark.sql.types._
+
+      val schema1 = StructType(Seq(
+        StructField("id", IntegerType), StructField("amount", DecimalType(10, 2))
+      ))
+      val data1 = Seq(
+        org.apache.spark.sql.Row(1, new java.math.BigDecimal("100.50")),
+        org.apache.spark.sql.Row(2, new java.math.BigDecimal("200.75"))
+      )
+      spark.createDataFrame(spark.sparkContext.parallelize(data1), schema1)
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Initial sync
+      val result1 = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INCLUDE COLUMNS ('id', 'amount')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+
+      // Recreate with decimal(5,1) — precision AND scale reduction
+      deleteRecursively(new java.io.File(deltaPath))
+      val schema2 = StructType(Seq(
+        StructField("id", IntegerType), StructField("amount", DecimalType(5, 1))
+      ))
+      val data2 = Seq(
+        org.apache.spark.sql.Row(3, new java.math.BigDecimal("10.5"))
+      )
+      spark.createDataFrame(spark.sparkContext.parallelize(data2), schema2)
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Incremental sync should error on decimal narrowing
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "error"
+      result2(0).getString(10) should include("type changed")
+    }
+  }
+
+  test("BUG4: decimal precision widening is allowed") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+      import org.apache.spark.sql.types._
+
+      val schema1 = StructType(Seq(
+        StructField("id", IntegerType), StructField("amount", DecimalType(10, 2))
+      ))
+      val data1 = Seq(
+        org.apache.spark.sql.Row(1, new java.math.BigDecimal("100.50"))
+      )
+      spark.createDataFrame(spark.sparkContext.parallelize(data1), schema1)
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result1 = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INCLUDE COLUMNS ('id', 'amount')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+
+      // Recreate with decimal(18,4) — precision AND scale increase (widening)
+      deleteRecursively(new java.io.File(deltaPath))
+      val schema2 = StructType(Seq(
+        StructField("id", IntegerType), StructField("amount", DecimalType(18, 4))
+      ))
+      val data2 = Seq(
+        org.apache.spark.sql.Row(2, new java.math.BigDecimal("200.7500"))
+      )
+      spark.createDataFrame(spark.sparkContext.parallelize(data2), schema2)
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Incremental sync should succeed — widening is allowed
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("BUG4: type change in non-indexed column does not block incremental sync") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create table with INT 'extra' column, only index 'id' and 'name'
+      Seq((1, "alice", 100), (2, "bob", 200)).toDF("id", "name", "extra")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result1 = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INCLUDE COLUMNS ('id', 'name')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+
+      // Recreate with STRING 'extra' column — breaking type change on non-indexed column
+      deleteRecursively(new java.io.File(deltaPath))
+      Seq((3, "charlie", "three")).toDF("id", "name", "extra")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Incremental sync should succeed — 'extra' is not indexed
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "success"
+    }
+  }
+
+  test("BUG5: INCLUDE COLUMNS with comma in column name round-trips through metadata") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create a Parquet table with a column name containing a comma (legal in Parquet/Iceberg)
+      Seq((1, "a", "x"), (2, "b", "y")).toDF("id", "revenue,usd", "name")
+        .write.format("parquet").mode("overwrite").save(parquetPath)
+
+      // Initial sync with INCLUDE COLUMNS including the comma-bearing column
+      val result1 = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath'
+           |  INCLUDE COLUMNS ('id', 'revenue,usd')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+
+      // Add more data
+      Seq((3, "c", "z")).toDF("id", "revenue,usd", "name")
+        .write.format("parquet").mode("append").save(parquetPath)
+
+      // Incremental sync should correctly restore "revenue,usd" from JSON metadata
+      val result2 = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
+      ).collect()
+      result2(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .load(indexPath)
+      df.count() shouldBe 3
+    }
+  }
+
   test("R6: breaking type change (INT to STRING) returns error on incremental sync") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
