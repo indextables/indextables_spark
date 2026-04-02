@@ -838,15 +838,15 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Verify per-bucket counts
       val countMap = result.map(r => (r.get(0).toString, r.getString(1)) -> r.getLong(2)).toMap
+      val buckets = result.map(_.get(0).toString).distinct.sorted
+      buckets.length shouldBe 2
       // 08:00-08:15 bucket
-      val bucket1 = result(0).get(0).toString
-      countMap((bucket1, "INFO")) shouldBe 2L
-      countMap((bucket1, "WARN")) shouldBe 1L
+      countMap((buckets(0), "INFO")) shouldBe 2L
+      countMap((buckets(0), "WARN")) shouldBe 1L
       // 08:15-08:30 bucket
-      val bucket2 = result(2).get(0).toString
-      countMap((bucket2, "ERROR")) shouldBe 1L
-      countMap((bucket2, "INFO")) shouldBe 1L
-      countMap((bucket2, "WARN")) shouldBe 1L
+      countMap((buckets(1), "ERROR")) shouldBe 1L
+      countMap((buckets(1), "INFO")) shouldBe 1L
+      countMap((buckets(1), "WARN")) shouldBe 1L
     }
   }
 
@@ -1035,13 +1035,13 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Verify per-bucket counts
       val countMap = result.map(r => (r.get(0).toString, r.getString(1)) -> r.getLong(2)).toMap
-      val bucket0 = result(0).get(0).toString
-      val bucket1 = result(3).get(0).toString
-      countMap((bucket0, "ERROR")) shouldBe 1L
-      countMap((bucket0, "INFO")) shouldBe 1L
-      countMap((bucket0, "WARN")) shouldBe 1L
-      countMap((bucket1, "INFO")) shouldBe 2L
-      countMap((bucket1, "WARN")) shouldBe 1L
+      val buckets = result.map(_.get(0).toString).distinct.sorted
+      buckets.length shouldBe 2
+      countMap((buckets(0), "ERROR")) shouldBe 1L
+      countMap((buckets(0), "INFO")) shouldBe 1L
+      countMap((buckets(0), "WARN")) shouldBe 1L
+      countMap((buckets(1), "INFO")) shouldBe 2L
+      countMap((buckets(1), "WARN")) shouldBe 1L
     }
   }
 
@@ -1103,13 +1103,13 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
       // Verify counts
       val countMap = result.map(r => (r.get(0).toString, r.getString(1), r.getString(2)) -> r.getLong(3)).toMap
-      val bucket1 = result(0).get(0).toString
-      val bucket2 = result(2).get(0).toString
-      countMap((bucket1, "INFO", "api")) shouldBe 1L
-      countMap((bucket1, "WARN", "web")) shouldBe 1L
-      countMap((bucket2, "ERROR", "web")) shouldBe 1L
-      countMap((bucket2, "INFO", "api")) shouldBe 1L
-      countMap((bucket2, "WARN", "api")) shouldBe 1L
+      val buckets = result.map(_.get(0).toString).distinct.sorted
+      buckets.length shouldBe 2
+      countMap((buckets(0), "INFO", "api")) shouldBe 1L
+      countMap((buckets(0), "WARN", "web")) shouldBe 1L
+      countMap((buckets(1), "ERROR", "web")) shouldBe 1L
+      countMap((buckets(1), "INFO", "api")) shouldBe 1L
+      countMap((buckets(1), "WARN", "api")) shouldBe 1L
     }
   }
 
