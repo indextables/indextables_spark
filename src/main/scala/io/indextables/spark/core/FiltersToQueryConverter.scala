@@ -256,6 +256,31 @@ object FiltersToQueryConverter {
     trimmed.startsWith("*") || trimmed.startsWith("?")
   }
 
+  /** Suffix used by the text_and_string indexing mode for the tokenized companion field. */
+  private[core] val TextCompanionSuffix = "__text"
+
+  /**
+   * For text_and_string columns, TEXTSEARCH should target the __text field. Detect dual-mode fields by checking if
+   * columnName + "__text" exists in the schema.
+   */
+  private def resolveTextSearchField(columnName: String, schema: Schema): String = {
+    val textFieldName = columnName + TextCompanionSuffix
+    if (schema.hasField(textFieldName)) textFieldName else columnName
+  }
+
+  /**
+   * For IndexQueryAll (all-fields search), build a field list that prefers __text fields for text_and_string columns.
+   * When a __text variant exists, include it and skip the raw string version to avoid duplicate hits.
+   */
+  private def resolveTextSearchFieldsForAll(schema: Schema): java.util.List[String] = {
+    import scala.jdk.CollectionConverters._
+    val allFields = schema.getFieldNames.asScala.toSeq
+    val rawSkip = allFields.collect {
+      case name if name.endsWith(TextCompanionSuffix) => name.stripSuffix(TextCompanionSuffix)
+    }.toSet
+    allFields.filterNot(rawSkip.contains).asJava
+  }
+
   /** Create an optimized range query from stored range information using SplitRangeQuery. */
   private def createOptimizedRangeQuery(
     field: String,
@@ -1184,11 +1209,14 @@ object FiltersToQueryConverter {
       // Handle custom IndexQuery filters
       // Note: Field validation happens earlier in isMixedFilterValidForSchema
       case indexQuery: IndexQueryFilter =>
-        queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
+        // For text_and_string columns, route TEXTSEARCH to the __text field
+        val effectiveFieldQ = resolveTextSearchField(indexQuery.columnName, schema)
+        queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'" +
+          (if (effectiveFieldQ != indexQuery.columnName) s" (routed to '$effectiveFieldQ')" else ""))
 
-        // Use parseQuery with the specified field
-        val fieldNames = List(indexQuery.columnName).asJava
-        queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
+        // Use parseQuery with the resolved field
+        val fieldNames = List(effectiveFieldQ).asJava
+        queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '$effectiveFieldQ'")
 
         withTemporaryIndex(schema) { index =>
           try
@@ -1207,12 +1235,13 @@ object FiltersToQueryConverter {
 
         queryLog(s"Converting custom IndexQueryAllFilter: indexqueryall('${indexQueryAll.queryString}')")
 
-        // Use single-argument parseQuery for all-fields search
+        // Use two-argument parseQuery with resolved text search fields for all-fields search
+        val allFieldNames = resolveTextSearchFieldsForAll(schema)
         queryLog(s"Executing parseQuery across all fields: '${indexQueryAll.queryString}'")
 
         withTemporaryIndex(schema) { index =>
           try
-            index.parseQuery(indexQueryAll.queryString)
+            index.parseQuery(indexQueryAll.queryString, allFieldNames)
           catch {
             case e: Exception =>
               // Throw descriptive exception instead of silently falling back to match-all
@@ -1244,8 +1273,10 @@ object FiltersToQueryConverter {
 
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
-        queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'")
-        val fieldNames = List(indexQueryFilter.columnName).asJava
+        val effectiveFieldMQ = resolveTextSearchField(indexQueryFilter.columnName, schema)
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
+          (if (effectiveFieldMQ != indexQueryFilter.columnName) s" (routed to '$effectiveFieldMQ')" else ""))
+        val fieldNames = List(effectiveFieldMQ).asJava
         withTemporaryIndex(schema) { index =>
           try
             index.parseQuery(indexQueryFilter.queryString, fieldNames)
@@ -1261,9 +1292,10 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
 
         queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}'")
+        val allFieldNames = resolveTextSearchFieldsForAll(schema)
         withTemporaryIndex(schema) { index =>
           try
-            index.parseQuery(indexQueryAllFilter.queryString)
+            index.parseQuery(indexQueryAllFilter.queryString, allFieldNames)
           catch {
             case e: Exception =>
               logger.warn(s"Failed to parse indexqueryall '${indexQueryAllFilter.queryString}': ${e.getMessage}")
@@ -1956,15 +1988,19 @@ object FiltersToQueryConverter {
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
         //
+        // For text_and_string columns, route TEXTSEARCH to the __text field
+        val effectiveField = resolveTextSearchField(columnName, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         // (e.g., columnName:*Configuration) which Tantivy's wildcard query builder supports
-        val transformedQuery = transformLeadingWildcardQuery(queryString, columnName)
+        val transformedQuery = transformLeadingWildcardQuery(queryString, effectiveField)
         queryLog(
-          s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'" +
+          s"Converting IndexQueryFilter to SplitQuery: field='$columnName'" +
+            (if (effectiveField != columnName) s" (routed to '$effectiveField')" else "") +
+            s", query='$queryString'" +
             (if (transformedQuery != queryString) s" (transformed to '$transformedQuery')" else "")
         )
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, columnName)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, effectiveField)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forField(
@@ -1987,9 +2023,10 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(queryString, schema, options)
 
         // Parse the custom IndexQueryAll using the split searcher with ALL fields
+        // For text_and_string columns, use __text fields and skip raw string fields to avoid duplicate hits
         // Note: Driver-side validation should have already caught syntax errors
-        import scala.collection.JavaConverters._
-        val allFieldNames = schema.getFieldNames
+        import scala.jdk.CollectionConverters._
+        val allFieldNames = resolveTextSearchFieldsForAll(schema)
         queryLog(s"Converting IndexQueryAllFilter to search across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(queryString, allFieldNames)
@@ -2013,14 +2050,18 @@ object FiltersToQueryConverter {
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
         //
+        // For text_and_string columns, route TEXTSEARCH to the __text field
+        val effectiveFieldV2 = resolveTextSearchField(indexQueryV2.columnName, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
-        val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, indexQueryV2.columnName)
+        val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, effectiveFieldV2)
         queryLog(
-          s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'" +
+          s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}'" +
+            (if (effectiveFieldV2 != indexQueryV2.columnName) s" (routed to '$effectiveFieldV2')" else "") +
+            s", query='${indexQueryV2.queryString}'" +
             (if (transformedQuery != indexQueryV2.queryString) s" (transformed to '$transformedQuery')" else "")
         )
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryV2.columnName)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, effectiveFieldV2)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forField(
@@ -2043,10 +2084,13 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllV2.queryString, schema, options)
 
         // Handle V2 IndexQueryAll expressions from temp views
+        // For text_and_string columns, use __text fields and skip raw string fields to avoid duplicate hits
         // Note: Driver-side validation should have already caught syntax errors
-        queryLog(s"Converting IndexQueryAllV2Filter to SplitQuery: query='${indexQueryAllV2.queryString}'")
+        import scala.jdk.CollectionConverters._
+        val allFieldNamesV2 = resolveTextSearchFieldsForAll(schema)
+        queryLog(s"Converting IndexQueryAllV2Filter to SplitQuery: query='${indexQueryAllV2.queryString}' across ${allFieldNamesV2.size()} fields: ${allFieldNamesV2.asScala.mkString(", ")}")
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllV2.queryString)
+          val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllV2.queryString, allFieldNamesV2)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forAllFields(
@@ -2087,14 +2131,17 @@ object FiltersToQueryConverter {
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
         // Delegate to existing IndexQueryFilter handling
+        // For text_and_string columns, route TEXTSEARCH to the __text field
+        val effectiveFieldMixed = resolveTextSearchField(indexQueryFilter.columnName, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
-        val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
+        val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, effectiveFieldMixed)
         queryLog(
           s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
+            (if (effectiveFieldMixed != indexQueryFilter.columnName) s" (routed to '$effectiveFieldMixed')" else "") +
             (if (transformedQuery != indexQueryFilter.queryString) s" (transformed to '$transformedQuery')" else "")
         )
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryFilter.columnName)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, effectiveFieldMixed)
           queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
@@ -2108,8 +2155,9 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
 
         // Delegate to existing IndexQueryAllFilter handling - search across ALL fields
-        import scala.collection.JavaConverters._
-        val allFieldNames = schema.getFieldNames
+        // For text_and_string columns, use __text fields and skip raw string fields to avoid duplicate hits
+        import scala.jdk.CollectionConverters._
+        val allFieldNames = resolveTextSearchFieldsForAll(schema)
         queryLog(s"MixedBooleanFilter: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}' across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllFilter.queryString, allFieldNames)

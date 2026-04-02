@@ -737,6 +737,19 @@ case class SyncToExternalCommand(
         }
       }
 
+      // Validate text_and_string companion field names don't collide with existing columns
+      effectiveIndexingModes.foreach { case (field, mode) =>
+        if (mode.toLowerCase == "text_and_string") {
+          val textCompanion = field + "__text"
+          if (dataColumnsLower.contains(textCompanion.toLowerCase)) {
+            throw new IllegalArgumentException(
+              s"Cannot use 'text_and_string' mode for field '$field': " +
+                s"column '$textCompanion' already exists in source schema."
+            )
+          }
+        }
+      }
+
       // Validate INDEXING MODES fields are within included columns (if INCLUDE COLUMNS specified)
       if (filteredIncludeColumns.nonEmpty && effectiveIndexingModes.nonEmpty) {
         val included = filteredIncludeColumns.map(_.toLowerCase).toSet
@@ -785,6 +798,8 @@ case class SyncToExternalCommand(
                 s"Hashed fast fields store a hash of the raw string value, which is incompatible with tokenized text fields."
             )
           }
+          // Note: text_and_string is intentionally NOT blocked here — the hash targets the raw
+          // primary field (which uses the "raw" tokenizer), not the tokenized __text companion field.
         }
       }
 

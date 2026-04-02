@@ -119,6 +119,14 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.indexingModes("ip_addr") shouldBe "ipaddress"
   }
 
+  test("parse SYNC with INDEXING MODES text_and_string") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' INDEXING MODES ('message':'text_and_string') AT LOCATION '/tmp/index'"
+    )
+    cmd.indexingModes should contain key "message"
+    cmd.indexingModes("message") shouldBe "text_and_string"
+  }
+
   test("parse SYNC with all options combined") {
     val cmd = parseSync(
       """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'

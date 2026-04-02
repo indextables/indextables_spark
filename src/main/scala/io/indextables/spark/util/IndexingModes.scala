@@ -27,6 +27,7 @@ object IndexingModes {
   val recognizedModes: Set[String] = Set(
     "string",
     "text",
+    "text_and_string",
     "ip",
     "ipaddress",
     "json",
@@ -43,7 +44,7 @@ object IndexingModes {
 
   /** Human-readable list of valid modes for error messages. */
   val validModesDescription: String =
-    "string, text, ip, ipaddress, json, exact_only, " +
+    "string, text, text_and_string, ip, ipaddress, json, exact_only, " +
       "text_uuid_exactonly, text_uuid_strip, text_custom_exactonly:<regex>, text_custom_strip:<regex>"
 
   /** Check if a mode value is recognized (case-insensitive). */
@@ -52,10 +53,11 @@ object IndexingModes {
     recognizedModes.contains(lower) || regexPrefixes.exists(p => lower.startsWith(p))
   }
 
-  /** Check if a mode is a compact string mode (exact_only or text_*). */
+  /** Check if a mode is a compact string mode (exact_only, text_and_string, or text_*). */
   def isCompactStringMode(mode: String): Boolean = {
     val lower = mode.toLowerCase
     lower == "exact_only" ||
+    lower == "text_and_string" ||
     lower == "text_uuid_exactonly" ||
     lower == "text_uuid_strip" ||
     lower.startsWith("text_custom_exactonly:") ||
@@ -77,6 +79,7 @@ object IndexingModes {
     lower match {
       case "text"                     => false
       case "exact_only"               => true
+      case "text_and_string"          => true
       case m if m.startsWith("text_") => false
       case _                          => true // string, ip, ipaddress, json, etc.
     }

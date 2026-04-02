@@ -500,6 +500,45 @@ class CompanionIncludeExcludeColumnsTest extends AnyFunSuite with Matchers with 
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  //  text_and_string mode validation
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("R2: text_and_string mode on INT column returns error") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createWideDeltaTable(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INCLUDE COLUMNS ('id', 'score')
+           |  INDEXING MODES ('id': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "error"
+      result(0).getString(10) should include("not compatible")
+      result(0).getString(10) should include("text_and_string")
+      result(0).getString(10) should include("string type")
+    }
+  }
+
+  test("R2: text_and_string mode on STRING column succeeds") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createWideDeltaTable(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INCLUDE COLUMNS ('id', 'message')
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   //  R5/R6: Incremental sync and schema evolution
   // ═══════════════════════════════════════════════════════════════════
 

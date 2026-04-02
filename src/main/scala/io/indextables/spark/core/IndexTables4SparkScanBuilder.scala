@@ -1343,6 +1343,16 @@ class IndexTables4SparkScanBuilder(
    * (containing dots) are always supported for pushdown via JsonPredicateTranslator.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
+    // Reject __text fields — these are internal tantivy text fields from text_and_string mode
+    val textSuffix = FiltersToQueryConverter.TextCompanionSuffix
+    if (attribute.endsWith(textSuffix)) {
+      val rawField = attribute.stripSuffix(textSuffix)
+      logger.debug(
+        s"Field '$attribute' is a text field. Use TEXTSEARCH for full-text search, or use '$rawField' for exact match."
+      )
+      return false
+    }
+
     // Check if this is a nested field (JSON field)
     if (attribute.contains(".")) {
       logger.debug(s"Field '$attribute' is a nested JSON field - supporting pushdown via JsonPredicateTranslator")
