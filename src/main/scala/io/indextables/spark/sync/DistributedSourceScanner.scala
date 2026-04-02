@@ -734,65 +734,68 @@ class DistributedSourceScanner(spark: SparkSession) {
                 )
                 None
             }
-            oldOnlyEntriesOpt.foreach { oldOnlyEntries =>
-              val oldOnlyFilePaths: Set[String] = oldOnlyEntries.map(_.getPath).toSet
+            oldOnlyEntriesOpt match {
+              case Some(oldOnlyEntries) =>
+                val oldOnlyFilePaths: Set[String] = oldOnlyEntries.map(_.getPath).toSet
 
-              // Read entries from new-only manifests (files that ARE in the current snapshot's changed manifests)
-              val newOnlyEntries = newOnlyManifests.flatMap { manifestPath =>
-                IcebergTableReader
-                  .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
-                  .asScala
-                  .filter(isParquetEntry)
-              }.toSeq
-              val newOnlyFilePaths: Set[String] = newOnlyEntries.map(_.getPath).toSet
+                // Read entries from new-only manifests (files that ARE in the current snapshot's changed manifests)
+                val newOnlyEntries = newOnlyManifests.flatMap { manifestPath =>
+                  IcebergTableReader
+                    .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+                    .asScala
+                    .filter(isParquetEntry)
+                }.toSeq
+                val newOnlyFilePaths: Set[String] = newOnlyEntries.map(_.getPath).toSet
 
-              // Set difference: added = in new but not old, deleted = in old but not new
-              val addedEntries = newOnlyEntries.filter(e => !oldOnlyFilePaths.contains(e.getPath))
-              val removedPaths = (oldOnlyFilePaths -- newOnlyFilePaths).toSeq
+                // Set difference: added = in new but not old, deleted = in old but not new
+                val addedEntries = newOnlyEntries.filter(e => !oldOnlyFilePaths.contains(e.getPath))
+                val removedPaths = (oldOnlyFilePaths -- newOnlyFilePaths).toSeq
 
-              // Derive storageRoot and partCols from any available entry (added, new-only, or
-              // old-only). Old-only entries are needed for the pure-deletion case where no new
-              // entries exist, so that removed paths can be correctly relativized.
-              val anyEntry = addedEntries.headOption
-                .orElse(newOnlyEntries.headOption)
-                .orElse(oldOnlyEntries.headOption)
-              val storageRoot = anyEntry.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
-              val partCols = anyEntry
-                .map(_.getPartitionValues.keySet.asScala.toSeq.sorted)
-                .getOrElse(Seq.empty)
-              val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
+                // Derive storageRoot and partCols from any available entry (added, new-only, or
+                // old-only). Old-only entries are needed for the pure-deletion case where no new
+                // entries exist, so that removed paths can be correctly relativized.
+                val anyEntry = addedEntries.headOption
+                  .orElse(newOnlyEntries.headOption)
+                  .orElse(oldOnlyEntries.headOption)
+                val storageRoot = anyEntry.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
+                val partCols = anyEntry
+                  .map(_.getPartitionValues.keySet.asScala.toSeq.sorted)
+                  .getOrElse(Seq.empty)
+                val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
 
-              // Normalize removed paths relative to storage root (same as added files)
-              val normalizedRemovedPaths = storageRoot match {
-                case Some(basePath) =>
-                  val normalizedBase = basePath.stripSuffix("/")
-                  removedPaths.map { p =>
-                    val normalized = p.stripSuffix("/")
-                    if (normalized.startsWith(normalizedBase))
-                      normalized.substring(normalizedBase.length).stripPrefix("/")
-                    else p
-                  }
-                case None => removedPaths
-              }
+                // Normalize removed paths relative to storage root (same as added files)
+                val normalizedRemovedPaths = storageRoot match {
+                  case Some(basePath) =>
+                    val normalizedBase = basePath.stripSuffix("/")
+                    removedPaths.map { p =>
+                      val normalized = p.stripSuffix("/")
+                      if (normalized.startsWith(normalizedBase))
+                        normalized.substring(normalizedBase.length).stripPrefix("/")
+                      else p
+                    }
+                  case None => removedPaths
+                }
 
-              logger.info(
-                s"Iceberg incremental: ${files.size} added, ${normalizedRemovedPaths.size} removed " +
-                  s"from ${totalChangedManifests} changed manifests (${oldOnlyManifests.size} old, ${newOnlyManifests.size} new)"
-              )
-              val sc = spark.sparkContext
-              return DistributedScanResult(
-                filesRDD = sc.parallelize(files),
-                version = Some(currentSnapId),
-                partitionColumns = partCols,
-                storageRoot = storageRoot,
-                sampleFilePath = addedEntries.headOption.orElse(newOnlyEntries.headOption).map(_.getPath),
-                numDistributedParts = 0,
-                schema = icebergSchemaOpt,
-                isIncremental = true,
-                removedSourcePaths = normalizedRemovedPaths,
-                driverFiles = Some(files)
-              )
-            } // end oldOnlyEntriesOpt.foreach — if None, falls through to full scan
+                logger.info(
+                  s"Iceberg incremental: ${files.size} added, ${normalizedRemovedPaths.size} removed " +
+                    s"from ${totalChangedManifests} changed manifests (${oldOnlyManifests.size} old, ${newOnlyManifests.size} new)"
+                )
+                val sc = spark.sparkContext
+                return DistributedScanResult(
+                  filesRDD = sc.parallelize(files),
+                  version = Some(currentSnapId),
+                  partitionColumns = partCols,
+                  storageRoot = storageRoot,
+                  sampleFilePath = addedEntries.headOption.orElse(newOnlyEntries.headOption).map(_.getPath),
+                  numDistributedParts = 0,
+                  schema = icebergSchemaOpt,
+                  isIncremental = true,
+                  removedSourcePaths = normalizedRemovedPaths,
+                  driverFiles = Some(files)
+                )
+              case None =>
+                logger.warn("Iceberg incremental: old manifest entries unavailable — falling back to full scan")
+            } // end oldOnlyEntriesOpt match
           } // end else (incremental path)
         }   // end else (currentSnapId != fsnap)
       case None => // fall through to full scan below

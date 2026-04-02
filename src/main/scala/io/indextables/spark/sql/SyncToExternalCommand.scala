@@ -698,35 +698,6 @@ case class SyncToExternalCommand(
         )
       }
 
-      // Invalidation-only: files were deleted from source but nothing new to index.
-      // Commit remove actions directly since the batch loop won't execute with empty groups.
-      if (parquetFilesToIndex.isEmpty && splitsToInvalidate.nonEmpty) {
-        logger.info(s"Invalidation-only sync: ${splitsToInvalidate.size} splits to remove, no new files to index")
-        val removeActions = buildRemoveActions(splitsToInvalidate)
-        val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
-        val metadata = buildCompanionMetadata(
-          transactionLog, effectiveIndexingModes, effectiveWherePredicates,
-          effectiveHfInclude, effectiveHfExclude, sourceVersion, externalStorageRoot
-        )
-        transactionLog.commitSyncActions(removeActions, Seq.empty, Some(metadata))
-        val durationMs = System.currentTimeMillis() - startTime
-        return Seq(
-          Row(
-            destPath,
-            sourcePath,
-            "success",
-            sourceVersionLong,
-            0,
-            splitsToInvalidate.size,
-            0,
-            0L,
-            0L,
-            durationMs,
-            s"Removed ${splitsToInvalidate.size} invalidated splits (no new files)"
-          )
-        )
-      }
-
       // 8. Plan indexing groups (respecting partition boundaries and target size)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
       val groups       = planIndexingGroups(parquetFilesToIndex, maxGroupSize)
@@ -1222,7 +1193,10 @@ case class SyncToExternalCommand(
         totalBytesDownloaded,
         totalBytesUploaded,
         durationMs,
-        s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
+        if (results.isEmpty && splitsInvalidated > 0)
+          s"Removed $splitsInvalidated invalidated splits (no new files)"
+        else
+          s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
       )
     )
   }

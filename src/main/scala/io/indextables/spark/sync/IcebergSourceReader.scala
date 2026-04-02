@@ -97,6 +97,7 @@ class IcebergSourceReader(
     entries
   }
 
+  // Explicit snapshotId (FROM SNAPSHOT) takes precedence over the entry's embedded snapshot ID.
   override def sourceVersion(): Option[Long] =
     snapshotId.orElse {
       val entries = fileEntries
