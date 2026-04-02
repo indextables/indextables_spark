@@ -62,13 +62,24 @@ class NativeTransactionLog(
   /** Native config map (credentials + cache + concurrency + checkpoint + timezone) */
   private val nativeConfig: java.util.Map[String, String] = {
     val config = ConfigMapper.toNativeConfig(options)
-    // Backward compatibility: if the new cache.ttl.ms key is not set via ConfigMapper but the
-    // legacy expirationSeconds key was explicitly provided, convert seconds→ms and set it.
-    // If neither key is set, let the native layer use its own default.
+    // Ensure stable defaults that match pre-0.34.2 behavior (native defaults are the same,
+    // but we set them explicitly to guarantee no silent behavior change on upgrade).
     if (!config.containsKey("cache.ttl.ms")) {
       Option(options.get("spark.indextables.transaction.cache.expirationSeconds")).foreach { v =>
-        config.put("cache.ttl.ms", (v.toLong * 1000L).toString)
+        try {
+          config.put("cache.ttl.ms", (v.toLong * 1000L).toString)
+        } catch {
+          case e: NumberFormatException =>
+            throw new IllegalArgumentException(
+              s"Invalid value for spark.indextables.transaction.cache.expirationSeconds: '$v' (expected integer seconds)", e)
+        }
       }
+    }
+    if (!config.containsKey("cache.ttl.ms")) {
+      config.put("cache.ttl.ms", "300000") // 5 min — matches native 0.34.2 default
+    }
+    if (!config.containsKey("checkpoint_interval")) {
+      config.put("checkpoint_interval", "10") // matches native 0.34.2 default
     }
     // Pass session timezone offset for timestamp data skipping.
     // Enables native compare_values_typed to parse bare datetime strings like "2025-11-07 05:00:00".
@@ -585,13 +596,10 @@ class NativeTransactionLog(
   }
 
   override def getCacheStats(): Option[CacheStats] = {
-    // Derive effective expiration from configured values (new key takes precedence over legacy key).
+    // Read the resolved TTL from nativeConfig (already accounts for new key, legacy key, and defaults).
     // Note: hits/misses/hitRate/versionsInCache are not available from the native txlog cache API;
     // they remain zero until tantivy4java exposes txlog cache statistics.
-    val expirationSecs = Option(options.get("spark.indextables.transaction.cache.ttl.ms"))
-      .map(_.toLong / 1000L)
-      .orElse(Option(options.get("spark.indextables.transaction.cache.expirationSeconds")).map(_.toLong))
-      .getOrElse(300L)
+    val expirationSecs = Option(nativeConfig.get("cache.ttl.ms")).map(_.toLong / 1000L).getOrElse(300L)
     Some(CacheStats(hits = 0, misses = 0, hitRate = 0.0, versionsInCache = 0, expirationSeconds = expirationSecs))
   }
 
