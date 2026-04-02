@@ -810,7 +810,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("companion_bucket_multikey")
@@ -825,9 +825,6 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
         GROUP BY indextables_date_histogram(timestamp, '15m'), severity
         ORDER BY bucket, severity
       """).collect()
-
-      println(s"DateHistogram multi-key result rows: ${result.length}")
-      result.foreach(r => println(s"  bucket=${r.get(0)}, severity=${r.getString(1)}, cnt=${r.getLong(2)}"))
 
       // Should have 5 rows: (bucket1, INFO), (bucket1, WARN), (bucket2, ERROR), (bucket2, INFO), (bucket2, WARN)
       result.length shouldBe 5
@@ -878,7 +875,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("companion_multikey_strings")
@@ -890,9 +887,6 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
         GROUP BY severity, service
         ORDER BY severity, service
       """).collect()
-
-      println(s"Multi-column GROUP BY result rows: ${result.length}")
-      result.foreach(r => println(s"  severity=${r.getString(0)}, service=${r.getString(1)}, cnt=${r.getLong(2)}"))
 
       // Should have 5 rows
       result.length shouldBe 5
@@ -944,7 +938,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("companion_range_multikey")
@@ -959,8 +953,8 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
         ORDER BY tier, severity
       """).collect()
 
-      println(s"Range multi-key result rows: ${result.length}")
-      result.foreach(r => println(s"  tier=${r.getString(0)}, severity=${r.getString(1)}, cnt=${r.getLong(2)}"))
+      // 6 rows: (cheap,INFO), (cheap,WARN), (expensive,ERROR), (mid,ERROR), (mid,INFO), (mid,WARN)
+      result.length shouldBe 6
 
       // tier column must be resolved range names, not internal keys
       val tiers = result.map(_.getString(0)).toSet
@@ -1010,7 +1004,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("companion_hist_multikey")
@@ -1022,9 +1016,6 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
         GROUP BY indextables_histogram(price, 50.0), severity
         ORDER BY bucket, severity
       """).collect()
-
-      println(s"Histogram multi-key result rows: ${result.length}")
-      result.foreach(r => println(s"  bucket=${r.get(0)}, severity=${r.getString(1)}, cnt=${r.getLong(2)}"))
 
       // Should have 5 rows: (0.0,ERROR), (0.0,INFO), (0.0,WARN), (50.0,INFO), (50.0,WARN)
       result.length shouldBe 5
@@ -1074,7 +1065,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("companion_datehist_2strings")
@@ -1088,9 +1079,6 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
         GROUP BY indextables_date_histogram(timestamp, '15m'), severity, service
         ORDER BY bucket, severity, service
       """).collect()
-
-      println(s"DateHistogram 2-string result rows: ${result.length}")
-      result.foreach(r => println(s"  bucket=${r.get(0)}, severity=${r.getString(1)}, service=${r.getString(2)}, cnt=${r.getLong(3)}"))
 
       // Should have 5 rows (5 distinct bucket/severity/service combos)
       result.length shouldBe 5
@@ -1141,7 +1129,7 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       row.getString(2) shouldBe "success"
 
       val companionDf = spark.read
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
         .load(indexPath)
 
       companionDf.createOrReplaceTempView("companion_single_key")
@@ -1153,9 +1141,6 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
         ORDER BY severity
       """).collect()
 
-      println(s"Single-key GROUP BY result rows: ${result.length}")
-      result.foreach(r => println(s"  severity=${r.getString(0)}, cnt=${r.getLong(1)}"))
-
       result.length shouldBe 3
 
       // severity must be resolved strings
@@ -1166,6 +1151,62 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       countMap("ERROR") shouldBe 1L
       countMap("INFO") shouldBe 3L
       countMap("WARN") shouldBe 2L
+    }
+  }
+
+  test("Multi-split companion should merge hash maps and resolve keys in multi-key GROUP BY") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_multisplit").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_multisplit").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+
+      // repartition(2) produces 2 parquet files → 2 companion splits.
+      // Exercises nativeMultiSplitAggregateArrowFfi where hash_resolution_maps
+      // from multiple splits are merged via merged_hash_map.extend(map).
+      // If merge loses entries on key collision, some strings won't resolve.
+      val data = Seq(
+        (Timestamp.valueOf("2025-06-01 08:01:00"), "INFO",  1L),
+        (Timestamp.valueOf("2025-06-01 08:05:00"), "WARN",  2L),
+        (Timestamp.valueOf("2025-06-01 08:10:00"), "ERROR", 3L),
+        (Timestamp.valueOf("2025-06-01 08:16:00"), "INFO",  4L),
+        (Timestamp.valueOf("2025-06-01 08:20:00"), "WARN",  5L),
+        (Timestamp.valueOf("2025-06-01 08:25:00"), "ERROR", 6L)
+      )
+      data
+        .toDF("timestamp", "severity", "id")
+        .repartition(2)
+        .write
+        .parquet(parquetPath)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .load(indexPath)
+
+      companionDf.createOrReplaceTempView("companion_multisplit")
+
+      val result = spark.sql("""
+        SELECT indextables_date_histogram(timestamp, '15m') as bucket,
+               severity, COUNT(*) as cnt
+        FROM companion_multisplit
+        GROUP BY indextables_date_histogram(timestamp, '15m'), severity
+        ORDER BY bucket, severity
+      """).collect()
+
+      // Should have rows across 2 buckets with all 3 severity values
+      result.length should be >= 4
+
+      // All severity values must be resolved strings after hash map merge
+      val severities = result.map(_.getString(1)).toSet
+      severities shouldBe Set("INFO", "WARN", "ERROR")
+
+      // Total count must equal total rows
+      val totalCount = result.map(_.getLong(2)).sum
+      totalCount shouldBe 6L
     }
   }
 }
