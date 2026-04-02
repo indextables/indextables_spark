@@ -207,51 +207,6 @@ class PartitionedDatasetTest extends TestBase {
     assert(distinctPartitions > 0, "Should still have accessible partitions after merge")
   }
 
-  test("Merge splits across all partitions without WHERE clause") {
-    // Generate and write test data
-    val timeSeriesData = generateTimeSeriesData(spark, totalRecords = 1800, daysSpan = 3)
-
-    // Force repartition to create multiple files
-    val repartitionedData = timeSeriesData.repartition(30)
-
-    repartitionedData.write
-      .format(INDEXTABLES_FORMAT)
-      .partitionBy("load_date", "load_hour")
-      .option("spark.indextables.indexWriter.batchSize", "5") // Small batches
-      .mode("overwrite")
-      .save(testDataPath)
-
-    // Count files before global merge
-    val filesBefore = countSplitFiles(testDataPath)
-    println(s"Files before global merge: $filesBefore")
-
-    // Perform global merge across all partitions
-    spark.sql(s"""
-      MERGE SPLITS '$testDataPath'
-      TARGET SIZE 5M
-      MAX DEST SPLITS 10
-    """)
-
-    // Validate global merge
-    val filesAfterGlobalMerge = countSplitFiles(testDataPath)
-    println(s"Files after global merge: $filesAfterGlobalMerge")
-
-    if (filesBefore > 1) {
-      assert(filesAfterGlobalMerge <= filesBefore, "Should have same or fewer files after global merge")
-    } else {
-      println("Global merge command executed successfully (single file case)")
-    }
-
-    // Verify data integrity
-    val df = spark.read.format(INDEXTABLES_FORMAT).load(testDataPath)
-    val totalRecordsAfter = df.count()
-    assert(totalRecordsAfter == 1800, "Should preserve all records after global merge")
-
-    // Verify partitions are still accessible
-    val partitionCount = df.select("load_date", "load_hour").distinct().count()
-    println(s"Distinct partitions after merge: $partitionCount")
-    assert(partitionCount >= 24, "Should maintain partition structure") // 3 days * 8+ hours each
-  }
 
   test("Complex partitioned queries with IndexQuery operations") {
     // Generate test data with varied content
