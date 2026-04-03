@@ -216,6 +216,46 @@ class CompanionIncludeExcludeColumnsTest extends AnyFunSuite with Matchers with 
     }
   }
 
+  test("EXCLUDE COLUMNS excluded column is absent from index") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create a table with an 'email' column that we will exclude
+      Seq(
+        (1, "alice", "alice@example.com"),
+        (2, "bob", "bob@example.com"),
+        (3, "charlie", "charlie@example.com")
+      ).toDF("id", "name", "email")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Build companion with email excluded
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('email')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .load(indexPath)
+
+      // Non-excluded columns should be searchable
+      val nameFiltered = df.filter(col("name") === "alice").collect()
+      nameFiltered.length shouldBe 1
+
+      // Excluded column 'email' should not be indexed — filter returns 0 results
+      val emailFiltered = df.filter(col("email") === "alice@example.com").collect()
+      emailFiltered.length shouldBe 0
+    }
+  }
+
   test("INCLUDE COLUMNS with nonexistent column returns error") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath

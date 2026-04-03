@@ -564,6 +564,7 @@ case class SyncToExternalCommand(
             } else {
               dataColumnsLower
             }
+            val decPattern = """decimal\((\d+),(\d+)\)""".r
             sourceSchema.fields
               .filter(f => indexedColumnsLower.contains(f.name.toLowerCase))
               .foreach { field =>
@@ -578,7 +579,6 @@ case class SyncToExternalCommand(
                     case ("int", "bigint")                                                     => true
                     case ("float", "double")                                                   => true
                     case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
-                      val decPattern = """decimal\((\d+),(\d+)\)""".r
                       (storedType, currentType) match {
                         case (decPattern(sp, ss), decPattern(cp, cs)) =>
                           cp.toInt >= sp.toInt && cs.toInt >= ss.toInt
@@ -610,7 +610,7 @@ case class SyncToExternalCommand(
       def formatAvailableColumns(cols: Seq[String]): String = {
         val maxShow = 20
         if (cols.size <= maxShow) cols.mkString(", ")
-        else cols.take(maxShow).mkString(", ") + s", ... and ${cols.size - maxShow} more"
+        else cols.take(maxShow).mkString(", ") + s", ... (showing $maxShow of ${cols.size})"
       }
       val availableColumnsFormatted = formatAvailableColumns(sourceSchema.fieldNames ++ partitionColumns)
 
@@ -630,7 +630,7 @@ case class SyncToExternalCommand(
       // R1: Separate partition columns (warn and ignore) from data columns
       def filterPartitionColumns(cols: Seq[String], clauseName: String): Seq[String] =
         cols.filter { col =>
-          if (partitionColumnsLower.contains(col.toLowerCase) && !dataColumnsLower.contains(col.toLowerCase)) {
+          if (partitionColumnsLower.contains(col.toLowerCase)) {
             logger.warn(
               s"Column '$col' is a partition column — partition columns are indexed automatically. " +
                 s"Ignoring in $clauseName."
@@ -1302,7 +1302,9 @@ case class SyncToExternalCommand(
                     effectiveHfExclude,
                     sourceVersion,
                     externalStorageRoot,
-                    sourceSchema
+                    sourceSchema,
+                    filteredIncludeColumns,
+                    filteredExcludeColumns
                   )
                 )
 
@@ -1402,7 +1404,9 @@ case class SyncToExternalCommand(
     effectiveHfExclude: Seq[String],
     sourceVersion: Long,
     externalStorageRoot: Option[String],
-    sourceSchema: Option[StructType] = None
+    sourceSchema: Option[StructType] = None,
+    filteredIncludeColumns: Seq[String] = Seq.empty,
+    filteredExcludeColumns: Seq[String] = Seq.empty
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
     val companionConfig = existingMetadata.configuration ++ Map(
@@ -1440,12 +1444,12 @@ case class SyncToExternalCommand(
             Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
           else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
                                 Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
-                              else Map.empty) ++ (if (includeColumns.nonEmpty)
+                              else Map.empty) ++ (if (filteredIncludeColumns.nonEmpty)
                                                     Map("indextables.companion.includeColumns" ->
-                                                      io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(includeColumns.asJava))
-                                                  else Map.empty) ++ (if (excludeColumns.nonEmpty)
+                                                      io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(filteredIncludeColumns.asJava))
+                                                  else Map.empty) ++ (if (filteredExcludeColumns.nonEmpty)
                                                                         Map("indextables.companion.excludeColumns" ->
-                                                                          io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(excludeColumns.asJava))
+                                                                          io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(filteredExcludeColumns.asJava))
                                                                       else Map.empty) ++ sourceSchema.map { schema =>
       Map(
         "indextables.companion.columnTypes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(
