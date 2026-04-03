@@ -59,15 +59,28 @@ class NativeTransactionLog(
   /** Native table path string (with scheme normalization) */
   private val nativeTablePath: String = ConfigMapper.normalizeTablePath(tablePath)
 
-  /** Native config map (credentials + cache TTL + checkpoint interval + timezone) */
+  /** Native config map (credentials + cache + concurrency + checkpoint + timezone) */
   private val nativeConfig: java.util.Map[String, String] = {
     val config = ConfigMapper.toNativeConfig(options)
-    // Pass cache TTL from Spark config to native layer
-    val cacheTtlMs = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L) * 1000L
-    config.put("cache.ttl.ms", cacheTtlMs.toString)
-    // Pass checkpoint interval to native layer for auto-checkpoint
-    val checkpointInterval = options.getInt("spark.indextables.checkpoint.interval", 10)
-    config.put("checkpoint_interval", checkpointInterval.toString)
+    // Ensure stable defaults that match pre-0.34.2 behavior (native defaults are the same,
+    // but we set them explicitly to guarantee no silent behavior change on upgrade).
+    if (!config.containsKey("cache.ttl.ms")) {
+      Option(options.get("spark.indextables.transaction.cache.expirationSeconds")).foreach { v =>
+        try {
+          config.put("cache.ttl.ms", (v.toLong * 1000L).toString)
+        } catch {
+          case e: NumberFormatException =>
+            throw new IllegalArgumentException(
+              s"Invalid value for spark.indextables.transaction.cache.expirationSeconds: '$v' (expected integer seconds)", e)
+        }
+      }
+    }
+    if (!config.containsKey("cache.ttl.ms")) {
+      config.put("cache.ttl.ms", "300000") // 5 min — matches native 0.34.2 default
+    }
+    if (!config.containsKey("checkpoint_interval")) {
+      config.put("checkpoint_interval", "10") // matches native 0.34.2 default
+    }
     // Pass session timezone offset for timestamp data skipping.
     // Enables native compare_values_typed to parse bare datetime strings like "2025-11-07 05:00:00".
     // Without this, timestamp data skipping is conservative (never skips) — safe but suboptimal.
@@ -583,7 +596,10 @@ class NativeTransactionLog(
   }
 
   override def getCacheStats(): Option[CacheStats] = {
-    val expirationSecs = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)
+    // Read the resolved TTL from nativeConfig (already accounts for new key, legacy key, and defaults).
+    // Note: hits/misses/hitRate/versionsInCache are not available from the native txlog cache API;
+    // they remain zero until tantivy4java exposes txlog cache statistics.
+    val expirationSecs = Option(nativeConfig.get("cache.ttl.ms")).map(_.toLong / 1000L).getOrElse(300L)
     Some(CacheStats(hits = 0, misses = 0, hitRate = 0.0, versionsInCache = 0, expirationSeconds = expirationSecs))
   }
 
