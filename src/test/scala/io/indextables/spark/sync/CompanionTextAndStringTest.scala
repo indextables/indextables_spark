@@ -405,14 +405,172 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       ).toDF("message", "message__text")
         .write.format("delta").mode("overwrite").save(deltaPath)
 
-      val ex = intercept[IllegalArgumentException] {
-        spark.sql(
-          s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
-             |  INDEXING MODES ('message': 'text_and_string')
-             |  AT LOCATION '$indexPath'""".stripMargin
-        ).collect()
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "error"
+      result(0).getString(10) should include("message__text")
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Mixed Catalyst predicate tests — single-pass pushdown validation
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("mixed exact match OR indexquery on same text_and_string column in single query") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath)
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_mixed_or")
+
+      // OR: exact match on raw field (row 2) OR tokenized search on __text (row 1)
+      val orResults = spark.sql(
+        """SELECT id FROM tas_mixed_or
+          |WHERE message = 'hello world from indextables' OR message indexquery 'quick brown'""".stripMargin
+      ).collect()
+      val orIds = orResults.map(_.getLong(0)).toSet
+      orIds should contain(1L) // "quick brown" matches via __text
+      orIds should contain(2L) // exact match via raw field
+      orResults.length shouldBe 2
+
+      // Dedup: row 1 matches BOTH branches (exact match on full string + tokenized "quick brown")
+      // Should appear exactly once, not duplicated
+      val dedupResults = spark.sql(
+        """SELECT id FROM tas_mixed_or
+          |WHERE message = 'the quick brown fox jumps over the lazy dog' OR message indexquery 'quick brown'""".stripMargin
+      ).collect()
+      dedupResults.length shouldBe 1 // exactly one row, no duplicates, no spurious matches
+      dedupResults(0).getLong(0) shouldBe 1L
+    }
+  }
+
+  test("mixed exact match AND indexquery on same text_and_string column in single query") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath)
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_mixed_and")
+
+      // AND: exact match on raw field AND tokenized search on __text — both must match same row
+      val andResults = spark.sql(
+        """SELECT id FROM tas_mixed_and
+          |WHERE message = 'hello world from indextables' AND message indexquery 'hello world'""".stripMargin
+      ).collect()
+      andResults.length shouldBe 1
+      andResults(0).getLong(0) shouldBe 2L
+
+      // AND with contradicting predicates: exact match won't match tokenized-only query
+      val emptyResults = spark.sql(
+        """SELECT id FROM tas_mixed_and
+          |WHERE message = 'hello world from indextables' AND message indexquery 'quick brown'""".stripMargin
+      ).collect()
+      emptyResults.length shouldBe 0
+    }
+  }
+
+  test("aggregation after indexquery filter on text_and_string column") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath, "HASHED FASTFIELDS INCLUDE ('description')")
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_mixed_agg")
+
+      // indexquery filters via __text, then GROUP BY uses raw field
+      val results = spark.sql(
+        """SELECT description, COUNT(*) as cnt FROM tas_mixed_agg
+          |WHERE description indexquery 'server started'
+          |GROUP BY description""".stripMargin
+      ).collect()
+      results.length shouldBe 1
+      results(0).getString(0) shouldBe "server started successfully"
+      results(0).getLong(1) shouldBe 2 // rows 1 and 3
+    }
+  }
+
+  test("mixed predicates across multiple text_and_string columns") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath)
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_mixed_cross")
+
+      // indexquery on message.__text AND exact match on description raw field
+      val results = spark.sql(
+        """SELECT id FROM tas_mixed_cross
+          |WHERE message indexquery 'quick' AND description = 'server started successfully'""".stripMargin
+      ).collect()
+      results.length shouldBe 1
+      results(0).getLong(0) shouldBe 1L // row 1: message has "quick", description is "server started successfully"
+
+      // Reverse: exact match on message AND indexquery on description
+      val reverseResults = spark.sql(
+        """SELECT id FROM tas_mixed_cross
+          |WHERE message = 'hello world from indextables' AND description indexquery 'timeout'""".stripMargin
+      ).collect()
+      reverseResults.length shouldBe 1
+      reverseResults(0).getLong(0) shouldBe 2L // row 2: message exact, description has "timeout"
+
+      // Cross-column OR: exact match on message OR exact match on description
+      val crossOrResults = spark.sql(
+        """SELECT id FROM tas_mixed_cross
+          |WHERE message = 'hello world from indextables' OR description = 'server started successfully'""".stripMargin
+      ).collect()
+      val crossOrIds = crossOrResults.map(_.getLong(0)).toSet
+      crossOrIds should contain(1L) // description = "server started successfully"
+      crossOrIds should contain(2L) // message = "hello world from indextables"
+      crossOrIds should contain(3L) // description = "server started successfully"
+      crossOrResults.length shouldBe crossOrIds.size
+    }
+  }
+
+  test("mixed predicates do not split into multiple scan stages") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath)
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_plan_check")
+
+      val filtered = spark.sql(
+        """SELECT id FROM tas_plan_check
+          |WHERE message = 'hello world from indextables' AND message indexquery 'hello world'""".stripMargin
+      )
+
+      val planString = filtered.queryExecution.executedPlan.toString
+
+      // Verify single BatchScan — no subquery/union splitting the query into multiple scans
+      val batchScanCount = "BatchScan ".r.findAllIn(planString).length
+      withClue(s"Expected single BatchScan but found $batchScanCount in plan:\n$planString\n") {
+        batchScanCount shouldBe 1
       }
-      assert(ex.getMessage.contains("message__text"))
+
+      // Verify no FilterExec above the scan — filters are pushed down, not post-filtered
+      val hasFilterExec = planString.contains("Filter ")
+      withClue(s"FilterExec found above BatchScan — filters not fully pushed down:\n$planString\n") {
+        hasFilterExec shouldBe false
+      }
+
+      // Verify the query still returns correct results
+      val results = filtered.collect()
+      results.length shouldBe 1
+      results(0).getLong(0) shouldBe 2L
     }
   }
 
