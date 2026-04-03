@@ -148,6 +148,7 @@ class NativeTransactionLog(
     val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
     val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
 
+    refreshCredentials()
     TransactionLogWriter.initializeTable(nativeTablePath, nativeConfig, protocolJson, metadataJson)
     logger.info(s"Initialized table at $nativeTablePath with ${partitionColumns.size} partition columns")
   }
@@ -232,8 +233,53 @@ class NativeTransactionLog(
     result.getVersion
   }
 
+  /**
+   * Re-resolve AWS credentials from the configured credential provider and update nativeConfig.
+   *
+   * Matches the lifecycle of the old S3CloudStorageProvider pattern: the old code wrapped the
+   * credential provider in V1ToV2CredentialsProviderAdapter so the AWS SDK re-invoked it before
+   * each storage operation. Here we replicate that by calling the provider before each write.
+   *
+   * The credential provider (e.g., UnityCatalogAWSCredentialProvider) has an internal Guava
+   * cache, so this is a cache-hit no-op on most calls; an HTTP fetch occurs only when credentials
+   * are near expiration (~40 minutes before the typical 1-hour UC credential TTL).
+   *
+   * No-ops if no credential provider class is configured (static credentials or default chain).
+   */
+  private def refreshCredentials(): Unit = {
+    val providerClassKey = "spark.indextables.aws.credentialsProviderClass"
+    val hasProvider = Option(options.get(providerClassKey))
+      .orElse(Option(options.get(providerClassKey.toLowerCase)))
+      .exists(_.nonEmpty)
+
+    if (!hasProvider) return
+
+    import scala.jdk.CollectionConverters._
+    // asCaseSensitiveMap() lowercases keys; resolveAWSCredentialsFromConfig handles both cases.
+    // Strip static credentials to force re-resolution through the provider (Priority 2).
+    // Also strip uc.tableId (source-table-specific) to avoid Priority 1.5 using the wrong
+    // source table ID for destination credential resolution (same guard as TransactionLogFactory).
+    val mapForRefresh = options.asCaseSensitiveMap().asScala.toMap -
+      "spark.indextables.aws.accessKey" - "spark.indextables.aws.accesskey" -
+      "spark.indextables.aws.secretKey" - "spark.indextables.aws.secretkey" -
+      "spark.indextables.aws.sessionToken" - "spark.indextables.aws.sessiontoken" -
+      "spark.indextables.iceberg.uc.tableId"
+
+    io.indextables.spark.utils.CredentialProviderFactory
+      .resolveAWSCredentialsFromConfig(mapForRefresh, nativeTablePath)
+      .foreach { creds =>
+        nativeConfig.put("aws_access_key_id", creds.accessKey)
+        nativeConfig.put("aws_secret_access_key", creds.secretKey)
+        creds.sessionToken match {
+          case Some(token) => nativeConfig.put("aws_session_token", token)
+          case None        => nativeConfig.remove("aws_session_token")
+        }
+      }
+  }
+
   /** Write actions via Arrow FFI (unified schema with action_type discriminator). */
   private def writeActionsViaArrow(actions: Seq[Action], retry: Boolean): WriteResult = {
+    refreshCredentials()
     val (arrowArray, arrowSchema, arrayAddr, schemaAddr) = ActionsToArrowConverter.exportAsFfi(actions)
     try {
       TransactionLogWriter.writeVersionArrowFfi(nativeTablePath, nativeConfig, arrayAddr, schemaAddr, retry)
@@ -262,6 +308,7 @@ class NativeTransactionLog(
     }
     val protocol    = ProtocolAction(effectiveReader, effectiveWriter)
     val actionsJson = ActionJsonSerializer.actionsToJsonLines(Seq(protocol))
+    refreshCredentials()
     TransactionLogWriter.writeVersion(nativeTablePath, nativeConfig, actionsJson)
   }
 
@@ -548,6 +595,7 @@ class NativeTransactionLog(
       skipCount = existingCount + 1
     )
     val skipJson = ActionJsonSerializer.skipActionToJson(skipAction)
+    refreshCredentials()
     val version  = TransactionLogWriter.skipFile(nativeTablePath, nativeConfig, skipJson)
     version
   }

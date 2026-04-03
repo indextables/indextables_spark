@@ -186,4 +186,60 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
     accessKey should startWith("table-based-key:")
     accessKey should include(sourceTableId)
   }
+
+  /**
+   * Regression test: NativeTransactionLog must re-invoke the credential provider before each
+   * write operation, not just once at construction time.
+   *
+   * This matches the old S3CloudStorageProvider behaviour, which wrapped the provider in
+   * V1ToV2CredentialsProviderAdapter so the AWS SDK re-invoked it before every storage call.
+   * Without per-write refresh, credentials (typical UC TTL ~1 hour) expire during long-running
+   * companion builds, causing auth failures.
+   *
+   * We verify by counting how many times MockTableCredentialProvider.getCredentials() is called
+   * across multiple writes. With the fix, the path-based provider must be invoked at least once
+   * per write; without it (static credentials only), the count stays at 0 after construction.
+   */
+  test("NativeTransactionLog re-invokes the credential provider on each write (not just at construction)") {
+    import io.indextables.spark.testutils.MockTableCredentialProvider
+    MockTableCredentialProvider.resetCounts()
+
+    withTempPath { destPath =>
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.aws.credentialsProviderClass" -> mockProviderClass
+        ).asJava
+      )
+
+      val txlog = TransactionLogFactory.create(new Path(destPath), spark, options)
+      try {
+        // Baseline: record how many times the provider was called during create()
+        val callsAfterCreate = MockTableCredentialProvider.pathCredentialCallCount.get()
+
+        // First write: initialize
+        txlog.initialize(getTestSchema())
+        val callsAfterInit = MockTableCredentialProvider.pathCredentialCallCount.get()
+        callsAfterInit should be > callsAfterCreate
+
+        // Second write: addFiles
+        val addAction = io.indextables.spark.transaction.AddAction(
+          path = "file://dummy/part-00000.split",
+          partitionValues = Map.empty,
+          size = 100L,
+          modificationTime = System.currentTimeMillis(),
+          dataChange = true,
+          stats = None,
+          tags = None,
+          numRecords = Some(1L)
+        )
+        txlog.addFiles(Seq(addAction))
+        val callsAfterAdd = MockTableCredentialProvider.pathCredentialCallCount.get()
+        callsAfterAdd should be > callsAfterInit
+
+        // Each write increments the counter: credential provider is re-invoked per write
+        MockTableCredentialProvider.pathCredentialCallCount.get() should be >= 2
+      } finally
+        txlog.close()
+    }
+  }
 }
