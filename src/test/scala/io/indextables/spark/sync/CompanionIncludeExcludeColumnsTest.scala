@@ -256,6 +256,47 @@ class CompanionIncludeExcludeColumnsTest extends AnyFunSuite with Matchers with 
     }
   }
 
+  test("predicate on excluded column returns zero results") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1, "alice", "alice@example.com"),
+        (2, "bob", "bob@example.com"),
+        (3, "charlie", "charlie@example.com")
+      ).toDF("id", "name", "email")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('email')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      )
+      result.collect()(0).getString(2) shouldBe "success"
+
+      val df = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .load(indexPath)
+
+      // Filter on excluded column returns 0 results (email is not in the index).
+      // Note: the ScanBuilder still classifies the EqualTo filter as "supported" because
+      // it has no awareness of excluded columns — tantivy returns 0 results for the
+      // non-existent field. A future improvement could make excluded columns non-pushable
+      // in isFieldSuitableForExactMatching by reading companion metadata.
+      val filtered = df.filter(col("email") === "alice@example.com")
+      filtered.collect().length shouldBe 0
+
+      // Verify included column still works
+      val nameFiltered = df.filter(col("name") === "alice")
+      nameFiltered.collect().length shouldBe 1
+    }
+  }
+
   test("INCLUDE COLUMNS with nonexistent column returns error") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath

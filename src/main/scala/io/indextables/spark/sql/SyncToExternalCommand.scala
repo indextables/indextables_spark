@@ -1134,7 +1134,9 @@ case class SyncToExternalCommand(
         maxConcurrentBatches,
         externalStorageRoot,
         startTime,
-        Some(sourceSchema)
+        Some(sourceSchema),
+        filteredIncludeColumns,
+        filteredExcludeColumns
       )
     } finally
       transactionLog.close()
@@ -1161,7 +1163,9 @@ case class SyncToExternalCommand(
     maxConcurrentBatches: Int,
     externalStorageRoot: Option[String],
     startTime: Long,
-    sourceSchema: Option[StructType] = None
+    sourceSchema: Option[StructType] = None,
+    filteredIncludeColumns: Seq[String] = Seq.empty,
+    filteredExcludeColumns: Seq[String] = Seq.empty
   ): Seq[Row] = {
     import scala.collection.parallel.ForkJoinTaskSupport
     import java.util.concurrent.ForkJoinPool
