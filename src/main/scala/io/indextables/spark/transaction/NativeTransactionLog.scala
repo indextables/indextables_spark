@@ -563,10 +563,13 @@ class NativeTransactionLog(
     Some(Seq(protocol, metadata) ++ addActions)
   }
 
-  override def getVersions(): Seq[Long] =
+  override def getVersions(): Seq[Long] = {
+    refreshCredentials()
     TransactionLogReader.listVersions(nativeTablePath, nativeConfig).toSeq
+  }
 
   override def readVersion(version: Long): Seq[Action] = {
+    refreshCredentials()
     val content = TransactionLogReader.readVersion(nativeTablePath, nativeConfig, version)
     parseActionsFromContent(content)
   }
@@ -606,6 +609,7 @@ class NativeTransactionLog(
     // independent of checkpoint state. This works with checkpoint-every-write where
     // postCheckpointPaths is always empty.
     val cooldownMs = options.getLong("spark.indextables.skippedFiles.cooldownDuration", 24L) * 3600 * 1000
+    refreshCredentials()
     val nativeSkips = TransactionLogReader.listSkipActions(nativeTablePath, nativeConfig, cooldownMs)
 
     import scala.jdk.CollectionConverters._
