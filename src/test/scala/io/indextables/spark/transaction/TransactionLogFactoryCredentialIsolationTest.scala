@@ -104,30 +104,34 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
    * path-based credentials (correct for the destination) are used instead.
    */
   test("TransactionLogFactory.create() does not use source uc.tableId for destination credential resolution") {
+    import io.indextables.spark.testutils.MockTableCredentialProvider
+    MockTableCredentialProvider.resetCounts()
+
     withTempPath { destPath =>
       val sourceTableId = "source-uc-table-id-xyz789"
 
       // Simulate the configs that SyncToExternalCommand passes to TransactionLogFactory:
       // mergedConfigs contains the source table's uc.tableId alongside the provider class.
-      val configs = Map(
-        "spark.indextables.aws.credentialsProviderClass" -> mockProviderClass,
-        "spark.indextables.iceberg.uc.tableId"           -> sourceTableId,
-        // Ensure the config goes through ConfigNormalization without dropping these keys
-        "spark.indextables.transaction.allowDirectUsage" -> "true"
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.aws.credentialsProviderClass" -> mockProviderClass,
+          "spark.indextables.iceberg.uc.tableId"           -> sourceTableId
+        ).asJava
       )
 
-      // After the fix: TransactionLogFactory strips uc.tableId before calling resolveCredentialsOnDriver.
-      // The resulting NativeTransactionLog should have been initialized with path-based credentials,
-      // not source-table-scoped credentials. We verify by inspecting what resolveCredentialsOnDriver
-      // produces when uc.tableId is absent (as the fix does internally).
-      val fixedConfigs = configs - "spark.indextables.iceberg.uc.tableId"
-      val resolved = CredentialProviderFactory.resolveCredentialsOnDriver(fixedConfigs, destPath)
-      val accessKey = resolved.getOrElse("spark.indextables.aws.accessKey", "")
+      // After the fix: TransactionLogFactory strips uc.tableId before calling resolveCredentialsOnDriver,
+      // so Priority 1.5 (table-based) is bypassed and Priority 2 (path-based) is used instead.
+      // If the fix is removed, tableCredentialCallCount would be > 0.
+      val txlog = TransactionLogFactory.create(new Path(destPath), spark, options)
+      try {
+        txlog.initialize(getTestSchema())
+      } finally
+        txlog.close()
 
-      // Path-based credentials: access key encodes the destination host, not the source table ID
-      accessKey should startWith("path-based-key:")
-      accessKey should not include sourceTableId
-      accessKey should not include "table-based-key"
+      // Table-based credentials must NOT have been invoked for the destination txlog
+      MockTableCredentialProvider.tableCredentialCallCount.get() shouldBe 0
+      // Path-based credentials must have been used at least once (construction + initialize)
+      MockTableCredentialProvider.pathCredentialCallCount.get() should be > 0
     }
   }
 

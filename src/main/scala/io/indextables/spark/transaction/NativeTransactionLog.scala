@@ -148,7 +148,7 @@ class NativeTransactionLog(
     val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
     val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
 
-    refreshCredentials()
+    // refreshCredentials() already called inside getOrRefreshSnapshot() above
     TransactionLogWriter.initializeTable(nativeTablePath, nativeConfig, protocolJson, metadataJson)
     logger.info(s"Initialized table at $nativeTablePath with ${partitionColumns.size} partition columns")
   }
@@ -263,7 +263,7 @@ class NativeTransactionLog(
       "spark.indextables.aws.accessKey" - "spark.indextables.aws.accesskey" -
       "spark.indextables.aws.secretKey" - "spark.indextables.aws.secretkey" -
       "spark.indextables.aws.sessionToken" - "spark.indextables.aws.sessiontoken" -
-      "spark.indextables.iceberg.uc.tableId"
+      "spark.indextables.iceberg.uc.tableId" - "spark.indextables.iceberg.uc.tableid"
 
     io.indextables.spark.utils.CredentialProviderFactory
       .resolveAWSCredentialsFromConfig(mapForRefresh, nativeTablePath)

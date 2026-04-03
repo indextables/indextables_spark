@@ -84,7 +84,11 @@ object TransactionLogFactory {
     // getTableCredentials(sourceTableId) — returning credentials scoped to the source table's S3
     // location, not the txlog destination. Removing it falls through to path-based resolution
     // (Priority 2), which correctly fetches credentials for tablePath.
-    val configsForDestAuth = mergedConfigs - "spark.indextables.iceberg.uc.tableId"
+    // Both camelCase and lowercase forms are stripped: CaseInsensitiveStringMap.asScala() lowercases
+    // all keys, so the key arriving via options will be "spark.indextables.iceberg.uc.tableid".
+    val configsForDestAuth = mergedConfigs -
+      "spark.indextables.iceberg.uc.tableId" -
+      "spark.indextables.iceberg.uc.tableid"
 
     val resolvedConfigs = io.indextables.spark.utils.CredentialProviderFactory
       .resolveCredentialsOnDriver(configsForDestAuth, tablePath.toString)
