@@ -13,6 +13,7 @@ IndexTables runs entirely within your existing Spark cluster with no additional 
 - **Embedded Search** - Runs directly within Spark executors, no additional infrastructure
 - **Multi-Cloud Storage** - AWS S3 and Azure Blob Storage fully supported
 - **Full-Text Search** - Native `indexquery` operator with complete Tantivy search syntax
+- **Dual-Field Search** - `text_and_string` mode enables both exact matching and full-text search on the same column
 - **Predicate Pushdown** - WHERE clause filters convert to native search operations
 - **Aggregate Pushdown** - COUNT, SUM, AVG, MIN, MAX execute directly in the search engine
 - **Bucket Aggregations** - DateHistogram, Histogram, and Range for time-series analysis

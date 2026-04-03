@@ -13,11 +13,16 @@ spark.indextables.indexing.typemap.<field>: "string"
 // Text fields - full-text search, IndexQuery only
 spark.indextables.indexing.typemap.<field>: "text"
 
+// Text+String fields - dual-field: exact match + full-text search
+spark.indextables.indexing.typemap.<field>: "text_and_string"
+
 // JSON fields - automatic for Struct/Array/Map types
 // No configuration needed - auto-detected
 // Optional: Control JSON indexing mode
 spark.indextables.indexing.json.mode: "full" (default) or "minimal"
 ```
+
+**text_and_string fields** provide both exact matching and full-text search on the same column. Each `text_and_string` column creates two tantivy fields: the original field name with raw tokenizer (supporting `=`, `>`, `<`, `IN`, and other exact-match filters with full pushdown, plus aggregations) and a `<field>__text` companion with the default tokenizer (supporting `TEXTSEARCH`/`indexquery` full-text search). The `__text` companion field is internal and not exposed in `SELECT *` results. `TEXTSEARCH` and `indexquery` operators auto-route to the `__text` field. `IndexQueryAll` prefers the `__text` field to avoid duplicate hits.
 
 ## List-Based Typemap Syntax (Recommended)
 
@@ -27,6 +32,7 @@ Configure multiple fields with the same type in one line:
 // New syntax: typemap.<type> = "field1,field2,..."
 spark.indextables.indexing.typemap.text: "title,content,body,description"
 spark.indextables.indexing.typemap.string: "status,category,tags"
+spark.indextables.indexing.typemap.text_and_string: "message,error_text"
 spark.indextables.indexing.typemap.json: "metadata,attributes"
 
 // Old per-field syntax still works
