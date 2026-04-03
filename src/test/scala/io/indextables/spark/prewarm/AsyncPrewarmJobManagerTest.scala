@@ -97,8 +97,10 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
     )
     result1.isRight shouldBe true
 
-    // Wait for first job to actually start
+    // Wait for first job to actually start running
     jobStarted.await(5, TimeUnit.SECONDS) shouldBe true
+    // Brief pause to ensure the job manager's slot counter has been updated
+    Thread.sleep(50)
 
     // Try to start second job - should be rejected
     val result2 = AsyncPrewarmJobManager.tryStartJob(

@@ -376,8 +376,8 @@
                     <reportsDirectory>${project.build.directory}/surefire-reports</reportsDirectory>
                     <junitxml>.</junitxml>
                     <filereports>TestSuiteReport.txt</filereports>
-                    <!-- Run tests with increased memory -->
-                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m</argLine>
+                    <!-- Run tests with increased memory; disable SparkUI to avoid port exhaustion under parallel test execution -->
+                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m -Dspark.ui.enabled=false</argLine>
                 </configuration>
                 <executions>
                     <execution>
