@@ -379,6 +379,7 @@ class NativeTransactionLog(
     excludeCooldown: Boolean,
     includeStats: Boolean
   ): NativeListFilesResult = {
+    refreshCredentials()
     // Allocate Arrow FFI structs — generous upper bound since native determines actual columns.
     // Native returns numColumns in result JSON; we only import that many.
     // 20 base (including partition_values JSON col) + up to 20 partition cols + 2 stats = 42
@@ -668,7 +669,8 @@ class NativeTransactionLog(
    * Caching is handled entirely by the native layer's global CACHE_REGISTRY, which is
    * automatically invalidated by write operations across all instances.
    */
-  private def getOrRefreshSnapshot(): TxLogSnapshotInfo =
+  private def getOrRefreshSnapshot(): TxLogSnapshotInfo = {
+    refreshCredentials()
     try {
       TransactionLogReader.getSnapshotInfo(nativeTablePath, nativeConfig)
     } catch {
@@ -676,6 +678,7 @@ class NativeTransactionLog(
         logger.debug(s"Table not yet initialized at $nativeTablePath")
         null
     }
+  }
 
   /** Execute a function with the current snapshot, returning a default if no snapshot exists. */
   private def withSnapshot[T](default: => T)(f: TxLogSnapshotInfo => T): T = {

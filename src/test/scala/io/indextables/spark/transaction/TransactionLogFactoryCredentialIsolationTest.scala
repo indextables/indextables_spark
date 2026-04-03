@@ -242,4 +242,49 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
         txlog.close()
     }
   }
+
+  /**
+   * Regression test: NativeTransactionLog must re-invoke the credential provider before each
+   * READ operation (listFiles, getSnapshot), not just before writes.
+   *
+   * The old S3CloudStorageProvider re-invoked the credential provider before every S3 operation,
+   * including reads (listFiles triggered S3 calls on each invocation). Without per-read refresh,
+   * long-running Spark queries against companion tables will fail after ~1 hour when UC
+   * credentials in nativeConfig expire.
+   *
+   * Both listFilesArrow() and getOrRefreshSnapshot() now call refreshCredentials() at entry,
+   * matching the write-path pattern. This test verifies both paths.
+   */
+  test("NativeTransactionLog re-invokes the credential provider on each read operation") {
+    import io.indextables.spark.testutils.MockTableCredentialProvider
+    MockTableCredentialProvider.resetCounts()
+
+    withTempPath { destPath =>
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.aws.credentialsProviderClass" -> mockProviderClass
+        ).asJava
+      )
+
+      val txlog = TransactionLogFactory.create(new Path(destPath), spark, options)
+      try {
+        txlog.initialize(getTestSchema())
+        val callsAfterInit = MockTableCredentialProvider.pathCredentialCallCount.get()
+
+        // Read 1: listFiles() — goes through listFilesArrow() which now calls refreshCredentials()
+        txlog.listFiles()
+        val callsAfterListFiles = MockTableCredentialProvider.pathCredentialCallCount.get()
+        callsAfterListFiles should be > callsAfterInit
+
+        // Read 2: getSchema() — goes through getOrRefreshSnapshot() which now calls refreshCredentials()
+        txlog.getSchema()
+        val callsAfterGetSchema = MockTableCredentialProvider.pathCredentialCallCount.get()
+        callsAfterGetSchema should be > callsAfterListFiles
+
+        // Credential provider re-invoked per read: total call count reflects both writes and reads
+        MockTableCredentialProvider.pathCredentialCallCount.get() should be >= 3
+      } finally
+        txlog.close()
+    }
+  }
 }
