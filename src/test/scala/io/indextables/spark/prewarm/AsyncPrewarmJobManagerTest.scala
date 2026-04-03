@@ -99,17 +99,22 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
 
     // Wait for first job to actually start running
     jobStarted.await(5, TimeUnit.SECONDS) shouldBe true
-    // Brief pause to ensure the job manager's slot counter has been updated
-    Thread.sleep(50)
 
-    // Try to start second job - should be rejected
-    val result2 = AsyncPrewarmJobManager.tryStartJob(
-      jobId = "job-2",
-      tablePath = "s3://bucket/table",
-      hostname = "host1",
-      totalSplits = 5,
-      work = () => AsyncPrewarmJobResult("job-2", "s3://bucket/table", "host1", 5, 5, 50, true, None)
-    )
+    // Retry the rejection check — the slot counter may take a moment to update
+    // after the work lambda begins executing on the thread pool.
+    var result2: Either[String, String] = Right("not yet")
+    var attempts = 0
+    while (result2.isRight && attempts < 20) {
+      Thread.sleep(25)
+      result2 = AsyncPrewarmJobManager.tryStartJob(
+        jobId = s"job-2-attempt-$attempts",
+        tablePath = "s3://bucket/table",
+        hostname = "host1",
+        totalSplits = 5,
+        work = () => AsyncPrewarmJobResult(s"job-2-attempt-$attempts", "s3://bucket/table", "host1", 5, 5, 50, true, None)
+      )
+      attempts += 1
+    }
 
     result2.isLeft shouldBe true
     result2.left.toOption.get should include("capacity")
