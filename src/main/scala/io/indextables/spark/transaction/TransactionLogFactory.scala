@@ -77,8 +77,17 @@ object TransactionLogFactory {
     val providerClassOpt = mergedConfigs.get(providerClassKey)
       .orElse(mergedConfigs.get(providerClassKey.toLowerCase))
 
+    // Strip source-table-specific keys before resolving credentials for this txlog's storage path.
+    // spark.indextables.iceberg.uc.tableId is injected by SyncToExternalCommand into mergedConfigs
+    // to identify the SOURCE table in Unity Catalog. If left in place when creating the destination
+    // txlog, CredentialProviderFactory.resolveCredentialsOnDriver hits Priority 1.5 and calls
+    // getTableCredentials(sourceTableId) — returning credentials scoped to the source table's S3
+    // location, not the txlog destination. Removing it falls through to path-based resolution
+    // (Priority 2), which correctly fetches credentials for tablePath.
+    val configsForDestAuth = mergedConfigs - "spark.indextables.iceberg.uc.tableId"
+
     val resolvedConfigs = io.indextables.spark.utils.CredentialProviderFactory
-      .resolveCredentialsOnDriver(mergedConfigs, tablePath.toString)
+      .resolveCredentialsOnDriver(configsForDestAuth, tablePath.toString)
 
     // Re-add provider class if it was stripped during resolution
     val finalConfigs = providerClassOpt match {

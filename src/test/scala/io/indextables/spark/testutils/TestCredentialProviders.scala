@@ -105,6 +105,37 @@ class TestDualCredentialProvider(uri: URI, conf: Configuration)
     }
 }
 
+/**
+ * Mock credential provider that implements both AWSCredentialsProvider (path-based, used by Priority 2) and
+ * TableCredentialProvider companion (table-ID-based, used by Priority 1.5).
+ *
+ * Used by TransactionLogFactoryCredentialIsolationTest to verify that the destination txlog credential
+ * resolution does NOT use the source table's uc.tableId (regression guard for the UC companion bug).
+ *
+ * Access keys encode which resolution path was taken so tests can assert the difference:
+ *   - Path-based (correct for destination): "path-based-key:<uri>"
+ *   - Table-based (wrong for destination): "table-based-key:<tableId>"
+ */
+class MockTableCredentialProvider(uri: URI, conf: Configuration) extends AWSCredentialsProvider {
+  override def getCredentials(): AWSCredentials =
+    new BasicAWSCredentials(s"path-based-key:${uri.getHost}", "path-based-secret")
+  override def refresh(): Unit = {}
+}
+
+object MockTableCredentialProvider extends io.indextables.spark.utils.TableCredentialProvider {
+  override def resolveTableId(fullTableName: String, config: Map[String, String]): String =
+    s"mock-table-id-for-$fullTableName"
+
+  override def getTableCredentials(
+    tableId: String,
+    config: Map[String, String]
+  ): io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials =
+    io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials(
+      s"table-based-key:$tableId",
+      "table-based-secret"
+    )
+}
+
 /** Test provider class that doesn't implement any supported interface */
 class UnsupportedProvider(uri: URI, conf: Configuration) {
   // This class intentionally doesn't implement any AWS credential provider interface
