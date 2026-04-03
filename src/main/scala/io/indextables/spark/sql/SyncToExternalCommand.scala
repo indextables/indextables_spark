@@ -740,8 +740,9 @@ case class SyncToExternalCommand(
       // Validate text_and_string companion field names don't collide with existing columns
       effectiveIndexingModes.foreach { case (field, mode) =>
         if (mode.toLowerCase == "text_and_string") {
-          val textCompanion = field + "__text"
-          if (dataColumnsLower.contains(textCompanion.toLowerCase)) {
+          val textCompanion = field + IndexingModes.TextCompanionSuffix
+          if (dataColumnsLower.contains(textCompanion.toLowerCase) ||
+              partitionColumnsLower.contains(textCompanion.toLowerCase)) {
             throw new IllegalArgumentException(
               s"Cannot use 'text_and_string' mode for field '$field': " +
                 s"column '$textCompanion' already exists in source schema."

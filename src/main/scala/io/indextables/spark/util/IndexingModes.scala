@@ -23,6 +23,9 @@ package io.indextables.spark.util
  */
 object IndexingModes {
 
+  /** Suffix for text_and_string companion fields. Must match tantivy4java TEXT_COMPANION_SUFFIX. */
+  val TextCompanionSuffix: String = "__text"
+
   /** Modes that are recognized as exact string values (case-insensitive). */
   val recognizedModes: Set[String] = Set(
     "string",

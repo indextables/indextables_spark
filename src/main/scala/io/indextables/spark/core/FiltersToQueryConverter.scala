@@ -257,7 +257,7 @@ object FiltersToQueryConverter {
   }
 
   /** Suffix used by the text_and_string indexing mode for the tokenized companion field. */
-  private[core] val TextCompanionSuffix = "__text"
+  private[core] val TextCompanionSuffix = io.indextables.spark.util.IndexingModes.TextCompanionSuffix
 
   /**
    * For text_and_string columns, TEXTSEARCH should target the __text field. Detect dual-mode fields by checking if
@@ -275,8 +275,11 @@ object FiltersToQueryConverter {
   private def resolveTextSearchFieldsForAll(schema: Schema): java.util.List[String] = {
     import scala.jdk.CollectionConverters._
     val allFields = schema.getFieldNames.asScala.toSeq
+    val allFieldSet = allFields.toSet
     val rawSkip = allFields.collect {
-      case name if name.endsWith(TextCompanionSuffix) => name.stripSuffix(TextCompanionSuffix)
+      case name if name.endsWith(TextCompanionSuffix) &&
+        allFieldSet.contains(name.stripSuffix(TextCompanionSuffix)) =>
+        name.stripSuffix(TextCompanionSuffix)
     }.toSet
     allFields.filterNot(rawSkip.contains).asJava
   }

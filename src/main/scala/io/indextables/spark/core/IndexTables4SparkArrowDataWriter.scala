@@ -153,7 +153,7 @@ class IndexTables4SparkArrowDataWriter(
           case Some("bool")                => ("bool", "")
           case Some("datetime")            => ("datetime", "")
           case Some("bytes")               => ("bytes", "")
-          case Some(other)                 => (other, "")
+          case Some(other)                 => (other, "")  // text_and_string schema creation handled by Rust; dual-field write support is companion-only for now
           case None =>
             field.dataType match {
               case StringType                                => ("text", "raw")

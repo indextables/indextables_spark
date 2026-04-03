@@ -386,4 +386,79 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       serverStarted.get.getLong(1) shouldBe 2
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Collision and feature combination tests
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("text_and_string rejects column name collision with __text") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create Delta table with a column that collides with the __text companion field name
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        ("hello", "world"),
+        ("foo", "bar")
+      ).toDF("message", "message__text")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql(
+          s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+             |  INDEXING MODES ('message': 'text_and_string')
+             |  AT LOCATION '$indexPath'""".stripMargin
+        ).collect()
+      }
+      assert(ex.getMessage.contains("message__text"))
+    }
+  }
+
+  test("text_and_string with HASHED FASTFIELDS enables aggregation and text search") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Create data with repeated message values for grouping
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "the quick brown fox", 100.0),
+        (2L, "hello world from indextables", 200.0),
+        (3L, "the quick brown fox", 300.0),
+        (4L, "error connection timeout", 400.0),
+        (5L, "hello world from indextables", 500.0)
+      ).toDF("id", "message", "score")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      // Build companion with both HASHED FASTFIELDS and text_and_string
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  HASHED FASTFIELDS INCLUDE ('message')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_test_hashed")
+
+      // 1. TEXTSEARCH finds results (tokenized search via __text)
+      val textResults = spark.sql("SELECT id FROM tas_test_hashed WHERE message indexquery 'quick brown'").collect()
+      textResults.length shouldBe 2
+      val textIds = textResults.map(_.getLong(0)).toSet
+      textIds should contain(1L)
+      textIds should contain(3L)
+
+      // 2. GROUP BY / COUNT aggregation works (via hashed fast field on raw field)
+      val grouped = df.groupBy("message").count().collect()
+      grouped.length shouldBe 3
+      val groupMap = grouped.map(r => r.getString(0) -> r.getLong(1)).toMap
+      groupMap("the quick brown fox") shouldBe 2L
+      groupMap("hello world from indextables") shouldBe 2L
+      groupMap("error connection timeout") shouldBe 1L
+    }
+  }
 }

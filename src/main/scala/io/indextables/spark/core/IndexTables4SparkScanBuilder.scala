@@ -1330,6 +1330,10 @@ class IndexTables4SparkScanBuilder(
    * hashes, not original values.
    */
   private def isFieldSuitableForRangeQuery(attribute: String): Boolean = {
+    // Tokenized __text companion fields have no column-level ordering for range comparison
+    if (attribute.endsWith(io.indextables.spark.util.IndexingModes.TextCompanionSuffix)) {
+      return false
+    }
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     effectiveConfig.get(fieldTypeKey) match {
       case Some(mode) => io.indextables.spark.util.IndexingModes.supportsRangeQuery(mode)
