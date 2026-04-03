@@ -59,7 +59,7 @@ import io.indextables.spark.filters.{
   MixedSparkFilter
 }
 import io.indextables.spark.sql.TableRootUtils
-import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLogInterface}
+import io.indextables.spark.transaction.{DocMappingMetadata, EnhancedTransactionLogCache, TransactionLogInterface}
 import io.indextables.spark.util.ProtocolNormalizer
 import org.slf4j.LoggerFactory
 
@@ -343,23 +343,9 @@ class IndexTables4SparkScanBuilder(
           logger.info(
             s"effectiveConfig: not a companion table (indextables.companion.enabled=${metadata.configuration.getOrElse("indextables.companion.enabled", "not set")})"
           )
-          // For non-companion tables, enrich config with typemap entries stored in metadata
-          // at write time. This enables TEXTSEARCH/FIELDMATCH type validation at read time
-          // without requiring users to re-specify typemap options.
-          val typemapPrefix = "spark.indextables.indexing.typemap."
-          val metadataTypemap = metadata.configuration.filter {
-            case (key, _) => key.toLowerCase.startsWith(typemapPrefix)
-          }
-          if (metadataTypemap.nonEmpty) {
-            logger.info(s"effectiveConfig: loaded ${metadataTypemap.size} typemap entries from transaction log metadata")
-            // User-provided read options take precedence over stored metadata
-            metadataTypemap.foldLeft(config) {
-              case (cfg, (key, value)) =>
-                if (cfg.contains(key)) cfg else cfg + (key -> value)
-            }
-          } else {
-            config
-          }
+          // For non-companion tables, field type info is derived from docMapping in the
+          // transaction log (cached via cachedDocMappingMetadata) — no config enrichment needed.
+          config
         }
       } catch {
         case e: IllegalArgumentException =>
@@ -1347,12 +1333,21 @@ class IndexTables4SparkScanBuilder(
   /**
    * Check if a field supports range query pushdown. exact_only fields store U64 hashes — range comparison would compare
    * hashes, not original values.
+   *
+   * Checks effectiveConfig first (handles explicit read options and companion mode), then falls back to docMapping.
    */
   private def isFieldSuitableForRangeQuery(attribute: String): Boolean = {
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     effectiveConfig.get(fieldTypeKey) match {
       case Some(mode) => io.indextables.spark.util.IndexingModes.supportsRangeQuery(mode)
-      case None       => true // No explicit config — assume standard string field
+      case None =>
+        // Fall back to docMapping: tokenized text fields don't support range queries
+        cachedDocMappingMetadata.isTokenizedField(attribute.toLowerCase) match {
+          case Some(true) =>
+            logger.debug(s"Field '$attribute' is tokenized (from docMapping) - range query not supported")
+            false
+          case _ => true // Non-tokenized or unknown — assume supports range query
+        }
     }
   }
 
@@ -1360,6 +1355,8 @@ class IndexTables4SparkScanBuilder(
    * Check if a field is suitable for exact matching at the data source level. String fields (raw tokenizer) support
    * exact matching. Text fields (default tokenizer) should be filtered by Spark for exact matches. Nested JSON fields
    * (containing dots) are always supported for pushdown via JsonPredicateTranslator.
+   *
+   * Checks effectiveConfig first (handles explicit read options and companion mode), then falls back to docMapping.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
     // Check if this is a nested field (JSON field)
@@ -1384,9 +1381,18 @@ class IndexTables4SparkScanBuilder(
           logger.debug(s"Field '$attribute' configured as '$mode' - deferring exact matching to Spark")
         supports
       case None =>
-        // No explicit configuration - assume string type (new default)
-        logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
-        true
+        // Fall back to docMapping field type from the transaction log
+        cachedDocMappingMetadata.isTokenizedField(attribute.toLowerCase) match {
+          case Some(true) =>
+            logger.debug(s"Field '$attribute' is tokenized (from docMapping) - deferring exact matching to Spark")
+            false
+          case Some(false) =>
+            logger.debug(s"Field '$attribute' is not tokenized (from docMapping) - supporting exact matching")
+            true
+          case None =>
+            logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
+            true
+        }
     }
   }
 
@@ -2053,14 +2059,17 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Validate that IndexQuery filter field types match the search type.
-   * - textsearch requires a tokenized field (mode where supportsExactMatchPushdown == false)
-   * - fieldmatch requires a non-tokenized field (mode where supportsExactMatchPushdown == true)
+   * Validate that IndexQuery filter field types match the search type using the docMapping
+   * document from the transaction log (cached via EnhancedTransactionLogCache).
+   * - textsearch requires a tokenized field (type="text" with non-raw tokenizer in docMapping)
+   * - fieldmatch requires a non-tokenized field (type!="text" or tokenizer="raw" in docMapping)
    * - indexquery skips validation (backwards compat)
    */
   private def validateIndexQueryFieldTypes(): Unit = {
     val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
     if (indexQueryFilters.isEmpty) return
+
+    val docMapping = cachedDocMappingMetadata
 
     // Collect all IndexQueryFilter instances (including from MixedBooleanFilter trees)
     val allFilters: Seq[IndexQueryFilter] = indexQueryFilters.flatMap {
@@ -2074,10 +2083,12 @@ class IndexTables4SparkScanBuilder(
 
     allFilters.foreach { filter =>
       if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
-        val fieldTypeKey = s"spark.indextables.indexing.typemap.${filter.columnName.toLowerCase}"
-        val fieldType    = effectiveConfig.get(fieldTypeKey)
+        val fieldLower = filter.columnName.toLowerCase
 
-        fieldType match {
+        // Check explicit read-time typemap first (handles text_uuid_*, text_custom_* modes),
+        // then fall back to docMapping from the transaction log.
+        val fieldTypeKey = s"spark.indextables.indexing.typemap.$fieldLower"
+        effectiveConfig.get(fieldTypeKey) match {
           case Some(mode) =>
             val isExactMatch = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
             if (filter.searchType == SearchType.TextSearch && isExactMatch) {
@@ -2094,23 +2105,43 @@ class IndexTables4SparkScanBuilder(
                   s"Use TEXTSEARCH instead, or update the field's typemap to an exact-match type (e.g., 'string')."
               )
             }
+            logger.debug(s"Field '${filter.columnName}' type validation passed via typemap: $mode")
           case None =>
-            // No explicit typemap config — can't validate field type.
-            // This commonly happens when typemap was set at write time but not at read time.
-            // Warn so users know validation was skipped.
-            val fieldLower = filter.columnName.toLowerCase
-            logger.warn(
-              s"Cannot validate ${filter.searchType.toUpperCase} on field '${filter.columnName}': " +
-                s"no typemap configuration found at read time. " +
-                "Add .option(\"spark.indextables.indexing.typemap." + fieldLower + "\", \"text\" or \"string\") " +
-                "to your read options to enable type validation."
-            )
+            // No explicit typemap — fall back to docMapping field type from transaction log
+            docMapping.isTokenizedField(fieldLower) match {
+              case Some(isTokenized) =>
+                if (filter.searchType == SearchType.TextSearch && !isTokenized) {
+                  throw new IllegalArgumentException(
+                    s"Cannot use TEXTSEARCH on field '${filter.columnName}': " +
+                      s"this field is not tokenized (type='${docMapping.fieldTypes.getOrElse(fieldLower, "unknown")}' in docMapping). " +
+                      s"Use FIELDMATCH instead, or update the field's typemap to a tokenized type (e.g., 'text')."
+                  )
+                }
+                if (filter.searchType == SearchType.FieldMatch && isTokenized) {
+                  throw new IllegalArgumentException(
+                    s"Cannot use FIELDMATCH on field '${filter.columnName}': " +
+                      s"this field is tokenized (type='${docMapping.fieldTypes.getOrElse(fieldLower, "unknown")}' in docMapping). " +
+                      s"Use TEXTSEARCH instead, or update the field's typemap to an exact-match type (e.g., 'string')."
+                  )
+                }
+                logger.debug(
+                  s"Field '${filter.columnName}' type validation passed via docMapping: " +
+                    s"${if (isTokenized) "tokenized" else "non-tokenized"}"
+                )
+              case None =>
+                logger.warn(
+                  s"Cannot validate ${filter.searchType.toUpperCase} on field '${filter.columnName}': " +
+                    s"field not found in docMapping. This may occur with tables created before docMapping was available."
+                )
+            }
         }
       }
       // searchType == SearchType.IndexQuery → skip validation (general-purpose, backwards compat)
     }
 
-    // Warn about potential field type mismatches for * TEXTSEARCH / * FIELDMATCH queries
+    // Validate * TEXTSEARCH / * FIELDMATCH — throw on type mismatches.
+    // Only examine text-type fields from docMapping (type == "text"). Non-text fields
+    // (i64, f64, bool, etc.) aren't text-searchable and shouldn't trigger validation errors.
     val allQueryAllFilters: Seq[IndexQueryAllFilter] = indexQueryFilters.flatMap {
       case filter: IndexQueryAllFilter => Seq(filter)
       case mixedFilter: MixedBooleanFilter =>
@@ -2118,21 +2149,19 @@ class IndexTables4SparkScanBuilder(
       case _ => Seq.empty
     }.toSeq
 
-    val typemapPrefix = "spark.indextables.indexing.typemap."
-    val typemapEntries: Map[String, String] = effectiveConfig.collect {
-      case (key, value) if key.startsWith(typemapPrefix) =>
-        key.stripPrefix(typemapPrefix) -> value
-    }
-
-    if (typemapEntries.nonEmpty) {
+    val textFields = docMapping.fieldTypes.filter { case (_, fieldType) => fieldType == "text" }
+    if (textFields.nonEmpty) {
       allQueryAllFilters.foreach { filter =>
         if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
-          val mismatchedFields = typemapEntries.collect {
-            case (field, mode) =>
-              val isExactMatch = io.indextables.spark.util.IndexingModes.supportsExactMatchPushdown(mode)
-              if (filter.searchType == SearchType.TextSearch && isExactMatch) Some(field)
-              else if (filter.searchType == SearchType.FieldMatch && !isExactMatch) Some(field)
-              else None
+          val mismatchedFields = textFields.collect {
+            case (field, _) =>
+              docMapping.isTokenizedField(field) match {
+                case Some(isTokenized) =>
+                  if (filter.searchType == SearchType.TextSearch && !isTokenized) Some(field)
+                  else if (filter.searchType == SearchType.FieldMatch && isTokenized) Some(field)
+                  else None
+                case None => None
+              }
           }.flatten.toSeq.sorted
 
           if (mismatchedFields.nonEmpty) {
@@ -2142,15 +2171,12 @@ class IndexTables4SparkScanBuilder(
                 ("non-tokenized", "FIELDMATCH")
               else
                 ("tokenized", "TEXTSEARCH")
-            val expectedBehavior =
-              if (filter.searchType == SearchType.TextSearch) "full-text search"
-              else "exact matching"
 
-            logger.warn(
-              s"* $searchOp query will search across ${mismatchedFields.size} $fieldDesc field(s) " +
-                s"[${mismatchedFields.mkString(", ")}] where $expectedBehavior may not produce expected results. " +
-                s"Consider using column-specific syntax (e.g., ${mismatchedFields.head} $suggestedOp '${filter.queryString}') " +
-                s"or 'indexqueryall' to suppress this warning."
+            throw new IllegalArgumentException(
+              s"Cannot use * $searchOp: ${mismatchedFields.size} $fieldDesc field(s) " +
+                s"[${mismatchedFields.mkString(", ")}] are incompatible with $searchOp. " +
+                s"Use column-specific syntax (e.g., ${mismatchedFields.head} $suggestedOp '${filter.queryString}') " +
+                s"or '* indexquery' to search all fields without type validation."
             )
           }
         }
@@ -2243,6 +2269,30 @@ class IndexTables4SparkScanBuilder(
     }
 
   /**
+   * Cached DocMappingMetadata from the transaction log. Used for field type validation
+   * (TEXTSEARCH/FIELDMATCH, exact match pushdown, range queries). Returns DocMappingMetadata.empty
+   * for new tables without splits.
+   */
+  private lazy val cachedDocMappingMetadata: DocMappingMetadata = computeDocMappingMetadata()
+
+  private def computeDocMappingMetadata(): DocMappingMetadata =
+    try {
+      val existingFiles       = transactionLog.listFiles()
+      val firstWithDocMapping = existingFiles.find(_.docMappingJson.isDefined)
+      firstWithDocMapping match {
+        case Some(addAction) =>
+          EnhancedTransactionLogCache.getDocMappingMetadata(addAction)
+        case None =>
+          logger.debug("No doc mapping found in transaction log - likely new table")
+          DocMappingMetadata.empty
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug(s"Failed to read doc mapping from transaction log: ${e.getMessage}")
+        DocMappingMetadata.empty
+    }
+
+  /**
    * Get fast fields from the actual table schema/docMappingJson, not from configuration. This reads the transaction log
    * to determine which fields are actually configured as fast.
    *
@@ -2256,46 +2306,23 @@ class IndexTables4SparkScanBuilder(
 
   private def getActualFastFieldsFromSchema(): Set[String] = cachedActualFastFields
 
-  private def computeActualFastFieldsFromSchema(): Set[String] =
-    try {
-      logger.debug("Reading actual fast fields from transaction log")
-
-      // Read existing files from transaction log to get docMappingJson
-      val existingFiles       = transactionLog.listFiles()
-      val firstWithDocMapping = existingFiles.find(_.docMappingJson.isDefined)
-
-      firstWithDocMapping match {
-        case Some(addAction) =>
-          // Use cached DocMappingMetadata - no JSON parsing here
-          val metadata = EnhancedTransactionLogCache.getDocMappingMetadata(addAction)
-          logger.debug(s"Actual fast fields from schema: ${metadata.fastFields.mkString(", ")}")
-          metadata.fastFields
-
-        case None =>
-          logger.debug("No doc mapping found - likely new table, falling back to configuration-based validation")
-          // Fall back to configuration-based validation for new tables
-          val fastFieldsStr = config
-            .get("spark.indextables.indexing.fastfields")
-            .getOrElse("")
-          if (fastFieldsStr.nonEmpty) {
-            fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-          } else {
-            Set.empty[String]
-          }
+  private def computeActualFastFieldsFromSchema(): Set[String] = {
+    val metadata = cachedDocMappingMetadata
+    if (metadata.fastFields.nonEmpty) {
+      logger.debug(s"Actual fast fields from schema: ${metadata.fastFields.mkString(", ")}")
+      metadata.fastFields
+    } else {
+      logger.debug("No fast fields from doc mapping, falling back to configuration-based validation")
+      val fastFieldsStr = config
+        .get("spark.indextables.indexing.fastfields")
+        .getOrElse("")
+      if (fastFieldsStr.nonEmpty) {
+        fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+      } else {
+        Set.empty[String]
       }
-    } catch {
-      case e: Exception =>
-        logger.debug(s"Failed to read fast fields from schema: ${e.getMessage}")
-        // Fall back to configuration-based validation
-        val fastFieldsStr = config
-          .get("spark.indextables.indexing.fastfields")
-          .getOrElse("")
-        if (fastFieldsStr.nonEmpty) {
-          fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-        } else {
-          Set.empty[String]
-        }
     }
+  }
 
   private def validateFilterFieldsAreFast(filter: org.apache.spark.sql.sources.Filter): Boolean = {
     // Get actual fast fields from the schema/docMappingJson

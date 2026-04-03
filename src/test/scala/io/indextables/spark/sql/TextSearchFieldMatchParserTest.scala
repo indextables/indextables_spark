@@ -331,9 +331,9 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         .mode("overwrite")
         .save(tempPath)
 
+      // Read WITHOUT typemap options — field type comes from docMapping in transaction log
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.status", "string")
         .load(tempPath)
       df.createOrReplaceTempView("textsearch_string_field")
 
@@ -389,9 +389,9 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         .mode("overwrite")
         .save(tempPath)
 
+      // Read WITHOUT typemap options — field type comes from docMapping in transaction log
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.content", "text")
         .load(tempPath)
       df.createOrReplaceTempView("fieldmatch_text_field")
 
@@ -474,13 +474,15 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val totalCount = spark.sql("SELECT count(*) FROM large_syntax_test").collect()(0).getLong(0)
       assert(totalCount == 100000, s"Expected 100000 rows, got $totalCount")
 
-      // TEXTSEARCH (new preferred), indexquery (legacy), and * TEXTSEARCH / indexqueryall
+      // TEXTSEARCH (new preferred), indexquery (legacy), and * indexquery / indexqueryall
+      // Note: * TEXTSEARCH is not used here because this table has mixed types (title=text, category=string)
+      // and * TEXTSEARCH now throws on tables with non-tokenized fields.
       val textsearchRows = spark.sql(
         "SELECT id, title FROM large_syntax_test WHERE title TEXTSEARCH 'spark' ORDER BY id"
       ).collect()
 
-      val starTextsearchRows = spark.sql(
-        "SELECT id, title FROM large_syntax_test WHERE * TEXTSEARCH 'spark' ORDER BY id"
+      val starIndexqueryRows = spark.sql(
+        "SELECT id, title FROM large_syntax_test WHERE * indexquery 'spark' ORDER BY id"
       ).collect()
 
       val indexqueryRows = spark.sql(
@@ -492,12 +494,12 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       ).collect()
 
       val textsearchIds = textsearchRows.map(_.getInt(0)).sorted.toSeq
-      val starTextsearchIds = starTextsearchRows.map(_.getInt(0)).sorted.toSeq
+      val starIndexqueryIds = starIndexqueryRows.map(_.getInt(0)).sorted.toSeq
       val indexqueryIds = indexqueryRows.map(_.getInt(0)).sorted.toSeq
       val indexqueryallIds = indexqueryallRows.map(_.getInt(0)).sorted.toSeq
 
       assert(textsearchIds == indexqueryIds, "TEXTSEARCH and indexquery must return identical rows")
-      assert(starTextsearchIds == indexqueryallIds, "* TEXTSEARCH and indexqueryall must return identical rows")
+      assert(starIndexqueryIds == indexqueryallIds, "* indexquery and indexqueryall must return identical rows")
       assert(textsearchRows.length == 10000, s"Expected 10000 rows for 'spark', got ${textsearchRows.length}")
       assert(textsearchRows.forall(_.getString(1).contains("spark")), "All TEXTSEARCH results should contain 'spark'")
 
@@ -583,11 +585,11 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         "All results should match 'spark' or 'learning'"
       )
 
-      // 3. * TEXTSEARCH AND standard filter
+      // 3. * indexquery AND standard filter (use * indexquery since table has mixed types)
       val starAndResults = spark.sql(
-        "SELECT id, title, category FROM compound_test WHERE * TEXTSEARCH 'learning' AND category = 'ai' ORDER BY id"
+        "SELECT id, title, category FROM compound_test WHERE * indexquery 'learning' AND category = 'ai' ORDER BY id"
       ).collect()
-      assert(starAndResults.length > 0, "* TEXTSEARCH AND filter should return results")
+      assert(starAndResults.length > 0, "* indexquery AND filter should return results")
       assert(starAndResults.forall(_.getString(2) == "ai"), "All results should have category=ai")
 
       // 4. TEXTSEARCH AND TEXTSEARCH
@@ -604,9 +606,9 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       assert(textsearchOrResults.length == 4, s"Expected 4 rows (ids 1,2,3,4), got ${textsearchOrResults.length}")
       assert(textsearchOrResults.map(_.getInt(0)).toSeq == Seq(1, 2, 3, 4), "Expected ids 1, 2, 3, 4")
 
-      // 6. * TEXTSEARCH OR standard filter
+      // 6. * indexquery OR standard filter (use * indexquery since table has mixed types)
       val starOrResults = spark.sql(
-        "SELECT id, title, category FROM compound_test WHERE * TEXTSEARCH 'neural' OR category = 'technology' ORDER BY id"
+        "SELECT id, title, category FROM compound_test WHERE * indexquery 'neural' OR category = 'technology' ORDER BY id"
       ).collect()
       assert(starOrResults.length == 4, s"Expected 4 rows (ids 1,3,4,5), got ${starOrResults.length}")
       assert(starOrResults.map(_.getInt(0)).toSeq == Seq(1, 3, 4, 5), "Expected ids 1, 3, 4, 5")
@@ -665,7 +667,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
   }
 
-  test("End-to-end: all syntax variants (TEXTSEARCH, * TEXTSEARCH, indexquery, indexqueryall)") {
+  test("End-to-end: all syntax variants (TEXTSEARCH, * indexquery, indexquery, indexqueryall)") {
     withTempPath { tempPath =>
       val spark = this.spark
       import spark.implicits._
@@ -694,11 +696,11 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       ).collect()
       assert(textsearchResults.length > 0, "TEXTSEARCH should return results")
 
-      // 2. * TEXTSEARCH (new all-fields syntax)
-      val starTextsearchResults = spark.sql(
-        "SELECT id, title FROM all_syntax_test WHERE * TEXTSEARCH 'spark' ORDER BY id"
+      // 2. * indexquery (all-fields without type validation, since table has mixed types)
+      val starIndexqueryResults = spark.sql(
+        "SELECT id, title FROM all_syntax_test WHERE * indexquery 'spark' ORDER BY id"
       ).collect()
-      assert(starTextsearchResults.length > 0, "* TEXTSEARCH should return results")
+      assert(starIndexqueryResults.length > 0, "* indexquery should return results")
 
       // 3. indexquery (legacy single-column syntax)
       val indexqueryResults = spark.sql(
@@ -718,15 +720,15 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       assert(textsearchIds == indexqueryIds, "TEXTSEARCH and indexquery should return the same rows")
 
       // Cross-check: all-fields variants return same results
-      val starTextsearchIds = starTextsearchResults.map(_.getInt(0)).toSet
+      val starIndexqueryIds = starIndexqueryResults.map(_.getInt(0)).toSet
       val indexqueryallIds = indexqueryallResults.map(_.getInt(0)).toSet
-      assert(starTextsearchIds == indexqueryallIds, "* TEXTSEARCH and indexqueryall should return the same rows")
+      assert(starIndexqueryIds == indexqueryallIds, "* indexquery and indexqueryall should return the same rows")
     }
   }
 
   // --- * TEXTSEARCH / * FIELDMATCH field type mismatch warning ---
 
-  test("* TEXTSEARCH should warn about non-tokenized fields in mixed-type table") {
+  test("* TEXTSEARCH should throw on non-tokenized fields in mixed-type table") {
     withTempPath { tempPath =>
       val spark = this.spark
       import spark.implicits._
@@ -745,53 +747,24 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         .mode("overwrite")
         .save(tempPath)
 
+      // Read WITHOUT typemap — docMapping provides field types
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.content", "text")
-        .option("spark.indextables.indexing.typemap.status", "string")
         .load(tempPath)
-      df.createOrReplaceTempView("mixed_type_warn_test")
+      df.createOrReplaceTempView("mixed_type_textsearch_throw_test")
 
-      // Capture log output
-      import org.apache.logging.log4j.LogManager
-      import org.apache.logging.log4j.core.{LoggerContext, Logger => Log4jLogger}
-      import org.apache.logging.log4j.core.appender.WriterAppender
-      import org.apache.logging.log4j.core.layout.PatternLayout
-      import org.apache.logging.log4j.Level
-
-      val logCtx      = LogManager.getContext(false).asInstanceOf[LoggerContext]
-      val log4jLogger = logCtx.getLogger("io.indextables.spark.core.IndexTables4SparkScanBuilder").asInstanceOf[Log4jLogger]
-      val origLevel   = log4jLogger.getLevel
-      log4jLogger.setLevel(Level.WARN)
-
-      val logOutput = new java.io.StringWriter()
-      val layout    = PatternLayout.newBuilder().withPattern("%msg%n").build()
-      val appender  = WriterAppender.createAppender(layout, null, logOutput, "test-warn-capture", false, true)
-      appender.start()
-      log4jLogger.addAppender(appender)
-
-      try {
-        // * TEXTSEARCH searches all fields — should warn about non-tokenized 'status'
-        val results = spark.sql(
-          "SELECT id, content FROM mixed_type_warn_test WHERE * TEXTSEARCH 'spark'"
+      // * TEXTSEARCH on table with non-tokenized fields should throw
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql(
+          "SELECT id, content FROM mixed_type_textsearch_throw_test WHERE * TEXTSEARCH 'spark'"
         ).collect()
-
-        val logStr = logOutput.toString
-        assert(logStr.contains("TEXTSEARCH"), s"Expected TEXTSEARCH warning in log output but got: $logStr")
-        assert(logStr.contains("non-tokenized"), s"Expected 'non-tokenized' in warning but got: $logStr")
-        assert(logStr.contains("status"), s"Expected field name 'status' in warning but got: $logStr")
-
-        // Query should still execute and return results (no behavioral change)
-        assert(results.length > 0, "* TEXTSEARCH should still return results despite warning")
-      } finally {
-        log4jLogger.removeAppender(appender)
-        appender.stop()
-        log4jLogger.setLevel(origLevel)
       }
+      assert(ex.getMessage.contains("TEXTSEARCH"), s"Expected TEXTSEARCH in error but got: ${ex.getMessage}")
+      assert(ex.getMessage.contains("non-tokenized"), s"Expected 'non-tokenized' in error but got: ${ex.getMessage}")
     }
   }
 
-  test("* FIELDMATCH should warn about tokenized fields in mixed-type table") {
+  test("* FIELDMATCH should throw on tokenized fields in mixed-type table") {
     withTempPath { tempPath =>
       val spark = this.spark
       import spark.implicits._
@@ -809,47 +782,20 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         .mode("overwrite")
         .save(tempPath)
 
+      // Read WITHOUT typemap — docMapping provides field types
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.content", "text")
-        .option("spark.indextables.indexing.typemap.status", "string")
         .load(tempPath)
-      df.createOrReplaceTempView("mixed_type_fieldmatch_warn_test")
+      df.createOrReplaceTempView("mixed_type_fieldmatch_throw_test")
 
-      import org.apache.logging.log4j.LogManager
-      import org.apache.logging.log4j.core.{LoggerContext, Logger => Log4jLogger}
-      import org.apache.logging.log4j.core.appender.WriterAppender
-      import org.apache.logging.log4j.core.layout.PatternLayout
-      import org.apache.logging.log4j.Level
-
-      val logCtx      = LogManager.getContext(false).asInstanceOf[LoggerContext]
-      val log4jLogger = logCtx.getLogger("io.indextables.spark.core.IndexTables4SparkScanBuilder").asInstanceOf[Log4jLogger]
-      val origLevel   = log4jLogger.getLevel
-      log4jLogger.setLevel(Level.WARN)
-
-      val logOutput = new java.io.StringWriter()
-      val layout    = PatternLayout.newBuilder().withPattern("%msg%n").build()
-      val appender  = WriterAppender.createAppender(layout, null, logOutput, "test-fieldmatch-warn-capture", false, true)
-      appender.start()
-      log4jLogger.addAppender(appender)
-
-      try {
-        // * FIELDMATCH searches all fields — should warn about tokenized 'content'
-        val results = spark.sql(
-          "SELECT id, content FROM mixed_type_fieldmatch_warn_test WHERE * FIELDMATCH 'active'"
+      // * FIELDMATCH on table with tokenized fields should throw
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql(
+          "SELECT id, content FROM mixed_type_fieldmatch_throw_test WHERE * FIELDMATCH 'active'"
         ).collect()
-
-        val logStr = logOutput.toString
-        assert(logStr.contains("FIELDMATCH"), s"Expected FIELDMATCH warning in log output but got: $logStr")
-        assert(logStr.contains("tokenized"), s"Expected 'tokenized' in warning but got: $logStr")
-        assert(logStr.contains("content"), s"Expected field name 'content' in warning but got: $logStr")
-
-        // Query should still execute (no behavioral change)
-      } finally {
-        log4jLogger.removeAppender(appender)
-        appender.stop()
-        log4jLogger.setLevel(origLevel)
       }
+      assert(ex.getMessage.contains("FIELDMATCH"), s"Expected FIELDMATCH in error but got: ${ex.getMessage}")
+      assert(ex.getMessage.contains("tokenized"), s"Expected 'tokenized' in error but got: ${ex.getMessage}")
     }
   }
 
@@ -970,11 +916,11 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       assert(orResults.length == 4, s"Expected 4 rows (ids 1,3,4,5), got ${orResults.length}")
       assert(orResults.map(_.getInt(0)).toSeq == Seq(1, 3, 4, 5), "Expected ids 1, 3, 4, 5")
 
-      // 3. * FIELDMATCH AND standard filter
+      // 3. * indexquery AND standard filter (use * indexquery since table has mixed types)
       val starAndResults = spark.sql(
-        "SELECT id FROM fieldmatch_compound_test WHERE * FIELDMATCH 'active' AND category = 'technology' ORDER BY id"
+        "SELECT id FROM fieldmatch_compound_test WHERE * indexquery 'active' AND category = 'technology' ORDER BY id"
       ).collect()
-      assert(starAndResults.length > 0, "* FIELDMATCH AND filter should return results")
+      assert(starAndResults.length > 0, "* indexquery AND filter should return results")
       assert(starAndResults.map(_.getInt(0)).toSeq == Seq(1, 3), "Expected ids 1, 3")
 
       // 4. Mixed TEXTSEARCH + FIELDMATCH
@@ -986,7 +932,71 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
   }
 
-  test("FIELDMATCH should warn when no typemap configuration found at read time") {
+  // --- MixedBooleanFilter failure path tests ---
+
+  test("TEXTSEARCH on string field inside compound WHERE should throw") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation", "active"),
+        (2, "machine learning algorithms", "inactive")
+      ).toDF("id", "content", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("mixed_filter_fail_test")
+
+      // status is a string (non-tokenized) field — TEXTSEARCH should throw even inside compound WHERE
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql("SELECT id FROM mixed_filter_fail_test WHERE status TEXTSEARCH 'active' AND id > 0").collect()
+      }
+      assert(ex.getMessage.contains("Cannot use TEXTSEARCH"), s"Expected TEXTSEARCH rejection, got: ${ex.getMessage}")
+      assert(ex.getMessage.contains("status"), s"Expected field name 'status' in error, got: ${ex.getMessage}")
+    }
+  }
+
+  test("FIELDMATCH on text field inside compound WHERE should throw") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation", "active"),
+        (2, "machine learning algorithms", "inactive")
+      ).toDF("id", "content", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("mixed_filter_fail_test_2")
+
+      // content is a text (tokenized) field — FIELDMATCH should throw even inside compound WHERE
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql("SELECT id FROM mixed_filter_fail_test_2 WHERE content FIELDMATCH 'spark' AND id > 0").collect()
+      }
+      assert(ex.getMessage.contains("Cannot use FIELDMATCH"), s"Expected FIELDMATCH rejection, got: ${ex.getMessage}")
+      assert(ex.getMessage.contains("content"), s"Expected field name 'content' in error, got: ${ex.getMessage}")
+    }
+  }
+
+  test("FIELDMATCH should succeed without read-time typemap options (docMapping provides field types)") {
     withTempPath { tempPath =>
       val spark = this.spark
       import spark.implicits._
@@ -997,52 +1007,25 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         (3, "active")
       ).toDF("id", "status")
 
-      // Write WITH typemap
+      // Write WITH typemap — native layer captures field type in docMapping
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.status", "string")
         .mode("overwrite")
         .save(tempPath)
 
-      // Read WITHOUT typemap
+      // Read WITHOUT typemap — docMapping in transaction log provides field type info
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
       df.createOrReplaceTempView("fieldmatch_no_typemap_test")
 
-      import org.apache.logging.log4j.LogManager
-      import org.apache.logging.log4j.core.{LoggerContext, Logger => Log4jLogger}
-      import org.apache.logging.log4j.core.appender.WriterAppender
-      import org.apache.logging.log4j.core.layout.PatternLayout
-      import org.apache.logging.log4j.Level
+      // FIELDMATCH on string field should succeed silently (docMapping knows it's non-tokenized)
+      val results = spark.sql(
+        "SELECT id FROM fieldmatch_no_typemap_test WHERE status FIELDMATCH 'active'"
+      ).collect()
 
-      val logCtx      = LogManager.getContext(false).asInstanceOf[LoggerContext]
-      val log4jLogger = logCtx.getLogger("io.indextables.spark.core.IndexTables4SparkScanBuilder").asInstanceOf[Log4jLogger]
-      val origLevel   = log4jLogger.getLevel
-      log4jLogger.setLevel(Level.WARN)
-
-      val logOutput = new java.io.StringWriter()
-      val layout    = PatternLayout.newBuilder().withPattern("%msg%n").build()
-      val appender  = WriterAppender.createAppender(layout, null, logOutput, "test-fieldmatch-no-typemap-capture", false, true)
-      appender.start()
-      log4jLogger.addAppender(appender)
-
-      try {
-        val results = spark.sql(
-          "SELECT id FROM fieldmatch_no_typemap_test WHERE status FIELDMATCH 'active'"
-        ).collect()
-
-        val logStr = logOutput.toString
-        assert(logStr.contains("Cannot validate FIELDMATCH"), s"Expected 'Cannot validate FIELDMATCH' in log but got: $logStr")
-        assert(logStr.contains("no typemap configuration found"), s"Expected 'no typemap configuration found' in log but got: $logStr")
-
-        // Query should still execute without throwing
-        assert(results.length > 0, "FIELDMATCH should still return results even without typemap at read time")
-      } finally {
-        log4jLogger.removeAppender(appender)
-        appender.stop()
-        log4jLogger.setLevel(origLevel)
-      }
+      assert(results.length > 0, "FIELDMATCH should return results when docMapping identifies field as non-tokenized")
     }
   }
 
@@ -1214,6 +1197,44 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
   }
 
+  test("* indexquery end-to-end: returns same results as _indexall indexquery") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation", "active"),
+        (2, "machine learning algorithms", "inactive"),
+        (3, "spark streaming tutorial", "active")
+      ).toDF("id", "content", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Read WITHOUT typemap — * indexquery skips type validation
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("star_indexquery_e2e_test")
+
+      val starResults = spark.sql(
+        "SELECT id FROM star_indexquery_e2e_test WHERE * indexquery 'spark'"
+      ).collect().map(_.getInt(0)).sorted
+
+      val indexallResults = spark.sql(
+        "SELECT id FROM star_indexquery_e2e_test WHERE _indexall indexquery 'spark'"
+      ).collect().map(_.getInt(0)).sorted
+
+      assert(starResults.nonEmpty, "* indexquery should return results")
+      assert(starResults.sameElements(indexallResults),
+        s"* indexquery [${starResults.mkString(",")}] and _indexall indexquery [${indexallResults.mkString(",")}] should return identical results")
+    }
+  }
+
   // --- Type validation for text_uuid and text_custom modes ---
 
   test("TEXTSEARCH on text_uuid_exactonly field should succeed") {
@@ -1340,9 +1361,9 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
   }
 
-  // --- Typemap persistence in transaction log ---
+  // --- DocMapping-based type validation (read without typemap options) ---
 
-  test("Typemap should be persisted in transaction log and available at read time") {
+  test("DocMapping-based type validation should work at read time without typemap options") {
     withTempPath { tempPath =>
       val spark = this.spark
       import spark.implicits._
@@ -1352,7 +1373,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         (2, "machine learning algorithms", "inactive")
       ).toDF("id", "content", "status")
 
-      // Write with typemap options
+      // Write with typemap options — native layer captures field types in docMapping
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.content", "text")
@@ -1360,73 +1381,68 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         .mode("overwrite")
         .save(tempPath)
 
-      // Read WITHOUT specifying typemap options — should still validate
+      // Read WITHOUT specifying typemap options — docMapping provides field type info
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
-      df.createOrReplaceTempView("typemap_persist_test")
+      df.createOrReplaceTempView("docmapping_validate_test")
 
-      // TEXTSEARCH on text field should succeed (typemap loaded from metadata)
+      // TEXTSEARCH on text field should succeed (docMapping knows it's tokenized)
       val results = spark.sql(
-        "SELECT id FROM typemap_persist_test WHERE content TEXTSEARCH 'spark'"
+        "SELECT id FROM docmapping_validate_test WHERE content TEXTSEARCH 'spark'"
       ).collect()
-      assert(results.length >= 1, "TEXTSEARCH should work with typemap from metadata")
+      assert(results.length >= 1, "TEXTSEARCH should work with field type from docMapping")
 
-      // TEXTSEARCH on string field should throw (typemap loaded from metadata)
+      // TEXTSEARCH on string field should throw (docMapping knows it's not tokenized)
       val error = intercept[Exception] {
         spark.sql(
-          "SELECT id FROM typemap_persist_test WHERE status TEXTSEARCH 'active'"
+          "SELECT id FROM docmapping_validate_test WHERE status TEXTSEARCH 'active'"
         ).collect()
       }
       assert(error.getMessage.contains("Cannot use TEXTSEARCH") ||
         error.getCause != null && error.getCause.getMessage.contains("Cannot use TEXTSEARCH"),
-        s"Expected TEXTSEARCH rejection error for string field (typemap from metadata), got: ${error.getMessage}")
+        s"Expected TEXTSEARCH rejection for string field (from docMapping), got: ${error.getMessage}")
     }
   }
 
-  test("Typemap should be updated when appending to existing table with new typemap entries") {
+  test("DocMapping-based validation: FIELDMATCH on string field succeeds, TEXTSEARCH throws") {
     withTempPath { tempPath =>
       val spark = this.spark
       import spark.implicits._
 
-      // First write: create table with content=text
-      val testData1 = Seq(
-        (1, "apache spark documentation", "active")
-      ).toDF("id", "content", "status")
-
-      testData1.write
-        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.content", "text")
-        .mode("overwrite")
-        .save(tempPath)
-
-      // Second write: append with additional typemap status=string
-      val testData2 = Seq(
+      val testData = Seq(
+        (1, "apache spark documentation", "active"),
         (2, "machine learning algorithms", "inactive")
       ).toDF("id", "content", "status")
 
-      testData2.write
+      testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.status", "string")
-        .mode("append")
+        .mode("overwrite")
         .save(tempPath)
 
-      // Read WITHOUT specifying typemap options — both typemaps should be available
+      // Read WITHOUT specifying typemap options — docMapping in splits provides field types
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
-      df.createOrReplaceTempView("typemap_append_test")
+      df.createOrReplaceTempView("docmapping_fieldmatch_test")
 
-      // TEXTSEARCH on string field should throw (typemap from metadata includes status=string)
+      // FIELDMATCH on string field should succeed (docMapping identifies it as non-tokenized)
+      val results = spark.sql(
+        "SELECT id FROM docmapping_fieldmatch_test WHERE status FIELDMATCH 'active'"
+      ).collect()
+      assert(results.length >= 1, "FIELDMATCH on string field should work via docMapping")
+
+      // FIELDMATCH on text field should throw (docMapping identifies it as tokenized)
       val error = intercept[Exception] {
         spark.sql(
-          "SELECT id FROM typemap_append_test WHERE status TEXTSEARCH 'active'"
+          "SELECT id FROM docmapping_fieldmatch_test WHERE content FIELDMATCH 'spark'"
         ).collect()
       }
-      assert(error.getMessage.contains("Cannot use TEXTSEARCH") ||
-        error.getCause != null && error.getCause.getMessage.contains("Cannot use TEXTSEARCH"),
-        s"Expected TEXTSEARCH rejection for string field added via append, got: ${error.getMessage}")
+      assert(error.getMessage.contains("Cannot use FIELDMATCH") ||
+        error.getCause != null && error.getCause.getMessage.contains("Cannot use FIELDMATCH"),
+        s"Expected FIELDMATCH rejection for text field (from docMapping), got: ${error.getMessage}")
     }
   }
 
@@ -1469,12 +1485,15 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     IndexQueryAllExpression(query, "textsearch")
     IndexQueryAllExpression(query, "fieldmatch")
 
+    // indexquery is valid for all-fields (used by * indexquery syntax)
+    IndexQueryAllExpression(query, "indexquery")
+
     // Invalid searchType should throw
     intercept[IllegalArgumentException] {
       IndexQueryAllExpression(query, "textSearch")
     }
     intercept[IllegalArgumentException] {
-      IndexQueryAllExpression(query, "indexquery")
+      IndexQueryAllExpression(query, "invalid_type")
     }
   }
 }

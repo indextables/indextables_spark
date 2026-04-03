@@ -33,5 +33,5 @@ object SearchType {
   val validSingleField: Set[String] = Set(IndexQuery, TextSearch, FieldMatch)
 
   /** Valid search types for all-fields expressions (IndexQueryAllExpression, IndexQueryAllFilter). */
-  val validAllFields: Set[String] = Set(IndexQueryAll, TextSearch, FieldMatch)
+  val validAllFields: Set[String] = Set(IndexQuery, IndexQueryAll, TextSearch, FieldMatch)
 }
