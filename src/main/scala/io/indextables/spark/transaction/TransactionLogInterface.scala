@@ -382,6 +382,25 @@ trait TransactionLogInterface extends AutoCloseable {
   /** Get full checkpoint info, if any. */
   def getLastCheckpointInfo(): Option[LastCheckpointInfo] = None
 
+  /**
+   * Create a checkpoint at the current state using resolved credentials.
+   *
+   * Callers must pass pre-serialized JSON for entries, metadata, and protocol.
+   * Implementations must use their own internally-resolved credential config so that
+   * cloud storage credentials (e.g. Unity Catalog) are correctly applied.
+   *
+   * @param entriesJson  JSON array of AddActions for all currently visible files
+   * @param metadataJson JSON of the MetadataAction
+   * @param protocolJson JSON of the ProtocolAction
+   * @return LastCheckpointInfo describing the written checkpoint
+   */
+  def createCheckpoint(
+    entriesJson: String,
+    metadataJson: String,
+    protocolJson: String
+  ): io.indextables.jni.txlog.LastCheckpointInfo =
+    throw new UnsupportedOperationException("createCheckpoint must be implemented by subclass")
+
   /** Pre-warm caches (no-op by default). */
   def prewarmCache(): Unit = ()
 

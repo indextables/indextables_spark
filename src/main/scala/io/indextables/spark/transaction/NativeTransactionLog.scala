@@ -639,6 +639,13 @@ class NativeTransactionLog(
     else candidateFiles.filterNot(f => cooldownPaths.contains(f.path))
   }
 
+  override def createCheckpoint(
+    entriesJson: String,
+    metadataJson: String,
+    protocolJson: String
+  ): io.indextables.jni.txlog.LastCheckpointInfo =
+    TransactionLogWriter.createCheckpoint(nativeTablePath, nativeConfig, entriesJson, metadataJson, protocolJson)
+
   // ------------------------------------------------------------------------------------
   // Cache Management
   // ------------------------------------------------------------------------------------

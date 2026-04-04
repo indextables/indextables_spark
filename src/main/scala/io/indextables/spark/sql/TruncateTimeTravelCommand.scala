@@ -345,17 +345,12 @@ case class TruncateTimeTravelCommand(
 
     logger.info(s"Creating checkpoint at version $currentVersion with ${allFiles.length + 2} actions")
 
-    // Create checkpoint via native TransactionLogWriter
-    val nativeTablePath = io.indextables.spark.transaction.ConfigMapper.normalizeTablePath(resolvedPath)
-    val nativeConfig    = io.indextables.spark.transaction.ConfigMapper.toNativeConfig(options)
-
     val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
     val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
     val addsJson     = ActionJsonSerializer.addActionsToJson(allFiles)
 
-    io.indextables.jni.txlog.TransactionLogWriter.createCheckpoint(
-      nativeTablePath, nativeConfig, addsJson, metadataJson, protocolJson
-    )
+    // Use the transaction log instance so resolved credentials (including Unity Catalog) are used.
+    transactionLog.createCheckpoint(addsJson, metadataJson, protocolJson)
     // Invalidate snapshot cache so subsequent reads see the new checkpoint
     transactionLog.invalidateCache()
     logger.info(s"Created checkpoint at version $currentVersion")
