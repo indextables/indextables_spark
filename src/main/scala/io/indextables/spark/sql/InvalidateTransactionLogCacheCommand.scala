@@ -96,8 +96,9 @@ case class InvalidateTransactionLogCacheCommand(
         val totalRequests = hitsBefore + missesBefore
         val hitRateBefore = if (totalRequests > 0) f"${(hitsBefore.toDouble / totalRequests) * 100}%.1f%%" else "N/A"
 
-        // Clear all global caches
+        // Clear all global caches: JVM-level doc mapping cache and native txlog snapshot/manifest cache
         io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+        io.indextables.jni.txlog.TransactionLogReader.invalidateCacheGlobal()
 
         logger.info("Global transaction log caches cleared successfully")
         Seq(
