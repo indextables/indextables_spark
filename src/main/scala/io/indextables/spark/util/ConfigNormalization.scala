@@ -34,10 +34,7 @@ import org.apache.hadoop.conf.Configuration
  */
 object ConfigNormalization {
 
-  /**
-   * Normalizes a configuration key from spark.indextables.* to spark.indextables.* if needed. Returns the key unchanged
-   * if it doesn't start with spark.indextables.
-   */
+  /** Returns the key unchanged. Kept for call-site compatibility. */
   def normalizeKey(key: String): String = key
 
   /** Checks if a configuration key is a IndexTables4Spark-related key. */
