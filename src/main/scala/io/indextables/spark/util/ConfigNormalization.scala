@@ -80,20 +80,16 @@ object ConfigNormalization {
 
   /** Filters and normalizes IndexTables4Spark configurations from SparkSession. */
   def extractTantivyConfigsFromSpark(spark: SparkSession): Map[String, String] =
-    try
-      spark.conf.getAll
-        .filter {
-          case (key, value) =>
-            isTantivyKey(key) && value != null
-        }
-        .map {
-          case (key, value) =>
-            normalizeKey(key) -> value
-        }
-        .toMap
-    catch {
-      case _: Exception => Map.empty[String, String]
-    }
+    spark.conf.getAll
+      .filter {
+        case (key, value) =>
+          isTantivyKey(key) && value != null
+      }
+      .map {
+        case (key, value) =>
+          normalizeKey(key) -> value
+      }
+      .toMap
 
   /** Filters and normalizes IndexTables4Spark configurations from CaseInsensitiveStringMap. */
   def extractTantivyConfigsFromOptions(options: CaseInsensitiveStringMap): Map[String, String] =

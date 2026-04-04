@@ -643,8 +643,10 @@ class NativeTransactionLog(
     entriesJson: String,
     metadataJson: String,
     protocolJson: String
-  ): io.indextables.jni.txlog.LastCheckpointInfo =
+  ): io.indextables.jni.txlog.LastCheckpointInfo = {
+    refreshCredentials()
     TransactionLogWriter.createCheckpoint(nativeTablePath, nativeConfig, entriesJson, metadataJson, protocolJson)
+  }
 
   // ------------------------------------------------------------------------------------
   // Cache Management
