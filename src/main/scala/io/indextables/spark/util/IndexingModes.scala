@@ -23,9 +23,6 @@ package io.indextables.spark.util
  */
 object IndexingModes {
 
-  /** Suffix for text_and_string companion fields. Must match tantivy4java TEXT_COMPANION_SUFFIX. */
-  val TextCompanionSuffix: String = "__text"
-
   /** Modes that are recognized as exact string values (case-insensitive). */
   val recognizedModes: Set[String] = Set(
     "string",
@@ -68,25 +65,36 @@ object IndexingModes {
   }
 
   /**
-   * Check if a mode supports range filter pushdown (>, <, >=, <=). exact_only stores U64 hashes — range comparison is
-   * meaningless.
+   * Check if a mode supports range filter pushdown (>, <, >=, <=). exact_only stores U64 hashes and text_and_string uses
+   * a tokenized inverted index — range comparison is meaningless for both.
    */
   def supportsRangeQuery(mode: String): Boolean = {
     val lower = mode.toLowerCase
-    lower != "exact_only"
+    lower != "exact_only" && lower != "text_and_string"
   }
 
-  /** Check if a mode supports EqualTo filter pushdown to tantivy. */
+  /**
+   * Check if a mode supports exact EqualTo filter pushdown to tantivy (no Spark post-filter needed). In the
+   * single-field text_and_string approach, EqualTo uses PhraseQuery(slop=0) which is approximate — Spark must
+   * post-filter for correctness. Use `supportsCandidateExactMatchPushdown` for text_and_string.
+   */
   def supportsExactMatchPushdown(mode: String): Boolean = {
     val lower = mode.toLowerCase
     lower match {
       case "text"                     => false
       case "exact_only"               => true
-      case "text_and_string"          => true
+      case "text_and_string"          => false // Approximate — needs Spark post-filter
       case m if m.startsWith("text_") => false
       case _                          => true // string, ip, ipaddress, json, etc.
     }
   }
+
+  /**
+   * Check if a mode supports candidate EqualTo pushdown — pushed to tantivy as approximate (PhraseQuery) for
+   * performance, with Spark post-filtering for exact correctness. Only text_and_string uses this pattern.
+   */
+  def supportsCandidateExactMatchPushdown(mode: String): Boolean =
+    mode.toLowerCase == "text_and_string"
 
   /** Extract the regex portion from a custom mode, or None if not a custom mode. */
   def extractCustomRegex(mode: String): Option[String] = {

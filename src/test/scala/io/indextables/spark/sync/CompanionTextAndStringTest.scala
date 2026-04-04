@@ -30,11 +30,11 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Integration tests for the text_and_string indexing mode in companion splits.
  *
- * Validates that text_and_string creates dual tantivy fields (raw string + tokenized text):
- *   - TEXTSEARCH/indexquery auto-routes to __text field
- *   - Exact match uses raw string field
- *   - Aggregations use raw string field
- *   - SELECT * returns single column (no __text exposed)
+ * Validates the single-field approach where text_and_string uses one tantivy field with:
+ *   - Full-text search via the "default"-tokenized inverted index
+ *   - Equality filters via PhraseQuery (slop=0) on the same inverted index + Spark post-filter
+ *   - Aggregations via the "raw" fast field on the same field
+ *   - SELECT * returns single column (no internal fields exposed)
  *   - Edge cases: empty strings, long strings, special characters, multiple columns
  */
 class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
@@ -148,7 +148,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("exact match finds results via raw string field") {
+  test("exact match finds results via PhraseQuery + Spark post-filter") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
@@ -173,7 +173,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("SELECT * returns single message column, no __text") {
+  test("SELECT * returns single message column, no internal fields exposed") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
@@ -182,9 +182,9 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
 
       val columns = readCompanion(indexPath).columns
       columns should contain("message")
-      columns should not contain "message__text"
       columns should contain("description")
-      columns should not contain "description__text"
+      // Single-field approach: no __text companion fields should exist
+      columns.filter(_.contains("__text")) shouldBe empty
     }
   }
 
@@ -203,7 +203,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       df.createOrReplaceTempView("tas_test_star")
 
       // "timeout" appears in both message (row 3) and description (row 2)
-      // Should not get duplicate rows from raw + __text fields
+      // Single-field: each row should appear at most once
       val results = spark.sql("SELECT id FROM tas_test_star WHERE indexqueryall('timeout')").collect()
       val ids = results.map(_.getLong(0)).toSet
       ids should contain(2L) // description has "connection timeout"
@@ -265,7 +265,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
   //  Edge cases
   // ═══════════════════════════════════════════════════════════════════
 
-  test("empty string values do not crash dual-field indexing") {
+  test("empty string values do not crash text_and_string indexing") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
@@ -295,8 +295,8 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       textResults.length shouldBe 1
       textResults(0).getLong(0) shouldBe 5L
 
-      // Note: exact match on 10KB strings exceeds tantivy's raw tokenizer max token length (255 bytes),
-      // so exact match won't find it. This is expected tantivy behavior, not a text_and_string bug.
+      // Note: exact match on very long strings may not work via PhraseQuery because the tokenized
+      // phrase query becomes impractically long. This is expected behavior.
       df.count() shouldBe 6
     }
   }
@@ -347,7 +347,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("phrase query via indexquery matches via __text field") {
+  test("phrase query via indexquery matches on tokenized field") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
@@ -368,7 +368,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
-  test("aggregation uses string field: GROUP BY returns full raw strings") {
+  test("aggregation uses raw fast field: GROUP BY returns full raw strings") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
@@ -387,21 +387,41 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("IN filter on text_and_string uses candidate pushdown with Spark post-filter") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath, indexPath)
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_in_test")
+
+      val results = spark.sql(
+        "SELECT id FROM tas_in_test WHERE message IN ('the quick brown fox jumps', 'hello world from indextables')"
+      ).collect()
+      val ids = results.map(_.getLong(0)).toSet
+      ids should contain(1L)
+      ids should contain(2L)
+      results.length shouldBe 2
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   //  Collision and feature combination tests
   // ═══════════════════════════════════════════════════════════════════
 
-  test("text_and_string rejects column name collision with __text") {
+  test("text_and_string works even when source has column ending in __text") {
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
-      // Create Delta table with a column that collides with the __text companion field name
+      // In the single-field approach, there's no __text companion field, so a column named
+      // "message__text" should not cause a collision error
       val ss = spark
       import ss.implicits._
       Seq(
-        ("hello", "world"),
-        ("foo", "bar")
+        ("hello world", "extra data"),
+        ("foo bar", "more data")
       ).toDF("message", "message__text")
         .write.format("delta").mode("overwrite").save(deltaPath)
 
@@ -410,8 +430,15 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
            |  INDEXING MODES ('message': 'text_and_string')
            |  AT LOCATION '$indexPath'""".stripMargin
       ).collect()
-      result(0).getString(2) shouldBe "error"
-      result(0).getString(10) should include("message__text")
+      // Should succeed — no collision in single-field mode
+      result(0).getString(2) shouldBe "success"
+
+      // Verify TEXTSEARCH works on the text_and_string field
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_no_collision")
+      val results = spark.sql("SELECT message FROM tas_no_collision WHERE message indexquery 'hello'").collect()
+      results.length shouldBe 1
+      results(0).getString(0) shouldBe "hello world"
     }
   }
 
@@ -429,14 +456,14 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       val df = readCompanion(indexPath)
       df.createOrReplaceTempView("tas_mixed_or")
 
-      // OR: exact match on raw field (row 2) OR tokenized search on __text (row 1)
+      // OR: exact match via PhraseQuery (row 2) OR tokenized search (row 1)
       val orResults = spark.sql(
         """SELECT id FROM tas_mixed_or
           |WHERE message = 'hello world from indextables' OR message indexquery 'quick brown'""".stripMargin
       ).collect()
       val orIds = orResults.map(_.getLong(0)).toSet
-      orIds should contain(1L) // "quick brown" matches via __text
-      orIds should contain(2L) // exact match via raw field
+      orIds should contain(1L) // "quick brown" matches via tokenized search
+      orIds should contain(2L) // exact match via PhraseQuery + Spark post-filter
       orResults.length shouldBe 2
 
       // Dedup: row 1 matches BOTH branches (exact match on full string + tokenized "quick brown")
@@ -460,7 +487,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       val df = readCompanion(indexPath)
       df.createOrReplaceTempView("tas_mixed_and")
 
-      // AND: exact match on raw field AND tokenized search on __text — both must match same row
+      // AND: exact match via PhraseQuery AND tokenized search — both must match same row
       val andResults = spark.sql(
         """SELECT id FROM tas_mixed_and
           |WHERE message = 'hello world from indextables' AND message indexquery 'hello world'""".stripMargin
@@ -487,7 +514,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       val df = readCompanion(indexPath)
       df.createOrReplaceTempView("tas_mixed_agg")
 
-      // indexquery filters via __text, then GROUP BY uses raw field
+      // indexquery filters via tokenized search, then GROUP BY uses raw fast field
       val results = spark.sql(
         """SELECT description, COUNT(*) as cnt FROM tas_mixed_agg
           |WHERE description indexquery 'server started'
@@ -509,7 +536,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       val df = readCompanion(indexPath)
       df.createOrReplaceTempView("tas_mixed_cross")
 
-      // indexquery on message.__text AND exact match on description raw field
+      // indexquery on message (tokenized) AND exact match on description (PhraseQuery + post-filter)
       val results = spark.sql(
         """SELECT id FROM tas_mixed_cross
           |WHERE message indexquery 'quick' AND description = 'server started successfully'""".stripMargin
@@ -561,11 +588,9 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
         batchScanCount shouldBe 1
       }
 
-      // Verify no FilterExec above the scan — filters are pushed down, not post-filtered
-      val hasFilterExec = planString.contains("Filter ")
-      withClue(s"FilterExec found above BatchScan — filters not fully pushed down:\n$planString\n") {
-        hasFilterExec shouldBe false
-      }
+      // In the single-field approach, text_and_string EqualTo uses candidate pushdown:
+      // PhraseQuery(slop=0) is pushed to tantivy for approximate filtering, and Spark adds
+      // a FilterExec for exact equality post-filtering. This is expected and correct.
 
       // Verify the query still returns correct results
       val results = filtered.collect()
@@ -603,7 +628,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       val df = readCompanion(indexPath)
       df.createOrReplaceTempView("tas_test_hashed")
 
-      // 1. TEXTSEARCH finds results (tokenized search via __text)
+      // 1. TEXTSEARCH finds results (tokenized search on same field)
       val textResults = spark.sql("SELECT id FROM tas_test_hashed WHERE message indexquery 'quick brown'").collect()
       textResults.length shouldBe 2
       val textIds = textResults.map(_.getLong(0)).toSet

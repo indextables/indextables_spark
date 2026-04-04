@@ -33,6 +33,7 @@ import io.indextables.tantivy4java.split.{
   SplitBooleanQuery,
   SplitExistsQuery,
   SplitMatchAllQuery,
+  SplitPhraseQuery,
   SplitQuery,
   SplitTermQuery
 }
@@ -254,34 +255,6 @@ object FiltersToQueryConverter {
   def hasLeadingWildcard(queryString: String): Boolean = {
     val trimmed = queryString.trim
     trimmed.startsWith("*") || trimmed.startsWith("?")
-  }
-
-  /** Suffix used by the text_and_string indexing mode for the tokenized companion field. */
-  private[core] val TextCompanionSuffix = io.indextables.spark.util.IndexingModes.TextCompanionSuffix
-
-  /**
-   * For text_and_string columns, TEXTSEARCH should target the __text field. Detect dual-mode fields by checking if
-   * columnName + "__text" exists in the schema.
-   */
-  private def resolveTextSearchField(columnName: String, schema: Schema): String = {
-    val textFieldName = columnName + TextCompanionSuffix
-    if (schema.hasField(textFieldName)) textFieldName else columnName
-  }
-
-  /**
-   * For IndexQueryAll (all-fields search), build a field list that prefers __text fields for text_and_string columns.
-   * When a __text variant exists, include it and skip the raw string version to avoid duplicate hits.
-   */
-  private def resolveTextSearchFieldsForAll(schema: Schema): java.util.List[String] = {
-    import scala.jdk.CollectionConverters._
-    val allFields = schema.getFieldNames.asScala.toSeq
-    val allFieldSet = allFields.toSet
-    val rawSkip = allFields.collect {
-      case name if name.endsWith(TextCompanionSuffix) &&
-        allFieldSet.contains(name.stripSuffix(TextCompanionSuffix)) =>
-        name.stripSuffix(TextCompanionSuffix)
-    }.toSet
-    allFields.filterNot(rawSkip.contains).asJava
   }
 
   /** Create an optimized range query from stored range information using SplitRangeQuery. */
@@ -1212,14 +1185,10 @@ object FiltersToQueryConverter {
       // Handle custom IndexQuery filters
       // Note: Field validation happens earlier in isMixedFilterValidForSchema
       case indexQuery: IndexQueryFilter =>
-        // For text_and_string columns, route TEXTSEARCH to the __text field
-        val effectiveFieldQ = resolveTextSearchField(indexQuery.columnName, schema)
-        queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'" +
-          (if (effectiveFieldQ != indexQuery.columnName) s" (routed to '$effectiveFieldQ')" else ""))
+        queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
 
-        // Use parseQuery with the resolved field
-        val fieldNames = List(effectiveFieldQ).asJava
-        queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '$effectiveFieldQ'")
+        val fieldNames = List(indexQuery.columnName).asJava
+        queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
 
         withTemporaryIndex(schema) { index =>
           try
@@ -1238,8 +1207,7 @@ object FiltersToQueryConverter {
 
         queryLog(s"Converting custom IndexQueryAllFilter: indexqueryall('${indexQueryAll.queryString}')")
 
-        // Use two-argument parseQuery with resolved text search fields for all-fields search
-        val allFieldNames = resolveTextSearchFieldsForAll(schema)
+        val allFieldNames = schema.getFieldNames
         queryLog(s"Executing parseQuery across all fields: '${indexQueryAll.queryString}'")
 
         withTemporaryIndex(schema) { index =>
@@ -1276,10 +1244,8 @@ object FiltersToQueryConverter {
 
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
-        val effectiveFieldMQ = resolveTextSearchField(indexQueryFilter.columnName, schema)
-        queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
-          (if (effectiveFieldMQ != indexQueryFilter.columnName) s" (routed to '$effectiveFieldMQ')" else ""))
-        val fieldNames = List(effectiveFieldMQ).asJava
+        queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'")
+        val fieldNames = List(indexQueryFilter.columnName).asJava
         withTemporaryIndex(schema) { index =>
           try
             index.parseQuery(indexQueryFilter.queryString, fieldNames)
@@ -1295,7 +1261,7 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
 
         queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}'")
-        val allFieldNames = resolveTextSearchFieldsForAll(schema)
+        val allFieldNames = schema.getFieldNames
         withTemporaryIndex(schema) { index =>
           try
             index.parseQuery(indexQueryAllFilter.queryString, allFieldNames)
@@ -1504,11 +1470,20 @@ object FiltersToQueryConverter {
         // For text fields, use phrase query syntax with quotes to ensure exact phrase matching
         // For date fields, use range queries for proper date matching
         // For other fields, use term queries
-        if (shouldUseTokenizedQuery(attribute, options)) {
-          // Use parseQuery with quoted syntax for exact phrase matching on tokenized text fields
-          val quotedValue = "\"" + convertedValue.toString.replace("\"", "\\\"") + "\""
-          val queryString = s"$attribute:$quotedValue"
-          Some(splitSearchEngine.parseQuery(queryString))
+        if (shouldUseTokenizedQuery(attribute, options) || isTextAndStringField(attribute, options)) {
+          // For tokenized text fields and text_and_string fields, use SplitPhraseQuery with slop=0
+          // for exact phrase matching. The field uses the "default" tokenizer, so we tokenize the
+          // value and create a phrase query. Spark post-filters for text_and_string correctness.
+          val terms = tokenizeForPhraseQuery(convertedValue.toString)
+          if (terms.isEmpty) {
+            // Empty value after tokenization (e.g., empty string) — use match-all as candidate filter;
+            // Spark post-filter will handle the actual equality check
+            queryLog(s"EqualTo on '$attribute': empty value after tokenization, using match-all (Spark will post-filter)")
+            Some(new SplitMatchAllQuery())
+          } else {
+            queryLog(s"EqualTo on '$attribute': using SplitPhraseQuery(slop=0) with terms=${terms}")
+            Some(SplitPhraseQuery.exactPhrase(attribute, terms))
+          }
         } else if (fieldType == FieldType.DATE) {
           // For date/timestamp fields, use range query for proper datetime matching
           convertedValue match {
@@ -1584,18 +1559,22 @@ object FiltersToQueryConverter {
 
       case In(attribute, values) if values.nonEmpty =>
         val fieldType = getFieldType(schema, attribute)
-        if (shouldUseTokenizedQuery(attribute, options)) {
-          // For TEXT fields with default tokenizer, use parseQuery with quoted syntax for exact phrase matching
-          val parseQueries = values.map { value =>
-            val quotedValue = "\"" + value.toString.replace("\"", "\\\"") + "\""
-            val queryString = s"$attribute:$quotedValue"
-            splitSearchEngine.parseQuery(queryString)
+        if (shouldUseTokenizedQuery(attribute, options) || isTextAndStringField(attribute, options)) {
+          // For tokenized text fields and text_and_string fields, use SplitPhraseQuery for each value
+          val phraseQueries = values.flatMap { value =>
+            val converted = convertSparkValueToTantivy(value, fieldType)
+            val terms = tokenizeForPhraseQuery(converted.toString)
+            if (terms.isEmpty) None
+            else Some(SplitPhraseQuery.exactPhrase(attribute, terms))
           }.toList
 
-          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
-          val boolQuery = new SplitBooleanQuery()
-          parseQueries.foreach(query => boolQuery.addShould(query))
-          Some(boolQuery)
+          if (phraseQueries.isEmpty) {
+            Some(new SplitMatchAllQuery())
+          } else {
+            val boolQuery = new SplitBooleanQuery()
+            phraseQueries.foreach(query => boolQuery.addShould(query))
+            Some(boolQuery)
+          }
         } else {
           // For STRING fields (raw tokenizer) and other non-tokenized fields, use term queries
           val termQueries = values.map { value =>
@@ -1991,19 +1970,16 @@ object FiltersToQueryConverter {
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
         //
-        // For text_and_string columns, route TEXTSEARCH to the __text field
-        val effectiveField = resolveTextSearchField(columnName, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         // (e.g., columnName:*Configuration) which Tantivy's wildcard query builder supports
-        val transformedQuery = transformLeadingWildcardQuery(queryString, effectiveField)
+        val transformedQuery = transformLeadingWildcardQuery(queryString, columnName)
         queryLog(
           s"Converting IndexQueryFilter to SplitQuery: field='$columnName'" +
-            (if (effectiveField != columnName) s" (routed to '$effectiveField')" else "") +
             s", query='$queryString'" +
             (if (transformedQuery != queryString) s" (transformed to '$transformedQuery')" else "")
         )
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, effectiveField)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, columnName)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forField(
@@ -2026,10 +2002,9 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(queryString, schema, options)
 
         // Parse the custom IndexQueryAll using the split searcher with ALL fields
-        // For text_and_string columns, use __text fields and skip raw string fields to avoid duplicate hits
         // Note: Driver-side validation should have already caught syntax errors
         import scala.jdk.CollectionConverters._
-        val allFieldNames = resolveTextSearchFieldsForAll(schema)
+        val allFieldNames = schema.getFieldNames
         queryLog(s"Converting IndexQueryAllFilter to search across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(queryString, allFieldNames)
@@ -2053,18 +2028,15 @@ object FiltersToQueryConverter {
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
         //
-        // For text_and_string columns, route TEXTSEARCH to the __text field
-        val effectiveFieldV2 = resolveTextSearchField(indexQueryV2.columnName, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
-        val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, effectiveFieldV2)
+        val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, indexQueryV2.columnName)
         queryLog(
           s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}'" +
-            (if (effectiveFieldV2 != indexQueryV2.columnName) s" (routed to '$effectiveFieldV2')" else "") +
             s", query='${indexQueryV2.queryString}'" +
             (if (transformedQuery != indexQueryV2.queryString) s" (transformed to '$transformedQuery')" else "")
         )
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, effectiveFieldV2)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryV2.columnName)
           // splitSearchEngine.parseQuery() returns null on parse failures
           if (parsedQuery == null) {
             throw IndexQueryParseException.forField(
@@ -2087,10 +2059,9 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllV2.queryString, schema, options)
 
         // Handle V2 IndexQueryAll expressions from temp views
-        // For text_and_string columns, use __text fields and skip raw string fields to avoid duplicate hits
         // Note: Driver-side validation should have already caught syntax errors
         import scala.jdk.CollectionConverters._
-        val allFieldNamesV2 = resolveTextSearchFieldsForAll(schema)
+        val allFieldNamesV2 = schema.getFieldNames
         queryLog(s"Converting IndexQueryAllV2Filter to SplitQuery: query='${indexQueryAllV2.queryString}' across ${allFieldNamesV2.size()} fields: ${allFieldNamesV2.asScala.mkString(", ")}")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllV2.queryString, allFieldNamesV2)
@@ -2133,18 +2104,14 @@ object FiltersToQueryConverter {
 
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
-        // Delegate to existing IndexQueryFilter handling
-        // For text_and_string columns, route TEXTSEARCH to the __text field
-        val effectiveFieldMixed = resolveTextSearchField(indexQueryFilter.columnName, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
-        val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, effectiveFieldMixed)
+        val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
         queryLog(
           s"MixedBooleanFilter: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'" +
-            (if (effectiveFieldMixed != indexQueryFilter.columnName) s" (routed to '$effectiveFieldMixed')" else "") +
             (if (transformedQuery != indexQueryFilter.queryString) s" (transformed to '$transformedQuery')" else "")
         )
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, effectiveFieldMixed)
+          val parsedQuery = splitSearchEngine.parseQuery(transformedQuery, indexQueryFilter.columnName)
           queryLog(s"MixedBooleanFilter: SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
@@ -2157,10 +2124,9 @@ object FiltersToQueryConverter {
         // Safety check for unqualified queries on wide tables
         validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
 
-        // Delegate to existing IndexQueryAllFilter handling - search across ALL fields
-        // For text_and_string columns, use __text fields and skip raw string fields to avoid duplicate hits
+        // Search across ALL fields
         import scala.jdk.CollectionConverters._
-        val allFieldNames = resolveTextSearchFieldsForAll(schema)
+        val allFieldNames = schema.getFieldNames
         queryLog(s"MixedBooleanFilter: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}' across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllFilter.queryString, allFieldNames)
@@ -2239,6 +2205,24 @@ object FiltersToQueryConverter {
   }
 
   /**
+   * Look up the configured indexing type for a field (e.g., "string", "text", "text_and_string"). Returns None if
+   * options are unavailable or the field has no explicit configuration. Centralizes the boilerplate shared by
+   * `shouldUseTokenizedQuery` and `isTextAndStringField`.
+   */
+  private def getFieldIndexingType(
+    fieldName: String,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
+  ): Option[String] =
+    options.flatMap { opts =>
+      try {
+        val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(opts)
+        tantivyOptions.getFieldIndexingConfig(fieldName).fieldType
+      } catch {
+        case _: Exception => None
+      }
+    }
+
+  /**
    * Determine whether a field should use tokenized queries based on its indexing configuration. Uses the field type
    * configuration to distinguish between exact (string) and tokenized (text) matching.
    */
@@ -2246,27 +2230,33 @@ object FiltersToQueryConverter {
     fieldName: String,
     options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): Boolean =
-    try
-      options match {
-        case Some(opts) =>
-          val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(opts)
-          val fieldConfig    = tantivyOptions.getFieldIndexingConfig(fieldName)
+    getFieldIndexingType(fieldName, options).contains("text")
 
-          // According to tantivy4java team:
-          // - TEXT fields use "default" tokenizer (tokenized/split)
-          // - STRING fields use "raw" tokenizer (exact preservation)
-          val fieldType = fieldConfig.fieldType.getOrElse("string") // Default to string type
+  /**
+   * Determine whether a field uses the text_and_string indexing mode. text_and_string fields use a single inverted
+   * index with the "default" tokenizer, so EqualTo filters need SplitPhraseQuery (slop=0) instead of SplitTermQuery.
+   */
+  private def isTextAndStringField(
+    fieldName: String,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
+  ): Boolean =
+    getFieldIndexingType(fieldName, options).exists(_.toLowerCase == "text_and_string")
 
-          fieldType == "text" // Only use tokenized queries for "text" type fields
-        case None =>
-          // No options available - default to exact matching for backward compatibility
-          false
-      }
-    catch {
-      case ex: Exception =>
-        logger.warn(
-          s"Failed to determine field configuration for '$fieldName', defaulting to exact matching: ${ex.getMessage}"
-        )
-        false // Default to exact matching on error
-    }
+  /**
+   * Tokenize a value using simple lowercase splitting to produce terms for a PhraseQuery. This mirrors tantivy's
+   * "default" tokenizer behavior: lowercase, split on non-alphanumeric characters, and drop tokens longer than 255 UTF-8
+   * bytes (matching tantivy's RemoveLongFilter).
+   *
+   * Uses Unicode-aware `\p{IsAlphanumeric}` instead of ASCII `[a-zA-Z0-9]` to match tantivy's `is_alphanumeric()`.
+   */
+  private def tokenizeForPhraseQuery(value: String): java.util.List[String] = {
+    import scala.jdk.CollectionConverters._
+    value
+      .toLowerCase(java.util.Locale.ROOT)
+      .split("[^\\p{IsAlphanumeric}]+")
+      .filter(_.nonEmpty)
+      .filter(_.getBytes("UTF-8").length <= 255) // Match tantivy's RemoveLongFilter
+      .toList
+      .asJava
+  }
 }

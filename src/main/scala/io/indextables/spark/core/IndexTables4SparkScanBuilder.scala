@@ -970,17 +970,27 @@ class IndexTables4SparkScanBuilder(
       filters
     }
 
+    // Classify filters into three categories:
+    //   1. Fully supported — pushed down, Spark does NOT re-evaluate
+    //   2. Candidate filters — pushed down as approximate (PhraseQuery), Spark ALSO re-evaluates
+    //   3. Unsupported — not pushed down, Spark evaluates
+    //
+    // Category 2 (candidate) is for text_and_string EqualTo/In: the PhraseQuery(slop=0) narrows
+    // results in tantivy, but Spark must post-filter for exact string equality because tokenization
+    // loses punctuation and casing information.
     val (supported, unsupported) = effectiveInputFilters.partition(isSupportedFilter)
+    val (candidateFilters, fullyUnsupported) = unsupported.partition(isCandidateFilter)
 
-    // NOTE: IsNull and IsNotNull are marked as "supported" for regular fields (not JSON fields)
-    // in isSupportedFilter. The query converter uses wildcardQuery to properly filter these:
-    // - IsNotNull(field) → wildcardQuery(field, "*") - matches docs where field has a value
-    // - IsNull(field) → for now returns allQuery() (TODO: implement proper null handling)
-    // This allows aggregate pushdown to work correctly with null/not-null filters.
+    // Push both fully-supported and candidate filters to the data source
+    _pushedFilters = supported ++ candidateFilters
+    // Unsupported = fully unsupported + candidates (candidates are re-evaluated by Spark for correctness)
+    _unsupportedFilters = fullyUnsupported ++ candidateFilters
 
-    // Store filters in instance variables
-    _pushedFilters = supported
-    _unsupportedFilters = unsupported
+    if (candidateFilters.nonEmpty) {
+      logger.info(s"PUSHFILTERS: ${candidateFilters.length} candidate filter(s) pushed down as approximate " +
+        s"(PhraseQuery) — Spark will also post-filter for exact equality")
+      candidateFilters.foreach(f => logger.info(s"PUSHFILTERS:   ~ CANDIDATE: $f"))
+    }
 
     // CRITICAL FIX: Store by relation object (not table path) to survive across multiple optimization passes
     // Spark runs V2ScanRelationPushDown multiple times, creating fresh ScanBuilders each time
@@ -991,29 +1001,28 @@ class IndexTables4SparkScanBuilder(
     // All ScanBuilders share the same relation object even across optimization passes
     IndexTables4SparkScanBuilder.getCurrentRelation() match {
       case Some(relation) =>
-        IndexTables4SparkScanBuilder.storePushedFilters(relation, supported)
-        IndexTables4SparkScanBuilder.storeUnsupportedFilters(relation, unsupported)
+        IndexTables4SparkScanBuilder.storePushedFilters(relation, _pushedFilters)
+        IndexTables4SparkScanBuilder.storeUnsupportedFilters(relation, _unsupportedFilters)
         logger.debug(
-          s"PUSHFILTERS: Stored ${supported.length} supported, ${unsupported.length} unsupported filters by relation object: ${System
-              .identityHashCode(relation)}"
+          s"PUSHFILTERS: Stored ${_pushedFilters.length} pushed (incl. candidates), " +
+            s"${_unsupportedFilters.length} unsupported filters by relation object: ${System
+                .identityHashCode(relation)}"
         )
       case None =>
         logger.warn(s"PUSHFILTERS: No relation in ThreadLocal, cannot store filters for future ScanBuilder instances")
     }
 
-    logger.debug(s"PUSHFILTERS: Supported=${supported.length}, Unsupported=${unsupported.length}")
-    supported.foreach(filter => logger.debug(s"PUSHFILTERS:   ✓ SUPPORTED: $filter"))
-    unsupported.foreach(filter => logger.debug(s"PUSHFILTERS:   ✗ UNSUPPORTED: $filter"))
-
     logger.info(s"Filter pushdown summary:")
     logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
     supported.foreach(filter => logger.info(s"    ✓ PUSHED: $filter"))
+    logger.info(s"  - ${candidateFilters.length} filters CANDIDATE (pushed down as approximate, Spark will also re-evaluate)")
+    candidateFilters.foreach(filter => logger.info(s"    ~ CANDIDATE: $filter"))
+    logger.info(s"  - ${fullyUnsupported.length} filters NOT SUPPORTED (will be re-evaluated by Spark after reading)")
+    fullyUnsupported.foreach(filter => logger.info(s"    ✗ NOT PUSHED: $filter"))
 
-    logger.info(s"  - ${unsupported.length} filters NOT SUPPORTED (will be re-evaluated by Spark after reading)")
-    unsupported.foreach(filter => logger.info(s"    ✗ NOT PUSHED: $filter"))
-
-    // Return only unsupported filters - Spark will re-evaluate these after reading data
-    unsupported
+    // Return unsupported + candidate filters — Spark will re-evaluate these after reading data.
+    // Candidate filters are also pushed down to the data source for approximate filtering (performance).
+    _unsupportedFilters
   }
 
   override def pushPredicates(predicates: Array[Predicate]): Array[Predicate] = {
@@ -1299,7 +1308,7 @@ class IndexTables4SparkScanBuilder(
       case GreaterThanOrEqual(attribute, _) => isFieldSuitableForRangeQuery(attribute)
       case LessThan(attribute, _)           => isFieldSuitableForRangeQuery(attribute)
       case LessThanOrEqual(attribute, _)    => isFieldSuitableForRangeQuery(attribute)
-      case _: In                            => true
+      case In(attribute, _)                  => isFieldSuitableForExactMatching(attribute)
       // IsNull/IsNotNull supported when field is fast (ExistsQuery requires FAST field)
       // or when field is a partition column (partition values are never null, so
       // IsNotNull is a tautology and IsNull always returns empty - both are safe).
@@ -1316,6 +1325,33 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
+  /**
+   * Check if a filter should be treated as a "candidate" filter — pushed down to the data source for approximate
+   * filtering (PhraseQuery) and ALSO re-evaluated by Spark for exact correctness. This is the partial pushdown
+   * pattern used by text_and_string fields.
+   */
+  private def isCandidateFilter(filter: Filter): Boolean = {
+    import org.apache.spark.sql.sources._
+
+    def isFieldCandidateForExactMatch(attribute: String): Boolean = {
+      val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
+      effectiveConfig.get(fieldTypeKey) match {
+        case Some(mode) => io.indextables.spark.util.IndexingModes.supportsCandidateExactMatchPushdown(mode)
+        case None       => false
+      }
+    }
+
+    filter match {
+      case EqualTo(attribute, _)       => isFieldCandidateForExactMatch(attribute)
+      case EqualNullSafe(attribute, _) => isFieldCandidateForExactMatch(attribute)
+      case In(attribute, _)            => isFieldCandidateForExactMatch(attribute)
+      case And(left, right)            => isCandidateFilter(left) || isCandidateFilter(right)
+      case Or(left, right)             => isCandidateFilter(left) || isCandidateFilter(right)
+      case Not(child)                  => isCandidateFilter(child)
+      case _                           => false
+    }
+  }
+
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
     // For V2 predicates, we need to inspect the actual predicate type
     // For now, let's accept all predicates and see what we get
@@ -1327,13 +1363,9 @@ class IndexTables4SparkScanBuilder(
 
   /**
    * Check if a field supports range query pushdown. exact_only fields store U64 hashes — range comparison would compare
-   * hashes, not original values.
+   * hashes, not original values. text_and_string fields use a tokenized index — range comparison is not meaningful.
    */
   private def isFieldSuitableForRangeQuery(attribute: String): Boolean = {
-    // Tokenized __text companion fields have no column-level ordering for range comparison
-    if (attribute.endsWith(io.indextables.spark.util.IndexingModes.TextCompanionSuffix)) {
-      return false
-    }
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     effectiveConfig.get(fieldTypeKey) match {
       case Some(mode) => io.indextables.spark.util.IndexingModes.supportsRangeQuery(mode)
@@ -1342,21 +1374,12 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Check if a field is suitable for exact matching at the data source level. String fields (raw tokenizer) support
-   * exact matching. Text fields (default tokenizer) should be filtered by Spark for exact matches. Nested JSON fields
-   * (containing dots) are always supported for pushdown via JsonPredicateTranslator.
+   * Check if a field is suitable for exact matching at the data source level. For text_and_string fields, EqualTo is
+   * pushed down as a PhraseQuery (slop=0) candidate filter with Spark post-filtering for correctness. Text fields
+   * (default tokenizer only) should be filtered by Spark for exact matches. Nested JSON fields (containing dots)
+   * are always supported for pushdown via JsonPredicateTranslator.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
-    // Reject __text fields — these are internal tantivy text fields from text_and_string mode
-    val textSuffix = FiltersToQueryConverter.TextCompanionSuffix
-    if (attribute.endsWith(textSuffix)) {
-      val rawField = attribute.stripSuffix(textSuffix)
-      logger.debug(
-        s"Field '$attribute' is a text field. Use TEXTSEARCH for full-text search, or use '$rawField' for exact match."
-      )
-      return false
-    }
-
     // Check if this is a nested field (JSON field)
     if (attribute.contains(".")) {
       logger.debug(s"Field '$attribute' is a nested JSON field - supporting pushdown via JsonPredicateTranslator")
