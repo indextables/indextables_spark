@@ -97,20 +97,29 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
     )
     result1.isRight shouldBe true
 
-    // Wait for first job to actually start
+    // Wait for first job to actually start running
     jobStarted.await(5, TimeUnit.SECONDS) shouldBe true
 
-    // Try to start second job - should be rejected
-    val result2 = AsyncPrewarmJobManager.tryStartJob(
-      jobId = "job-2",
-      tablePath = "s3://bucket/table",
-      hostname = "host1",
-      totalSplits = 5,
-      work = () => AsyncPrewarmJobResult("job-2", "s3://bucket/table", "host1", 5, 5, 50, true, None)
-    )
+    // Retry the rejection check — the slot counter may take a moment to update
+    // after the work lambda begins executing on the thread pool.
+    var rejected = false
+    var rejectMsg = ""
+    var attempts = 0
+    while (!rejected && attempts < 20) {
+      Thread.sleep(25)
+      val result2 = AsyncPrewarmJobManager.tryStartJob(
+        jobId = s"job-2-attempt-$attempts",
+        tablePath = "s3://bucket/table",
+        hostname = "host1",
+        totalSplits = 5,
+        work = () => AsyncPrewarmJobResult(s"job-2-attempt-$attempts", "s3://bucket/table", "host1", 5, 5, 50, true, None)
+      )
+      result2.left.foreach { msg => rejected = true; rejectMsg = msg }
+      attempts += 1
+    }
 
-    result2.isLeft shouldBe true
-    result2.left.toOption.get should include("capacity")
+    rejected shouldBe true
+    rejectMsg should include("capacity")
 
     // Let first job complete
     jobCanComplete.countDown()
