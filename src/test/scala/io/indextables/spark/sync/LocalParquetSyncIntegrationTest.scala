@@ -777,4 +777,139 @@ class LocalParquetSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
       names shouldBe Set("name_0", "name_5", "name_10")
     }
   }
+
+  test("DateHistogram with nested GROUP BY string column should resolve hash keys on companion splits") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_bucket_multikey").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_bucket_multikey").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+
+      // Data spans two 15-minute buckets with different severity distributions:
+      //   08:00-08:15 bucket: INFO x2, WARN x1
+      //   08:15-08:30 bucket: INFO x1, WARN x1, ERROR x1
+      // This ensures different buckets have different term keys, exercising
+      // the multi-bucket hash collection in collect_all_hashes_recursive.
+      val data = Seq(
+        (Timestamp.valueOf("2025-06-01 08:01:00"), "INFO",  1L),
+        (Timestamp.valueOf("2025-06-01 08:05:00"), "INFO",  2L),
+        (Timestamp.valueOf("2025-06-01 08:10:00"), "WARN",  3L),
+        (Timestamp.valueOf("2025-06-01 08:16:00"), "INFO",  4L),
+        (Timestamp.valueOf("2025-06-01 08:20:00"), "WARN",  5L),
+        (Timestamp.valueOf("2025-06-01 08:25:00"), "ERROR", 6L)
+      )
+      data
+        .toDF("timestamp", "severity", "value")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      // Build companion index (default HYBRID mode — string fields stored as u64 hashes)
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.createOrReplaceTempView("companion_bucket_multikey")
+
+      // Multi-key bucket aggregation: DateHistogram + nested Terms on severity.
+      // Before the fix, severity returned u64 hashes (e.g. "2194871672194243152")
+      // instead of the actual strings.
+      val result = spark.sql("""
+        SELECT indextables_date_histogram(timestamp, '15m') as bucket,
+               severity, COUNT(*) as cnt
+        FROM companion_bucket_multikey
+        GROUP BY indextables_date_histogram(timestamp, '15m'), severity
+        ORDER BY bucket, severity
+      """).collect()
+
+      println(s"DateHistogram multi-key result rows: ${result.length}")
+      result.foreach(r => println(s"  bucket=${r.get(0)}, severity=${r.getString(1)}, cnt=${r.getLong(2)}"))
+
+      // Should have 5 rows: (bucket1, INFO), (bucket1, WARN), (bucket2, ERROR), (bucket2, INFO), (bucket2, WARN)
+      result.length shouldBe 5
+
+      // Key assertion: severity column must contain resolved strings, not u64 hashes.
+      val severities = result.map(_.getString(1)).toSet
+      severities shouldBe Set("INFO", "WARN", "ERROR")
+
+      // Verify per-bucket counts
+      val countMap = result.map(r => (r.get(0).toString, r.getString(1)) -> r.getLong(2)).toMap
+      // 08:00-08:15 bucket
+      val bucket1 = result(0).get(0).toString
+      countMap((bucket1, "INFO")) shouldBe 2L
+      countMap((bucket1, "WARN")) shouldBe 1L
+      // 08:15-08:30 bucket
+      val bucket2 = result(2).get(0).toString
+      countMap((bucket2, "ERROR")) shouldBe 1L
+      countMap((bucket2, "INFO")) shouldBe 1L
+      countMap((bucket2, "WARN")) shouldBe 1L
+    }
+  }
+
+  test("Multi-column GROUP BY on string columns should resolve hash keys on companion splits") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_multikey_strings").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_multikey_strings").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+
+      // Two string columns with different value distributions per combination:
+      //   (INFO, api)x2, (INFO, web)x1, (WARN, api)x1, (WARN, web)x1, (ERROR, api)x1
+      val data = Seq(
+        (1L, "INFO",  "api"),
+        (2L, "INFO",  "api"),
+        (3L, "INFO",  "web"),
+        (4L, "WARN",  "api"),
+        (5L, "WARN",  "web"),
+        (6L, "ERROR", "api")
+      )
+      data
+        .toDF("id", "severity", "service")
+        .repartition(1)
+        .write
+        .parquet(parquetPath)
+
+      val row = syncParquetAndCollect(parquetPath, indexPath)
+      row.getString(2) shouldBe "success"
+
+      val companionDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(indexPath)
+
+      companionDf.createOrReplaceTempView("companion_multikey_strings")
+
+      // Multi-column GROUP BY without bucket function: Terms → nested Terms
+      val result = spark.sql("""
+        SELECT severity, service, COUNT(*) as cnt
+        FROM companion_multikey_strings
+        GROUP BY severity, service
+        ORDER BY severity, service
+      """).collect()
+
+      println(s"Multi-column GROUP BY result rows: ${result.length}")
+      result.foreach(r => println(s"  severity=${r.getString(0)}, service=${r.getString(1)}, cnt=${r.getLong(2)}"))
+
+      // Should have 5 rows
+      result.length shouldBe 5
+
+      // Both columns must contain resolved strings, not u64 hashes
+      val severities = result.map(_.getString(0)).toSet
+      val services = result.map(_.getString(1)).toSet
+      severities shouldBe Set("INFO", "WARN", "ERROR")
+      services shouldBe Set("api", "web")
+
+      // Verify counts
+      val countMap = result.map(r => (r.getString(0), r.getString(1)) -> r.getLong(2)).toMap
+      countMap(("ERROR", "api")) shouldBe 1L
+      countMap(("INFO", "api")) shouldBe 2L
+      countMap(("INFO", "web")) shouldBe 1L
+      countMap(("WARN", "api")) shouldBe 1L
+      countMap(("WARN", "web")) shouldBe 1L
+    }
+  }
 }
