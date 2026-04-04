@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.5.4_spark_3.5.3</version>
+    <version>0.5.5_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>IndexTables4Spark</name>
@@ -178,7 +178,7 @@
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.34.2</version>
+            <version>0.34.4</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 

@@ -24,12 +24,7 @@ import org.apache.spark.sql.types.{BooleanType, LongType, StringType}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.jni.txlog.TransactionLogWriter
-import io.indextables.spark.transaction.{
-  ActionJsonSerializer,
-  ConfigMapper,
-  TransactionLogFactory
-}
+import io.indextables.spark.transaction.{ActionJsonSerializer, TransactionLogFactory}
 import org.slf4j.LoggerFactory
 
 /**
@@ -116,18 +111,9 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
         val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
         val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
 
-        // Normalize table path and build native config
-        val nativeTablePath = ConfigMapper.normalizeTablePath(resolvedPath)
-        val nativeConfig    = ConfigMapper.toNativeConfig(options)
-
-        // Delegate checkpoint creation to the native tantivy4java implementation
-        val checkpointInfo = TransactionLogWriter.createCheckpoint(
-          nativeTablePath,
-          nativeConfig,
-          entriesJson,
-          metadataJson,
-          protocolJson
-        )
+        // Delegate checkpoint creation through the transaction log instance so that
+        // resolved credentials (including Unity Catalog) are used for the write.
+        val checkpointInfo = transactionLog.createCheckpoint(entriesJson, metadataJson, protocolJson)
 
         val checkpointVersion = checkpointInfo.getVersion
         val numFiles          = checkpointInfo.getNumFiles
