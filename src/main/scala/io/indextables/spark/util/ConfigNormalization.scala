@@ -38,16 +38,11 @@ object ConfigNormalization {
    * Normalizes a configuration key from spark.indextables.* to spark.indextables.* if needed. Returns the key unchanged
    * if it doesn't start with spark.indextables.
    */
-  def normalizeKey(key: String): String =
-    if (key.startsWith("spark.indextables.")) {
-      key.replace("spark.indextables.", "spark.indextables.")
-    } else {
-      key
-    }
+  def normalizeKey(key: String): String = key
 
-  /** Checks if a configuration key is a IndexTables4Spark-related key (either prefix). */
+  /** Checks if a configuration key is a IndexTables4Spark-related key. */
   def isTantivyKey(key: String): Boolean =
-    key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")
+    key.startsWith("spark.indextables.")
 
   /**
    * Filters and normalizes a Map of configuration properties to extract only IndexTables4Spark-related keys with

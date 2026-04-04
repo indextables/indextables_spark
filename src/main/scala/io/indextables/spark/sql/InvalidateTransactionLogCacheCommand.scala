@@ -117,7 +117,9 @@ case class InvalidateTransactionLogCacheCommand(
       // Resolve the table path
       val resolvedPath = resolveTablePath(path, sparkSession)
 
-      // Create a temporary TransactionLog to access the cache
+      // Create a temporary TransactionLog to validate the path and access the cache.
+      // Empty options are intentional: no writes occur here, so PATH_READ_WRITE credentials
+      // are not needed. TransactionLogFactory.create merges Spark and Hadoop conf for reads.
       val transactionLog = TransactionLogFactory.create(
         resolvedPath,
         sparkSession,

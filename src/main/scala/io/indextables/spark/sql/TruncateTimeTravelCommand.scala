@@ -313,7 +313,7 @@ case class TruncateTimeTravelCommand(
       } finally
         transactionLog.close()
     } catch {
-      case e: Exception =>
+      case scala.util.control.NonFatal(e) =>
         val errorMsg = s"Failed to truncate time travel data: ${e.getMessage}"
         logger.error(errorMsg, e)
         Seq(
@@ -350,11 +350,12 @@ case class TruncateTimeTravelCommand(
     val addsJson     = ActionJsonSerializer.addActionsToJson(allFiles)
 
     // Use the transaction log instance so resolved credentials (including Unity Catalog) are used.
-    transactionLog.createCheckpoint(addsJson, metadataJson, protocolJson)
+    val checkpointInfo = transactionLog.createCheckpoint(addsJson, metadataJson, protocolJson)
     // Invalidate snapshot cache so subsequent reads see the new checkpoint
     transactionLog.invalidateCache()
-    logger.info(s"Created checkpoint at version $currentVersion")
-    currentVersion
+    val checkpointVersion = checkpointInfo.getVersion
+    logger.info(s"Created checkpoint at version $checkpointVersion")
+    checkpointVersion
   }
 
   /** Resolve table path from string path or table identifier. */
