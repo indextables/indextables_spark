@@ -17,6 +17,8 @@
 
 package io.indextables.spark.filters
 
+import io.indextables.spark.expressions.SearchType
+
 /**
  * Custom filter for IndexQueryAll pushdown operations.
  *
@@ -29,7 +31,12 @@ package io.indextables.spark.filters
  * @param queryString
  *   The Tantivy query string to search across all fields
  */
-case class IndexQueryAllFilter(queryString: String) {
+case class IndexQueryAllFilter(queryString: String, searchType: String = SearchType.IndexQueryAll) {
+
+  require(
+    SearchType.validAllFields.contains(searchType),
+    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validAllFields.mkString(", ")}"
+  )
 
   /**
    * Returns an empty array since this filter doesn't reference specific columns. The search operates across all
@@ -54,7 +61,9 @@ case class IndexQueryAllFilter(queryString: String) {
    * @return
    *   String representation of this filter
    */
-  override def toString: String = s"IndexQueryAllFilter($queryString)"
+  override def toString: String =
+    if (searchType == SearchType.IndexQueryAll) s"IndexQueryAllFilter($queryString)"
+    else s"IndexQueryAllFilter[$searchType]($queryString)"
 
   /**
    * Checks if this filter is compatible with another filter for combining.
