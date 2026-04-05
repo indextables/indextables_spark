@@ -34,20 +34,12 @@ import org.apache.hadoop.conf.Configuration
  */
 object ConfigNormalization {
 
-  /**
-   * Normalizes a configuration key from spark.indextables.* to spark.indextables.* if needed. Returns the key unchanged
-   * if it doesn't start with spark.indextables.
-   */
-  def normalizeKey(key: String): String =
-    if (key.startsWith("spark.indextables.")) {
-      key.replace("spark.indextables.", "spark.indextables.")
-    } else {
-      key
-    }
+  /** Returns the key unchanged. Kept for call-site compatibility. */
+  def normalizeKey(key: String): String = key
 
-  /** Checks if a configuration key is a IndexTables4Spark-related key (either prefix). */
+  /** Checks if a configuration key is a IndexTables4Spark-related key. */
   def isTantivyKey(key: String): Boolean =
-    key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")
+    key.startsWith("spark.indextables.")
 
   /**
    * Filters and normalizes a Map of configuration properties to extract only IndexTables4Spark-related keys with
@@ -80,20 +72,16 @@ object ConfigNormalization {
 
   /** Filters and normalizes IndexTables4Spark configurations from SparkSession. */
   def extractTantivyConfigsFromSpark(spark: SparkSession): Map[String, String] =
-    try
-      spark.conf.getAll
-        .filter {
-          case (key, value) =>
-            isTantivyKey(key) && value != null
-        }
-        .map {
-          case (key, value) =>
-            normalizeKey(key) -> value
-        }
-        .toMap
-    catch {
-      case _: Exception => Map.empty[String, String]
-    }
+    spark.conf.getAll
+      .filter {
+        case (key, value) =>
+          isTantivyKey(key) && value != null
+      }
+      .map {
+        case (key, value) =>
+          normalizeKey(key) -> value
+      }
+      .toMap
 
   /** Filters and normalizes IndexTables4Spark configurations from CaseInsensitiveStringMap. */
   def extractTantivyConfigsFromOptions(options: CaseInsensitiveStringMap): Map[String, String] =

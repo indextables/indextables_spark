@@ -306,13 +306,10 @@ class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.cata
       ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     }
 
-    val sparkTantivyConfigs =
-      try {
-        import io.indextables.spark.util.ConfigNormalization
-        ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-      } catch {
-        case _: Exception => Map.empty[String, String]
-      }
+    val sparkTantivyConfigs = {
+      import io.indextables.spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    }
 
     val readTantivyConfigs = {
       import io.indextables.spark.util.ConfigNormalization
@@ -360,13 +357,10 @@ class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.cata
       ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     }
 
-    val sparkTantivyConfigs =
-      try {
-        import io.indextables.spark.util.ConfigNormalization
-        ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-      } catch {
-        case _: Exception => Map.empty[String, String]
-      }
+    val sparkTantivyConfigs = {
+      import io.indextables.spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    }
 
     val tableTantivyConfigs = {
       import io.indextables.spark.util.ConfigNormalization
