@@ -197,6 +197,10 @@ class IndexTables4SparkScanBuilder(
                       logger.warn(s"Failed to parse companion indexingModes: ${e.getMessage}")
                   }
                 }
+                // Propagate stored skipFields for companion filter pushdown
+                metadata.configuration.get("indextables.companion.skipFields").foreach { json =>
+                  designatorConfig = designatorConfig + ("spark.indextables.companion.skipFields" -> json)
+                }
                 designatorConfig - "spark.indextables.iceberg.uc.tableId"
               case None =>
                 // Designator set but root not found - fail with actionable error
@@ -328,6 +332,10 @@ class IndexTables4SparkScanBuilder(
                   }
                 }
 
+                metadata.configuration.get("indextables.companion.skipFields").foreach { json =>
+                  enrichedConfig = enrichedConfig + ("spark.indextables.companion.skipFields" -> json)
+                }
+
                 // Strip tableId from the final config so that split credential resolution
                 // uses path-based credentials (for the indextables split storage), not
                 // table-based credentials (scoped to the Iceberg source table). Companion
@@ -353,6 +361,11 @@ class IndexTables4SparkScanBuilder(
       }
     }
   }
+
+  private lazy val companionSkipFields: Set[String] =
+    effectiveConfig.get("spark.indextables.companion.skipFields").map { json =>
+      io.indextables.spark.util.JsonUtil.parseStringArray(json).map(_.toLowerCase).toSet
+    }.getOrElse(Set.empty)
 
   /**
    * For Iceberg companions: try to resolve table credentials at read time by reconstructing the full table name from
@@ -1299,7 +1312,7 @@ class IndexTables4SparkScanBuilder(
       case GreaterThanOrEqual(attribute, _) => isFieldSuitableForRangeQuery(attribute)
       case LessThan(attribute, _)           => isFieldSuitableForRangeQuery(attribute)
       case LessThanOrEqual(attribute, _)    => isFieldSuitableForRangeQuery(attribute)
-      case _: In                            => true
+      case In(attribute, _)                  => isFieldSuitableForExactMatching(attribute)
       // IsNull/IsNotNull supported when field is fast (ExistsQuery requires FAST field)
       // or when field is a partition column (partition values are never null, so
       // IsNotNull is a tautology and IsNull always returns empty - both are safe).
@@ -1330,6 +1343,11 @@ class IndexTables4SparkScanBuilder(
    * hashes, not original values.
    */
   private def isFieldSuitableForRangeQuery(attribute: String): Boolean = {
+    if (companionSkipFields.contains(attribute.toLowerCase)) {
+      logger.debug(s"Field '$attribute' excluded from companion index — deferring to Spark")
+      return false
+    }
+
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     effectiveConfig.get(fieldTypeKey) match {
       case Some(mode) => io.indextables.spark.util.IndexingModes.supportsRangeQuery(mode)
@@ -1343,6 +1361,11 @@ class IndexTables4SparkScanBuilder(
    * (containing dots) are always supported for pushdown via JsonPredicateTranslator.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
+    if (companionSkipFields.contains(attribute.toLowerCase)) {
+      logger.debug(s"Field '$attribute' excluded from companion index — deferring to Spark")
+      return false
+    }
+
     // Check if this is a nested field (JSON field)
     if (attribute.contains(".")) {
       logger.debug(s"Field '$attribute' is a nested JSON field - supporting pushdown via JsonPredicateTranslator")

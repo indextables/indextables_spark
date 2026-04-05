@@ -475,12 +475,10 @@ case class SyncToExternalCommand(
         storedConfig.get(key).filter(_.nonEmpty).map { value =>
           if (value.startsWith("[")) {
             // JSON array format (new)
-            import com.fasterxml.jackson.core.`type`.TypeReference
-            io.indextables.spark.util.JsonUtil.mapper
-              .readValue(value, new TypeReference[java.util.List[String]]() {}).asScala.toSeq
+            io.indextables.spark.util.JsonUtil.parseStringArray(value)
           } else {
             // CSV format (legacy)
-            value.split(",").toSeq
+            value.split(",").map(_.trim).toSeq
           }
         }.getOrElse(Seq.empty)
 
@@ -581,7 +579,20 @@ case class SyncToExternalCommand(
                     case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
                       (storedType, currentType) match {
                         case (decPattern(sp, ss), decPattern(cp, cs)) =>
-                          cp.toInt >= sp.toInt && cs.toInt >= ss.toInt
+                          val precisionOk = cp.toInt >= sp.toInt
+                          val scaleOk = cs.toInt >= ss.toInt
+                          if (precisionOk && scaleOk) {
+                            true
+                          } else {
+                            val reasons = Seq(
+                              if (!precisionOk) Some(s"precision decreased from $sp to $cp") else None,
+                              if (!scaleOk) Some(s"scale decreased from $ss to $cs") else None
+                            ).flatten.mkString(" and ")
+                            throw new IllegalArgumentException(
+                              s"Column '${field.name}' decimal type changed from $storedType to $currentType ($reasons). " +
+                                s"Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
+                            )
+                          }
                         case _ => false
                       }
                     case _                                                                     => false
@@ -606,13 +617,19 @@ case class SyncToExternalCommand(
         (cleanedInclude, cleanedExclude)
       }
 
+      // Defensive guard: mutual exclusivity should be enforced at parse time, but verify
+      // after metadata restore in case stored metadata is corrupted
+      require(!(effectiveIncludeColumns.nonEmpty && effectiveExcludeColumns.nonEmpty),
+        "Cannot have both INCLUDE COLUMNS and EXCLUDE COLUMNS — check stored companion metadata for corruption.")
+
       // Helper: format available columns truncated at 20
       def formatAvailableColumns(cols: Seq[String]): String = {
         val maxShow = 20
         if (cols.size <= maxShow) cols.mkString(", ")
         else cols.take(maxShow).mkString(", ") + s", ... (showing $maxShow of ${cols.size})"
       }
-      val availableColumnsFormatted = formatAvailableColumns(sourceSchema.fieldNames ++ partitionColumns)
+      val dataOnlyColumns = sourceSchema.fieldNames.filterNot(c => partitionColumnsLower.contains(c.toLowerCase))
+      val availableColumnsFormatted = formatAvailableColumns(dataOnlyColumns)
 
       // R1: Detect duplicate columns
       def checkDuplicates(cols: Seq[String], clauseName: String): Unit = {
@@ -641,6 +658,14 @@ case class SyncToExternalCommand(
 
       val filteredIncludeColumns = filterPartitionColumns(effectiveIncludeColumns, "INCLUDE COLUMNS")
       val filteredExcludeColumns = filterPartitionColumns(effectiveExcludeColumns, "EXCLUDE COLUMNS")
+
+      // R1: Guard against INCLUDE COLUMNS containing only partition columns
+      if (includeColumns.nonEmpty && filteredIncludeColumns.isEmpty) {
+        throw new IllegalArgumentException(
+          "INCLUDE COLUMNS contains only partition columns. " +
+            "Partition columns are always indexed — specify at least one non-partition column."
+        )
+      }
 
       // R1: Validate columns exist in source schema (after filtering out partition columns)
       filteredIncludeColumns.foreach { col =>
@@ -1136,7 +1161,8 @@ case class SyncToExternalCommand(
         startTime,
         Some(sourceSchema),
         filteredIncludeColumns,
-        filteredExcludeColumns
+        filteredExcludeColumns,
+        effectiveSkipFields
       )
     } finally
       transactionLog.close()
@@ -1165,7 +1191,8 @@ case class SyncToExternalCommand(
     startTime: Long,
     sourceSchema: Option[StructType] = None,
     filteredIncludeColumns: Seq[String] = Seq.empty,
-    filteredExcludeColumns: Seq[String] = Seq.empty
+    filteredExcludeColumns: Seq[String] = Seq.empty,
+    effectiveSkipFields: Seq[String] = Seq.empty
   ): Seq[Row] = {
     import scala.collection.parallel.ForkJoinTaskSupport
     import java.util.concurrent.ForkJoinPool
@@ -1308,7 +1335,8 @@ case class SyncToExternalCommand(
                     externalStorageRoot,
                     sourceSchema,
                     filteredIncludeColumns,
-                    filteredExcludeColumns
+                    filteredExcludeColumns,
+                    skipFields = effectiveSkipFields
                   )
                 )
 
@@ -1410,64 +1438,74 @@ case class SyncToExternalCommand(
     externalStorageRoot: Option[String],
     sourceSchema: Option[StructType] = None,
     filteredIncludeColumns: Seq[String] = Seq.empty,
-    filteredExcludeColumns: Seq[String] = Seq.empty
+    filteredExcludeColumns: Seq[String] = Seq.empty,
+    skipFields: Seq[String] = Seq.empty
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
-    val companionConfig = existingMetadata.configuration ++ Map(
+    val builder = Map.newBuilder[String, String]
+
+    builder ++= Map(
       "indextables.companion.enabled"           -> "true",
       "indextables.companion.sourceTablePath"   -> sourcePath,
       "indextables.companion.sourceFormat"      -> sourceFormat,
       "indextables.companion.lastSyncedVersion" -> sourceVersion.toString,
       "indextables.companion.fastFieldMode"     -> fastFieldMode
-    ) ++ (if (sourceFormat == "iceberg") {
-            Map(
-              "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
-            ) ++ effectiveWarehouse.map(w => "indextables.companion.icebergWarehouse" -> w) ++ catalogType.map(ct =>
-              "indextables.companion.icebergCatalogType" -> ct
-            ) ++ externalStorageRoot.map(root => "indextables.companion.parquetStorageRoot" -> root)
-          } else if (sourceFormat == "delta" && isTableName(sourcePath) && externalStorageRoot.isDefined) {
-            // Delta UC table name resolution: store metadata for read-path credential resolution
-            Map(
-              "indextables.companion.parquetStorageRoot" -> externalStorageRoot.get,
-              "indextables.companion.deltaTableName"     -> sourcePath,
-              "indextables.companion.deltaCatalog"       -> effectiveCatalogName.getOrElse("")
-            )
-          } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
-                                  Map(
-                                    "indextables.companion.indexingModes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(
-                                      effectiveIndexingModes.asJava
-                                    )
-                                  )
-                                } else Map.empty) ++ (if (effectiveWherePredicates.nonEmpty) {
-                                                        Map(
-                                                          "indextables.companion.whereClause" -> effectiveWherePredicates.head
-                                                        )
-                                                      } else Map.empty) ++ fromVersion.map(v =>
-      "indextables.companion.fromVersion" -> v.toString
-    ) ++ (if (effectiveHfInclude.nonEmpty)
-            Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
-          else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
-                                Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
-                              else Map.empty) ++ (if (filteredIncludeColumns.nonEmpty)
-                                                    Map("indextables.companion.includeColumns" ->
-                                                      io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(filteredIncludeColumns.asJava))
-                                                  else Map.empty) ++ (if (filteredExcludeColumns.nonEmpty)
-                                                                        Map("indextables.companion.excludeColumns" ->
-                                                                          io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(filteredExcludeColumns.asJava))
-                                                                      else Map.empty) ++ sourceSchema.map { schema =>
-      Map(
-        "indextables.companion.columnTypes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(
+    )
+
+    if (sourceFormat == "iceberg") {
+      builder += "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
+      effectiveWarehouse.foreach(w => builder += "indextables.companion.icebergWarehouse" -> w)
+      catalogType.foreach(ct => builder += "indextables.companion.icebergCatalogType" -> ct)
+      externalStorageRoot.foreach(root => builder += "indextables.companion.parquetStorageRoot" -> root)
+    } else if (sourceFormat == "delta" && isTableName(sourcePath) && externalStorageRoot.isDefined) {
+      builder += "indextables.companion.parquetStorageRoot" -> externalStorageRoot.get
+      builder += "indextables.companion.deltaTableName"     -> sourcePath
+      builder += "indextables.companion.deltaCatalog"       -> effectiveCatalogName.getOrElse("")
+    }
+
+    if (effectiveIndexingModes.nonEmpty) {
+      builder += "indextables.companion.indexingModes" ->
+        io.indextables.spark.util.JsonUtil.toJson(effectiveIndexingModes.asJava)
+    }
+    if (effectiveWherePredicates.nonEmpty) {
+      builder += "indextables.companion.whereClause" -> effectiveWherePredicates.head
+    }
+    fromVersion.foreach(v => builder += "indextables.companion.fromVersion" -> v.toString)
+
+    if (effectiveHfInclude.nonEmpty) {
+      builder += "indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(",")
+    }
+    if (effectiveHfExclude.nonEmpty) {
+      builder += "indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(",")
+    }
+
+    if (filteredIncludeColumns.nonEmpty) {
+      builder += "indextables.companion.includeColumns" ->
+        io.indextables.spark.util.JsonUtil.toJson(filteredIncludeColumns.asJava)
+    }
+    if (filteredExcludeColumns.nonEmpty) {
+      builder += "indextables.companion.excludeColumns" ->
+        io.indextables.spark.util.JsonUtil.toJson(filteredExcludeColumns.asJava)
+    }
+
+    if (skipFields.nonEmpty) {
+      builder += "indextables.companion.skipFields" ->
+        io.indextables.spark.util.JsonUtil.toJson(skipFields.asJava)
+    }
+
+    sourceSchema.foreach { schema =>
+      builder += "indextables.companion.columnTypes" ->
+        io.indextables.spark.util.JsonUtil.toJson(
           schema.fields.map(f => f.name.toLowerCase -> f.dataType.simpleString).toMap.asJava
         )
-      )
-    }.getOrElse(Map.empty) ++ tableRoots.flatMap {
-      case (name, path) =>
-        Map(
-          TableRootUtils.rootKey(name)      -> path,
-          TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
-        )
     }
-    existingMetadata.copy(configuration = companionConfig)
+
+    tableRoots.foreach { case (name, path) =>
+      builder += TableRootUtils.rootKey(name)      -> path
+      builder += TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
+    }
+
+    existingMetadata.copy(configuration = existingMetadata.configuration ++ builder.result())
   }
 
   /** Build RemoveAction entries for invalidated splits. */

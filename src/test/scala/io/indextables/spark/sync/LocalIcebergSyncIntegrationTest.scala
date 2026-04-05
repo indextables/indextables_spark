@@ -49,7 +49,8 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
   private val MINIO_ENDPOINT   = "http://localhost:9000"
   private val MINIO_ACCESS_KEY = "admin"
   private val MINIO_SECRET_KEY = "password"
-  private val TABLE_IDENTIFIER = "default.test_events"
+  private val TABLE_IDENTIFIER    = "default.test_events"
+  private val TABLE_IDENTIFIER_V2 = "default.test_events_v2"
 
   private var spark: SparkSession    = _
   private var tempDir: File          = _
@@ -337,5 +338,47 @@ class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with Bef
 
     // Total should be 12
     regionCounts.values.sum shouldBe 12L
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Column-mapping test (requires Docker — v2 format with name mapping)
+  //  Basic INCLUDE/EXCLUDE/incremental tests are in IcebergCompanionColumnsTest
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("INCLUDE COLUMNS with column-mapped Iceberg table translates physicalSkipFields") {
+    assume(restAvailable, "REST catalog not available")
+
+    val indexPath = newIndexPath()
+
+    // Build companion for the v2 column-mapped table with INCLUDE COLUMNS.
+    // When column name mapping is active (write.metadata.column-mapping.mode = 'name'),
+    // the logical column names must be translated to physical Parquet column names
+    // before being passed to the Rust indexing layer.
+    val result = spark.sql(
+      s"""BUILD INDEXTABLES COMPANION FOR ICEBERG '$TABLE_IDENTIFIER_V2'
+         |  INCLUDE COLUMNS ('event_type', 'score')
+         |  AT LOCATION '$indexPath'""".stripMargin
+    )
+
+    val buildRow = result.collect()
+    buildRow.length shouldBe 1
+    buildRow(0).getString(2) shouldBe "success"
+    buildRow(0).getInt(4) should be > 0 // splits_created
+
+    // Read back the companion index
+    val companionDf = spark.read
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+      .load(indexPath)
+
+    // Total count should match the full table (12 rows)
+    companionDf.count() shouldBe 12L
+
+    // Filter on an included column — event_type = 'click' should return 5 rows
+    val clickDf = companionDf.filter(companionDf("event_type") === "click")
+    clickDf.count() shouldBe 5L
+
+    // Filter on another included column — score > 1.0 should return 4 rows
+    val highScoreDf = companionDf.filter(companionDf("score") > 1.0)
+    highScoreDf.count() shouldBe 4L
   }
 }
