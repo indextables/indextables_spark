@@ -452,6 +452,13 @@ class IndexTables4SparkScanBuilder(
     // Look up relation from ThreadLocal at usage time (not at construction time!)
     val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
 
+    // Capture consumed state BEFORE validation, to distinguish explain-path from body-path build.
+    // Spark calls build() twice for a failing query: once on the explain/logging path (consumed=false,
+    // exception is caught internally) and once on the body execution path (consumed=true, because the
+    // explain-path build already called getIndexQueries).  We only clear stale queries on the body-path
+    // build so that the explain-path's queries are still available for the subsequent body-path build.
+    val queriesWereConsumedOnEntry = IndexTables4SparkScanBuilder.wereIndexQueriesConsumed()
+
     logger.debug(s"BUILD: ScanBuilder.build() called on instance ${System.identityHashCode(this)}")
     logger.debug(s"BUILD: Aggregation present: ${aggregation.isDefined}, filters: ${_pushedFilters.length}")
 
@@ -632,7 +639,23 @@ class IndexTables4SparkScanBuilder(
         // CRITICAL: Validate IndexQuery field existence on driver before creating scan
         // This prevents task failures on executors when fields don't exist
         // Same pattern as PR #122's syntax validation - fail fast on driver
-        validateIndexQueryFieldsExist()
+        try {
+          validateIndexQueryFieldsExist()
+        } catch {
+          case e: Throwable =>
+            // Clear stale IndexQueries on the body-path build (queriesWereConsumedOnEntry=true)
+            // for any failure, not just IllegalArgumentException.  Other throwables (e.g. from
+            // schema inspection) would otherwise leave queries in the WeakHashMap indefinitely,
+            // causing them to bleed into the next query on the same relation.
+            //
+            // Explain-path build (consumed=false on entry) must NOT clear — its queries must
+            // remain available for the subsequent body-path build, which is the one visible to
+            // the user.
+            if (queriesWereConsumedOnEntry) {
+              relationForIndexQuery.foreach(IndexTables4SparkScanBuilder.clearIndexQueries)
+            }
+            throw e
+        }
         logger.debug(s"BUILD: IndexQuery field validation passed for regular scan")
 
         // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
@@ -2461,7 +2484,19 @@ object IndexTables4SparkScanBuilder {
     val newId     = newRelation.map(System.identityHashCode)
 
     if (currentId.isDefined && newId.isDefined && currentId != newId) {
-      // Different relation - clear the old one
+      // Propagate IndexQueries from old relation to new before clearing.
+      // Catalog-backed tables may cause Spark's analyzer to create a new DataSourceV2Relation
+      // object during fixed-point re-resolution. Without propagation, IndexQueries stored for
+      // the original relation are lost and the fallback eval() returns true for all rows.
+      currentRelation.get().foreach { oldRelation =>
+        newRelation.foreach { newRel =>
+          val oldQueries = peekIndexQueries(oldRelation)
+          // Only propagate if queries have NOT been consumed (i.e., not stale from a failed plan).
+          // If consumed=true the previous query threw and Spark is retrying/starting a new query;
+          // propagating would bleed stale queries into the new relation.
+          if (oldQueries.nonEmpty && !indexQueriesConsumed.get()) storeIndexQueries(newRel, oldQueries)
+        }
+      }
       currentRelation.remove()
       currentRelationId.remove()
     }
@@ -2501,7 +2536,8 @@ object IndexTables4SparkScanBuilder {
   def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit =
     relationIndexQueries.synchronized {
       val existing = Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
-      relationIndexQueries.put(relation, existing ++ indexQueries)
+      val newTotal = existing ++ indexQueries
+      relationIndexQueries.put(relation, newTotal)
       indexQueriesConsumed.set(false) // Fresh IndexQueries - not yet consumed
     }
 
@@ -2511,6 +2547,15 @@ object IndexTables4SparkScanBuilder {
       val result = Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
       if (result.nonEmpty) indexQueriesConsumed.set(true) // Mark as consumed by build()/pushAggregation()
       result
+    }
+
+  /**
+   * Peek at IndexQuery expressions for a specific relation object WITHOUT marking them as consumed. Used internally
+   * when propagating queries to a replacement relation — we must not trigger stale detection for an ongoing query.
+   */
+  private def peekIndexQueries(relation: AnyRef): Seq[Any] =
+    relationIndexQueries.synchronized {
+      Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
     }
 
   /** Clear IndexQuery expressions for a specific relation object. */

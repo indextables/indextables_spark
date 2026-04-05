@@ -302,6 +302,45 @@ Configuration is set via Spark session properties or as DataSource options. For 
 - **Parquet directories**: Unversioned. There is no version tracking, so the anti-join reconciliation operates purely on file presence.
 - **Compact string modes**: Available only for companion builds. See [Compact String Indexing](#compact-string-indexing-companion-splits) below for details on `exact_only`, `text_uuid_exactonly`, and other size-reduction modes.
 
+### Named Catalog Access
+
+Companion indexes can be queried by logical table name instead of raw storage path using `IndexTablesCatalog`, a Spark V2 `TableCatalog` implementation.
+
+**Setup** — register the catalog in your SparkSession and set the required TBLPROPERTIES on the source table:
+
+```scala
+val spark = SparkSession.builder()
+  .config("spark.sql.catalog.indextables", "io.indextables.catalog.IndexTablesCatalog")
+  .getOrCreate()
+```
+
+```sql
+ALTER TABLE unity_catalog.production.users SET TBLPROPERTIES (
+  'indextables.companion.indexroot'                  = 's3://my-bucket/indexes',
+  'indextables.companion.tableroot.relativepath'     = 'production/users'
+);
+-- Region-specific root (takes precedence when the detected region matches):
+-- 'indextables.companion.indexroot.us-east-1' = 's3://us-east-bucket/indexes'
+```
+
+**Query** — reference the index by 4-part name (`<catalog>.<source_catalog>.<namespace>.<table>`):
+
+```sql
+SELECT * FROM indextables.unity_catalog.production.users
+WHERE content indexquery 'machine learning'
+```
+
+**Cache TTL** — resolved paths are cached per catalog instance (default: 60 minutes). Override per catalog:
+
+```
+spark.sql.catalog.indextables.catalog.cache.ttl.minutes=30
+```
+
+**Limitations**:
+- **Read-only**: the catalog does not support writes. Use `IndexTablesProvider` or `BUILD INDEXTABLES COMPANION` for all write operations.
+- **`SHOW TABLES` / `SHOW NAMESPACES`**: these commands return empty results. `IndexTablesCatalog` has no registry of table names — it resolves paths on demand from source table TBLPROPERTIES. Running `SHOW TABLES IN indextables` will succeed but return an empty list.
+- **`DROP TABLE`**: returns `false` (no-op). Use `PURGE INDEXTABLE` to remove index data.
+
 ---
 
 ## Compact String Indexing (Companion Splits)
