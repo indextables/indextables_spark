@@ -50,7 +50,11 @@ import org.slf4j.LoggerFactory
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class CompanionParquetColumnsPrewarmTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionParquetColumnsPrewarmTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[CompanionParquetColumnsPrewarmTest])
 

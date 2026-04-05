@@ -23,26 +23,25 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.utils.CredentialProviderFactory
+import io.indextables.spark.TestBase
 
 /**
  * Regression tests for the Unity Catalog companion build credential isolation bug.
  *
- * Bug: When BUILD INDEXTABLES COMPANION was run for a UC Delta/Iceberg source table,
- * SyncToExternalCommand injected spark.indextables.iceberg.uc.tableId (the SOURCE table's ID)
- * into mergedConfigs, then passed those configs to TransactionLogFactory.create() for the
- * DESTINATION txlog. TransactionLogFactory.create() called resolveCredentialsOnDriver() which
- * hit Priority 1.5 (table-based credentials), using the source table's ID to fetch credentials
- * scoped to the source table's S3 path — not the destination. This caused auth failures when
- * writing the companion index transaction log.
+ * Bug: When BUILD INDEXTABLES COMPANION was run for a UC Delta/Iceberg source table, SyncToExternalCommand injected
+ * spark.indextables.iceberg.uc.tableId (the SOURCE table's ID) into mergedConfigs, then passed those configs to
+ * TransactionLogFactory.create() for the DESTINATION txlog. TransactionLogFactory.create() called
+ * resolveCredentialsOnDriver() which hit Priority 1.5 (table-based credentials), using the source table's ID to fetch
+ * credentials scoped to the source table's S3 path — not the destination. This caused auth failures when writing the
+ * companion index transaction log.
  *
  * Fix: TransactionLogFactory.create() strips spark.indextables.iceberg.uc.tableId before calling
- * resolveCredentialsOnDriver(), falling through to Priority 2 (path-based credential resolution)
- * which correctly fetches credentials for the destination txlog path.
+ * resolveCredentialsOnDriver(), falling through to Priority 2 (path-based credential resolution) which correctly
+ * fetches credentials for the destination txlog path.
  *
- * See also: MockTableCredentialProvider in TestCredentialProviders.scala, which encodes the
- * resolution path in the access key string for assertions.
+ * See also: MockTableCredentialProvider in TestCredentialProviders.scala, which encodes the resolution path in the
+ * access key string for assertions.
  */
 class TransactionLogFactoryCredentialIsolationTest extends TestBase {
 
@@ -50,11 +49,11 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
     "io.indextables.spark.testutils.MockTableCredentialProvider"
 
   /**
-   * Documents the bug: resolveCredentialsOnDriver with uc.tableId present triggers Priority 1.5
-   * and returns source-table-scoped credentials (wrong for destination).
+   * Documents the bug: resolveCredentialsOnDriver with uc.tableId present triggers Priority 1.5 and returns
+   * source-table-scoped credentials (wrong for destination).
    *
-   * This test documents the pre-fix behavior so the regression is clearly understood.
-   * It does NOT call TransactionLogFactory — it tests CredentialProviderFactory directly.
+   * This test documents the pre-fix behavior so the regression is clearly understood. It does NOT call
+   * TransactionLogFactory — it tests CredentialProviderFactory directly.
    */
   test("resolveCredentialsOnDriver uses table credentials when uc.tableId is present (documents bug path)") {
     val sourceTableId = "source-uc-table-id-abc123"
@@ -75,8 +74,8 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
-   * Documents the fix: resolveCredentialsOnDriver without uc.tableId falls through to Priority 2
-   * and returns path-based credentials (correct for destination).
+   * Documents the fix: resolveCredentialsOnDriver without uc.tableId falls through to Priority 2 and returns path-based
+   * credentials (correct for destination).
    */
   test("resolveCredentialsOnDriver uses path credentials when uc.tableId is absent (correct for destination)") {
     val destPath = "s3://companion-index-dest/my-index"
@@ -96,12 +95,12 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
-   * Core regression test: TransactionLogFactory.create() must NOT use the source uc.tableId to
-   * resolve credentials for the destination txlog. Before the fix, the source table's credentials
-   * were fetched (table-based path) and used for the destination, causing auth failures.
+   * Core regression test: TransactionLogFactory.create() must NOT use the source uc.tableId to resolve credentials for
+   * the destination txlog. Before the fix, the source table's credentials were fetched (table-based path) and used for
+   * the destination, causing auth failures.
    *
-   * After the fix, uc.tableId is stripped before resolveCredentialsOnDriver is called, so
-   * path-based credentials (correct for the destination) are used instead.
+   * After the fix, uc.tableId is stripped before resolveCredentialsOnDriver is called, so path-based credentials
+   * (correct for the destination) are used instead.
    */
   test("TransactionLogFactory.create() does not use source uc.tableId for destination credential resolution") {
     import io.indextables.spark.testutils.MockTableCredentialProvider
@@ -123,9 +122,9 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
       // so Priority 1.5 (table-based) is bypassed and Priority 2 (path-based) is used instead.
       // If the fix is removed, tableCredentialCallCount would be > 0.
       val txlog = TransactionLogFactory.create(new Path(destPath), spark, options)
-      try {
+      try
         txlog.initialize(getTestSchema())
-      } finally
+      finally
         txlog.close()
 
       // Table-based credentials must NOT have been invoked for the destination txlog
@@ -136,12 +135,12 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
-   * Integration-level regression test: TransactionLogFactory.create() must succeed (not throw)
-   * when uc.tableId is present in the options, and must create a usable txlog at the destination.
+   * Integration-level regression test: TransactionLogFactory.create() must succeed (not throw) when uc.tableId is
+   * present in the options, and must create a usable txlog at the destination.
    *
-   * Before the fix, if the table-based credential resolution returned source-scoped credentials
-   * that were incompatible with the destination, the txlog initialization would fail on the first
-   * actual storage operation (e.g., initialize() writing to the destination path).
+   * Before the fix, if the table-based credential resolution returned source-scoped credentials that were incompatible
+   * with the destination, the txlog initialization would fail on the first actual storage operation (e.g., initialize()
+   * writing to the destination path).
    */
   test("TransactionLogFactory.create() succeeds with uc.tableId in configs and produces a writable txlog") {
     withTempPath { destPath =>
@@ -166,12 +165,12 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
-   * Verifies that uc.tableId in the options is still available for SOURCE reads (not stripped
-   * from the configs used to initialize IcebergSourceReader / DeltaSourceReader).
+   * Verifies that uc.tableId in the options is still available for SOURCE reads (not stripped from the configs used to
+   * initialize IcebergSourceReader / DeltaSourceReader).
    *
-   * The fix strips uc.tableId only inside TransactionLogFactory.create() (for destination auth);
-   * the original mergedConfigs in SyncToExternalCommand must retain it for source credential
-   * resolution via resolveCredentials(mergedConfigs, sourcePath).
+   * The fix strips uc.tableId only inside TransactionLogFactory.create() (for destination auth); the original
+   * mergedConfigs in SyncToExternalCommand must retain it for source credential resolution via
+   * resolveCredentials(mergedConfigs, sourcePath).
    */
   test("uc.tableId is still usable for source credential resolution after the fix") {
     val sourceTableId = "source-uc-table-id-for-read"
@@ -192,17 +191,16 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
-   * Regression test: NativeTransactionLog must re-invoke the credential provider before each
-   * write operation, not just once at construction time.
+   * Regression test: NativeTransactionLog must re-invoke the credential provider before each write operation, not just
+   * once at construction time.
    *
    * This matches the old S3CloudStorageProvider behaviour, which wrapped the provider in
-   * V1ToV2CredentialsProviderAdapter so the AWS SDK re-invoked it before every storage call.
-   * Without per-write refresh, credentials (typical UC TTL ~1 hour) expire during long-running
-   * companion builds, causing auth failures.
+   * V1ToV2CredentialsProviderAdapter so the AWS SDK re-invoked it before every storage call. Without per-write refresh,
+   * credentials (typical UC TTL ~1 hour) expire during long-running companion builds, causing auth failures.
    *
-   * We verify by counting how many times MockTableCredentialProvider.getCredentials() is called
-   * across multiple writes. With the fix, the path-based provider must be invoked at least once
-   * per write; without it (static credentials only), the count stays at 0 after construction.
+   * We verify by counting how many times MockTableCredentialProvider.getCredentials() is called across multiple writes.
+   * With the fix, the path-based provider must be invoked at least once per write; without it (static credentials
+   * only), the count stays at 0 after construction.
    */
   test("NativeTransactionLog re-invokes the credential provider on each write (not just at construction)") {
     import io.indextables.spark.testutils.MockTableCredentialProvider
@@ -248,16 +246,15 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
-   * Regression test: NativeTransactionLog must re-invoke the credential provider before each
-   * READ operation (listFiles, getSnapshot), not just before writes.
+   * Regression test: NativeTransactionLog must re-invoke the credential provider before each READ operation (listFiles,
+   * getSnapshot), not just before writes.
    *
-   * The old S3CloudStorageProvider re-invoked the credential provider before every S3 operation,
-   * including reads (listFiles triggered S3 calls on each invocation). Without per-read refresh,
-   * long-running Spark queries against companion tables will fail after ~1 hour when UC
-   * credentials in nativeConfig expire.
+   * The old S3CloudStorageProvider re-invoked the credential provider before every S3 operation, including reads
+   * (listFiles triggered S3 calls on each invocation). Without per-read refresh, long-running Spark queries against
+   * companion tables will fail after ~1 hour when UC credentials in nativeConfig expire.
    *
-   * Both listFilesArrow() and getOrRefreshSnapshot() now call refreshCredentials() at entry,
-   * matching the write-path pattern. This test verifies both paths.
+   * Both listFilesArrow() and getOrRefreshSnapshot() now call refreshCredentials() at entry, matching the write-path
+   * pattern. This test verifies both paths.
    */
   test("NativeTransactionLog re-invokes the credential provider on each read operation") {
     import io.indextables.spark.testutils.MockTableCredentialProvider

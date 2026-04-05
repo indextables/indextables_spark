@@ -35,7 +35,11 @@ import org.scalatest.BeforeAndAfterAll
  * (string), owner (int), subscriptionFilter (array[string]), message_date (date - partition-key), message_hour
  * (string), asv (string)
  */
-class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class GroupByAggQueryDebugTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _

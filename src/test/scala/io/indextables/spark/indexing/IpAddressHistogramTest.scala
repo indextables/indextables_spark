@@ -25,15 +25,14 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Validates that IP CIDR/wildcard filters work correctly on the histogram/bucket
- * aggregation execution path (GroupByAggregateColumnarReader → nativeAggregateArrowFfi
- * → perform_search_async_impl_leaf_response_with_aggregations).
+ * Validates that IP CIDR/wildcard filters work correctly on the histogram/bucket aggregation execution path
+ * (GroupByAggregateColumnarReader → nativeAggregateArrowFfi →
+ * perform_search_async_impl_leaf_response_with_aggregations).
  *
- * Uses a dedicated Spark session (like BucketAggregationTest) to avoid codegen cache
- * interference from the shared TestBase session.
+ * Uses a dedicated Spark session (like BucketAggregationTest) to avoid codegen cache interference from the shared
+ * TestBase session.
  */
-class IpAddressHistogramTest extends AnyFunSuite with Matchers
-    with io.indextables.spark.testutils.FileCleanupHelper {
+class IpAddressHistogramTest extends AnyFunSuite with Matchers with io.indextables.spark.testutils.FileCleanupHelper {
 
   def createTestSession(): SparkSession =
     SparkSession
@@ -44,7 +43,7 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
       .getOrCreate()
 
   test("IP CIDR filter with histogram aggregation") {
-    val spark = createTestSession()
+    val spark   = createTestSession()
     val tempDir = Files.createTempDirectory("ip-histogram-test").toFile
 
     try {
@@ -53,9 +52,9 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
       // Two IPs inside 192.168.1.0/24 with requests in different histogram buckets,
       // one IP outside the CIDR that must be excluded by the pushed-down filter.
       val data = Seq(
-        ("s1", "192.168.1.1", 15.0),  // bucket 0.0   (0–50)
-        ("s2", "192.168.1.2", 75.0),  // bucket 50.0  (50–100)
-        ("s3", "10.0.0.1",   200.0)   // outside CIDR — must NOT appear in results
+        ("s1", "192.168.1.1", 15.0), // bucket 0.0   (0–50)
+        ("s2", "192.168.1.2", 75.0), // bucket 50.0  (50–100)
+        ("s3", "10.0.0.1", 200.0)    // outside CIDR — must NOT appear in results
       ).toDF("name", "ip", "requests")
 
       data.write
@@ -71,15 +70,17 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
 
       df.createOrReplaceTempView("ip_hist")
 
-      val result = spark.sql(
-        """
-          |SELECT indextables_histogram(requests, 50.0) AS bucket, COUNT(*) AS cnt
-          |FROM ip_hist
-          |WHERE ip = '192.168.1.0/24'
-          |GROUP BY indextables_histogram(requests, 50.0)
-          |ORDER BY bucket
-          |""".stripMargin
-      ).collect()
+      val result = spark
+        .sql(
+          """
+            |SELECT indextables_histogram(requests, 50.0) AS bucket, COUNT(*) AS cnt
+            |FROM ip_hist
+            |WHERE ip = '192.168.1.0/24'
+            |GROUP BY indextables_histogram(requests, 50.0)
+            |ORDER BY bucket
+            |""".stripMargin
+        )
+        .collect()
 
       // s1 → bucket 0.0; s2 → bucket 50.0; s3 excluded by CIDR filter
       result.length shouldBe 2
@@ -88,21 +89,21 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
       result(1).getAs[Double]("bucket") shouldBe 50.0
       result(1).getAs[Long]("cnt") shouldBe 1
 
-    } finally {
-      try { deleteRecursively(tempDir) } finally { spark.stop() }
-    }
+    } finally
+      try deleteRecursively(tempDir)
+      finally spark.stop()
   }
 
   test("IP wildcard filter with histogram aggregation") {
-    val spark = createTestSession()
+    val spark   = createTestSession()
     val tempDir = Files.createTempDirectory("ip-wildcard-histogram-test").toFile
 
     try {
       import spark.implicits._
 
       val data = Seq(
-        ("s1", "10.0.0.1",  20.0),   // bucket 0.0   — inside 10.0.*.*
-        ("s2", "10.0.0.2",  80.0),   // bucket 50.0  — inside 10.0.*.*
+        ("s1", "10.0.0.1", 20.0),    // bucket 0.0   — inside 10.0.*.*
+        ("s2", "10.0.0.2", 80.0),    // bucket 50.0  — inside 10.0.*.*
         ("s3", "10.0.1.1", 120.0),   // bucket 100.0 — inside 10.0.*.*
         ("s4", "192.168.1.1", 999.0) // outside wildcard — must NOT appear
       ).toDF("name", "ip", "requests")
@@ -120,15 +121,17 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
 
       df.createOrReplaceTempView("ip_wildcard_hist")
 
-      val result = spark.sql(
-        """
-          |SELECT indextables_histogram(requests, 50.0) AS bucket, COUNT(*) AS cnt
-          |FROM ip_wildcard_hist
-          |WHERE ip = '10.0.*.*'
-          |GROUP BY indextables_histogram(requests, 50.0)
-          |ORDER BY bucket
-          |""".stripMargin
-      ).collect()
+      val result = spark
+        .sql(
+          """
+            |SELECT indextables_histogram(requests, 50.0) AS bucket, COUNT(*) AS cnt
+            |FROM ip_wildcard_hist
+            |WHERE ip = '10.0.*.*'
+            |GROUP BY indextables_histogram(requests, 50.0)
+            |ORDER BY bucket
+            |""".stripMargin
+        )
+        .collect()
 
       // s1 → 0.0; s2 → 50.0; s3 → 100.0; s4 excluded
       result.length shouldBe 3
@@ -139,8 +142,8 @@ class IpAddressHistogramTest extends AnyFunSuite with Matchers
       result(2).getAs[Double]("bucket") shouldBe 100.0
       result(2).getAs[Long]("cnt") shouldBe 1
 
-    } finally {
-      try { deleteRecursively(tempDir) } finally { spark.stop() }
-    }
+    } finally
+      try deleteRecursively(tempDir)
+      finally spark.stop()
   }
 }

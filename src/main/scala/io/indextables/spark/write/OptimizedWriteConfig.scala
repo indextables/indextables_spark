@@ -104,12 +104,24 @@ object OptimizedWriteConfig {
   def default: OptimizedWriteConfig = OptimizedWriteConfig()
 
   def fromOptions(options: CaseInsensitiveStringMap): OptimizedWriteConfig = {
-    val enabled              = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
-    val targetSplitSizeBytes = ConfigParsingUtils.parseSizeOption(options, KEY_TARGET_SPLIT_SIZE, DEFAULT_TARGET_SPLIT_SIZE_BYTES)
-    val samplingRatio        = ConfigParsingUtils.getDoubleOption(options, KEY_SAMPLING_RATIO, DEFAULT_SAMPLING_RATIO, minExclusive = Some(0.0))
-    val minRowsForEstimation = ConfigParsingUtils.getLongOption(options, KEY_MIN_ROWS_FOR_EST, DEFAULT_MIN_ROWS_FOR_ESTIMATION, mustBePositive = true)
-    val distributionMode     = ConfigParsingUtils.getStringOption(options, KEY_DISTRIBUTION_MODE, DEFAULT_DISTRIBUTION_MODE, VALID_DISTRIBUTION_MODES)
-    val maxSplitSizeBytes    = ConfigParsingUtils.parseSizeOption(options, KEY_MAX_SPLIT_SIZE, DEFAULT_MAX_SPLIT_SIZE_BYTES)
+    val enabled = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
+    val targetSplitSizeBytes =
+      ConfigParsingUtils.parseSizeOption(options, KEY_TARGET_SPLIT_SIZE, DEFAULT_TARGET_SPLIT_SIZE_BYTES)
+    val samplingRatio =
+      ConfigParsingUtils.getDoubleOption(options, KEY_SAMPLING_RATIO, DEFAULT_SAMPLING_RATIO, minExclusive = Some(0.0))
+    val minRowsForEstimation = ConfigParsingUtils.getLongOption(
+      options,
+      KEY_MIN_ROWS_FOR_EST,
+      DEFAULT_MIN_ROWS_FOR_ESTIMATION,
+      mustBePositive = true
+    )
+    val distributionMode = ConfigParsingUtils.getStringOption(
+      options,
+      KEY_DISTRIBUTION_MODE,
+      DEFAULT_DISTRIBUTION_MODE,
+      VALID_DISTRIBUTION_MODES
+    )
+    val maxSplitSizeBytes = ConfigParsingUtils.parseSizeOption(options, KEY_MAX_SPLIT_SIZE, DEFAULT_MAX_SPLIT_SIZE_BYTES)
 
     val config = OptimizedWriteConfig(
       enabled = enabled,

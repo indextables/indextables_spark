@@ -206,8 +206,8 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
   }
 
   /**
-   * Regression test: global invalidation must clear the native txlog cache, not only the
-   * JVM-level EnhancedTransactionLogCache. Before the fix, the global case only called
+   * Regression test: global invalidation must clear the native txlog cache, not only the JVM-level
+   * EnhancedTransactionLogCache. Before the fix, the global case only called
    * EnhancedTransactionLogCache.clearGlobalCaches() and never touched the native Rust cache.
    */
   test("global invalidation clears native txlog cache and subsequent reads still succeed") {
@@ -250,9 +250,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
     }
   }
 
-  /**
-   * Verify that two distinct tables both have their native caches cleared by a global invalidation.
-   */
+  /** Verify that two distinct tables both have their native caches cleared by a global invalidation. */
   test("global invalidation clears native cache for all tables, not just one") {
     withTempPath { tempDir1 =>
       withTempPath { tempDir2 =>
@@ -261,10 +259,16 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
         def addAndWarm(path: String): io.indextables.spark.transaction.TransactionLogInterface = {
           val tl = TransactionLogFactory.create(new Path(path), spark)
           tl.initialize(schema)
-          tl.addFile(io.indextables.spark.transaction.AddAction(
-            path = "f.split", partitionValues = Map.empty, size = 10L,
-            modificationTime = System.currentTimeMillis(), dataChange = true, numRecords = Some(1L)
-          ))
+          tl.addFile(
+            io.indextables.spark.transaction.AddAction(
+              path = "f.split",
+              partitionValues = Map.empty,
+              size = 10L,
+              modificationTime = System.currentTimeMillis(),
+              dataChange = true,
+              numRecords = Some(1L)
+            )
+          )
           tl.listFiles() // warm cache
           tl
         }

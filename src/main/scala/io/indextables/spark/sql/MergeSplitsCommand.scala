@@ -33,8 +33,8 @@ import io.indextables.spark.transaction.{
   AddAction,
   PartitionPredicateUtils,
   RemoveAction,
-  TransactionLogInterface,
-  TransactionLogFactory
+  TransactionLogFactory,
+  TransactionLogInterface
 }
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit

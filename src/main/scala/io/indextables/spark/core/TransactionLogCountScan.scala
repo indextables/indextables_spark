@@ -122,7 +122,8 @@ class TransactionLogCountBatch(
     }
 
   /** Compute the count from transaction log on the driver side. */
-  private def computeCountFromTransactionLog(transactionLog: TransactionLogInterface, pushedFilters: Array[Filter]): Long =
+  private def computeCountFromTransactionLog(transactionLog: TransactionLogInterface, pushedFilters: Array[Filter])
+    : Long =
     if (pushedFilters.isEmpty) {
       // No filters - return total count from transaction log
       transactionLog.getTotalRowCount()
@@ -341,16 +342,19 @@ class TransactionLogGroupByCountPartitionReader(
           localDate.toEpochDay.toInt
         } catch {
           case _: Exception =>
-            val n = try { value.toInt } catch {
-              case e: NumberFormatException =>
-                throw new IllegalArgumentException(
-                  s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e.getMessage}",
-                  e
-                )
-            }
+            val n =
+              try value.toInt
+              catch {
+                case e: NumberFormatException =>
+                  throw new IllegalArgumentException(
+                    s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e.getMessage}",
+                    e
+                  )
+              }
             if (!DistributedSourceScanner.isPlausibleEpochDay(n))
               throw new IllegalArgumentException(
-                s"Partition value '$value' for column '$columnName' is numeric but not a plausible epoch day (range: -100000..100000)")
+                s"Partition value '$value' for column '$columnName' is numeric but not a plausible epoch day (range: -100000..100000)"
+              )
             n
         }
 

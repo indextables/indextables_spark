@@ -37,7 +37,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsPartitionTest])
 
-  var tempTablePath: String          = _
+  var tempTablePath: String                   = _
   var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {

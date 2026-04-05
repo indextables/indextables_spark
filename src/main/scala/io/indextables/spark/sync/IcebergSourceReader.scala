@@ -48,17 +48,15 @@ object IcebergSourceReader {
     config
   }
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val logger         = LoggerFactory.getLogger(getClass)
   private val decimalPattern = """decimal\((\d+),\s*(\d+)\)""".r
-  private val fixedPattern = """fixed\[(\d+)\]""".r
+  private val fixedPattern   = """fixed\[(\d+)\]""".r
 
-  /**
-   * Parse schema JSON to Spark StructType, trying Spark format first and falling back to Iceberg format conversion.
-   */
+  /** Parse schema JSON to Spark StructType, trying Spark format first and falling back to Iceberg format conversion. */
   def parseSchemaJson(schemaJson: String): StructType =
-    try {
+    try
       DataType.fromJson(schemaJson).asInstanceOf[StructType]
-    } catch {
+    catch {
       case _: Exception =>
         logger.info("Schema JSON is not Spark-compatible, converting from Iceberg format")
         convertIcebergSchemaToSpark(schemaJson)
@@ -70,7 +68,7 @@ object IcebergSourceReader {
    * "fields":[{"name":"...", "type":"long", "nullable":true, "metadata":{}}]}
    */
   def convertIcebergSchemaToSpark(schemaJson: String): StructType = {
-    val root = JsonUtil.mapper.readTree(schemaJson)
+    val root   = JsonUtil.mapper.readTree(schemaJson)
     val fields = root.get("fields")
 
     val sparkFields = (0 until fields.size()).map { i =>
@@ -127,10 +125,10 @@ object IcebergSourceReader {
     case "binary" | "fixed"                                              => BinaryType
     case "date"                                                          => DateType
     case "timestamp" | "timestamptz" | "timestamp_ns" | "timestamptz_ns" => TimestampType
-    case "time"                           => LongType
-    case "uuid"                           => StringType
-    case fixedPattern(_)                  => BinaryType
-    case decimalPattern(precision, scale) => DecimalType(precision.toInt, scale.toInt)
+    case "time"                                                          => LongType
+    case "uuid"                                                          => StringType
+    case fixedPattern(_)                                                 => BinaryType
+    case decimalPattern(precision, scale)                                => DecimalType(precision.toInt, scale.toInt)
     case other =>
       logger.warn(s"Unknown Iceberg type '$other', defaulting to StringType")
       StringType
@@ -227,7 +225,9 @@ class IcebergSourceReader(
 
     // Extract DATE column names so we can convert Iceberg epoch-day partition
     // values to ISO format (e.g., "20527" -> "2026-03-22").
-    val schemaOpt = try Some(parsedSchema) catch { case _: Exception => None }
+    val schemaOpt =
+      try Some(parsedSchema)
+      catch { case _: Exception => None }
     val dateColumns = DistributedSourceScanner.extractDateColumns(schemaOpt)
 
     // Build files with absolute paths first (needed for partition value extraction).
@@ -235,8 +235,8 @@ class IcebergSourceReader(
     val absoluteFiles = parquetFiles.map { entry =>
       CompanionSourceFile(
         path = entry.getPath,
-        partitionValues = DistributedSourceScanner.normalizeIcebergDatePartitions(
-          entry.getPartitionValues.asScala.toMap, dateColumns),
+        partitionValues =
+          DistributedSourceScanner.normalizeIcebergDatePartitions(entry.getPartitionValues.asScala.toMap, dateColumns),
         size = entry.getFileSizeBytes
       )
     }

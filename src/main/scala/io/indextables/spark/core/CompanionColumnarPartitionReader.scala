@@ -34,9 +34,16 @@ import org.apache.spark.unsafe.types.UTF8String
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.arrow.ArrowFfiBridge
-import io.indextables.spark.metrics.{ReadPipelineMetrics, TaskSplitEngineCreationTime, TaskQueryBuildTime, TaskStreamingSessionStartTime, TaskNextBatchTime, TaskBatchAssemblyTime}
-import io.indextables.spark.sync.DistributedSourceScanner
+import io.indextables.spark.metrics.{
+  ReadPipelineMetrics,
+  TaskBatchAssemblyTime,
+  TaskNextBatchTime,
+  TaskQueryBuildTime,
+  TaskSplitEngineCreationTime,
+  TaskStreamingSessionStartTime
+}
 import io.indextables.spark.search.SplitSearchEngine
+import io.indextables.spark.sync.DistributedSourceScanner
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.SplitSearcher
 import org.slf4j.LoggerFactory
@@ -164,8 +171,8 @@ class ColumnarPartitionReader(
     // Start streaming session on first call
     if (streamingSession == null) {
       val queryBuildT0 = System.nanoTime()
-      val splitQuery    = ctx.buildSplitQuery(splitSearchEngine)
-      val queryAstJson  = splitQuery.toQueryAstJson()
+      val splitQuery   = ctx.buildSplitQuery(splitSearchEngine)
+      val queryAstJson = splitQuery.toQueryAstJson()
       pipelineMetrics.queryBuildNs = System.nanoTime() - queryBuildT0
 
       val typeHints     = buildTypeHints()
@@ -219,7 +226,7 @@ class ColumnarPartitionReader(
     }
 
     val assemblyT0 = System.nanoTime()
-    val dataBatch = bridge.importAsColumnarBatchStreaming(arrays, schemas, rows)
+    val dataBatch  = bridge.importAsColumnarBatchStreaming(arrays, schemas, rows)
     currentBatch = assembleColumnarBatch(dataBatch, rows)
     pipelineMetrics.batchAssemblyTotalNs += System.nanoTime() - assemblyT0
 
@@ -227,7 +234,7 @@ class ColumnarPartitionReader(
     pipelineMetrics.totalRows = totalRowsReturned
     logger.debug(
       s"Streaming: batch with $rows rows for ${addAction.path}, totalRowsReturned=$totalRowsReturned" +
-      f", nextBatch=${nextBatchElapsed / 1e6}%.1f ms"
+        f", nextBatch=${nextBatchElapsed / 1e6}%.1f ms"
     )
     true
   }
@@ -435,26 +442,32 @@ class ColumnarPartitionReader(
         case BooleanType => vec.setBoolean(value.toBoolean)
         case ShortType   => vec.setShort(value.toShort)
         case ByteType    => vec.setByte(value.toByte)
-        case DateType =>
+        case DateType    =>
           // Handle both ISO date strings (e.g., "2026-03-22") and epoch-day numbers
           // (e.g., "20527" from older companion indexes). The build-side fix in
           // DistributedSourceScanner normalizes to ISO, so try that first to avoid
           // exception allocation on the common path.
-          val epochDay = try {
-            val dateStr = if (value.contains("T")) value.substring(0, 10) else value
-            java.time.LocalDate.parse(dateStr).toEpochDay.toInt // ISO date string (common case)
-          } catch {
-            case _: Exception =>
-              val n = try { value.toInt } catch {
-                case e: NumberFormatException =>
+          val epochDay =
+            try {
+              val dateStr = if (value.contains("T")) value.substring(0, 10) else value
+              java.time.LocalDate.parse(dateStr).toEpochDay.toInt // ISO date string (common case)
+            } catch {
+              case _: Exception =>
+                val n =
+                  try value.toInt
+                  catch {
+                    case e: NumberFormatException =>
+                      throw new IllegalArgumentException(
+                        s"Cannot convert partition value '$value' to DateType: ${e.getMessage}",
+                        e
+                      )
+                  }
+                if (!DistributedSourceScanner.isPlausibleEpochDay(n))
                   throw new IllegalArgumentException(
-                    s"Cannot convert partition value '$value' to DateType: ${e.getMessage}", e)
-              }
-              if (!DistributedSourceScanner.isPlausibleEpochDay(n))
-                throw new IllegalArgumentException(
-                  s"Partition value '$value' is numeric but not a plausible epoch day (range: -100000..100000)")
-              n
-          }
+                    s"Partition value '$value' is numeric but not a plausible epoch day (range: -100000..100000)"
+                  )
+                n
+            }
           vec.setInt(epochDay)
         case TimestampType =>
           val instant = if (value.contains("T")) {

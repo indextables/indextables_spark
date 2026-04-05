@@ -43,7 +43,11 @@ import org.scalatest.BeforeAndAfterAll
  *
  * Run with: mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.sql.ConcurrentTableRootCommandsTest'
  */
-class ConcurrentTableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class ConcurrentTableRootCommandsTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _

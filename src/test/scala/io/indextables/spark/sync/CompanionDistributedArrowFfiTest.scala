@@ -28,7 +28,6 @@ import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -200,17 +199,21 @@ class CompanionDistributedArrowFfiTest
       val distPath    = new File(root, "index-dist").getAbsolutePath
       val nonDistPath = new File(root, "index-nondist").getAbsolutePath
 
-      val distResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.test' AT LOCATION '$distPath'"
-      ).collect()
+      val distResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.test' AT LOCATION '$distPath'"
+        )
+        .collect()
 
       flushCaches()
 
       spark.conf.set("spark.indextables.companion.sync.distributedLogRead.enabled", "false")
       try {
-        val nonDistResult = spark.sql(
-          s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.test' AT LOCATION '$nonDistPath'"
-        ).collect()
+        val nonDistResult = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.test' AT LOCATION '$nonDistPath'"
+          )
+          .collect()
 
         distResult(0).getString(2) shouldBe "success"
         nonDistResult(0).getString(2) shouldBe "success"
@@ -238,9 +241,11 @@ class CompanionDistributedArrowFfiTest
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       createDeltaSource(deltaPath)
-      val buildResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
-      ).collect()
+      val buildResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+        )
+        .collect()
       buildResult(0).getString(2) shouldBe "success"
 
       flushCaches()
@@ -277,9 +282,11 @@ class CompanionDistributedArrowFfiTest
     withIcebergSource("ffi_test") { (_, root) =>
       val indexPath = new File(root, "index").getAbsolutePath
 
-      val buildResult = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.ffi_test' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
-      ).collect()
+      val buildResult = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.ffi_test' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+        )
+        .collect()
       buildResult(0).getString(2) shouldBe "success"
 
       flushCaches()

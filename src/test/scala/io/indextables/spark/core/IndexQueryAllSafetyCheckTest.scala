@@ -30,7 +30,10 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for the _indexall safety check that rejects queries searching too many fields. Uses tantivy4java's
  * SplitQuery.countQueryFields() for accurate field counting.
  */
-class IndexQueryAllSafetyCheckTest extends AnyFunSuite with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class IndexQueryAllSafetyCheckTest
+    extends AnyFunSuite
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   @transient private var _spark: SparkSession = _
   private var tempDir: java.nio.file.Path     = _

@@ -282,7 +282,6 @@ object MergeUploader {
     }
   }
 
-
   /**
    * Upload a local file to Azure Blob Storage.
    *

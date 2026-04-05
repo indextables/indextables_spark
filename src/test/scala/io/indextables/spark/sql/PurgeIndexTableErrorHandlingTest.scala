@@ -29,7 +29,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Error handling and edge case tests for PURGE INDEXTABLE command. */
-class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PurgeIndexTableErrorHandlingTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _

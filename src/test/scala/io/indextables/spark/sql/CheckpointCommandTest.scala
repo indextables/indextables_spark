@@ -28,7 +28,11 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /** Tests for CHECKPOINT INDEXTABLES command. */
-class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CheckpointCommandTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -232,21 +236,21 @@ class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfte
   }
 
   /**
-   * Regression test: CHECKPOINT INDEXTABLES must resolve credentials via TransactionLogFactory.create(),
-   * not bypass it with a freshly-built nativeConfig from ConfigMapper.toNativeConfig(options).
+   * Regression test: CHECKPOINT INDEXTABLES must resolve credentials via TransactionLogFactory.create(), not bypass it
+   * with a freshly-built nativeConfig from ConfigMapper.toNativeConfig(options).
    *
-   * Before the fix (commit c75465ba), CheckpointCommand called TransactionLogWriter.createCheckpoint
-   * with a nativeConfig built directly from raw options — bypassing resolveCredentialsOnDriver.
-   * On Databricks/UC, this meant no credentials were injected into nativeConfig, causing the native
-   * Rust layer to use anonymous/instance-role access and fail with 403 on UC-controlled S3 paths.
+   * Before the fix (commit c75465ba), CheckpointCommand called TransactionLogWriter.createCheckpoint with a
+   * nativeConfig built directly from raw options — bypassing resolveCredentialsOnDriver. On Databricks/UC, this meant
+   * no credentials were injected into nativeConfig, causing the native Rust layer to use anonymous/instance-role access
+   * and fail with 403 on UC-controlled S3 paths.
    *
-   * After the fix, CheckpointCommand delegates through transactionLog.createCheckpoint(), which uses
-   * the NativeTransactionLog's own nativeConfig (populated via TransactionLogFactory.create's
-   * resolveCredentialsOnDriver call) and also calls refreshCredentials() before the write.
+   * After the fix, CheckpointCommand delegates through transactionLog.createCheckpoint(), which uses the
+   * NativeTransactionLog's own nativeConfig (populated via TransactionLogFactory.create's resolveCredentialsOnDriver
+   * call) and also calls refreshCredentials() before the write.
    *
-   * We verify via MockTableCredentialProvider: if CHECKPOINT calls resolveCredentialsOnDriver,
-   * getCredentials() is invoked and pathCredentialCallCount increments. If it bypasses resolution,
-   * the count stays unchanged after checkpoint.
+   * We verify via MockTableCredentialProvider: if CHECKPOINT calls resolveCredentialsOnDriver, getCredentials() is
+   * invoked and pathCredentialCallCount increments. If it bypasses resolution, the count stays unchanged after
+   * checkpoint.
    */
   test("CHECKPOINT INDEXTABLES invokes credential provider from Spark conf (regression for credential bypass bug)") {
     import io.indextables.spark.testutils.MockTableCredentialProvider

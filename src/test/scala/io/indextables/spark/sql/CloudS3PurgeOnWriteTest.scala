@@ -208,11 +208,11 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
 
     // Common write options for this test
     val s3Opts = Map(
-      "spark.indextables.aws.accessKey"        -> accessKey,
-      "spark.indextables.aws.secretKey"        -> secretKey,
-      "spark.indextables.aws.region"           -> S3_REGION,
-      "spark.indextables.checkpoint.enabled"   -> "true",
-      "spark.indextables.checkpoint.interval"  -> "10"
+      "spark.indextables.aws.accessKey"       -> accessKey,
+      "spark.indextables.aws.secretKey"       -> secretKey,
+      "spark.indextables.aws.region"          -> S3_REGION,
+      "spark.indextables.checkpoint.enabled"  -> "true",
+      "spark.indextables.checkpoint.interval" -> "10"
     )
 
     // Write 12 times to create version files 0-11 and a checkpoint at version 10
@@ -235,9 +235,11 @@ class CloudS3PurgeOnWriteTest extends CloudS3TestBase {
     assert(versionFilesBefore >= 10, s"Should have at least 10 version files before purge, got $versionFilesBefore")
 
     // Run synchronous purge via SQL (no sleep/timing dependency)
-    spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS"
-    ).collect()
+    spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS TRANSACTION LOG RETENTION 0 HOURS"
+      )
+      .collect()
 
     // Verify old pre-checkpoint version files were deleted
     val versionFilesAfter = fs.listStatus(txLogPath).count(_.getPath.getName.matches("\\d+\\.json"))

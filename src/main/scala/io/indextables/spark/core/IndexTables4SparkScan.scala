@@ -35,7 +35,15 @@ import io.indextables.spark.metrics._
 import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.stats.DataSkippingMetrics
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, NativeFilteringMetrics, NativeListFilesResult, NativeTransactionLog, PartitionPredicateUtils, SparkFilterToNativeFilter, TransactionLogInterface}
+import io.indextables.spark.transaction.{
+  AddAction,
+  NativeFilteringMetrics,
+  NativeListFilesResult,
+  NativeTransactionLog,
+  PartitionPredicateUtils,
+  SparkFilterToNativeFilter,
+  TransactionLogInterface
+}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -81,7 +89,7 @@ class IndexTables4SparkScan(
   // Replaces: getPartitionColumns + listFilesWithPartitionFilters + applyDataSkipping + getSchema
   private lazy val cachedListFilesResult: NativeListFilesResult = {
     // Separate partition vs data filters using shared utility
-    val partitionColumns = transactionLog.getPartitionColumns()
+    val partitionColumns                = transactionLog.getPartitionColumns()
     val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
 
     // Single native call: partition pruning + data skipping + cooldown filtering + metadata
@@ -120,9 +128,9 @@ class IndexTables4SparkScan(
 
     logger.debug(
       s"Native filtering: ${m.totalFilesBeforeFiltering} total → " +
-      s"${m.filesAfterPartitionPruning} after partition → " +
-      s"${m.filesAfterDataSkipping} after data skip → " +
-      s"${result.files.size} final (${m.manifestsPruned}/${m.manifestsTotal} manifests pruned)"
+        s"${m.filesAfterPartitionPruning} after partition → " +
+        s"${m.filesAfterDataSkipping} after data skip → " +
+        s"${result.files.size} final (${m.manifestsPruned}/${m.manifestsTotal} manifests pruned)"
     )
 
     result
@@ -179,7 +187,7 @@ class IndexTables4SparkScan(
     // Time this call to capture native filtering cost within the planInputPartitions window.
     // If estimateStatistics() already triggered the lazy val, this returns instantly (0 ns).
     val nativeFilterStart = System.nanoTime()
-    val filteredActions = getFilteredActions()
+    val filteredActions   = getFilteredActions()
     planningMetrics.nativeFilteringNs = System.nanoTime() - nativeFilterStart
     planningMetrics.totalFilesBeforeFiltering = cachedListFilesResult.metrics.totalFilesBeforeFiltering
     planningMetrics.resultFiles = filteredActions.size
@@ -306,8 +314,8 @@ class IndexTables4SparkScan(
 
     // Batch-assign all splits for this query using per-query load balancing
     val localityStart = System.nanoTime()
-    val splitPaths  = filteredActions.map(_.path)
-    val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    val splitPaths    = filteredActions.map(_.path)
+    val assignments   = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
     planningMetrics.localityAssignmentNs = System.nanoTime() - localityStart
     logger.debug(s"Assigned ${assignments.size} splits to hosts")
 
@@ -487,8 +495,6 @@ class IndexTables4SparkScan(
         // Return unknown statistics rather than failing the query
         IndexTables4SparkStatistics.unknown()
     }
-
-
 
   // ============================================================================
   // Filter utilities

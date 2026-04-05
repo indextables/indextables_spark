@@ -27,11 +27,10 @@ class PartitionPruningOptimizationIntegrationTest extends TestBase {
 
   private val provider = INDEXTABLES_FORMAT
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     super.beforeEach()
-    // Clear partition filter cache before each test
-    // Native caches are managed by tantivy4java
-  }
+  // Clear partition filter cache before each test
+  // Native caches are managed by tantivy4java
 
   test("Integration: equality filter with partition index") {
     withTempPath { path =>

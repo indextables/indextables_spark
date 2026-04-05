@@ -28,7 +28,6 @@ import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -240,9 +239,9 @@ class CompanionBucketAggregationTest
 
       f(companionDf)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      try spark.conf.unset("spark.indextables.iceberg.catalogType")
       catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      try spark.conf.unset("spark.indextables.iceberg.uri")
       catch { case _: Exception => }
       server.close()
       deleteRecursively(root)
@@ -306,7 +305,7 @@ class CompanionBucketAggregationTest
       rows.length should be >= 2
 
       val counts = rows.map(_.getAs[Long]("cnt"))
-      counts.sum shouldBe 8L // all 8 rows accounted for
+      counts.sum shouldBe 8L           // all 8 rows accounted for
       counts.foreach(_ should be > 0L) // no empty buckets
     }
   }
@@ -453,7 +452,7 @@ class CompanionBucketAggregationTest
       rows.length should be >= 2
 
       val counts = rows.map(_.getAs[Long]("cnt"))
-      counts.sum shouldBe 8L // all 8 rows accounted for
+      counts.sum shouldBe 8L           // all 8 rows accounted for
       counts.foreach(_ should be > 0L) // no empty buckets
     }
   }

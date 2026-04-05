@@ -105,50 +105,67 @@ class PurgeOrphanedSplitsExecutor(
     // The native layer evaluates version retention and returns all split file paths
     // referenced by any non-expired version. This is the "known files" set.
     val retainedFilePaths = {
-      val paths   = scala.collection.mutable.Set[String]()
-      val cursor  = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
+      val paths  = scala.collection.mutable.Set[String]()
+      val cursor = TransactionLogReader.openRetainedFilesCursor(nativeTablePath, nativeConfig, txLogRetentionMs)
       try {
         val numCols = 20 // base schema including partition_values (no dynamic partitions for purge)
-        val bridge = new io.indextables.spark.arrow.ArrowFfiBridge()
+        val bridge  = new io.indextables.spark.arrow.ArrowFfiBridge()
         try {
           var continue = true
           while (continue) {
             val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
             try {
               val rowCount = TransactionLogReader.readNextRetainedFilesBatchArrowFfi(
-                cursor, 10000, arrayAddrs, schemaAddrs
+                cursor,
+                10000,
+                arrayAddrs,
+                schemaAddrs
               )
               if (rowCount > 0) {
                 // importAsColumnarBatchStreaming transfers ownership of all structs
                 val batch = bridge.importAsColumnarBatchStreaming(arrays.take(numCols), schemas.take(numCols), rowCount)
                 try {
-                  val pathVec = batch.column(0).asInstanceOf[
-                    org.apache.spark.sql.vectorized.ArrowColumnVector
-                  ].getValueVector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
+                  val pathVec = batch
+                    .column(0)
+                    .asInstanceOf[
+                      org.apache.spark.sql.vectorized.ArrowColumnVector
+                    ]
+                    .getValueVector
+                    .asInstanceOf[org.apache.arrow.vector.VarCharVector]
                   var i = 0
                   while (i < rowCount) {
                     if (!pathVec.isNull(i)) paths += new String(pathVec.get(i), java.nio.charset.StandardCharsets.UTF_8)
                     i += 1
                   }
-                } finally {
+                } finally
                   batch.close()
-                }
               } else {
                 continue = false
                 // Close unused structs — native didn't fill them
-                arrays.foreach(a => try a.close() catch { case _: Exception => })
-                schemas.foreach(s => try s.close() catch { case _: Exception => })
+                arrays.foreach(a =>
+                  try a.close()
+                  catch { case _: Exception => }
+                )
+                schemas.foreach(s =>
+                  try s.close()
+                  catch { case _: Exception => }
+                )
               }
             } catch {
               case e: Exception =>
-                arrays.foreach(a => try a.close() catch { case _: Exception => })
-                schemas.foreach(s => try s.close() catch { case _: Exception => })
+                arrays.foreach(a =>
+                  try a.close()
+                  catch { case _: Exception => }
+                )
+                schemas.foreach(s =>
+                  try s.close()
+                  catch { case _: Exception => }
+                )
                 throw e
             }
           }
-        } finally {
+        } finally
           bridge.close()
-        }
       } finally
         TransactionLogReader.closeRetainedFilesCursor(cursor)
       paths.toSet
@@ -158,8 +175,10 @@ class PurgeOrphanedSplitsExecutor(
     // --- Step 2: Native cleanup of expired states and versions ---
     // For dry run, use dryRun=true to get counts. Guard deleted counts in Scala as a
     // safety net until native dryRun is fully verified. For real runs, delete with dryRun=false.
-    val stateResultJson   = TransactionLogWriter.deleteExpiredStates(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
-    val versionResultJson = TransactionLogWriter.deleteExpiredVersions(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
+    val stateResultJson =
+      TransactionLogWriter.deleteExpiredStates(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
+    val versionResultJson =
+      TransactionLogWriter.deleteExpiredVersions(nativeTablePath, nativeConfig, txLogRetentionMs, dryRun)
 
     // Invalidate cache after deletion so subsequent reads rebuild from current state.
     // Invalidate both the normalized path (used by this txlog instance) and the raw path
@@ -198,10 +217,15 @@ class PurgeOrphanedSplitsExecutor(
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = 0, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun, durationMs = durationMs,
+        orphanedFilesFound = 0,
+        orphanedFilesDeleted = 0,
+        sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted,
+        retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found,
+        expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun,
+        durationMs = durationMs,
         message = Some(s"No split files found in table directory.$stateMessage")
       )
     }
@@ -220,10 +244,15 @@ class PurgeOrphanedSplitsExecutor(
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = 0, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun, durationMs = durationMs,
+        orphanedFilesFound = 0,
+        orphanedFilesDeleted = 0,
+        sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted,
+        retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found,
+        expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun,
+        durationMs = durationMs,
         message = Some(s"No orphaned files found.$stateMessage")
       )
     }
@@ -232,17 +261,25 @@ class PurgeOrphanedSplitsExecutor(
     val retentionTimestamp  = System.currentTimeMillis() - (retentionHours * 3600 * 1000)
     val eligibleForDeletion = orphanedFiles.filter(col("modificationTime") < retentionTimestamp)
     val eligibleCount       = eligibleForDeletion.count()
-    logger.info(s"Orphaned files eligible for deletion: $eligibleCount (skipped ${orphanedCount - eligibleCount} too recent)")
+    logger.info(
+      s"Orphaned files eligible for deletion: $eligibleCount (skipped ${orphanedCount - eligibleCount} too recent)"
+    )
 
     if (eligibleCount == 0) {
       val durationMs = System.currentTimeMillis() - startTime
       return PurgeResult(
         status = if (dryRun) "DRY_RUN" else "SUCCESS",
-        orphanedFilesFound = orphanedCount, orphanedFilesDeleted = 0, sizeMBDeleted = 0.0,
-        txLogFilesDeleted = versionFilesDeleted, retentionHours = retentionHours,
-        expiredStatesFound = stateCleanupResult.found, expiredStatesDeleted = stateCleanupResult.deleted,
-        dryRun = dryRun, durationMs = durationMs,
-        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
+        orphanedFilesFound = orphanedCount,
+        orphanedFilesDeleted = 0,
+        sizeMBDeleted = 0.0,
+        txLogFilesDeleted = versionFilesDeleted,
+        retentionHours = retentionHours,
+        expiredStatesFound = stateCleanupResult.found,
+        expiredStatesDeleted = stateCleanupResult.deleted,
+        dryRun = dryRun,
+        durationMs = durationMs,
+        message =
+          Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours).$stateMessage")
       )
     }
 
@@ -943,8 +980,7 @@ class PurgeOrphanedSplitsExecutor(
    *   The specific versions to scan (typically versions that will remain after cleanup) Returns: Seq[AddAction]
    *   containing all files that appear in any of the specified versions
    */
-  private def getAllFilesFromVersions(txLog: TransactionLogInterface, versionsToScan: Seq[Long])
-    : Seq[AddAction] = {
+  private def getAllFilesFromVersions(txLog: TransactionLogInterface, versionsToScan: Seq[Long]): Seq[AddAction] = {
     logger.info(s"Scanning ${versionsToScan.size} transaction log versions for file references (time travel support)")
 
     // Collect all unique file paths that appear in ANY of the specified versions
@@ -1021,9 +1057,9 @@ class PurgeOrphanedSplitsExecutor(
     // scanning them would over-protect files that have since been removed (e.g., by MERGE
     // or DROP PARTITIONS). Only post-checkpoint versions may contain state changes not yet
     // reflected in a checkpoint.
-    val checkpointVersion = txLog.getLastCheckpointVersion().getOrElse(-1L)
+    val checkpointVersion      = txLog.getLastCheckpointVersion().getOrElse(-1L)
     val postCheckpointVersions = versionsToKeep.filter(_ > checkpointVersion)
-    val versionFiles = getAllFilesFromVersions(txLog, postCheckpointVersions)
+    val versionFiles           = getAllFilesFromVersions(txLog, postCheckpointVersions)
     versionFiles.foreach { add =>
       allFilePaths += add.path
       // Keep the most recent AddAction for each path (for metadata like size)
@@ -1223,9 +1259,9 @@ class PurgeOrphanedSplitsExecutor(
   private def parseActionsFromStream(provider: CloudStorageProvider, filePath: String): Seq[Action] = {
     import io.indextables.spark.util.JsonUtil
 
-    val rawStream           = provider.openInputStream(filePath)
-    val reader              = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
-    val actions             = ListBuffer[Action]()
+    val rawStream = provider.openInputStream(filePath)
+    val reader    = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
+    val actions   = ListBuffer[Action]()
 
     try {
       var line = reader.readLine()
@@ -1252,9 +1288,11 @@ class PurgeOrphanedSplitsExecutor(
       .map { line =>
         EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode = JsonUtil.mapper.readTree(line)
-        ActionJsonSerializer.parseActionFromJsonNode(jsonNode).getOrElse(
-          throw new IllegalArgumentException(s"Unknown action type in line: $line")
-        )
+        ActionJsonSerializer
+          .parseActionFromJsonNode(jsonNode)
+          .getOrElse(
+            throw new IllegalArgumentException(s"Unknown action type in line: $line")
+          )
       }
       .toSeq
   }
@@ -1425,9 +1463,7 @@ class PurgeOrphanedSplitsExecutor(
     spark.createDataset(addedFiles)
   }
 
-  /**
-   * Convert retained file paths from the native layer into a Dataset of filenames for anti-join.
-   */
+  /** Convert retained file paths from the native layer into a Dataset of filenames for anti-join. */
   private def getValidSplitFilesFromRetainedPaths(retainedPaths: Set[String]): Dataset[String] = {
     import spark.implicits._
     val filenames = retainedPaths.map(_.split('/').last).toSeq

@@ -27,7 +27,6 @@ import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
@@ -103,13 +102,12 @@ class CompanionPurgeTest
 
   // ── Delta helpers ───────────────────────────────────────────────────────────
 
-  private def createDeltaSource(deltaPath: String): Unit = {
+  private def createDeltaSource(deltaPath: String): Unit =
     spark
       .createDataFrame(spark.sparkContext.parallelize(testRows), sparkSchema)
       .write
       .format("delta")
       .save(deltaPath)
-  }
 
   private def buildDeltaCompanion(deltaPath: String, indexPath: String): Unit = {
     val result = spark
@@ -121,25 +119,27 @@ class CompanionPurgeTest
     flushCaches()
   }
 
-  private def readCompanion(indexPath: String): org.apache.spark.sql.DataFrame = {
+  private def readCompanion(indexPath: String): org.apache.spark.sql.DataFrame =
     spark.read
       .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
       .option("spark.indextables.read.defaultLimit", "1000")
       .load(indexPath)
-  }
 
-  private def createOrphanFile(indexPath: String, name: String, ageHoursAgo: Long): File = {
+  private def createOrphanFile(
+    indexPath: String,
+    name: String,
+    ageHoursAgo: Long
+  ): File = {
     val orphanFile = new File(indexPath, name)
     orphanFile.createNewFile()
     orphanFile.setLastModified(System.currentTimeMillis() - (ageHoursAgo * 60 * 60 * 1000))
     orphanFile
   }
 
-  private def setAllSplitTimestamps(indexPath: String, ageHoursAgo: Long): Unit = {
+  private def setAllSplitTimestamps(indexPath: String, ageHoursAgo: Long): Unit =
     new File(indexPath).listFiles().filter(_.getName.endsWith(".split")).foreach { f =>
       f.setLastModified(System.currentTimeMillis() - (ageHoursAgo * 60 * 60 * 1000))
     }
-  }
 
   // ── Iceberg helpers ─────────────────────────────────────────────────────────
 
@@ -219,9 +219,9 @@ class CompanionPurgeTest
 
       f(root, indexPath, server, tableId)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      try spark.conf.unset("spark.indextables.iceberg.catalogType")
       catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      try spark.conf.unset("spark.indextables.iceberg.uri")
       catch { case _: Exception => }
       server.close()
       deleteRecursively(root)
@@ -423,127 +423,151 @@ class CompanionPurgeTest
   // ═══════════════════════════════════════════════════════════════════════════
 
   test("PURGE on Iceberg companion should delete orphaned splits") {
-    withIcebergCompanion { (_, indexPath, _, _) =>
-      val validSplitsBefore = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
-      validSplitsBefore should be > 0
+    withIcebergCompanion {
+      (
+        _,
+        indexPath,
+        _,
+        _
+      ) =>
+        val validSplitsBefore = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
+        validSplitsBefore should be > 0
 
-      // Create orphaned .split files aged 25 hours
-      val orphan1 = createOrphanFile(indexPath, "orphan-ice-1111-2222-3333-444444444444.split", 25)
-      val orphan2 = createOrphanFile(indexPath, "orphan-ice-5555-6666-7777-888888888888.split", 25)
+        // Create orphaned .split files aged 25 hours
+        val orphan1 = createOrphanFile(indexPath, "orphan-ice-1111-2222-3333-444444444444.split", 25)
+        val orphan2 = createOrphanFile(indexPath, "orphan-ice-5555-6666-7777-888888888888.split", 25)
 
-      // Purge
-      val result  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
-      val metrics = result(0).getStruct(1)
+        // Purge
+        val result  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
+        val metrics = result(0).getStruct(1)
 
-      metrics.getString(0) shouldBe "SUCCESS"
-      metrics.getLong(1) should be >= 2L
-      metrics.getLong(2) should be >= 2L
+        metrics.getString(0) shouldBe "SUCCESS"
+        metrics.getLong(1) should be >= 2L
+        metrics.getLong(2) should be >= 2L
 
-      // Verify orphans deleted
-      orphan1.exists() shouldBe false
-      orphan2.exists() shouldBe false
+        // Verify orphans deleted
+        orphan1.exists() shouldBe false
+        orphan2.exists() shouldBe false
 
-      // Verify valid splits preserved
-      val validSplitsAfter = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
-      validSplitsAfter shouldBe validSplitsBefore
+        // Verify valid splits preserved
+        val validSplitsAfter = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
+        validSplitsAfter shouldBe validSplitsBefore
 
-      // Verify data still readable
-      val df = readCompanion(indexPath)
-      df.count() shouldBe 5
+        // Verify data still readable
+        val df = readCompanion(indexPath)
+        df.count() shouldBe 5
     }
   }
 
   test("PURGE should not delete valid Iceberg companion splits") {
-    withIcebergCompanion { (_, indexPath, _, _) =>
-      // Set old timestamps on ALL files (valid + will-be-orphaned)
-      setAllSplitTimestamps(indexPath, 25)
+    withIcebergCompanion {
+      (
+        _,
+        indexPath,
+        _,
+        _
+      ) =>
+        // Set old timestamps on ALL files (valid + will-be-orphaned)
+        setAllSplitTimestamps(indexPath, 25)
 
-      // Create orphaned .split file also aged 25 hours
-      val orphan = createOrphanFile(indexPath, "orphan-ice-aaaa-bbbb-cccc-dddddddddddd.split", 25)
+        // Create orphaned .split file also aged 25 hours
+        val orphan = createOrphanFile(indexPath, "orphan-ice-aaaa-bbbb-cccc-dddddddddddd.split", 25)
 
-      val validSplitsBefore = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
+        val validSplitsBefore = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
 
-      // Purge
-      val result  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
-      val metrics = result(0).getStruct(1)
+        // Purge
+        val result  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
+        val metrics = result(0).getStruct(1)
 
-      metrics.getString(0) shouldBe "SUCCESS"
+        metrics.getString(0) shouldBe "SUCCESS"
 
-      // Only the orphan should be deleted
-      orphan.exists() shouldBe false
+        // Only the orphan should be deleted
+        orphan.exists() shouldBe false
 
-      val validSplitsAfter = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
-      validSplitsAfter shouldBe (validSplitsBefore - 1)
+        val validSplitsAfter = new File(indexPath).listFiles().count(_.getName.endsWith(".split"))
+        validSplitsAfter shouldBe (validSplitsBefore - 1)
 
-      // Verify table is still readable
-      val df = readCompanion(indexPath)
-      df.count() shouldBe 5
+        // Verify table is still readable
+        val df = readCompanion(indexPath)
+        df.count() shouldBe 5
     }
   }
 
   test("PURGE on Iceberg companion preserves data integrity") {
-    withIcebergCompanion { (_, indexPath, _, _) =>
-      // Create orphans and purge
-      createOrphanFile(indexPath, "orphan-integrity-1111-2222-3333-444444444444.split", 25)
-      createOrphanFile(indexPath, "orphan-integrity-5555-6666-7777-888888888888.split", 25)
+    withIcebergCompanion {
+      (
+        _,
+        indexPath,
+        _,
+        _
+      ) =>
+        // Create orphans and purge
+        createOrphanFile(indexPath, "orphan-integrity-1111-2222-3333-444444444444.split", 25)
+        createOrphanFile(indexPath, "orphan-integrity-5555-6666-7777-888888888888.split", 25)
 
-      val result  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
-      val metrics = result(0).getStruct(1)
-      metrics.getString(0) shouldBe "SUCCESS"
+        val result  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
+        val metrics = result(0).getStruct(1)
+        metrics.getString(0) shouldBe "SUCCESS"
 
-      // Verify all rows are still correct
-      val df   = readCompanion(indexPath)
-      val rows = df.collect()
-      rows.length shouldBe 5
+        // Verify all rows are still correct
+        val df   = readCompanion(indexPath)
+        val rows = df.collect()
+        rows.length shouldBe 5
 
-      val rowsById = rows.map(r => r.getAs[Int]("id") -> r).toMap
-      rowsById.size shouldBe 5
+        val rowsById = rows.map(r => r.getAs[Int]("id") -> r).toMap
+        rowsById.size shouldBe 5
 
-      rowsById(1).getAs[String]("name") shouldBe "alice"
-      rowsById(2).getAs[String]("name") shouldBe "bob"
-      rowsById(3).getAs[String]("name") shouldBe "charlie"
-      rowsById(4).getAs[String]("name") shouldBe "dave"
-      rowsById(5).getAs[String]("name") shouldBe "eve"
+        rowsById(1).getAs[String]("name") shouldBe "alice"
+        rowsById(2).getAs[String]("name") shouldBe "bob"
+        rowsById(3).getAs[String]("name") shouldBe "charlie"
+        rowsById(4).getAs[String]("name") shouldBe "dave"
+        rowsById(5).getAs[String]("name") shouldBe "eve"
 
-      rowsById(1).getAs[Double]("score") shouldBe 85.0 +- 0.01
-      rowsById(2).getAs[Double]("score") shouldBe 92.5 +- 0.01
-      rowsById(3).getAs[Double]("score") shouldBe 78.0 +- 0.01
-      rowsById(4).getAs[Double]("score") shouldBe 95.1 +- 0.01
-      rowsById(5).getAs[Double]("score") shouldBe 88.3 +- 0.01
+        rowsById(1).getAs[Double]("score") shouldBe 85.0 +- 0.01
+        rowsById(2).getAs[Double]("score") shouldBe 92.5 +- 0.01
+        rowsById(3).getAs[Double]("score") shouldBe 78.0 +- 0.01
+        rowsById(4).getAs[Double]("score") shouldBe 95.1 +- 0.01
+        rowsById(5).getAs[Double]("score") shouldBe 88.3 +- 0.01
     }
   }
 
   test("Re-sync after purge on Iceberg companion") {
-    withIcebergCompanion { (root, indexPath, server, tableId) =>
-      // Create orphans and purge
-      createOrphanFile(indexPath, "orphan-resync-1111-2222-3333-444444444444.split", 25)
+    withIcebergCompanion {
+      (
+        root,
+        indexPath,
+        server,
+        tableId
+      ) =>
+        // Create orphans and purge
+        createOrphanFile(indexPath, "orphan-resync-1111-2222-3333-444444444444.split", 25)
 
-      val purgeResult = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
-      val purgeMetrics = purgeResult(0).getStruct(1)
-      purgeMetrics.getString(0) shouldBe "SUCCESS"
+        val purgeResult  = spark.sql(s"PURGE INDEXTABLE '$indexPath' OLDER THAN 0 HOURS").collect()
+        val purgeMetrics = purgeResult(0).getStruct(1)
+        purgeMetrics.getString(0) shouldBe "SUCCESS"
 
-      // Append new data to Iceberg
-      val newRows = Seq(
-        Row(6, "frank", 91.0),
-        Row(7, "grace", 87.5)
-      )
-      appendIcebergSnapshot(server, tableId, newRows, root, 2)
-
-      flushCaches()
-
-      // Re-sync should succeed
-      val resyncResult = spark
-        .sql(
-          s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.purge_test' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+        // Append new data to Iceberg
+        val newRows = Seq(
+          Row(6, "frank", 91.0),
+          Row(7, "grace", 87.5)
         )
-        .collect()
-      resyncResult(0).getString(2) shouldBe "success"
+        appendIcebergSnapshot(server, tableId, newRows, root, 2)
 
-      flushCaches()
+        flushCaches()
 
-      // Verify all rows (original + new) are present via count
-      val df = readCompanion(indexPath)
-      df.count() shouldBe 7
+        // Re-sync should succeed
+        val resyncResult = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.purge_test' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+          )
+          .collect()
+        resyncResult(0).getString(2) shouldBe "success"
+
+        flushCaches()
+
+        // Verify all rows (original + new) are present via count
+        val df = readCompanion(indexPath)
+        df.count() shouldBe 7
     }
   }
 }

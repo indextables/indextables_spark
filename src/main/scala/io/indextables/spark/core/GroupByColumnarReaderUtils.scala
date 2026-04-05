@@ -361,7 +361,7 @@ object GroupByColumnarReaderUtils {
 
     ffiKeyIndices.zipWithIndex.foreach {
       case (ffiIdx, outIdx) =>
-        val keyColName  = if (outIdx < dataGroupByCols.length) dataGroupByCols(outIdx) else "key"
+        val keyColName   = if (outIdx < dataGroupByCols.length) dataGroupByCols(outIdx) else "key"
         val keyArrowType = arrowTypeAt(columnTypes, ffiIdx)
         val keyTargetType =
           // If the Arrow column is Utf8 the key is a string value (e.g. Range bucket labels in
@@ -369,8 +369,7 @@ object GroupByColumnarReaderUtils {
           if (keyArrowType == ARROW_UTF8) StringType
           else if (outIdx == 0 && isRange) StringType
           else schema.fields.find(_.name == keyColName).map(_.dataType).getOrElse(StringType)
-        vectors(outIdx) =
-          castColumnSafe(ffiBatch.column(ffiIdx), keyTargetType, numRows, keyArrowType)
+        vectors(outIdx) = castColumnSafe(ffiBatch.column(ffiIdx), keyTargetType, numRows, keyArrowType)
     }
 
     val docCountIdx   = columnNames.indexOf("doc_count")

@@ -26,13 +26,11 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
-import io.indextables.spark.transaction.TransactionLogFactory
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -413,9 +411,9 @@ class CompanionMergeSplitsTest
 
       f(indexPath, df)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      try spark.conf.unset("spark.indextables.iceberg.catalogType")
       catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      try spark.conf.unset("spark.indextables.iceberg.uri")
       catch { case _: Exception => }
       server.close()
       deleteRecursively(root)

@@ -34,7 +34,11 @@ import org.scalatest.BeforeAndAfterAll
  * Each test writes known data to a Delta table, builds a companion index, reads ALL rows back through the companion,
  * and asserts that every column of every row matches the original source.
  */
-class CompanionRoundTripTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionRoundTripTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

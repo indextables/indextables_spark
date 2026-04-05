@@ -61,7 +61,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
         .save(tablePath)
 
       // 2. Read original table and collect results
-      val originalDf = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
+      val originalDf      = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
       val originalResults = originalDf.orderBy("id").collect()
       val originalCount   = originalDf.count()
 
@@ -91,7 +91,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       fs.rename(repairedLogPath, originalLogPath)
 
       // 6. Read table with repaired transaction log
-      val repairedDf = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
+      val repairedDf      = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
       val repairedResults = repairedDf.orderBy("id").collect()
       val repairedCount   = repairedDf.count()
 
@@ -263,8 +263,8 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       fs.rename(repairedLogPath, originalLogPath)
 
       // 9. Read table with consolidated transaction log
-      val repairedDf    = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
-      val repairedCount = repairedDf.count()
+      val repairedDf      = spark.read.format(INDEXTABLES_FORMAT).load(tablePath)
+      val repairedCount   = repairedDf.count()
       val repairedResults = repairedDf.orderBy("id").collect()
 
       // 10. Validate identical results

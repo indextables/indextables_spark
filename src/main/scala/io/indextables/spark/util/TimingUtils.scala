@@ -17,9 +17,7 @@
 
 package io.indextables.spark.util
 
-/**
- * Shared timing measurement utility.
- */
+/** Shared timing measurement utility. */
 object TimingUtils {
 
   /**
