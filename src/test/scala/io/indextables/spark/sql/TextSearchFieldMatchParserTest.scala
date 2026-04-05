@@ -241,7 +241,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         ORDER BY id
       """).collect()
 
-      assert(results.length > 0, "TEXTSEARCH query should return results")
+      assert(results.length == 1, s"TEXTSEARCH query should return 1 result, got ${results.length}")
       assert(
         results.exists(_.getString(1).toLowerCase.contains("spark")),
         "TEXTSEARCH should return documents containing the search term"
@@ -279,7 +279,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         ORDER BY id
       """).collect()
 
-      assert(results.length > 0, "* TEXTSEARCH query should return results")
+      assert(results.length == 1, s"* TEXTSEARCH query should return 1 result, got ${results.length}")
       assert(
         results.exists(_.getString(1).toLowerCase.contains("spark")),
         "* TEXTSEARCH should return documents containing the search term"
@@ -311,7 +311,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("textsearch_text_field")
 
       val results = spark.sql("SELECT id FROM textsearch_text_field WHERE content TEXTSEARCH 'spark'").collect()
-      assert(results.length > 0, "TEXTSEARCH on text field should succeed and return results")
+      assert(results.length == 1, s"TEXTSEARCH on text field should return 1 result, got ${results.length}")
     }
   }
 
@@ -369,7 +369,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       df.createOrReplaceTempView("fieldmatch_string_field")
 
       val results = spark.sql("SELECT id FROM fieldmatch_string_field WHERE status FIELDMATCH 'active'").collect()
-      assert(results.length > 0, "FIELDMATCH on string field should succeed and return results")
+      assert(results.length == 1, s"FIELDMATCH on string field should return 1 result, got ${results.length}")
     }
   }
 
@@ -429,7 +429,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
 
       // indexquery should work on text fields without type validation
       val results = spark.sql("SELECT id FROM indexquery_any_field WHERE content indexquery 'spark'").collect()
-      assert(results.length > 0, "indexquery should work on text fields without type validation")
+      assert(results.length == 1, s"indexquery should return 1 result for 'spark', got ${results.length}")
     }
   }
 
@@ -862,7 +862,77 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val results = spark.sql(
         "SELECT id FROM all_string_fieldmatch_test WHERE * FIELDMATCH 'active' ORDER BY id"
       ).collect()
-      assert(results.length > 0, "* FIELDMATCH on all-string table should return results")
+      assert(results.length == 2, s"* FIELDMATCH on all-string table should return 2 results (ids 1,3), got ${results.length}")
+    }
+  }
+
+  test("* FIELDMATCH on all-tokenized table should throw error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation", "full text search engine"),
+        (2, "hadoop mapreduce tutorial", "distributed processing framework")
+      ).toDF("id", "content", "description")
+
+      // Write with all text fields (tokenized)
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.description", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("all_text_fieldmatch_test")
+
+      // * FIELDMATCH should throw — all text fields are tokenized, none are exact-match
+      val exception = intercept[Exception] {
+        spark.sql(
+          "SELECT id FROM all_text_fieldmatch_test WHERE * FIELDMATCH 'spark'"
+        ).collect()
+      }
+      assert(
+        exception.getMessage.contains("Cannot use") || exception.getCause.getMessage.contains("Cannot use"),
+        s"Expected type validation error, got: ${exception.getMessage}"
+      )
+    }
+  }
+
+  test("* TEXTSEARCH on table with zero text-type fields should throw error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Create a table with only integer fields — no text fields at all
+      val testData = Seq(
+        (1, 100, 200),
+        (2, 300, 400)
+      ).toDF("id", "score", "rating")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("no_text_fields_test")
+
+      // * TEXTSEARCH should throw — no text-type fields exist
+      val exception = intercept[Exception] {
+        spark.sql(
+          "SELECT id FROM no_text_fields_test WHERE * TEXTSEARCH 'something'"
+        ).collect()
+      }
+      assert(
+        exception.getMessage.contains("Cannot use") || exception.getCause.getMessage.contains("Cannot use"),
+        s"Expected type validation error, got: ${exception.getMessage}"
+      )
     }
   }
 
@@ -922,7 +992,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val results = spark.sql(
         "SELECT id FROM col_textsearch_op_textsearch_test WHERE textsearch TEXTSEARCH 'spark' ORDER BY id"
       ).collect()
-      assert(results.length >= 1, s"Expected at least 1 row for TEXTSEARCH 'spark', got ${results.length}")
+      assert(results.length == 1, s"Expected 1 row for TEXTSEARCH 'spark', got ${results.length}")
     }
   }
 
@@ -1027,8 +1097,8 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         ORDER BY id
       """).collect()
 
-      assert(results.length > 0, "* FIELDMATCH query should return results")
-      assert(results.map(_.getInt(0)).toSeq.contains(1), "Should include id 1 which has status=active")
+      assert(results.length == 2, s"* FIELDMATCH query should return 2 results (ids 1,4), got ${results.length}")
+      assert(results.map(_.getInt(0)).toSeq == Seq(1, 4), "Should return ids 1 and 4")
     }
   }
 
@@ -1182,7 +1252,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
         "SELECT id FROM fieldmatch_no_typemap_test WHERE status FIELDMATCH 'active'"
       ).collect()
 
-      assert(results.length > 0, "FIELDMATCH should return results when docMapping identifies field as non-tokenized")
+      assert(results.length == 2, s"FIELDMATCH should return 2 results (ids 1,3) when docMapping identifies field as non-tokenized, got ${results.length}")
     }
   }
 
@@ -1419,7 +1489,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val results = spark.sql(
         "SELECT id FROM textsearch_uuid_test WHERE message TEXTSEARCH 'log'"
       ).collect()
-      assert(results.length >= 1, "TEXTSEARCH on text_uuid_exactonly field should return results")
+      assert(results.length == 2, s"TEXTSEARCH on text_uuid_exactonly field should return 2 results, got ${results.length}")
     }
   }
 
@@ -1481,7 +1551,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val results = spark.sql(
         "SELECT id FROM textsearch_uuid_strip_test WHERE message TEXTSEARCH 'log'"
       ).collect()
-      assert(results.length >= 1, "TEXTSEARCH on text_uuid_strip field should return results")
+      assert(results.length == 2, s"TEXTSEARCH on text_uuid_strip field should return 2 results, got ${results.length}")
     }
   }
 
@@ -1548,7 +1618,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val results = spark.sql(
         "SELECT id FROM docmapping_validate_test WHERE content TEXTSEARCH 'spark'"
       ).collect()
-      assert(results.length >= 1, "TEXTSEARCH should work with field type from docMapping")
+      assert(results.length == 1, s"TEXTSEARCH should return 1 result for 'spark' via docMapping, got ${results.length}")
 
       // TEXTSEARCH on string field should throw (docMapping knows it's not tokenized)
       val error = intercept[Exception] {
@@ -1589,7 +1659,7 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       val results = spark.sql(
         "SELECT id FROM docmapping_fieldmatch_test WHERE status FIELDMATCH 'active'"
       ).collect()
-      assert(results.length >= 1, "FIELDMATCH on string field should work via docMapping")
+      assert(results.length == 1, s"FIELDMATCH on string field should return 1 result via docMapping, got ${results.length}")
 
       // FIELDMATCH on text field should throw (docMapping identifies it as tokenized)
       val error = intercept[Exception] {
@@ -1719,6 +1789,98 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
     intercept[IllegalArgumentException] {
       IndexQueryAllExpression(query, "invalid_type")
+    }
+  }
+
+  // ==================== Edge case tests ====================
+
+  test("TEXTSEARCH with empty query string should execute without error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation"),
+        (2, "hadoop mapreduce tutorial")
+      ).toDF("id", "content")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("empty_query_test")
+
+      // Empty query string — Tantivy's query parser treats this as match-all
+      val results = spark.sql(
+        "SELECT id FROM empty_query_test WHERE content TEXTSEARCH ''"
+      ).collect()
+      assert(results.length == 2, s"Empty query matches all rows in Tantivy, got ${results.length}")
+    }
+  }
+
+  test("TEXTSEARCH with unicode characters should execute without error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "日本語テキスト検索"),
+        (2, "café résumé naïve"),
+        (3, "plain english text")
+      ).toDF("id", "content")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("unicode_test")
+
+      // Unicode query — should not crash
+      val results = spark.sql(
+        "SELECT id FROM unicode_test WHERE content TEXTSEARCH 'café'"
+      ).collect()
+      assert(results != null, "Unicode query should return a result set, not null")
+    }
+  }
+
+  test("FIELDMATCH with special characters should execute without error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "user@example.com"),
+        (2, "admin@test.org"),
+        (3, "no-reply@company.net")
+      ).toDF("id", "email")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.email", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("special_char_test")
+
+      // Query with @ and . characters — should not crash
+      val results = spark.sql(
+        "SELECT id FROM special_char_test WHERE email FIELDMATCH 'user@example.com'"
+      ).collect()
+      assert(results.length == 1, s"FIELDMATCH with special chars should return 1 result, got ${results.length}")
+      assert(results(0).getInt(0) == 1, "Should match id=1")
     }
   }
 }

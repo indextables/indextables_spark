@@ -32,6 +32,8 @@ object SearchType {
   /** Valid search types for single-field expressions (IndexQueryExpression, IndexQueryFilter). */
   val validSingleField: Set[String] = Set(IndexQuery, TextSearch, FieldMatch)
 
-  /** Valid search types for all-fields expressions (IndexQueryAllExpression, IndexQueryAllFilter). */
+  /** Valid search types for all-fields expressions (IndexQueryAllExpression, IndexQueryAllFilter).
+    * IndexQuery is included because `* indexquery` via parseExpression creates
+    * IndexQueryAllExpression with SearchType.IndexQuery (the preprocessor path uses IndexQueryAll). */
   val validAllFields: Set[String] = Set(IndexQuery, IndexQueryAll, TextSearch, FieldMatch)
 }

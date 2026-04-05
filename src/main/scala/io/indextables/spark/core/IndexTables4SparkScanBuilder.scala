@@ -632,11 +632,12 @@ class IndexTables4SparkScanBuilder(
         )
         extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
-        // CRITICAL: Validate IndexQuery field existence on driver before creating scan
+        // CRITICAL: Validate IndexQuery field existence and types on driver before creating scan
         // This prevents task failures on executors when fields don't exist
         // Same pattern as PR #122's syntax validation - fail fast on driver
-        validateIndexQueryFieldsExist()
-        validateIndexQueryFieldTypes()
+        val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+        validateIndexQueryFieldsExist(indexQueryFilters)
+        validateIndexQueryFieldTypes(indexQueryFilters)
         logger.debug(s"BUILD: IndexQuery field validation passed for regular scan")
 
         // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
@@ -1153,8 +1154,9 @@ class IndexTables4SparkScanBuilder(
 
       // Validate IndexQuery filter fields exist in schema - throw exception if not
       // This prevents silent failures where queries with non-existent fields return all data
-      validateIndexQueryFieldsExist()
-      validateIndexQueryFieldTypes()
+      val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+      validateIndexQueryFieldsExist(indexQueryFilters)
+      validateIndexQueryFieldTypes(indexQueryFilters)
       logger.debug(s"AGGREGATE PUSHDOWN: IndexQuery field validation passed")
 
       // Note: IS NULL/IS NOT NULL validation no longer needed here because isSupportedFilter
@@ -1171,6 +1173,10 @@ class IndexTables4SparkScanBuilder(
       case e: IllegalArgumentException if e.getMessage.contains("filter references non-existent") =>
         // Rethrow field existence errors - these should fail the query
         logger.error(s"AGGREGATE PUSHDOWN: Null filter field not found - ${e.getMessage}")
+        throw e
+      case e: IllegalArgumentException if e.getMessage.contains("Cannot use") =>
+        // Rethrow TEXTSEARCH/FIELDMATCH type validation errors - these are real user mistakes
+        logger.error(s"AGGREGATE PUSHDOWN: Type validation error - ${e.getMessage}")
         throw e
       case e: IllegalArgumentException =>
         logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
@@ -2020,8 +2026,9 @@ class IndexTables4SparkScanBuilder(
    * Validate that IndexQuery filter fields exist in the schema. Throws IllegalArgumentException if an IndexQuery
    * references a non-existent field.
    */
-  private def validateIndexQueryFieldsExist(): Unit = {
-    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+  private def validateIndexQueryFieldsExist(
+    indexQueryFilters: Array[Any] = extractIndexQueriesFromCurrentPlan()
+  ): Unit = {
     if (indexQueryFilters.isEmpty) return
 
     // Get available fields from the schema
@@ -2065,8 +2072,9 @@ class IndexTables4SparkScanBuilder(
    * - fieldmatch requires a non-tokenized field (type!="text" or tokenizer="raw" in docMapping)
    * - indexquery skips validation (backwards compat)
    */
-  private def validateIndexQueryFieldTypes(): Unit = {
-    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+  private def validateIndexQueryFieldTypes(
+    indexQueryFilters: Array[Any] = extractIndexQueriesFromCurrentPlan()
+  ): Unit = {
     if (indexQueryFilters.isEmpty) return
 
     val docMapping = cachedDocMappingMetadata
@@ -2150,7 +2158,20 @@ class IndexTables4SparkScanBuilder(
     }.toSeq
 
     val textFields = docMapping.fieldTypes.filter { case (_, fieldType) => fieldType == "text" }
-    if (textFields.nonEmpty) {
+    if (textFields.isEmpty) {
+      // No text-type fields at all — TEXTSEARCH/FIELDMATCH on * is meaningless
+      allQueryAllFilters.foreach { filter =>
+        if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
+          val searchOp = filter.searchType.toUpperCase
+          val nonTextTypes = docMapping.fieldTypes.values.toSet - "text"
+          throw new IllegalArgumentException(
+            s"Cannot use * $searchOp: table has no text-type fields in docMapping. " +
+              s"All fields are non-text types (${nonTextTypes.mkString(", ")}). " +
+              s"Use '* indexquery' to search without type validation."
+          )
+        }
+      }
+    } else {
       allQueryAllFilters.foreach { filter =>
         if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
           val searchOp = filter.searchType.toUpperCase
@@ -2179,6 +2200,11 @@ class IndexTables4SparkScanBuilder(
                   s"or '* indexquery' to search all fields without type validation."
               )
             }
+            // All fields are tokenized — TEXTSEARCH is valid
+            logger.debug(
+              s"* $searchOp: all ${tokenizedFields.size} text-type field(s) " +
+                s"[${tokenizedFields.mkString(", ")}] are tokenized — validation passed."
+            )
           } else {
             // * FIELDMATCH requires at least one non-tokenized field
             if (nonTokenizedFields.isEmpty) {
@@ -2198,8 +2224,8 @@ class IndexTables4SparkScanBuilder(
                   s"or '* indexquery' to search all fields without type validation."
               )
             }
-            // All fields are non-tokenized — FIELDMATCH is valid but log for visibility
-            logger.warn(
+            // All fields are non-tokenized — FIELDMATCH is valid, log for visibility
+            logger.info(
               s"* $searchOp: all ${nonTokenizedFields.size} text-type field(s) " +
                 s"[${nonTokenizedFields.mkString(", ")}] are non-tokenized — " +
                 s"* FIELDMATCH will search all fields as exact match."
@@ -2313,7 +2339,7 @@ class IndexTables4SparkScanBuilder(
           DocMappingMetadata.empty
       }
     } catch {
-      case e: Exception =>
+      case scala.util.control.NonFatal(e) =>
         logger.warn(s"Failed to read doc mapping from transaction log: ${e.getMessage}" +
           " — type validation (TEXTSEARCH/FIELDMATCH), exact match pushdown, and range query " +
           "behaviour will use defaults")
@@ -2336,11 +2362,13 @@ class IndexTables4SparkScanBuilder(
 
   private def computeActualFastFieldsFromSchema(): Set[String] = {
     val metadata = cachedDocMappingMetadata
-    if (metadata.fastFields.nonEmpty) {
+    if (metadata ne DocMappingMetadata.empty) {
+      // DocMapping exists — trust it (empty set means no fast fields were configured)
       logger.debug(s"Actual fast fields from schema: ${metadata.fastFields.mkString(", ")}")
       metadata.fastFields
     } else {
-      logger.debug("No fast fields from doc mapping, falling back to configuration-based validation")
+      // No docMapping (new/empty table) — fall back to config
+      logger.debug("No doc mapping found, falling back to configuration-based fast field validation")
       val fastFieldsStr = config
         .get("spark.indextables.indexing.fastfields")
         .getOrElse("")
