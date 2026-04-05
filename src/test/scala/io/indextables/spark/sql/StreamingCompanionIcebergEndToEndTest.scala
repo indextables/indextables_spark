@@ -230,14 +230,14 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
 
           configureSparkForEmbeddedCatalog(server)
 
-          val command = makeIcebergCommand(indexPath).copy(streamingPollIntervalMs = Some(2000L))
+          val command = makeIcebergCommand(indexPath).copy(streamingPollIntervalMs = Some(500L))
           val thread  = new Thread(() => command.run(spark))
           thread.setDaemon(true)
           thread.start()
 
           try {
             // Wait for initial full sync (2 rows).
-            val initialSynced = waitUntil(30000)(countCompanionRows(indexPath) == 2)
+            val initialSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 2)
             withClue("initial full sync should complete within 30 s") {
               initialSynced shouldBe true
             }
@@ -246,13 +246,13 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
             appendIcebergSnapshot(server, tableId, Seq(Row(3L, "charlie"), Row(4L, "dave")), batchId = 2)
 
             // Stream should detect the new snapshot and index it incrementally.
-            val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 4)
+            val secondSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 4)
             withClue("streaming should pick up snapshot 2 (4 total rows) within 30 s") {
               secondSynced shouldBe true
             }
 
-            // Idle period: 3 poll cycles (6 s) — row count must remain stable.
-            Thread.sleep(6000)
+            // Idle period: 3 poll cycles (1.5 s at 500 ms interval) — row count must remain stable.
+            Thread.sleep(1500)
             withClue("row count should remain 4 after a no-changes idle period") {
               countCompanionRows(indexPath) shouldBe 4
             }
@@ -260,7 +260,7 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
             // Snapshot 3: 1 more row.
             appendIcebergSnapshot(server, tableId, Seq(Row(5L, "eve")), batchId = 3)
 
-            val thirdSynced = waitUntil(30000)(countCompanionRows(indexPath) == 5)
+            val thirdSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 5)
             withClue("streaming should pick up snapshot 3 (5 total rows) within 30 s") {
               thirdSynced shouldBe true
             }
@@ -303,13 +303,13 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
 
           // Start streaming: it reads the persisted lastSyncedVersion (snapshot 1) and runs an
           // incremental cycle for snapshot 2 instead of re-indexing all data.
-          val streamingCommand = command.copy(streamingPollIntervalMs = Some(2000L))
+          val streamingCommand = command.copy(streamingPollIntervalMs = Some(500L))
           val thread           = new Thread(() => streamingCommand.run(spark))
           thread.setDaemon(true)
           thread.start()
 
           try {
-            val resumeSynced = waitUntil(30000)(countCompanionRows(indexPath) == 3)
+            val resumeSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 3)
             withClue("streaming resume should index the missing snapshot (charlie) within 30 s") {
               resumeSynced shouldBe true
             }
@@ -347,20 +347,20 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
           // Start streaming with FROM SNAPSHOT snap1 — first cycle should time-travel to snap1
           // (only 2 rows), then subsequent cycles should incrementally pick up snap2.
           val command = makeIcebergCommand(indexPath)
-            .copy(fromSnapshot = Some(snap1Id), streamingPollIntervalMs = Some(2000L))
+            .copy(fromSnapshot = Some(snap1Id), streamingPollIntervalMs = Some(500L))
           val thread = new Thread(() => command.run(spark))
           thread.setDaemon(true)
           thread.start()
 
           try {
             // First cycle: FROM SNAPSHOT snap1 → time-travel → only 2 rows (not all 4).
-            val initialSynced = waitUntil(30000)(countCompanionRows(indexPath) == 2)
+            val initialSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 2)
             withClue("FROM SNAPSHOT should time-travel to snap1 (2 rows), not current (4 rows)") {
               initialSynced shouldBe true
             }
 
             // Streaming continues: should incrementally pick up snap2 → 4 rows total.
-            val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 4)
+            val secondSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 4)
             withClue("streaming should incrementally pick up snap2 (4 total rows) within 30 s") {
               secondSynced shouldBe true
             }
@@ -368,7 +368,7 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
             // Snapshot 3: 1 more row appended while streaming.
             appendIcebergSnapshot(server, tableId, Seq(Row(5L, "eve")), batchId = 3)
 
-            val thirdSynced = waitUntil(30000)(countCompanionRows(indexPath) == 5)
+            val thirdSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 5)
             withClue("streaming should pick up snap3 (5 total rows) within 30 s") {
               thirdSynced shouldBe true
             }
@@ -419,6 +419,70 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
 
           // Companion should now have 0 rows (all source files were deleted).
           countCompanionRows(indexPath) shouldBe 0
+        } finally {
+          clearSparkIcebergConfig()
+          server.close()
+        }
+    }
+  }
+
+  test("streaming Iceberg companion: deletion detected incrementally across streaming cycles") {
+    withTempDirs {
+      (
+        warehouseDir,
+        indexPath,
+        _
+      ) =>
+        val server = new EmbeddedIcebergRestServer(warehouseDir)
+        try {
+          val tableId = createTestTable(server)
+
+          // Snapshot 1: 2 rows.
+          appendIcebergSnapshot(server, tableId, Seq(Row(1L, "alice"), Row(2L, "bob")), batchId = 1)
+
+          configureSparkForEmbeddedCatalog(server)
+
+          val command = makeIcebergCommand(indexPath).copy(streamingPollIntervalMs = Some(500L))
+          val thread  = new Thread(() => command.run(spark))
+          thread.setDaemon(true)
+          thread.start()
+
+          try {
+            // Wait for initial full sync (2 rows).
+            val initialSynced = waitUntil(30000, 200)(countCompanionRows(indexPath) == 2)
+            withClue("initial sync should index 2 rows within 30 s") {
+              initialSynced shouldBe true
+            }
+
+            // Snapshot 2: append 1 more row (table now has 3 rows).
+            appendIcebergSnapshot(server, tableId, Seq(Row(3L, "charlie")), batchId = 2)
+
+            val afterAppend = waitUntil(30000, 200)(countCompanionRows(indexPath) == 3)
+            withClue("streaming should pick up append (3 total rows) within 30 s") {
+              afterAppend shouldBe true
+            }
+
+            // Snapshot 3: delete snap2's file (the 1 row appended above).
+            // Note: currentSnapshot().addedDataFiles() returns only files added in the latest
+            // snapshot — exactly snap2's file. This creates a new snapshot where that file is gone.
+            val table = server.catalog.loadTable(tableId)
+            val snap2Files = table.currentSnapshot().addedDataFiles(table.io()).iterator()
+            val deleteOp = table.newDelete()
+            while (snap2Files.hasNext) deleteOp.deleteFile(snap2Files.next())
+            deleteOp.commit()
+
+            // Streaming should detect the deletion via manifest set-difference:
+            // old manifest has snap2's file, new manifest doesn't → 1 removed path.
+            // The companion invalidates the split containing that file, re-indexes siblings.
+            val afterDelete = waitUntil(30000, 200)(countCompanionRows(indexPath) == 2)
+            withClue("streaming should detect file deletion (3 → 2 rows) within 30 s") {
+              afterDelete shouldBe true
+            }
+
+          } finally {
+            thread.interrupt()
+            thread.join(5000)
+          }
         } finally {
           clearSparkIcebergConfig()
           server.close()

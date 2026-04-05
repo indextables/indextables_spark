@@ -128,7 +128,7 @@ case class SyncToExternalCommand(
         ) =>
           val cycleCommand = lastSyncedVersion match {
             case Some(v) =>
-              copy(lastSyncedVersion = Some(v), streamingPollIntervalMs = None)
+              copy(lastSyncedVersion = Some(v), fromVersion = None, fromSnapshot = None, streamingPollIntervalMs = None)
             case _ =>
               copy(streamingPollIntervalMs = None)
           }

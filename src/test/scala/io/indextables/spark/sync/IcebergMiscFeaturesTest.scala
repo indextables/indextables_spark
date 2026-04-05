@@ -313,6 +313,37 @@ class IcebergMiscFeaturesTest
     }
   }
 
+  test("FROM SNAPSHOT reports requested snapshot ID even when entries have different embedded IDs") {
+    // Files written in snap1 are still visible in snap2. When FROM SNAPSHOT snap2 is used,
+    // sourceVersion() should return snap2 (the requested snapshot), not snap1 (the entry's
+    // embedded snapshot ID from when the file was first added).
+    withIcebergTable("snap_priority") { (server, tableId, root, indexPath) =>
+      server.catalog.buildTable(tableId, icebergSchema).create()
+
+      // Snapshot 1: 3 rows
+      val rows1 = Seq(Row(1L, "alice", 85.0), Row(2L, "bob", 90.5), Row(3L, "carol", 75.0))
+      appendIcebergSnapshot(server, tableId, rows1, sparkSchema, root, 1)
+      val snap1Id = server.catalog.loadTable(tableId).currentSnapshot().snapshotId()
+
+      // Snapshot 2: 2 more rows (snap1's files are still visible in snap2)
+      val rows2 = Seq(Row(4L, "dave", 80.0), Row(5L, "eve", 88.3))
+      appendIcebergSnapshot(server, tableId, rows2, sparkSchema, root, 2)
+      val snap2Id = server.catalog.loadTable(tableId).currentSnapshot().snapshotId()
+      snap2Id should not equal snap1Id
+
+      // Build FROM SNAPSHOT snap2 — should report snap2, not snap1
+      val result = spark.sql(
+        s"BUILD INDEXTABLES COMPANION FOR ICEBERG 'default.snap_priority' FROM SNAPSHOT $snap2Id AT LOCATION '$indexPath'"
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+      result(0).getAs[Long](3) shouldBe snap2Id
+
+      // Should have all 5 rows (both snap1 and snap2 files visible at snap2)
+      flushCaches()
+      readCompanion(indexPath).count() shouldBe 5
+    }
+  }
+
   test("FROM SNAPSHOT with non-existent snapshot should return error") {
     withIcebergTable("bad_snapshot") { (server, tableId, root, indexPath) =>
       server.catalog.buildTable(tableId, icebergSchema).create()
