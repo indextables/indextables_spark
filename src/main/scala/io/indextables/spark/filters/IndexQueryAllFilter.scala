@@ -61,7 +61,9 @@ case class IndexQueryAllFilter(queryString: String, searchType: String = SearchT
    * @return
    *   String representation of this filter
    */
-  override def toString: String = s"IndexQueryAllFilter($queryString)"
+  override def toString: String =
+    if (searchType == SearchType.IndexQueryAll) s"IndexQueryAllFilter($queryString)"
+    else s"IndexQueryAllFilter[$searchType]($queryString)"
 
   /**
    * Checks if this filter is compatible with another filter for combining.

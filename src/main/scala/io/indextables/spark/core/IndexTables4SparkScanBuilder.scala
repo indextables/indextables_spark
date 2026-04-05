@@ -2153,30 +2153,56 @@ class IndexTables4SparkScanBuilder(
     if (textFields.nonEmpty) {
       allQueryAllFilters.foreach { filter =>
         if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
-          val mismatchedFields = textFields.collect {
-            case (field, _) =>
-              docMapping.isTokenizedField(field) match {
-                case Some(isTokenized) =>
-                  if (filter.searchType == SearchType.TextSearch && !isTokenized) Some(field)
-                  else if (filter.searchType == SearchType.FieldMatch && isTokenized) Some(field)
-                  else None
-                case None => None
-              }
-          }.flatten.toSeq.sorted
+          val searchOp = filter.searchType.toUpperCase
 
-          if (mismatchedFields.nonEmpty) {
-            val searchOp = filter.searchType.toUpperCase
-            val (fieldDesc, suggestedOp) =
-              if (filter.searchType == SearchType.TextSearch)
-                ("non-tokenized", "FIELDMATCH")
-              else
-                ("tokenized", "TEXTSEARCH")
+          // Classify text fields by tokenization status
+          val (tokenizedFields, nonTokenizedFields) = textFields.keys.toSeq.sorted.partition { field =>
+            docMapping.isTokenizedField(field).getOrElse(true)
+          }
 
-            throw new IllegalArgumentException(
-              s"Cannot use * $searchOp: ${mismatchedFields.size} $fieldDesc field(s) " +
-                s"[${mismatchedFields.mkString(", ")}] are incompatible with $searchOp. " +
-                s"Use column-specific syntax (e.g., ${mismatchedFields.head} $suggestedOp '${filter.queryString}') " +
-                s"or '* indexquery' to search all fields without type validation."
+          if (filter.searchType == SearchType.TextSearch) {
+            // * TEXTSEARCH requires at least one tokenized field
+            if (tokenizedFields.isEmpty) {
+              throw new IllegalArgumentException(
+                s"Cannot use * $searchOp: no tokenized text fields found in table. " +
+                  s"All ${nonTokenizedFields.size} text-type field(s) [${nonTokenizedFields.mkString(", ")}] " +
+                  s"use non-tokenized (raw) indexing. " +
+                  s"Use FIELDMATCH for exact-match fields, or '* indexquery' to search without type validation."
+              )
+            }
+            // Some tokenized, some not — throw on the mismatched (non-tokenized) ones
+            if (nonTokenizedFields.nonEmpty) {
+              throw new IllegalArgumentException(
+                s"Cannot use * $searchOp: ${nonTokenizedFields.size} non-tokenized field(s) " +
+                  s"[${nonTokenizedFields.mkString(", ")}] are incompatible with $searchOp. " +
+                  s"Use column-specific syntax (e.g., ${nonTokenizedFields.head} FIELDMATCH '${filter.queryString}') " +
+                  s"or '* indexquery' to search all fields without type validation."
+              )
+            }
+          } else {
+            // * FIELDMATCH requires at least one non-tokenized field
+            if (nonTokenizedFields.isEmpty) {
+              throw new IllegalArgumentException(
+                s"Cannot use * $searchOp: no non-tokenized (exact-match) fields found in table. " +
+                  s"All ${tokenizedFields.size} text-type field(s) [${tokenizedFields.mkString(", ")}] " +
+                  s"are tokenized. " +
+                  s"Use TEXTSEARCH for tokenized fields, or '* indexquery' to search without type validation."
+              )
+            }
+            // Some non-tokenized, some tokenized — throw on the mismatched (tokenized) ones
+            if (tokenizedFields.nonEmpty) {
+              throw new IllegalArgumentException(
+                s"Cannot use * $searchOp: ${tokenizedFields.size} tokenized field(s) " +
+                  s"[${tokenizedFields.mkString(", ")}] are incompatible with $searchOp. " +
+                  s"Use column-specific syntax (e.g., ${tokenizedFields.head} TEXTSEARCH '${filter.queryString}') " +
+                  s"or '* indexquery' to search all fields without type validation."
+              )
+            }
+            // All fields are non-tokenized — FIELDMATCH is valid but log for visibility
+            logger.warn(
+              s"* $searchOp: all ${nonTokenizedFields.size} text-type field(s) " +
+                s"[${nonTokenizedFields.mkString(", ")}] are non-tokenized — " +
+                s"* FIELDMATCH will search all fields as exact match."
             )
           }
         }
@@ -2288,7 +2314,9 @@ class IndexTables4SparkScanBuilder(
       }
     } catch {
       case e: Exception =>
-        logger.debug(s"Failed to read doc mapping from transaction log: ${e.getMessage}")
+        logger.warn(s"Failed to read doc mapping from transaction log: ${e.getMessage}" +
+          " — type validation (TEXTSEARCH/FIELDMATCH), exact match pushdown, and range query " +
+          "behaviour will use defaults")
         DocMappingMetadata.empty
     }
 

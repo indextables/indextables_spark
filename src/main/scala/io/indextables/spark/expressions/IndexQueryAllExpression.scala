@@ -51,20 +51,28 @@ case class IndexQueryAllExpression(
   override lazy val deterministic: Boolean = false
 
   override def prettyName: String = searchType match {
-    case SearchType.TextSearch => "textsearch_all"
-    case SearchType.FieldMatch => "fieldmatch_all"
-    case _                     => "indexqueryall"
+    case SearchType.TextSearch  => "textsearch_all"
+    case SearchType.FieldMatch  => "fieldmatch_all"
+    case SearchType.IndexQuery  => "indexquery_all"
+    case _                      => "indexqueryall"
   }
 
   private def displayKeyword: String = searchType match {
     case SearchType.TextSearch => "TEXTSEARCH"
     case SearchType.FieldMatch => "FIELDMATCH"
+    case SearchType.IndexQuery => "indexquery"
     case _                     => "indexqueryall"
   }
 
-  override def sql: String = s"(* $displayKeyword ${child.sql})"
+  override def sql: String = searchType match {
+    case SearchType.IndexQueryAll => s"indexqueryall(${child.sql})"
+    case _                        => s"(* $displayKeyword ${child.sql})"
+  }
 
-  override def toString: String = s"(* $displayKeyword $child)"
+  override def toString: String = searchType match {
+    case SearchType.IndexQueryAll => s"indexqueryall($child)"
+    case _                        => s"(* $displayKeyword $child)"
+  }
 
   // For pushdown, we primarily care about the structure, not evaluation
   override def nullSafeEval(input: Any): Any =

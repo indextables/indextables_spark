@@ -799,6 +799,163 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
     }
   }
 
+  test("* TEXTSEARCH on all-string table (no text fields) should throw") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active", "technology"),
+        (2, "inactive", "science"),
+        (3, "active", "engineering")
+      ).toDF("id", "status", "category")
+
+      // Write with only string fields — no tokenized text fields
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("all_string_textsearch_test")
+
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql(
+          "SELECT id FROM all_string_textsearch_test WHERE * TEXTSEARCH 'active'"
+        ).collect()
+      }
+      assert(ex.getMessage.contains("no tokenized text fields") ||
+        ex.getMessage.contains("non-tokenized"),
+        s"Expected tokenization-related error but got: ${ex.getMessage}")
+    }
+  }
+
+  test("* FIELDMATCH on all-string table (no text fields) should succeed") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active", "technology"),
+        (2, "inactive", "science"),
+        (3, "active", "engineering")
+      ).toDF("id", "status", "category")
+
+      // Write with only string fields — no tokenized text fields
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("all_string_fieldmatch_test")
+
+      // * FIELDMATCH should work on all-string table — all fields are non-tokenized
+      val results = spark.sql(
+        "SELECT id FROM all_string_fieldmatch_test WHERE * FIELDMATCH 'active' ORDER BY id"
+      ).collect()
+      assert(results.length > 0, "* FIELDMATCH on all-string table should return results")
+    }
+  }
+
+  test("column literally named 'textsearch' should parse correctly with FIELDMATCH operator") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "enabled"),
+        (2, "disabled"),
+        (3, "enabled")
+      ).toDF("id", "textsearch")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.textsearch", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("col_named_textsearch_test")
+
+      // Column 'textsearch' with operator FIELDMATCH — regex should match 'textsearch' as column, 'FIELDMATCH' as keyword
+      val results = spark.sql(
+        "SELECT id FROM col_named_textsearch_test WHERE textsearch FIELDMATCH 'enabled' ORDER BY id"
+      ).collect()
+      assert(results.length == 2, s"Expected 2 rows for FIELDMATCH 'enabled', got ${results.length}")
+    }
+  }
+
+  test("column named 'textsearch' with TEXTSEARCH operator should parse correctly") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation"),
+        (2, "machine learning algorithms"),
+        (3, "big data processing")
+      ).toDF("id", "textsearch")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.textsearch", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("col_textsearch_op_textsearch_test")
+
+      // textsearch TEXTSEARCH 'spark' — column and operator are the same word
+      val results = spark.sql(
+        "SELECT id FROM col_textsearch_op_textsearch_test WHERE textsearch TEXTSEARCH 'spark' ORDER BY id"
+      ).collect()
+      assert(results.length >= 1, s"Expected at least 1 row for TEXTSEARCH 'spark', got ${results.length}")
+    }
+  }
+
+  test("column named 'fieldmatch' with FIELDMATCH operator should parse correctly") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active"),
+        (2, "inactive"),
+        (3, "active")
+      ).toDF("id", "fieldmatch")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.fieldmatch", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("col_fieldmatch_op_fieldmatch_test")
+
+      // fieldmatch FIELDMATCH 'active' — column and operator are the same word
+      val results = spark.sql(
+        "SELECT id FROM col_fieldmatch_op_fieldmatch_test WHERE fieldmatch FIELDMATCH 'active' ORDER BY id"
+      ).collect()
+      assert(results.length == 2, s"Expected 2 rows for FIELDMATCH 'active', got ${results.length}")
+    }
+  }
+
   // --- FIELDMATCH end-to-end SQL tests ---
 
   test("End-to-end: WHERE col FIELDMATCH 'query' via spark.sql") {
@@ -1443,6 +1600,74 @@ class TextSearchFieldMatchParserTest extends AnyFunSuite with TestBase {
       assert(error.getMessage.contains("Cannot use FIELDMATCH") ||
         error.getCause != null && error.getCause.getMessage.contains("Cannot use FIELDMATCH"),
         s"Expected FIELDMATCH rejection for text field (from docMapping), got: ${error.getMessage}")
+    }
+  }
+
+  // --- Non-existent field validation ---
+
+  test("TEXTSEARCH on non-existent field should throw with field name in error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "apache spark documentation"),
+        (2, "machine learning algorithms")
+      ).toDF("id", "content")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.content", "text")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("nonexistent_field_test")
+
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql(
+          "SELECT id FROM nonexistent_field_test WHERE nosuchfield TEXTSEARCH 'spark'"
+        ).collect()
+      }
+      assert(ex.getMessage.contains("nosuchfield"),
+        s"Expected 'nosuchfield' in error message but got: ${ex.getMessage}")
+      assert(ex.getMessage.contains("non-existent"),
+        s"Expected 'non-existent' in error message but got: ${ex.getMessage}")
+    }
+  }
+
+  test("FIELDMATCH on non-existent field should throw with field name in error") {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      val testData = Seq(
+        (1, "active"),
+        (2, "inactive")
+      ).toDF("id", "status")
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .mode("overwrite")
+        .save(tempPath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      df.createOrReplaceTempView("nonexistent_field_test_2")
+
+      val ex = intercept[IllegalArgumentException] {
+        spark.sql(
+          "SELECT id FROM nonexistent_field_test_2 WHERE fakefield FIELDMATCH 'active'"
+        ).collect()
+      }
+      assert(ex.getMessage.contains("fakefield"),
+        s"Expected 'fakefield' in error message but got: ${ex.getMessage}")
+      assert(ex.getMessage.contains("non-existent"),
+        s"Expected 'non-existent' in error message but got: ${ex.getMessage}")
     }
   }
 

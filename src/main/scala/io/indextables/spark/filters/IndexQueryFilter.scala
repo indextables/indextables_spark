@@ -48,7 +48,9 @@ case class IndexQueryFilter(
     s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validSingleField.mkString(", ")}"
   )
 
-  override def toString: String = s"IndexQuery[$searchType]($columnName, '$queryString')"
+  override def toString: String =
+    if (searchType == SearchType.IndexQuery) s"IndexQuery($columnName, '$queryString')"
+    else s"IndexQuery[$searchType]($columnName, '$queryString')"
 
   /** References returns the set of column names that this filter references. */
   def references: Array[String] = Array(columnName)
