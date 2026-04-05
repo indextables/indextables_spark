@@ -74,13 +74,13 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
 
   test("ENABLE TANTIVY4SPARK PROFILER should work as alias") {
     val result = spark.sql("ENABLE TANTIVY4SPARK PROFILER")
-    val rows = result.collect()
+    val rows   = result.collect()
     rows(0).getString(0) shouldBe "enabled"
   }
 
   test("enable indextables profiler should be case insensitive") {
     val result = spark.sql("enable indextables profiler")
-    val rows = result.collect()
+    val rows   = result.collect()
     rows(0).getString(0) shouldBe "enabled"
   }
 
@@ -99,14 +99,14 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
   test("DISABLE TANTIVY4SPARK PROFILER should work as alias") {
     FfiProfiler.enable()
     val result = spark.sql("DISABLE TANTIVY4SPARK PROFILER")
-    val rows = result.collect()
+    val rows   = result.collect()
     rows(0).getString(0) shouldBe "disabled"
   }
 
   // ===== DESCRIBE PROFILER tests =====
 
   test("DESCRIBE INDEXTABLES PROFILER should return section schema") {
-    val result = spark.sql("DESCRIBE INDEXTABLES PROFILER")
+    val result  = spark.sql("DESCRIBE INDEXTABLES PROFILER")
     val columns = result.columns.toSeq
     columns shouldBe Seq("section", "category", "calls", "total_ms", "avg_us", "min_us", "max_us")
   }
@@ -133,7 +133,7 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ===== DESCRIBE PROFILER CACHE tests =====
 
   test("DESCRIBE INDEXTABLES PROFILER CACHE should return cache schema") {
-    val result = spark.sql("DESCRIBE INDEXTABLES PROFILER CACHE")
+    val result  = spark.sql("DESCRIBE INDEXTABLES PROFILER CACHE")
     val columns = result.columns.toSeq
     columns shouldBe Seq("cache", "hits", "misses", "hit_rate")
   }
@@ -155,7 +155,7 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
   // ===== RESET PROFILER tests =====
 
   test("RESET INDEXTABLES PROFILER should return section schema") {
-    val result = spark.sql("RESET INDEXTABLES PROFILER")
+    val result  = spark.sql("RESET INDEXTABLES PROFILER")
     val columns = result.columns.toSeq
     columns shouldBe Seq("section", "category", "calls", "total_ms", "avg_us", "min_us", "max_us")
   }
@@ -170,7 +170,7 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("RESET INDEXTABLES PROFILER CACHE should return cache schema") {
-    val result = spark.sql("RESET INDEXTABLES PROFILER CACHE")
+    val result  = spark.sql("RESET INDEXTABLES PROFILER CACHE")
     val columns = result.columns.toSeq
     columns shouldBe Seq("cache", "hits", "misses", "hit_rate")
   }
@@ -206,12 +206,14 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
   test("profiler should capture non-zero section counters after index read") {
     val tempPath = Files.createTempDirectory("ffi-profiler-test").toString
     try {
-      val schema = StructType(Array(
-        StructField("id", IntegerType, nullable = false),
-        StructField("name", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Array(
+          StructField("id", IntegerType, nullable = false),
+          StructField("name", StringType, nullable = false)
+        )
+      )
       val data = Seq(Row(1, "Alice"), Row(2, "Bob"), Row(3, "Charlie"))
-      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+      val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
       val format = "io.indextables.spark.core.IndexTables4SparkTableProvider"
       df.write.format(format).mode("overwrite").save(tempPath)
@@ -226,7 +228,7 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
 
       // Check that profiler captured something
       val result = spark.sql("DESCRIBE INDEXTABLES PROFILER")
-      val rows = result.collect()
+      val rows   = result.collect()
       rows.length should be > 0
 
       // At least one section should have non-zero calls
@@ -239,10 +241,9 @@ class FfiProfilerCommandsTest extends AnyFunSuite with Matchers with BeforeAndAf
       afterReset.length shouldBe 0
 
       spark.sql("DISABLE INDEXTABLES PROFILER")
-    } finally {
+    } finally
       try org.apache.commons.io.FileUtils.deleteDirectory(new java.io.File(tempPath))
       catch { case _: Exception => }
-    }
   }
 
   // ===== SQL passthrough test =====

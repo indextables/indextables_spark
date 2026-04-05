@@ -27,7 +27,7 @@ import org.apache.spark.sql.connector.metric.{CustomMetric, CustomSumMetric, Cus
 abstract class CustomMaxMillisMetric extends CustomMetric {
   override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
     val maxVal = if (taskMetrics.nonEmpty) taskMetrics.max else 0L
-    s"${maxVal} ms"
+    s"$maxVal ms"
   }
 }
 
@@ -81,10 +81,20 @@ object BatchAssemblyTime { val NAME = "batchAssemblyTimeMs" }
 // TaskMetric wrappers
 // ============================================================================
 
-class TaskNativeFilteringTime(val value: Long)         extends CustomTaskMetric { override def name(): String = NativeFilteringTime.NAME }
-class TaskScanPlanTotalTime(val value: Long)           extends CustomTaskMetric { override def name(): String = ScanPlanTotalTime.NAME }
-class TaskSplitEngineCreationTime(val value: Long)     extends CustomTaskMetric { override def name(): String = SplitEngineCreationTime.NAME }
-class TaskQueryBuildTime(val value: Long)              extends CustomTaskMetric { override def name(): String = QueryBuildTime.NAME }
-class TaskStreamingSessionStartTime(val value: Long)   extends CustomTaskMetric { override def name(): String = StreamingSessionStartTime.NAME }
-class TaskNextBatchTime(val value: Long)               extends CustomTaskMetric { override def name(): String = NextBatchTime.NAME }
-class TaskBatchAssemblyTime(val value: Long)           extends CustomTaskMetric { override def name(): String = BatchAssemblyTime.NAME }
+class TaskNativeFilteringTime(val value: Long) extends CustomTaskMetric {
+  override def name(): String = NativeFilteringTime.NAME
+}
+class TaskScanPlanTotalTime(val value: Long) extends CustomTaskMetric {
+  override def name(): String = ScanPlanTotalTime.NAME
+}
+class TaskSplitEngineCreationTime(val value: Long) extends CustomTaskMetric {
+  override def name(): String = SplitEngineCreationTime.NAME
+}
+class TaskQueryBuildTime(val value: Long) extends CustomTaskMetric { override def name(): String = QueryBuildTime.NAME }
+class TaskStreamingSessionStartTime(val value: Long) extends CustomTaskMetric {
+  override def name(): String = StreamingSessionStartTime.NAME
+}
+class TaskNextBatchTime(val value: Long) extends CustomTaskMetric { override def name(): String = NextBatchTime.NAME }
+class TaskBatchAssemblyTime(val value: Long) extends CustomTaskMetric {
+  override def name(): String = BatchAssemblyTime.NAME
+}

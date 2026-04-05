@@ -40,7 +40,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsValidationTest])
 
-  var tempTablePath: String          = _
+  var tempTablePath: String                   = _
   var transactionLog: TransactionLogInterface = _
 
   /**
@@ -233,8 +233,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateMergedFilesCanBeRead()
 
     // Validate that data is still readable and complete
-    val mergedData  = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
-    val actualCount = mergedData.count()
+    val mergedData    = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val actualCount   = mergedData.count()
     val expectedCount = 300L // 3 writes * 100 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
 
@@ -294,8 +294,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
 
     // Validate data integrity
-    val mergedData  = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
-    val actualCount = mergedData.count()
+    val mergedData    = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val actualCount   = mergedData.count()
     val expectedCount = 300L // 2 writes * 150 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
 
@@ -341,8 +341,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateAllFilesExist()
 
     // Validate data integrity
-    val mergedData  = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
-    val actualCount = mergedData.count()
+    val mergedData    = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val actualCount   = mergedData.count()
     val expectedCount = 320L // 4 writes * 80 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
 
@@ -401,8 +401,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateAllFilesExist()
 
     // Validate that data is still readable and complete
-    val mergedData  = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
-    val actualCount = mergedData.count()
+    val mergedData    = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val actualCount   = mergedData.count()
     val expectedCount = 320L // 8 writes * 40 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
 
@@ -487,8 +487,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateAllFilesExist()
 
     // Validate that all data is preserved despite the grouping limit
-    val mergedData  = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
-    val actualCount = mergedData.count()
+    val mergedData    = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val actualCount   = mergedData.count()
     val expectedCount = 360L // 12 writes * 30 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
 
@@ -592,8 +592,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     }
 
     // Validate that data is still readable and complete
-    val mergedData  = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
-    val actualCount = mergedData.count()
+    val mergedData    = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val actualCount   = mergedData.count()
     val expectedCount = 300L // 3 writes * 100 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
 

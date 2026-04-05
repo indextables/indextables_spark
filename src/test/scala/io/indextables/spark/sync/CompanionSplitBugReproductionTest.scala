@@ -32,7 +32,11 @@ import org.scalatest.BeforeAndAfterAll
  *   1. Array[String] field returns null with "Cannot deserialize value of type LinkedHashMap" error 2. Date field
  *      throws ClassCastException 3. Any predicate returns zero rows
  */
-class CompanionSplitBugReproductionTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionSplitBugReproductionTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

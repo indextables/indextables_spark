@@ -4,8 +4,8 @@ import io.indextables.spark.TestBase
 
 /**
  * Validates Arrow FFI split behavior:
- *   1. EndsWith/Contains pushdown on FFI-written splits
- *   2. Partition filters don't leak to tantivy on FFI splits (which don't index partition cols)
+ *   1. EndsWith/Contains pushdown on FFI-written splits 2. Partition filters don't leak to tantivy on FFI splits (which
+ *      don't index partition cols)
  */
 class TantVsFfiSplitComparisonTest extends TestBase {
 

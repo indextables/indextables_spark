@@ -35,7 +35,10 @@ import org.slf4j.LoggerFactory
  *   1. Prewarm state is tracked per split 2. New hosts trigger catch-up prewarming 3. New splits discovered in
  *      transaction log trigger catch-up 4. State tracking is consistent across operations
  */
-class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PrewarmCatchUpTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCatchUpTest])
 

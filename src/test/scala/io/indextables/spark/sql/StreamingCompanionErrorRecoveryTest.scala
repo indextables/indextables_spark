@@ -32,13 +32,11 @@ import io.indextables.spark.TestBase
  * Uses a controllable syncFn lambda to simulate failures without requiring actual Delta/Iceberg tables. The parquet
  * source format is used so cheapSourceVersion always returns None, ensuring syncFn is called every cycle.
  */
-class StreamingCompanionErrorRecoveryTest
-    extends TestBase
-    with io.indextables.spark.testutils.FileCleanupHelper {
+class StreamingCompanionErrorRecoveryTest extends TestBase with io.indextables.spark.testutils.FileCleanupHelper {
 
   override protected def deleteRecursively(file: File): Unit = super[FileCleanupHelper].deleteRecursively(file)
 
-  private val tempDirs = new java.util.concurrent.CopyOnWriteArrayList[File]()
+  private val tempDirs                 = new java.util.concurrent.CopyOnWriteArrayList[File]()
   private var sharedSourcePath: String = _
 
   private def makeTempDir(prefix: String): String = {
@@ -94,7 +92,11 @@ class StreamingCompanionErrorRecoveryTest
       val destPath  = makeTempDir("streaming-dest")
       val callCount = new AtomicInteger(0)
 
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+        _,
+        _,
+        _
+      ) => {
         callCount.incrementAndGet()
         throw new RuntimeException("simulated failure")
       }
@@ -117,7 +119,11 @@ class StreamingCompanionErrorRecoveryTest
       val destPath  = makeTempDir("streaming-dest2")
       val callCount = new AtomicInteger(0)
 
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+        _,
+        _,
+        _
+      ) => {
         callCount.incrementAndGet()
         throw new RuntimeException("simulated failure")
       }
@@ -147,7 +153,11 @@ class StreamingCompanionErrorRecoveryTest
       // Pattern: fail, fail, succeed, fail, fail, succeed, fail, fail, succeed...
       // If error counter wasn't reset, the 3rd failure would abort.
       // Since it IS reset by successes, the stream continues past 6+ calls.
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+        _,
+        _,
+        _
+      ) => {
         val n = callCount.incrementAndGet()
         if (n % 3 == 0) {
           Seq.empty // every 3rd call succeeds, resetting consecutive errors
@@ -191,7 +201,11 @@ class StreamingCompanionErrorRecoveryTest
       val destPath   = makeTempDir("streaming-backoff")
       val timestamps = new java.util.concurrent.CopyOnWriteArrayList[Long]()
 
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+        _,
+        _,
+        _
+      ) => {
         timestamps.add(System.currentTimeMillis())
         throw new RuntimeException("simulated failure")
       }
@@ -205,7 +219,7 @@ class StreamingCompanionErrorRecoveryTest
       // 4 calls, 3 intervals between them
       timestamps.size() shouldBe 4
 
-      val ts = (0 until timestamps.size()).map(timestamps.get)
+      val ts        = (0 until timestamps.size()).map(timestamps.get)
       val intervals = ts.sliding(2).map { case Seq(a, b) => b - a }.toSeq
 
       // With multiplier=2 and pollInterval=500ms:
@@ -235,7 +249,11 @@ class StreamingCompanionErrorRecoveryTest
       val destPath  = makeTempDir("streaming-exact-count")
       val callCount = new AtomicInteger(0)
 
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+        _,
+        _,
+        _
+      ) => {
         callCount.incrementAndGet()
         throw new RuntimeException("simulated failure")
       }
@@ -255,7 +273,11 @@ class StreamingCompanionErrorRecoveryTest
     val destPath  = makeTempDir("streaming-success")
     val callCount = new AtomicInteger(0)
 
-    val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+    val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+      _,
+      _,
+      _
+    ) => {
       callCount.incrementAndGet()
       Seq.empty
     }
@@ -281,10 +303,14 @@ class StreamingCompanionErrorRecoveryTest
   test("interrupt during backoff sleep should exit cleanly") {
     spark.conf.set("spark.indextables.companion.stream.maxConsecutiveErrors", "100")
     try {
-      val destPath = makeTempDir("streaming-interrupt")
+      val destPath      = makeTempDir("streaming-interrupt")
       val firstCallDone = new AtomicBoolean(false)
 
-      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (_, _, _) => {
+      val syncFn: (SparkSession, Long, Option[Long]) => Seq[Row] = (
+        _,
+        _,
+        _
+      ) => {
         firstCallDone.set(true)
         throw new RuntimeException("simulated failure")
       }

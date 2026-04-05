@@ -21,13 +21,13 @@ import java.io.File
 import java.nio.file.{Files, Paths}
 import java.sql.Timestamp
 import java.time.{LocalDate, LocalDateTime}
+import java.util.zip.GZIPInputStream
 
 import scala.util.Random
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 
-import java.util.zip.GZIPInputStream
 import io.indextables.spark.TestBase
 import org.apache.commons.io.FileUtils
 
@@ -197,7 +197,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity after merge
-    val df = spark.read.format(INDEXTABLES_FORMAT).load(testDataPath)
+    val df                = spark.read.format(INDEXTABLES_FORMAT).load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 2400, "Should preserve all records after partition merge")
 
@@ -206,7 +206,6 @@ class PartitionedDatasetTest extends TestBase {
     println(s"Accessible partitions after merge: $distinctPartitions")
     assert(distinctPartitions > 0, "Should still have accessible partitions after merge")
   }
-
 
   test("Complex partitioned queries with IndexQuery operations") {
     // Generate test data with varied content
@@ -427,12 +426,14 @@ class PartitionedDatasetTest extends TestBase {
     val hasPartitionInfo = logFiles.exists { file =>
       val rawBytes = Files.readAllBytes(file.toPath)
       // Decompress if needed (handles both compressed and uncompressed files)
-      val decompressedBytes = try {
-        val gzis = new GZIPInputStream(new java.io.ByteArrayInputStream(rawBytes))
-        try gzis.readAllBytes() finally gzis.close()
-      } catch {
-        case _: java.util.zip.ZipException => rawBytes // Not compressed
-      }
+      val decompressedBytes =
+        try {
+          val gzis = new GZIPInputStream(new java.io.ByteArrayInputStream(rawBytes))
+          try gzis.readAllBytes()
+          finally gzis.close()
+        } catch {
+          case _: java.util.zip.ZipException => rawBytes // Not compressed
+        }
       val content = new String(decompressedBytes, "UTF-8")
       content.contains("partitionBy") || content.contains("load_date") || content.contains("load_hour")
     }

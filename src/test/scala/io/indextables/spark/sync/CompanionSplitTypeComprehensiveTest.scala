@@ -37,7 +37,11 @@ import org.scalatest.BeforeAndAfterAll
  *   - Partition column values are correctly injected
  *   - Complex types (Array, Struct, Map) are correctly deserialized
  */
-class CompanionSplitTypeComprehensiveTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionSplitTypeComprehensiveTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

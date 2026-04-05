@@ -18,26 +18,25 @@
 package io.indextables.spark.transaction
 
 import org.apache.spark.sql.sources._
+
 import io.indextables.tantivy4java.filter.PartitionFilter
 
 /**
  * Converts Spark DataSource V2 Filter objects to tantivy4java PartitionFilter JSON.
  *
- * Used for both partition filters (evaluated against partition_values) and data filters
- * (evaluated against min_values/max_values for data skipping). The same JSON format is
- * used for both — the native layer determines the evaluation target.
+ * Used for both partition filters (evaluated against partition_values) and data filters (evaluated against
+ * min_values/max_values for data skipping). The same JSON format is used for both — the native layer determines the
+ * evaluation target.
  */
 object SparkFilterToNativeFilter {
 
   /**
-   * Split pushed filters into partition filters and data (non-partition) filters.
-   * Partition filters reference only partition columns; data filters reference non-partition columns.
+   * Split pushed filters into partition filters and data (non-partition) filters. Partition filters reference only
+   * partition columns; data filters reference non-partition columns.
    *
-   * Data filters are further restricted to only include filters on fields where native
-   * data skipping (can_skip_by_stats) works correctly. Fields with type-dependent
-   * serialization (Date, Timestamp, Binary) are excluded because filter.value.toString()
-   * produces a different format than the stored min/max stats strings.
-   *
+   * Data filters are further restricted to only include filters on fields where native data skipping
+   * (can_skip_by_stats) works correctly. Fields with type-dependent serialization (Date, Timestamp, Binary) are
+   * excluded because filter.value.toString() produces a different format than the stored min/max stats strings.
    */
   def splitFilters(
     pushedFilters: Array[Filter],
@@ -92,8 +91,8 @@ object SparkFilterToNativeFilter {
   }
 
   /**
-   * Convert a value to the same string format used by transaction log min/max statistics.
-   * This ensures native can_skip_by_stats compares like-for-like.
+   * Convert a value to the same string format used by transaction log min/max statistics. This ensures native
+   * can_skip_by_stats compares like-for-like.
    */
   private def toStatCompatibleString(value: Any): String = value match {
     case ts: java.sql.Timestamp =>
@@ -104,39 +103,39 @@ object SparkFilterToNativeFilter {
       // Stats store dates as ISO strings or epoch days. ISO format works for both
       // native string comparison and typed date comparison.
       d.toLocalDate.toString
-    case null => null
+    case null  => null
     case other => other.toString
   }
 
   /** Convert a single Spark Filter to a PartitionFilter. Returns None for unsupported filters. */
   def convert(filter: Filter): Option[PartitionFilter] = filter match {
-    case EqualTo(attr, value)            => Some(PartitionFilter.eq(attr, toStatCompatibleString(value)))
-    case EqualNullSafe(attr, value)      =>
+    case EqualTo(attr, value) => Some(PartitionFilter.eq(attr, toStatCompatibleString(value)))
+    case EqualNullSafe(attr, value) =>
       if (value == null) Some(PartitionFilter.isNull(attr))
       else Some(PartitionFilter.eq(attr, toStatCompatibleString(value)))
     case GreaterThan(attr, value)        => Some(PartitionFilter.gt(attr, toStatCompatibleString(value)))
     case GreaterThanOrEqual(attr, value) => Some(PartitionFilter.gte(attr, toStatCompatibleString(value)))
     case LessThan(attr, value)           => Some(PartitionFilter.lt(attr, toStatCompatibleString(value)))
     case LessThanOrEqual(attr, value)    => Some(PartitionFilter.lte(attr, toStatCompatibleString(value)))
-    case In(attr, values)                =>
+    case In(attr, values) =>
       val strValues = values.filter(_ != null).map(toStatCompatibleString)
       if (strValues.nonEmpty) Some(PartitionFilter.in(attr, strValues: _*))
       else None
-    case IsNull(attr)                    => Some(PartitionFilter.isNull(attr))
-    case IsNotNull(attr)                 => Some(PartitionFilter.isNotNull(attr))
-    case StringStartsWith(attr, value)   => Some(PartitionFilter.stringStartsWith(attr, value))
-    case StringEndsWith(attr, value)     => Some(PartitionFilter.stringEndsWith(attr, value))
-    case StringContains(attr, value)     => Some(PartitionFilter.stringContains(attr, value))
-    case Not(child)                      =>
+    case IsNull(attr)                  => Some(PartitionFilter.isNull(attr))
+    case IsNotNull(attr)               => Some(PartitionFilter.isNotNull(attr))
+    case StringStartsWith(attr, value) => Some(PartitionFilter.stringStartsWith(attr, value))
+    case StringEndsWith(attr, value)   => Some(PartitionFilter.stringEndsWith(attr, value))
+    case StringContains(attr, value)   => Some(PartitionFilter.stringContains(attr, value))
+    case Not(child) =>
       convert(child).map(PartitionFilter.not)
-    case And(left, right)                =>
+    case And(left, right) =>
       (convert(left), convert(right)) match {
         case (Some(l), Some(r)) => Some(PartitionFilter.and(l, r))
         case (Some(l), None)    => Some(l)
         case (None, Some(r))    => Some(r)
         case (None, None)       => None
       }
-    case Or(left, right)                 =>
+    case Or(left, right) =>
       (convert(left), convert(right)) match {
         case (Some(l), Some(r)) => Some(PartitionFilter.or(l, r))
         case _                  => None // Can't push OR if one side is unsupported

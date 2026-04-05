@@ -33,7 +33,11 @@ import org.scalatest.BeforeAndAfterAll
  * column + an indexquery condition on a text field, all rows in the first partition are returned instead of only the
  * matching rows.
  */
-class CompanionMultiPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionMultiPartitionFilterBugTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

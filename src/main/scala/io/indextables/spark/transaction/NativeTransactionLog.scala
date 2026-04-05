@@ -22,15 +22,17 @@ import java.util.UUID
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
-import io.indextables.spark.util.JsonUtil
-import io.indextables.spark.arrow.ArrowFfiBridge
-import io.indextables.spark.stats.DataSkippingMetrics
-import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter, TxLogSnapshotInfo, WriteResult}
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.vectorized.ColumnarBatch
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.jni.txlog.{TransactionLogReader, TransactionLogWriter, TxLogSnapshotInfo, WriteResult}
+import io.indextables.spark.arrow.ArrowFfiBridge
+import io.indextables.spark.stats.DataSkippingMetrics
+import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
 /**
@@ -66,12 +68,14 @@ class NativeTransactionLog(
     // but we set them explicitly to guarantee no silent behavior change on upgrade).
     if (!config.containsKey("cache.ttl.ms")) {
       Option(options.get("spark.indextables.transaction.cache.expirationSeconds")).foreach { v =>
-        try {
+        try
           config.put("cache.ttl.ms", (v.toLong * 1000L).toString)
-        } catch {
+        catch {
           case e: NumberFormatException =>
             throw new IllegalArgumentException(
-              s"Invalid value for spark.indextables.transaction.cache.expirationSeconds: '$v' (expected integer seconds)", e)
+              s"Invalid value for spark.indextables.transaction.cache.expirationSeconds: '$v' (expected integer seconds)",
+              e
+            )
         }
       }
     }
@@ -85,7 +89,7 @@ class NativeTransactionLog(
     // Enables native compare_values_typed to parse bare datetime strings like "2025-11-07 05:00:00".
     // Without this, timestamp data skipping is conservative (never skips) — safe but suboptimal.
     try {
-      val tz = org.apache.spark.sql.SparkSession.active.sessionState.conf.sessionLocalTimeZone
+      val tz            = org.apache.spark.sql.SparkSession.active.sessionState.conf.sessionLocalTimeZone
       val offsetSeconds = java.util.TimeZone.getTimeZone(tz).getOffset(System.currentTimeMillis()) / 1000
       config.put("session.timezone.offset.seconds", offsetSeconds.toString)
     } catch {
@@ -203,7 +207,7 @@ class NativeTransactionLog(
 
   override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
     val actions: Seq[Action] = removeActions ++ addActions
-    val result = writeActionsViaArrow(actions, retry = true)
+    val result               = writeActionsViaArrow(actions, retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
@@ -214,7 +218,7 @@ class NativeTransactionLog(
     metadataUpdate: Option[MetadataAction]
   ): Long = {
     val actions: Seq[Action] = removeActions ++ addActions ++ metadataUpdate.toSeq
-    val result = writeActionsViaArrow(actions, retry = true)
+    val result               = writeActionsViaArrow(actions, retry = true)
     recordRetryMetrics(result)
     result.getVersion
   }
@@ -236,13 +240,13 @@ class NativeTransactionLog(
   /**
    * Re-resolve AWS credentials from the configured credential provider and update nativeConfig.
    *
-   * Matches the lifecycle of the old S3CloudStorageProvider pattern: the old code wrapped the
-   * credential provider in V1ToV2CredentialsProviderAdapter so the AWS SDK re-invoked it before
-   * each storage operation. Here we replicate that by calling the provider before each write.
+   * Matches the lifecycle of the old S3CloudStorageProvider pattern: the old code wrapped the credential provider in
+   * V1ToV2CredentialsProviderAdapter so the AWS SDK re-invoked it before each storage operation. Here we replicate that
+   * by calling the provider before each write.
    *
-   * The credential provider (e.g., UnityCatalogAWSCredentialProvider) has an internal Guava
-   * cache, so this is a cache-hit no-op on most calls; an HTTP fetch occurs only when credentials
-   * are near expiration (~40 minutes before the typical 1-hour UC credential TTL).
+   * The credential provider (e.g., UnityCatalogAWSCredentialProvider) has an internal Guava cache, so this is a
+   * cache-hit no-op on most calls; an HTTP fetch occurs only when credentials are near expiration (~40 minutes before
+   * the typical 1-hour UC credential TTL).
    *
    * No-ops if no credential provider class is configured (static credentials or default chain).
    */
@@ -281,9 +285,9 @@ class NativeTransactionLog(
   private def writeActionsViaArrow(actions: Seq[Action], retry: Boolean): WriteResult = {
     refreshCredentials()
     val (arrowArray, arrowSchema, arrayAddr, schemaAddr) = ActionsToArrowConverter.exportAsFfi(actions)
-    try {
+    try
       TransactionLogWriter.writeVersionArrowFfi(nativeTablePath, nativeConfig, arrayAddr, schemaAddr, retry)
-    } finally {
+    finally {
       arrowArray.close()
       arrowSchema.close()
     }
@@ -299,7 +303,7 @@ class NativeTransactionLog(
       logger.debug("Protocol auto-upgrade disabled via configuration, skipping")
       return
     }
-    val current       = getProtocol()
+    val current         = getProtocol()
     val effectiveReader = math.max(current.minReaderVersion, newMinReaderVersion)
     val effectiveWriter = math.max(current.minWriterVersion, newMinWriterVersion)
     if (effectiveReader == current.minReaderVersion && effectiveWriter == current.minWriterVersion) {
@@ -330,7 +334,7 @@ class NativeTransactionLog(
   override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] =
     listFilesWithAllFilters(partitionFilters, Seq.empty)
 
-  override def listFilesWithAllFilters(partitionFilters: Seq[Filter], dataFilters: Seq[Filter]): Seq[AddAction] = {
+  override def listFilesWithAllFilters(partitionFilters: Seq[Filter], dataFilters: Seq[Filter]): Seq[AddAction] =
     // Data skipping already applied natively — no need to export stats back to JVM
     listFilesArrow(
       partitionFilters = SparkFilterToNativeFilter.convertOrNull(partitionFilters),
@@ -338,15 +342,13 @@ class NativeTransactionLog(
       excludeCooldown = false,
       includeStats = false
     ).files
-  }
 
   /**
-   * List files with all filtering applied natively in a single JNI call.
-   * Returns files + table metadata + filtering metrics.
+   * List files with all filtering applied natively in a single JNI call. Returns files + table metadata + filtering
+   * metrics.
    *
-   * Replaces the old multi-step pipeline:
-   * getSnapshotInfo → readManifest × N → readPostCheckpointChanges →
-   * JVM log replay → partition pruning → data skipping → cooldown filtering → schema restore
+   * Replaces the old multi-step pipeline: getSnapshotInfo → readManifest × N → readPostCheckpointChanges → JVM log
+   * replay → partition pruning → data skipping → cooldown filtering → schema restore
    */
   def listFilesWithMetadata(
     partitionFilters: Seq[Filter],
@@ -361,17 +363,16 @@ class NativeTransactionLog(
     )
 
   /**
-   * List files excluding those in cooldown/skip state.
-   * Replaces the old pattern: listFiles() then filterFilesInCooldown().
+   * List files excluding those in cooldown/skip state. Replaces the old pattern: listFiles() then
+   * filterFilesInCooldown().
    */
-  def listFilesExcludingCooldown(filters: Seq[Filter] = Seq.empty): Seq[AddAction] = {
+  def listFilesExcludingCooldown(filters: Seq[Filter] = Seq.empty): Seq[AddAction] =
     listFilesArrow(
       partitionFilters = SparkFilterToNativeFilter.convertOrNull(filters),
       dataFilters = null,
       excludeCooldown = true,
       includeStats = true // merge path needs full metadata
     ).files
-  }
 
   private def listFilesArrow(
     partitionFilters: String,
@@ -384,26 +385,29 @@ class NativeTransactionLog(
     // Native returns numColumns in result JSON; we only import that many.
     // 20 base (including partition_values JSON col) + up to 20 partition cols + 2 stats = 42
     val maxCols = 42
-    val bridge = new ArrowFfiBridge()
+    val bridge  = new ArrowFfiBridge()
     try {
       val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(maxCols)
 
       // Field types for type-aware data skipping are auto-extracted from
       // MetadataAction.schema_string by the native layer — no JVM-side work needed.
-      val resultJson = try {
-        TransactionLogReader.listFilesArrowFfi(
-          nativeTablePath, nativeConfig,
-          partitionFilters,
-          dataFilters,
-          excludeCooldown,
-          includeStats,
-          arrayAddrs, schemaAddrs
-        )
-      } catch {
-        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
-          logger.debug(s"Table not yet initialized at $nativeTablePath")
-          null
-      }
+      val resultJson =
+        try
+          TransactionLogReader.listFilesArrowFfi(
+            nativeTablePath,
+            nativeConfig,
+            partitionFilters,
+            dataFilters,
+            excludeCooldown,
+            includeStats,
+            arrayAddrs,
+            schemaAddrs
+          )
+        catch {
+          case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
+            logger.debug(s"Table not yet initialized at $nativeTablePath")
+            null
+        }
 
       if (resultJson == null) {
         closeUnusedStructs(arrays, schemas, 0)
@@ -419,13 +423,15 @@ class NativeTransactionLog(
 
       // Parse result metadata
       val resultNode = mapper.readTree(resultJson)
-      val numRows = resultNode.get("numRows").asLong()
+      val numRows    = resultNode.get("numRows").asLong()
       val numColumns = resultNode.get("numColumns").asInt()
 
       // Extract table metadata (eliminates separate getSchema/getPartitionColumns/getProtocol calls)
       // schemaJson now returns the table data schema (MetadataAction.schema_string) in Spark StructType JSON format
-      val schemaJson = if (resultNode.has("schemaJson") && !resultNode.get("schemaJson").isNull)
-        resultNode.get("schemaJson").asText() else null
+      val schemaJson =
+        if (resultNode.has("schemaJson") && !resultNode.get("schemaJson").isNull)
+          resultNode.get("schemaJson").asText()
+        else null
       val schema = if (schemaJson != null && schemaJson.nonEmpty) {
         Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
       } else None
@@ -441,8 +447,8 @@ class NativeTransactionLog(
 
       val metadataConfig = if (resultNode.has("metadataConfigJson") && !resultNode.get("metadataConfigJson").isNull) {
         val configNode = mapper.readTree(resultNode.get("metadataConfigJson").asText())
-        val entries = scala.collection.mutable.Map[String, String]()
-        val it = configNode.fields()
+        val entries    = scala.collection.mutable.Map[String, String]()
+        val it         = configNode.fields()
         while (it.hasNext) {
           val entry = it.next()
           entries.put(entry.getKey, entry.getValue.asText())
@@ -475,11 +481,10 @@ class NativeTransactionLog(
           schemas.take(numColumns),
           numRows.toInt
         )
-        try {
+        try
           ArrowFileEntryExtractor.extract(batch, partitionColumns)
-        } finally {
+        finally
           batch.close()
-        }
       } else {
         Seq.empty
       }
@@ -492,9 +497,8 @@ class NativeTransactionLog(
         metadataConfig = metadataConfig,
         metrics = metrics
       )
-    } finally {
+    } finally
       bridge.close()
-    }
   }
 
   override def getTotalRowCount(): Long =
@@ -600,7 +604,7 @@ class NativeTransactionLog(
     )
     val skipJson = ActionJsonSerializer.skipActionToJson(skipAction)
     refreshCredentials()
-    val version  = TransactionLogWriter.skipFile(nativeTablePath, nativeConfig, skipJson)
+    val version = TransactionLogWriter.skipFile(nativeTablePath, nativeConfig, skipJson)
     version
   }
 
@@ -676,17 +680,17 @@ class NativeTransactionLog(
   // ------------------------------------------------------------------------------------
 
   /**
-   * Get the current snapshot from the native layer. Returns null if the table is not yet
-   * initialized (e.g., during the write path before any data is committed).
+   * Get the current snapshot from the native layer. Returns null if the table is not yet initialized (e.g., during the
+   * write path before any data is committed).
    *
-   * Caching is handled entirely by the native layer's global CACHE_REGISTRY, which is
-   * automatically invalidated by write operations across all instances.
+   * Caching is handled entirely by the native layer's global CACHE_REGISTRY, which is automatically invalidated by
+   * write operations across all instances.
    */
   private def getOrRefreshSnapshot(): TxLogSnapshotInfo = {
     refreshCredentials()
-    try {
+    try
       TransactionLogReader.getSnapshotInfo(nativeTablePath, nativeConfig)
-    } catch {
+    catch {
       case e: RuntimeException if e.getMessage != null && e.getMessage.contains("not initialized") =>
         logger.debug(s"Table not yet initialized at $nativeTablePath")
         null
@@ -700,8 +704,8 @@ class NativeTransactionLog(
   }
 
   /**
-   * Retry an operation with exponential backoff. The operation is called on each attempt
-   * and should return a WriteResult from writeVersionOnce.
+   * Retry an operation with exponential backoff. The operation is called on each attempt and should return a
+   * WriteResult from writeVersionOnce.
    */
   private def retryWithBackoff(operationName: String)(operation: () => WriteResult): Long = {
     val maxAttempts = options.getInt("spark.indextables.state.retry.maxAttempts", 10)
@@ -732,7 +736,7 @@ class NativeTransactionLog(
     )
   }
 
-  private def recordRetryMetrics(result: WriteResult): Unit = {
+  private def recordRetryMetrics(result: WriteResult): Unit =
     lastRetryMetrics = Some(
       TxRetryMetrics(
         attemptsMade = result.getRetries + 1,
@@ -741,7 +745,6 @@ class NativeTransactionLog(
         conflictedVersions = result.getConflictedVersions.asScala.map(_.toLong).toSeq
       )
     )
-  }
 
   private def parseMetadataJson(metadataJson: String): MetadataAction =
     mapper.readValue(metadataJson, classOf[MetadataAction])
@@ -754,8 +757,10 @@ class NativeTransactionLog(
   ): Unit = {
     var i = usedCount
     while (i < arrays.length) {
-      try { arrays(i).close() } catch { case _: Exception => }
-      try { schemas(i).close() } catch { case _: Exception => }
+      try arrays(i).close()
+      catch { case _: Exception => }
+      try schemas(i).close()
+      catch { case _: Exception => }
       i += 1
     }
   }

@@ -266,8 +266,9 @@ class IndexTables4SparkTable(
 
 }
 
-class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.catalog.TableProvider
-  with org.apache.spark.sql.sources.DataSourceRegister {
+class IndexTables4SparkTableProvider
+    extends org.apache.spark.sql.connector.catalog.TableProvider
+    with org.apache.spark.sql.sources.DataSourceRegister {
 
   override def shortName(): String = "indextables"
 

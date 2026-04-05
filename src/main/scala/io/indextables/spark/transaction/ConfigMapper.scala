@@ -22,8 +22,8 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /**
- * Maps Spark/Hadoop configuration keys to the native tantivy4java config map format expected by JNI
- * transaction log methods.
+ * Maps Spark/Hadoop configuration keys to the native tantivy4java config map format expected by JNI transaction log
+ * methods.
  *
  * This centralizes the credential translation that was previously duplicated across DeltaLogReader,
  * ParquetDirectoryReader, and IcebergSourceReader.
@@ -33,30 +33,30 @@ object ConfigMapper {
   /** Direct 1:1 Spark key → native key mappings. */
   private val directMappings: Seq[(String, String)] = Seq(
     // AWS credentials
-    "spark.indextables.aws.accessKey"     -> "aws_access_key_id",
-    "spark.indextables.aws.secretKey"     -> "aws_secret_access_key",
-    "spark.indextables.aws.sessionToken"  -> "aws_session_token",
-    "spark.indextables.aws.region"        -> "aws_region",
-    "spark.indextables.aws.endpoint"      -> "aws_endpoint",
+    "spark.indextables.aws.accessKey"      -> "aws_access_key_id",
+    "spark.indextables.aws.secretKey"      -> "aws_secret_access_key",
+    "spark.indextables.aws.sessionToken"   -> "aws_session_token",
+    "spark.indextables.aws.region"         -> "aws_region",
+    "spark.indextables.aws.endpoint"       -> "aws_endpoint",
     "spark.indextables.aws.forcePathStyle" -> "aws_force_path_style",
     // Azure credentials
     "spark.indextables.azure.accountName" -> "azure_account_name",
     "spark.indextables.azure.accountKey"  -> "azure_access_key",
     "spark.indextables.azure.bearerToken" -> "azure_bearer_token",
     // Transaction log cache configuration
-    "spark.indextables.transaction.cache.enabled"            -> "cache.enabled",
-    "spark.indextables.transaction.cache.ttl.ms"             -> "cache.ttl.ms",
-    "spark.indextables.transaction.cache.version.ttl.ms"     -> "cache.version.ttl.ms",
-    "spark.indextables.transaction.cache.snapshot.ttl.ms"    -> "cache.snapshot.ttl.ms",
-    "spark.indextables.transaction.cache.fileList.ttl.ms"    -> "cache.file_list.ttl.ms",
-    "spark.indextables.transaction.cache.metadata.ttl.ms"    -> "cache.metadata.ttl.ms",
-    "spark.indextables.transaction.cache.version.capacity"   -> "cache.version.capacity",
-    "spark.indextables.transaction.cache.snapshot.capacity"   -> "cache.snapshot.capacity",
-    "spark.indextables.transaction.cache.fileList.capacity"  -> "cache.file_list.capacity",
+    "spark.indextables.transaction.cache.enabled"           -> "cache.enabled",
+    "spark.indextables.transaction.cache.ttl.ms"            -> "cache.ttl.ms",
+    "spark.indextables.transaction.cache.version.ttl.ms"    -> "cache.version.ttl.ms",
+    "spark.indextables.transaction.cache.snapshot.ttl.ms"   -> "cache.snapshot.ttl.ms",
+    "spark.indextables.transaction.cache.fileList.ttl.ms"   -> "cache.file_list.ttl.ms",
+    "spark.indextables.transaction.cache.metadata.ttl.ms"   -> "cache.metadata.ttl.ms",
+    "spark.indextables.transaction.cache.version.capacity"  -> "cache.version.capacity",
+    "spark.indextables.transaction.cache.snapshot.capacity" -> "cache.snapshot.capacity",
+    "spark.indextables.transaction.cache.fileList.capacity" -> "cache.file_list.capacity",
     // Transaction log concurrency
-    "spark.indextables.transaction.maxConcurrentReads"       -> "max_concurrent_reads",
+    "spark.indextables.transaction.maxConcurrentReads" -> "max_concurrent_reads",
     // Checkpoint interval
-    "spark.indextables.checkpoint.interval"                  -> "checkpoint_interval"
+    "spark.indextables.checkpoint.interval" -> "checkpoint_interval"
   )
 
   /**
@@ -73,9 +73,8 @@ object ConfigMapper {
     val config = new java.util.HashMap[String, String]()
 
     // Apply direct 1:1 mappings
-    for ((sparkKey, nativeKey) <- directMappings) {
+    for ((sparkKey, nativeKey) <- directMappings)
       Option(options.get(sparkKey)).foreach(v => config.put(nativeKey, v))
-    }
 
     // S3 endpoint/pathStyle alternate keys (conditional — only set if primary key not already present)
     Option(options.get("spark.indextables.s3.endpoint")).foreach { v =>
@@ -100,9 +99,8 @@ object ConfigMapper {
     val config = new java.util.HashMap[String, String]()
 
     // Apply direct 1:1 mappings
-    for ((sparkKey, nativeKey) <- directMappings) {
+    for ((sparkKey, nativeKey) <- directMappings)
       options.get(sparkKey).foreach(v => config.put(nativeKey, v))
-    }
 
     // S3 endpoint/pathStyle alternate keys (conditional — only set if primary key not already present)
     options.get("spark.indextables.s3.endpoint").foreach { v =>
@@ -118,9 +116,9 @@ object ConfigMapper {
   /**
    * Normalize a Hadoop Path to a string suitable for native txlog methods.
    *
-   * Delegates to ProtocolNormalizer for cloud scheme conversion (s3a→s3, abfss→azure, wasbs→azure),
-   * which correctly extracts container names from full Azure URLs
-   * (e.g. abfss://container@account.dfs.core.windows.net/path → azure://container/path).
+   * Delegates to ProtocolNormalizer for cloud scheme conversion (s3a→s3, abfss→azure, wasbs→azure), which correctly
+   * extracts container names from full Azure URLs (e.g. abfss://container@account.dfs.core.windows.net/path →
+   * azure://container/path).
    *
    * Also handles local paths by adding file:// scheme for native object_store.
    */

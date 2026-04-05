@@ -28,8 +28,8 @@ import io.indextables.spark.TestBase
  *   - Multiple terms (IN): ip_field:192.168.1.1 OR ip_field:10.0.0.1
  *
  * CIDR and wildcard patterns are transparently expanded by tantivy4java:
- *   - CIDR: ip indexquery '192.168.1.0/24'  →  range [192.168.1.0 TO 192.168.1.255]
- *   - Wildcard: ip indexquery '192.168.1.*'  →  same range
+ *   - CIDR: ip indexquery '192.168.1.0/24' → range [192.168.1.0 TO 192.168.1.255]
+ *   - Wildcard: ip indexquery '192.168.1.*' → same range
  */
 class IpAddressIndexQueryTest extends TestBase {
 

@@ -390,10 +390,9 @@ class SplitReaderContext(
 
   /**
    * Check if a range filter is redundant based on min/max statistics. A filter is redundant if the split's entire data
-   * Redundant range filter elimination is now handled natively (FR4).
-   * The native split search engine automatically uses per-file stats
-   * cached during listFilesArrowFfi() to eliminate redundant range filters.
-   * See: TANTIVY4JAVA_FR4_API_GAP.md (resolved)
+   * Redundant range filter elimination is now handled natively (FR4). The native split search engine automatically uses
+   * per-file stats cached during listFilesArrowFfi() to eliminate redundant range filters. See:
+   * TANTIVY4JAVA_FR4_API_GAP.md (resolved)
    */
 }
 

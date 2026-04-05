@@ -37,8 +37,8 @@ object TransactionLogFactory {
   /**
    * Create a transaction log instance.
    *
-   * Resolves credentials from Hadoop config, Spark config, and DataSource options using the same
-   * precedence chain as the read path (ConfigNormalization + CredentialProviderFactory).
+   * Resolves credentials from Hadoop config, Spark config, and DataSource options using the same precedence chain as
+   * the read path (ConfigNormalization + CredentialProviderFactory).
    *
    * @param tablePath
    *   The path to the table
@@ -57,9 +57,9 @@ object TransactionLogFactory {
     logger.debug(s"Creating NativeTransactionLog for $tablePath")
 
     // Merge configs with same precedence as read path: Hadoop < Spark config < options
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val hadoopConf    = spark.sparkContext.hadoopConfiguration
     val hadoopConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val sparkConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val sparkConfigs  = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val optionConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromOptions(options)
 
     val mergedConfigs = io.indextables.spark.util.ConfigNormalization.mergeWithPrecedence(
@@ -74,7 +74,8 @@ object TransactionLogFactory {
     // class key, and injects explicit credentials. We re-add the provider class afterward so
     // CloudStorageProvider and executors can still invoke it for fresh credential refresh.
     val providerClassKey = "spark.indextables.aws.credentialsProviderClass"
-    val providerClassOpt = mergedConfigs.get(providerClassKey)
+    val providerClassOpt = mergedConfigs
+      .get(providerClassKey)
       .orElse(mergedConfigs.get(providerClassKey.toLowerCase))
 
     // Strip source-table-specific keys before resolving credentials for this txlog's storage path.
@@ -107,8 +108,8 @@ object TransactionLogFactory {
   /**
    * Create a native transaction log instance directly.
    *
-   * Convenience method that bypasses SparkSession parameter. Useful for tests.
-   * Credentials must already be present in the options map.
+   * Convenience method that bypasses SparkSession parameter. Useful for tests. Credentials must already be present in
+   * the options map.
    */
   def createNative(
     tablePath: Path,

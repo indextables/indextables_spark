@@ -36,8 +36,8 @@ import org.slf4j.LoggerFactory
  *   - CHECKPOINT TANTIVY4SPARK '/path/to/table'
  *
  * This command:
- *   1. Reads the current transaction log state 2. Delegates checkpoint creation to the native
- *      tantivy4java implementation 3. Returns status information about the checkpoint
+ *   1. Reads the current transaction log state 2. Delegates checkpoint creation to the native tantivy4java
+ *      implementation 3. Returns status information about the checkpoint
  *
  * Use this command to:
  *   - Force checkpoint creation at a specific point in time

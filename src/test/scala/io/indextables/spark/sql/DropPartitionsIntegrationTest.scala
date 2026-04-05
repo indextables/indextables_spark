@@ -28,7 +28,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Integration tests for DROP INDEXTABLES PARTITIONS command. */
-class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class DropPartitionsIntegrationTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _
@@ -572,7 +575,7 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       assert(count2 == 4, s"Expected 4 records after second insert, got $count2")
 
       // Verify both partitions exist
-      val df = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
+      val df               = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
       val partition01Count = df.filter($"partition_key" === "01").count()
       val partition02Count = df.filter($"partition_key" === "02").count()
       println(s"[AVRO] Partition counts: 01=$partition01Count, 02=$partition02Count")

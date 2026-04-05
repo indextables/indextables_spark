@@ -25,7 +25,14 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.metrics.{ReadPipelineMetrics, TaskSplitEngineCreationTime, TaskQueryBuildTime, TaskStreamingSessionStartTime, TaskNextBatchTime, TaskBatchAssemblyTime}
+import io.indextables.spark.metrics.{
+  ReadPipelineMetrics,
+  TaskBatchAssemblyTime,
+  TaskNextBatchTime,
+  TaskQueryBuildTime,
+  TaskSplitEngineCreationTime,
+  TaskStreamingSessionStartTime
+}
 import io.indextables.spark.transaction.AddAction
 import org.slf4j.LoggerFactory
 

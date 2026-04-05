@@ -360,7 +360,7 @@ class SimpleAggregatePushdownTest extends TestBase with io.indextables.spark.tes
     )
 
     // For testing: create a mock TransactionLog with empty files
-    val transactionLog = TransactionLogFactory.create(new Path("/mock/path"), spark)
+    val transactionLog  = TransactionLogFactory.create(new Path("/mock/path"), spark)
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
     // Test that we can create the scan builder

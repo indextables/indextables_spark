@@ -19,9 +19,7 @@ package io.indextables.spark.util
 
 import org.apache.spark.sql.sources._
 
-/**
- * Shared utilities for extracting metadata from Spark Filter objects.
- */
+/** Shared utilities for extracting metadata from Spark Filter objects. */
 object FilterUtils {
 
   /**

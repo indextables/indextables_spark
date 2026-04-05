@@ -85,9 +85,9 @@ abstract class CloudS3TestBase extends AnyFunSuite with Matchers with BeforeAndA
   }
 
   /**
-   * Load AWS credentials from ~/.aws/credentials and set them in Spark and Hadoop config.
-   * The native transaction log requires explicit credential configuration via
-   * spark.indextables.aws.* keys (it does not auto-resolve from Hadoop's filesystem API).
+   * Load AWS credentials from ~/.aws/credentials and set them in Spark and Hadoop config. The native transaction log
+   * requires explicit credential configuration via spark.indextables.aws.* keys (it does not auto-resolve from Hadoop's
+   * filesystem API).
    */
   private def loadAndConfigureAwsCredentials(): Unit =
     try {

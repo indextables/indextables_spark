@@ -17,8 +17,9 @@
 
 package io.indextables.spark.write
 
-import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.slf4j.LoggerFactory
 
 /**
@@ -66,8 +67,8 @@ object ArrowFfiWriteConfig {
   val KEY_HEAP_SIZE  = "spark.indextables.indexWriter.heapSize"
 
   // Default values
-  val DEFAULT_BATCH_SIZE: Int  = 8192
-  val DEFAULT_HEAP_SIZE: Long  = 256L * 1024 * 1024 // 256MB
+  val DEFAULT_BATCH_SIZE: Int = 8192
+  val DEFAULT_HEAP_SIZE: Long = 256L * 1024 * 1024 // 256MB
 
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 
@@ -86,7 +87,13 @@ object ArrowFfiWriteConfig {
     warnIfDeprecatedKeyPresent(key => options.containsKey(key))
 
     val batchSize = ConfigParsingUtils.getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
-    val heapSize  = ConfigParsingUtils.getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
+    val heapSize = ConfigParsingUtils.getLongOption(
+      options,
+      KEY_HEAP_SIZE,
+      DEFAULT_HEAP_SIZE,
+      mustBePositive = true,
+      supportSizeSuffix = true
+    )
 
     val config = ArrowFfiWriteConfig(
       batchSize = batchSize,

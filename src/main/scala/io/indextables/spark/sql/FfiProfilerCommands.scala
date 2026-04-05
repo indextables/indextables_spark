@@ -20,11 +20,11 @@ package io.indextables.spark.sql
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 
-import org.apache.spark.SparkContext
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType}
+import org.apache.spark.SparkContext
 
 import io.indextables.spark.storage.DriverSplitLocalityManager
 import io.indextables.tantivy4java.split.FfiProfiler
@@ -46,8 +46,7 @@ case class EnableFfiProfilerCommand() extends LeafRunnableCommand {
   override def run(sparkSession: SparkSession): Seq[Row] = {
     FfiProfiler.enable() // driver host
     val hostCount = FfiProfilerExecutorHelper.broadcastToHosts(sparkSession.sparkContext, enable = true)
-    Seq(Row("enabled", hostCount,
-      s"FFI profiler enabled on driver + $hostCount executor host(s) (counters auto-reset)"))
+    Seq(Row("enabled", hostCount, s"FFI profiler enabled on driver + $hostCount executor host(s) (counters auto-reset)"))
   }
 }
 
@@ -67,17 +66,17 @@ case class DisableFfiProfilerCommand() extends LeafRunnableCommand {
   override def run(sparkSession: SparkSession): Seq[Row] = {
     FfiProfiler.disable() // driver host
     val hostCount = FfiProfilerExecutorHelper.broadcastToHosts(sparkSession.sparkContext, enable = false)
-    Seq(Row("disabled", hostCount,
-      s"FFI profiler disabled on driver + $hostCount executor host(s) (counters preserved)"))
+    Seq(
+      Row("disabled", hostCount, s"FFI profiler disabled on driver + $hostCount executor host(s) (counters preserved)")
+    )
   }
 }
 
 /**
  * SQL command to read FFI profiler counters from all hosts as a DataFrame.
  *
- * Syntax:
- *   DESCRIBE INDEXTABLES PROFILER        -- section timings
- *   DESCRIBE INDEXTABLES PROFILER CACHE  -- cache hit/miss counters
+ * Syntax: DESCRIBE INDEXTABLES PROFILER -- section timings DESCRIBE INDEXTABLES PROFILER CACHE -- cache hit/miss
+ * counters
  */
 case class DescribeFfiProfilerCommand(cacheOnly: Boolean = false) extends LeafRunnableCommand {
 
@@ -96,12 +95,10 @@ case class DescribeFfiProfilerCommand(cacheOnly: Boolean = false) extends LeafRu
 /**
  * SQL command to read and reset FFI profiler counters from all hosts.
  *
- * Reset is atomic per-host (native CAS), but not cluster-atomic. Events recorded on executors
- * between their reset and the driver reset are not captured in the returned snapshot.
+ * Reset is atomic per-host (native CAS), but not cluster-atomic. Events recorded on executors between their reset and
+ * the driver reset are not captured in the returned snapshot.
  *
- * Syntax:
- *   RESET INDEXTABLES PROFILER        -- section timings
- *   RESET INDEXTABLES PROFILER CACHE  -- cache hit/miss counters
+ * Syntax: RESET INDEXTABLES PROFILER -- section timings RESET INDEXTABLES PROFILER CACHE -- cache hit/miss counters
  */
 case class ResetFfiProfilerCommand(cacheOnly: Boolean = false) extends LeafRunnableCommand {
 
@@ -144,12 +141,13 @@ private[sql] object FfiProfilerCommands {
     sections.toSeq
       .filter { case (_, (count, _, _, _)) => count > 0 }
       .sortBy { case (name, _) => name }
-      .map { case (name, (count, totalNanos, minNanos, maxNanos)) =>
-        val totalMs = totalNanos / 1000000.0
-        val avgUs   = if (count > 0) totalNanos.toDouble / count / 1000.0 else 0.0
-        val minUs   = minNanos / 1000.0
-        val maxUs   = maxNanos / 1000.0
-        Row(name, categoryFor(name), count, totalMs, avgUs, minUs, maxUs)
+      .map {
+        case (name, (count, totalNanos, minNanos, maxNanos)) =>
+          val totalMs = totalNanos / 1000000.0
+          val avgUs   = if (count > 0) totalNanos.toDouble / count / 1000.0 else 0.0
+          val minUs   = minNanos / 1000.0
+          val maxUs   = maxNanos / 1000.0
+          Row(name, categoryFor(name), count, totalMs, avgUs, minUs, maxUs)
       }
 
   def buildCacheRows(counters: Map[String, Long]): Seq[Row] = {
@@ -157,14 +155,16 @@ private[sql] object FfiProfilerCommands {
     // added in tantivy4java are automatically picked up without code changes.
     val cacheNames = counters.keys
       .map(k => k.replaceAll("_(hit|miss)$", ""))
-      .toSeq.distinct.sorted
+      .toSeq
+      .distinct
+      .sorted
 
     cacheNames.flatMap { name =>
       val hits   = counters.getOrElse(s"${name}_hit", 0L)
       val misses = counters.getOrElse(s"${name}_miss", 0L)
       if (hits == 0 && misses == 0) None
       else {
-        val total = hits + misses
+        val total                     = hits + misses
         val hitRate: java.lang.Double = if (total > 0) hits.toDouble / total else null
         Some(Row(name, hits, misses, hitRate))
       }
@@ -188,9 +188,9 @@ private[sql] object FfiProfilerCommands {
 /**
  * Helper for running profiler operations on each unique executor host.
  *
- * Uses `DriverSplitLocalityManager.getAvailableHosts` for host discovery and
- * `sc.makeRDD` with preferred locations — the same pattern as `PrewarmCacheCommand`.
- * Since profiler counters are global per host, one collect per unique host is correct.
+ * Uses `DriverSplitLocalityManager.getAvailableHosts` for host discovery and `sc.makeRDD` with preferred locations —
+ * the same pattern as `PrewarmCacheCommand`. Since profiler counters are global per host, one collect per unique host
+ * is correct.
  */
 private[sql] object FfiProfilerExecutorHelper {
 
@@ -199,11 +199,11 @@ private[sql] object FfiProfilerExecutorHelper {
   import FfiProfilerCommands.SectionData
 
   /**
-   * Run a function once on each unique executor host using preferred locations.
-   * In local mode (no executors), returns empty — caller handles driver separately.
+   * Run a function once on each unique executor host using preferred locations. In local mode (no executors), returns
+   * empty — caller handles driver separately.
    *
-   * Note: preferred locations are hints, not guarantees. Under heavy load, Spark may
-   * schedule a task on a different host. This is best-effort, same as PrewarmCacheCommand.
+   * Note: preferred locations are hints, not guarantees. Under heavy load, Spark may schedule a task on a different
+   * host. This is best-effort, same as PrewarmCacheCommand.
    */
   private def runOnEachHost[T: ClassTag](
     sc: SparkContext,
@@ -227,25 +227,28 @@ private[sql] object FfiProfilerExecutorHelper {
 
   /** Broadcast enable/disable to all executor hosts. Returns number of hosts reached. */
   def broadcastToHosts(sc: SparkContext, enable: Boolean): Int = {
-    val results = runOnEachHost(sc, () => {
-      if (enable) FfiProfiler.enable() else FfiProfiler.disable()
-    })
+    val results = runOnEachHost(sc, () => if (enable) FfiProfiler.enable() else FfiProfiler.disable())
     results.size
   }
 
   /** Collect and merge section counters from all hosts (executors + driver). */
   def collectSectionCounters(sc: SparkContext, reset: Boolean): Map[String, SectionData] = {
-    val hostResults = runOnEachHost[Map[String, SectionData]](sc, () => {
-      val entries = if (reset) FfiProfiler.reset() else FfiProfiler.snapshot()
-      entries.asScala.map { case (name, pe) =>
-        name -> (pe.getCount, pe.getTotalNanos, pe.getMinNanos, pe.getMaxNanos)
-      }.toMap
-    })
+    val hostResults = runOnEachHost[Map[String, SectionData]](
+      sc,
+      () => {
+        val entries = if (reset) FfiProfiler.reset() else FfiProfiler.snapshot()
+        entries.asScala.map {
+          case (name, pe) =>
+            name -> (pe.getCount, pe.getTotalNanos, pe.getMinNanos, pe.getMaxNanos)
+        }.toMap
+      }
+    )
 
     // Driver-host counters
     val driverEntries = if (reset) FfiProfiler.reset() else FfiProfiler.snapshot()
-    val driverMap = driverEntries.asScala.map { case (name, pe) =>
-      name -> (pe.getCount, pe.getTotalNanos, pe.getMinNanos, pe.getMaxNanos)
+    val driverMap = driverEntries.asScala.map {
+      case (name, pe) =>
+        name -> (pe.getCount, pe.getTotalNanos, pe.getMinNanos, pe.getMaxNanos)
     }.toMap
 
     mergeProfiles(hostResults :+ driverMap)
@@ -253,29 +256,34 @@ private[sql] object FfiProfilerExecutorHelper {
 
   /** Collect and merge cache counters from all hosts (executors + driver). */
   def collectCacheCounters(sc: SparkContext, reset: Boolean): Map[String, Long] = {
-    val hostResults = runOnEachHost[Map[String, Long]](sc, () => {
-      val counters = if (reset) FfiProfiler.resetCacheCounters() else FfiProfiler.cacheCounters()
-      counters.asScala.map { case (k, v) => k -> v.longValue() }.toMap
-    })
+    val hostResults = runOnEachHost[Map[String, Long]](
+      sc,
+      () => {
+        val counters = if (reset) FfiProfiler.resetCacheCounters() else FfiProfiler.cacheCounters()
+        counters.asScala.map { case (k, v) => k -> v.longValue() }.toMap
+      }
+    )
 
     // Driver-host counters
     val driverCounters = if (reset) FfiProfiler.resetCacheCounters() else FfiProfiler.cacheCounters()
-    val driverMap = driverCounters.asScala.map { case (k, v) => k -> v.longValue() }.toMap
+    val driverMap      = driverCounters.asScala.map { case (k, v) => k -> v.longValue() }.toMap
 
     val allMaps = hostResults :+ driverMap
-    allMaps.flatten.groupBy(_._1).map { case (key, entries) =>
-      key -> entries.map(_._2).sum
+    allMaps.flatten.groupBy(_._1).map {
+      case (key, entries) =>
+        key -> entries.map(_._2).sum
     }
   }
 
   private def mergeProfiles(profiles: Seq[Map[String, SectionData]]): Map[String, SectionData] =
-    profiles.flatten.groupBy(_._1).map { case (section, entries) =>
-      val values = entries.map(_._2)
-      section -> (
-        values.map(_._1).sum,       // sum counts
-        values.map(_._2).sum,       // sum totalNanos
-        values.map(_._3).min,       // min of mins
-        values.map(_._4).max        // max of maxes
-      )
+    profiles.flatten.groupBy(_._1).map {
+      case (section, entries) =>
+        val values = entries.map(_._2)
+        section -> (
+          values.map(_._1).sum, // sum counts
+          values.map(_._2).sum, // sum totalNanos
+          values.map(_._3).min, // min of mins
+          values.map(_._4).max  // max of maxes
+        )
     }
 }

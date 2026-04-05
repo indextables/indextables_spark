@@ -17,9 +17,9 @@
 
 package io.indextables.spark.sync
 
-import scala.jdk.CollectionConverters._
-
 import java.time.LocalDate
+
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{DataType, DateType, StructType}
@@ -189,26 +189,29 @@ object DistributedSourceScanner {
     dateColumns: Set[String]
   ): Map[String, String] = {
     if (dateColumns.isEmpty) return partitionValues
-    partitionValues.map { case (key, value) =>
-      if (dateColumns.contains(key)) {
-        try {
-          val epochDay = value.toLong
-          if (isPlausibleEpochDay(epochDay)) {
-            key -> LocalDate.ofEpochDay(epochDay).toString
-          } else {
-            key -> value // implausibly large — likely a compact ISO date, pass through
+    partitionValues.map {
+      case (key, value) =>
+        if (dateColumns.contains(key)) {
+          try {
+            val epochDay = value.toLong
+            if (isPlausibleEpochDay(epochDay)) {
+              key -> LocalDate.ofEpochDay(epochDay).toString
+            } else {
+              key -> value // implausibly large — likely a compact ISO date, pass through
+            }
+          } catch {
+            case _: NumberFormatException => key -> value
           }
-        } catch {
-          case _: NumberFormatException => key -> value
+        } else {
+          key -> value
         }
-      } else {
-        key -> value
-      }
     }
   }
 
-  /** Plausibility check: epoch days outside -100000..100000 (~year -304 to ~2243) are likely
-    * compact ISO dates (e.g., 20260322) rather than real epoch days. */
+  /**
+   * Plausibility check: epoch days outside -100000..100000 (~year -304 to ~2243) are likely compact ISO dates (e.g.,
+   * 20260322) rather than real epoch days.
+   */
   private[spark] def isPlausibleEpochDay(n: Long): Boolean = n >= -100000 && n <= 100000
 
   /** Extract the set of DATE column names from a Spark StructType schema. */
@@ -387,7 +390,8 @@ object DistributedSourceScanner {
                 case None => absolutePath
               }
 
-              val effectivePartitionValues = resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
+              val effectivePartitionValues =
+                resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
 
               results += CompanionSourceFile(
                 path = relativePath,

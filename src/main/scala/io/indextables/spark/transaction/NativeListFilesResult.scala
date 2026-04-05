@@ -21,9 +21,9 @@ import org.apache.spark.sql.types.StructType
 
 /**
  * Result of a native Arrow FFI listFiles call. Combines:
- * - File listing (already filtered by partition pruning, data skipping, cooldown)
- * - Table metadata (schema, partition columns, protocol) — eliminates separate JNI calls
- * - Filtering metrics (for DataSkippingMetrics / Spark UI)
+ *   - File listing (already filtered by partition pruning, data skipping, cooldown)
+ *   - Table metadata (schema, partition columns, protocol) — eliminates separate JNI calls
+ *   - Filtering metrics (for DataSkippingMetrics / Spark UI)
  */
 case class NativeListFilesResult(
   files: Seq[AddAction],
@@ -34,8 +34,8 @@ case class NativeListFilesResult(
   metrics: NativeFilteringMetrics)
 
 /**
- * Metrics from native-side filtering, returned alongside the file listing.
- * Used by DataSkippingMetrics.recordScan() and DESCRIBE DATA SKIPPING STATS.
+ * Metrics from native-side filtering, returned alongside the file listing. Used by DataSkippingMetrics.recordScan() and
+ * DESCRIBE DATA SKIPPING STATS.
  */
 case class NativeFilteringMetrics(
   totalFilesBeforeFiltering: Long,

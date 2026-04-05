@@ -147,7 +147,7 @@ case class TruncateTimeTravelCommand(
           val versionFiles    = scala.collection.mutable.ListBuffer[(Long, String)]()
           val checkpointFiles = scala.collection.mutable.ListBuffer[(Long, String)]()
           val partFiles       = scala.collection.mutable.ListBuffer[(Long, String, String)]() // (version, uuid, path)
-          val avroStateFiles  = scala.collection.mutable.ListBuffer[(Long, String)]() // (version, file path)
+          val avroStateFiles  = scala.collection.mutable.ListBuffer[(Long, String)]()         // (version, file path)
 
           allFiles.foreach { f =>
             val filePath = new Path(f.path)
@@ -170,8 +170,10 @@ case class TruncateTimeTravelCommand(
             }
           }
 
-          logger.info(s"Found ${versionFiles.size} version files, ${checkpointFiles.size} JSON checkpoints, " +
-            s"${partFiles.size} checkpoint parts, ${avroStateFiles.map(_._1).toSet.size} Avro state checkpoints")
+          logger.info(
+            s"Found ${versionFiles.size} version files, ${checkpointFiles.size} JSON checkpoints, " +
+              s"${partFiles.size} checkpoint parts, ${avroStateFiles.map(_._1).toSet.size} Avro state checkpoints"
+          )
 
           // Identify files to delete:
           // - Version files with version < checkpointVersion
@@ -183,10 +185,13 @@ case class TruncateTimeTravelCommand(
           val partsToDelete       = partFiles.filter(_._1 < checkpointVersion)
           val avroStateToDelete   = avroStateFiles.filter(_._1 < checkpointVersion)
 
-          val totalFilesToDelete = versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size + avroStateToDelete.size
+          val totalFilesToDelete =
+            versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size + avroStateToDelete.size
 
-          logger.info(s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, " +
-            s"${partsToDelete.size} parts, ${avroStateToDelete.size} Avro state files")
+          logger.info(
+            s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, " +
+              s"${partsToDelete.size} parts, ${avroStateToDelete.size} Avro state files"
+          )
 
           if (totalFilesToDelete == 0) {
             return Seq(

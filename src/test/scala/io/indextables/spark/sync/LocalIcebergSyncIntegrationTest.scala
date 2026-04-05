@@ -43,7 +43,12 @@ import org.scalatest.BeforeAndAfterAll
  *
  * Tests are automatically skipped if the REST catalog is not reachable.
  */
-class LocalIcebergSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with IcebergTestSupport with io.indextables.spark.testutils.FileCleanupHelper {
+class LocalIcebergSyncIntegrationTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with IcebergTestSupport
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val REST_URI         = "http://localhost:8181"
   private val MINIO_ENDPOINT   = "http://localhost:9000"

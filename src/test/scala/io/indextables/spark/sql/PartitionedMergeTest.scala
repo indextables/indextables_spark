@@ -30,17 +30,14 @@ import io.indextables.spark.TestBase
 import org.apache.commons.io.FileUtils
 
 /**
- * Standalone reproducer for the regression introduced in tantivy4java 0.34.1:
- * RemoveAction tombstones written via writeVersionArrowFfi are not being applied
- * when reading back the Avro-format transaction log. After a MERGE SPLITS operation
- * (which adds new merged splits and removes old splits), the file listing returns
- * both the old and new splits, causing duplicate records.
+ * Standalone reproducer for the regression introduced in tantivy4java 0.34.1: RemoveAction tombstones written via
+ * writeVersionArrowFfi are not being applied when reading back the Avro-format transaction log. After a MERGE SPLITS
+ * operation (which adds new merged splits and removes old splits), the file listing returns both the old and new
+ * splits, causing duplicate records.
  *
- * Expected: 1800 records after global merge
- * Actual:   ~5788 records (original splits + merged splits both visible)
+ * Expected: 1800 records after global merge Actual: ~5788 records (original splits + merged splits both visible)
  *
- * Run with:
- *   mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.sql.PartitionedMergeTest'
+ * Run with: mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.sql.PartitionedMergeTest'
  */
 class PartitionedMergeTest extends TestBase {
 
@@ -58,19 +55,18 @@ class PartitionedMergeTest extends TestBase {
 
   override def afterEach(): Unit = {
     super.afterEach()
-    try {
+    try
       if (testDataPath != null) FileUtils.deleteDirectory(new File(testDataPath))
-    } catch {
+    catch {
       case _: Exception =>
     }
   }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit =
     super.afterAll()
-  }
 
   test("Merge splits across all partitions without WHERE clause") {
-    val timeSeriesData = generateTimeSeriesData(spark, totalRecords = 1800, daysSpan = 3)
+    val timeSeriesData    = generateTimeSeriesData(spark, totalRecords = 1800, daysSpan = 3)
     val repartitionedData = timeSeriesData.repartition(30)
 
     repartitionedData.write
@@ -96,7 +92,7 @@ class PartitionedMergeTest extends TestBase {
       assert(filesAfterGlobalMerge <= filesBefore, "Should have same or fewer files after global merge")
     }
 
-    val df = spark.read.format(INDEXTABLES_FORMAT).load(testDataPath)
+    val df                = spark.read.format(INDEXTABLES_FORMAT).load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 1800, "Should preserve all records after global merge")
 

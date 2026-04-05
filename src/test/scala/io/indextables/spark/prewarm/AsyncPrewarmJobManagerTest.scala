@@ -102,9 +102,9 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
 
     // Retry the rejection check — the slot counter may take a moment to update
     // after the work lambda begins executing on the thread pool.
-    var rejected = false
+    var rejected  = false
     var rejectMsg = ""
-    var attempts = 0
+    var attempts  = 0
     while (!rejected && attempts < 20) {
       Thread.sleep(25)
       val result2 = AsyncPrewarmJobManager.tryStartJob(
@@ -112,7 +112,8 @@ class AsyncPrewarmJobManagerTest extends AnyFunSuite with Matchers with BeforeAn
         tablePath = "s3://bucket/table",
         hostname = "host1",
         totalSplits = 5,
-        work = () => AsyncPrewarmJobResult(s"job-2-attempt-$attempts", "s3://bucket/table", "host1", 5, 5, 50, true, None)
+        work =
+          () => AsyncPrewarmJobResult(s"job-2-attempt-$attempts", "s3://bucket/table", "host1", 5, 5, 50, true, None)
       )
       result2.left.foreach { msg => rejected = true; rejectMsg = msg }
       attempts += 1

@@ -109,8 +109,8 @@ class TestDualCredentialProvider(uri: URI, conf: Configuration)
  * Mock credential provider that implements both AWSCredentialsProvider (path-based, used by Priority 2) and
  * TableCredentialProvider companion (table-ID-based, used by Priority 1.5).
  *
- * Used by TransactionLogFactoryCredentialIsolationTest to verify that the destination txlog credential
- * resolution does NOT use the source table's uc.tableId (regression guard for the UC companion bug).
+ * Used by TransactionLogFactoryCredentialIsolationTest to verify that the destination txlog credential resolution does
+ * NOT use the source table's uc.tableId (regression guard for the UC companion bug).
  *
  * Access keys encode which resolution path was taken so tests can assert the difference:
  *   - Path-based (correct for destination): "path-based-key:<uri>"
