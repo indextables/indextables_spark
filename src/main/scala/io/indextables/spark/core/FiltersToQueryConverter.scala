@@ -2218,7 +2218,9 @@ object FiltersToQueryConverter {
         val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(opts)
         tantivyOptions.getFieldIndexingConfig(fieldName).fieldType
       } catch {
-        case _: Exception => None
+        case scala.util.control.NonFatal(e) =>
+          logger.warn(s"Failed to resolve field indexing type for '$fieldName': ${e.getMessage}")
+          None
       }
     }
 
@@ -2247,13 +2249,16 @@ object FiltersToQueryConverter {
    * "default" tokenizer behavior: lowercase, split on non-alphanumeric characters, and drop tokens longer than 255 UTF-8
    * bytes (matching tantivy's RemoveLongFilter).
    *
-   * Uses Unicode-aware `\p{IsAlphanumeric}` instead of ASCII `[a-zA-Z0-9]` to match tantivy's `is_alphanumeric()`.
+   * Uses `[\p{L}\p{N}]` (Unicode Letter or Number) to approximate tantivy's `is_alphanumeric()`.
+   * Supports Latin accented characters (café, München, Straße) and most scripts. Does not fully
+   * support CJK ideographs (tantivy's default tokenizer handles CJK differently). For text_and_string
+   * EqualTo filters, any tokenization mismatch is caught by Spark's candidate post-filter.
    */
   private def tokenizeForPhraseQuery(value: String): java.util.List[String] = {
     import scala.jdk.CollectionConverters._
     value
       .toLowerCase(java.util.Locale.ROOT)
-      .split("[^\\p{IsAlphanumeric}]+")
+      .split("[^\\p{L}\\p{N}]+")
       .filter(_.nonEmpty)
       .filter(_.getBytes("UTF-8").length <= 255) // Match tantivy's RemoveLongFilter
       .toList

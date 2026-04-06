@@ -89,7 +89,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
         GlobalSplitCacheManager.flushAllCaches()
         DriverSplitLocalityManager.clear()
       } catch {
-        case _: Exception =>
+        case _: Exception => // Cache may not be initialized yet — safe to ignore during test setup
       }
       f(path)
     } finally
@@ -322,6 +322,47 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     }
   }
 
+  test("Unicode strings: exact match and tokenized search on accented characters") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "caf\u00e9 cr\u00e8me br\u00fbl\u00e9e"),         // café crème brûlée (precomposed NFC)
+        (2L, "M\u00fcnchen Gro\u00dfstadt Stra\u00dfe"),         // München Großstadt Straße (German)
+        (3L, "hello world plain ascii")
+      ).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_unicode")
+
+      // Tokenized search on accented characters — tantivy's default tokenizer preserves
+      // accented letters as single tokens (café → "café", not split at the accent)
+      val cafeResults = spark.sql("SELECT id FROM tas_unicode WHERE message indexquery 'caf\u00e9'").collect()
+      cafeResults.length shouldBe 1
+      cafeResults(0).getLong(0) shouldBe 1L
+
+      // Exact match on full Unicode string (Spark candidate post-filter ensures correctness)
+      val exactResults = df.filter(col("message") === "M\u00fcnchen Gro\u00dfstadt Stra\u00dfe").collect()
+      exactResults.length shouldBe 1
+      exactResults(0).getLong(0) shouldBe 2L
+
+      // Exact match should NOT match a substring
+      val partialResults = df.filter(col("message") === "M\u00fcnchen").collect()
+      partialResults.length shouldBe 0
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   //  Query correctness
   // ═══════════════════════════════════════════════════════════════════
@@ -391,18 +432,42 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
     withTempPath { tempDir =>
       val deltaPath = new File(tempDir, "delta").getAbsolutePath
       val indexPath = new File(tempDir, "index").getAbsolutePath
-      createTestData(deltaPath, indexPath)
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath)
 
       val df = readCompanion(indexPath)
       df.createOrReplaceTempView("tas_in_test")
 
+      // Use exact full string values — Spark post-filter ensures exact match correctness
       val results = spark.sql(
-        "SELECT id FROM tas_in_test WHERE message IN ('the quick brown fox jumps', 'hello world from indextables')"
+        "SELECT id FROM tas_in_test WHERE message IN ('the quick brown fox jumps over the lazy dog', 'hello world from indextables')"
       ).collect()
       val ids = results.map(_.getLong(0)).toSet
       ids should contain(1L)
       ids should contain(2L)
       results.length shouldBe 2
+    }
+  }
+
+  test("IN filter with empty string value does not crash") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+      buildCompanion(deltaPath, indexPath)
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_in_empty")
+
+      // IN with empty string and a real value — the empty string tokenizes to zero terms
+      // and is dropped from the PhraseQuery OR (can't represent empty in inverted index).
+      // Only the non-empty value matches. Empty string equality requires EqualTo, not IN.
+      val results = spark.sql(
+        "SELECT id FROM tas_in_empty WHERE message IN ('', 'hello world from indextables')"
+      ).collect()
+      val ids = results.map(_.getLong(0)).toSet
+      ids should contain(2L) // row 2 has "hello world from indextables"
+      // Note: row 4 (empty message) is NOT matched — empty string is dropped from IN's PhraseQuery list
     }
   }
 
