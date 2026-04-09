@@ -13,7 +13,8 @@ spark.indextables.indexing.typemap.<field>: "string"
 // Text fields - full-text search, IndexQuery only
 spark.indextables.indexing.typemap.<field>: "text"
 
-// Text+String fields - dual-field: exact match + full-text search
+// Text+String fields - single tantivy field supporting both exact match
+// (phrase-query candidate pushdown + Spark post-filter) and full-text search
 spark.indextables.indexing.typemap.<field>: "text_and_string"
 
 // JSON fields - automatic for Struct/Array/Map types
@@ -22,7 +23,13 @@ spark.indextables.indexing.typemap.<field>: "text_and_string"
 spark.indextables.indexing.json.mode: "full" (default) or "minimal"
 ```
 
-**text_and_string fields** provide both exact matching and full-text search on the same column. Each `text_and_string` column creates two tantivy fields: the original field name with raw tokenizer (supporting `=`, `>`, `<`, `IN`, and other exact-match filters with full pushdown, plus aggregations) and a `<field>__text` companion with the default tokenizer (supporting `TEXTSEARCH`/`indexquery` full-text search). The `__text` companion field is internal and not exposed in `SELECT *` results. `TEXTSEARCH` and `indexquery` operators auto-route to the `__text` field. `IndexQueryAll` prefers the `__text` field to avoid duplicate hits.
+**text_and_string fields** provide both exact matching and full-text search on the same column using a **single tantivy field**. The field is indexed with a tokenized analyzer (Unicode-aware regex, lowercased, 255-byte term limit) and its raw representation is retained as a fast field for aggregations.
+
+- **`EqualTo` and `IN` filters** push down as `SplitPhraseQuery(slop=0)` candidate filters — tantivy returns documents whose tokens include the phrase, and Spark applies a `FilterExec` post-filter to guarantee exact-match correctness. Empty values and values that tokenize to zero terms fall back to a match-all candidate and rely entirely on the Spark post-filter.
+- **`TEXTSEARCH` / `indexquery`** operators run directly against the same field with no auto-routing or companion-field indirection.
+- **Range queries** (`>`, `<`, `BETWEEN`) are **not supported** on `text_and_string` fields — tokenized inverted indexes have no meaningful lexical ordering across term boundaries.
+- **`GROUP BY` and fast-field aggregations** work via the retained raw fast field.
+- **`HASHED FASTFIELDS`** are compatible (the hash is computed over the field's raw representation).
 
 ## List-Based Typemap Syntax (Recommended)
 

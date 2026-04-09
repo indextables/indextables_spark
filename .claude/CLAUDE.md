@@ -57,7 +57,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 
 - **String** (default): Exact matching, full filter pushdown (`===`, `>`, `<`, `IN`, etc.)
 - **Text**: Full-text search via IndexQuery only. Configure: `spark.indextables.indexing.typemap.text: "field1,field2"`
-- **Text+String** (dual): Exact matching + full-text search on the same column. Creates a raw field and a `__text` companion. TEXTSEARCH auto-routes to `__text`. Configure: `spark.indextables.indexing.typemap.text_and_string: "field1,field2"`
+- **Text+String**: Exact matching + full-text search on the same column via a single tantivy field. `EqualTo`/`IN` filters push down as `SplitPhraseQuery` candidates and Spark applies a post-filter for exact correctness. `TEXTSEARCH`/`indexquery` hit the same field directly. Range queries not supported (tokenized index has no meaningful ordering). The raw fast field is retained so `GROUP BY` and fast-field aggregations work. Configure: `spark.indextables.indexing.typemap.text_and_string: "field1,field2"`
 - **JSON**: Automatic for Struct/Array/Map types. Mode: `spark.indextables.indexing.json.mode: "full"` (default) or `"minimal"`
 - **Fast fields** (for aggregations): `spark.indextables.indexing.fastfields: "score,timestamp"`
 

@@ -749,7 +749,7 @@ spark.indextables.companion.schedulerPool: "indextables-companion" (FAIR schedul
 | `text_uuid_exactonly` | Strip UUIDs from text for "default" tokenizer; UUIDs indexed in companion U64 hash field. Use IndexQuery for queries. |
 | `text_uuid_strip` | Strip UUIDs from text for "default" tokenizer; UUIDs discarded. Use IndexQuery for queries. |
 | `text_custom_exactonly:<regex>` | Same as `text_uuid_exactonly` but with custom regex pattern. |
-| `text_and_string` | Dual-field: raw string for exact match/range/aggregation + tokenized `__text` companion for full-text search via TEXTSEARCH/indexquery. Queries auto-route to the correct field. |
+| `text_and_string` | Single tantivy field supporting both exact match and full-text search. `EqualTo`/`IN` push down as `SplitPhraseQuery` candidates with a Spark post-filter for exact correctness. `TEXTSEARCH`/`indexquery` run against the same field. Range queries unsupported. Raw fast field retained for aggregations. |
 | `text_custom_strip:<regex>` | Same as `text_uuid_strip` but with custom regex pattern. |
 
 **Compact String Indexing Examples:**
@@ -766,7 +766,7 @@ BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data'
   )
   AT LOCATION 's3://bucket/index';
 
--- Dual-field: exact match + full-text search on the same column
+-- text_and_string: exact match + full-text search on the same column
 BUILD INDEXTABLES COMPANION FOR ICEBERG 'logs.events'
   CATALOG 'uc_catalog' TYPE 'rest'
   WAREHOUSE 's3://unity-warehouse/iceberg'
@@ -780,24 +780,29 @@ BUILD INDEXTABLES COMPANION FOR ICEBERG 'logs.events'
 
 ### text_and_string Indexing Mode
 
-The `text_and_string` mode creates two tantivy fields for each column, enabling both exact matching and full-text search on the same data without maintaining duplicate columns.
+The `text_and_string` mode stores each column as a **single tantivy field** that supports both exact matching and full-text search. The field uses a Unicode-aware tokenizer (`[\p{L}\p{N}]` terms, lowercased, 255-byte term limit) for the inverted index, and its raw representation is retained as a fast field so aggregations continue to work without a second column.
 
-**Dual-Field Model:**
-- `<column>` (raw string): supports exact match (`=`, `>`, `<`, `IN`), range queries, and aggregations (`GROUP BY`, `COUNT`)
-- `<column>__text` (tokenized text): supports full-text search via `TEXTSEARCH` and `indexquery`
-- The `__text` companion field is internal and not exposed in `SELECT *` results
+**Storage Model:**
+- One tantivy field per column (no duplicate storage)
+- Tokenized inverted index: drives `TEXTSEARCH` / `indexquery` full-text search
+- Raw fast field: drives `GROUP BY`, `COUNT`, and other fast-field aggregations
 
-**Query Auto-Routing:**
-- `TEXTSEARCH` and `indexquery` operators automatically route to the `__text` field
-- Exact match filters (`=`, `>`, `<`, `IN`, `LIKE`) use the raw string field
-- `IndexQueryAll` (`_indexall indexquery '...'`) prefers `__text` fields to avoid duplicate hits
-- Range queries on `__text` fields are blocked (tokenized fields have no meaningful ordering)
+**Exact Match (`=`, `IN`):**
+- Spark `EqualTo`/`In` filters push down as `SplitPhraseQuery(slop=0)` candidate queries built from the value's tokens
+- Tantivy returns documents whose tokens include the phrase; Spark applies a `FilterExec` post-filter to enforce exact equality
+- Empty values and values that tokenize to zero terms fall back to match-all candidates with full reliance on the Spark post-filter
+- `IN` lists with one or more empty strings drop the empty entries from the tantivy `OR` but the post-filter still handles them correctly
 
-**Validation:**
-- Column names ending in `__text` in the source table are rejected at build time to prevent name collisions
-- This check covers both data columns and partition columns
-- Compatible with `HASHED FASTFIELDS` (hashes target the raw field)
-- Compatible with `INCLUDE COLUMNS` / `EXCLUDE COLUMNS`
+**Full-Text Search (`TEXTSEARCH`, `indexquery`, `IndexQueryAll`):**
+- Operators execute directly against the single field — no routing logic
+- `IndexQueryAll` (`_indexall indexquery '...'`) hits `text_and_string` fields along with other text fields with no special handling
+
+**Unsupported / Restricted:**
+- **Range queries** (`>`, `<`, `BETWEEN`) are blocked for `text_and_string` fields — tokenized inverted indexes have no meaningful lexical ordering across term boundaries
+
+**Compatibility:**
+- `HASHED FASTFIELDS`: supported — hashes are computed over the raw representation
+- `INCLUDE COLUMNS` / `EXCLUDE COLUMNS`: supported
 
 - Creates minimal Quickwit splits that reference external parquet files (45-70% split size reduction)
 - Supports incremental sync via anti-join reconciliation (detects new/removed parquet files)
