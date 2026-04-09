@@ -153,7 +153,7 @@ class IndexTables4SparkArrowDataWriter(
           case Some("bool")                => ("bool", "")
           case Some("datetime")            => ("datetime", "")
           case Some("bytes")               => ("bytes", "")
-          case Some(other)                 => (other, "")  // Schema creation handled by Rust (e.g., text_and_string dual tokenizers)
+          case Some(other)                 => (other, "")  // Schema creation handled by Rust (e.g., text_and_string's tokenized index + raw fast field)
           case None =>
             field.dataType match {
               case StringType                                => ("text", "raw")

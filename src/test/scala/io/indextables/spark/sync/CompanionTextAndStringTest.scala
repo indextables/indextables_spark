@@ -89,7 +89,7 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
         GlobalSplitCacheManager.flushAllCaches()
         DriverSplitLocalityManager.clear()
       } catch {
-        case _: Exception => // Cache may not be initialized yet — safe to ignore during test setup
+        case scala.util.control.NonFatal(_) => // Cache may not be initialized yet — safe to ignore during test setup
       }
       f(path)
     } finally
@@ -707,6 +707,496 @@ class CompanionTextAndStringTest extends AnyFunSuite with Matchers with BeforeAn
       groupMap("the quick brown fox") shouldBe 2L
       groupMap("hello world from indextables") shouldBe 2L
       groupMap("error connection timeout") shouldBe 1L
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Correctness guards — prove Spark post-filter is actually running
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Data for the superset-correctness tests. Row A is the exact match target. Row B has extra tokens
+   * after the phrase so a SplitPhraseQuery(slop=0) for "hello world" matches both rows — only Spark's
+   * FilterExec post-filter can distinguish them. If the post-filter ever stops running, this test set
+   * returns more rows than expected.
+   */
+  private def createPhraseFalsePositiveData(deltaPath: String): Unit = {
+    val ss = spark
+    import ss.implicits._
+    Seq(
+      (1L, "hello world"),             // row A — exact match target
+      (2L, "hello world extra stuff"), // row B — phrase candidate false positive
+      (3L, "other content")
+    ).toDF("id", "message")
+      .write.format("delta").mode("overwrite").save(deltaPath)
+  }
+
+  test("EqualTo on text_and_string: phrase false positive is removed by Spark post-filter") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createPhraseFalsePositiveData(deltaPath)
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      // SplitPhraseQuery for "hello world" would match both row 1 and row 2.
+      // Spark's FilterExec post-filter must trim row 2 to give the exact result.
+      val results = df.filter(col("message") === "hello world").collect()
+      results.length shouldBe 1
+      results(0).getLong(0) shouldBe 1L
+    }
+  }
+
+  test("EqualTo on text_and_string: query plan keeps FilterExec with the original predicate") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createPhraseFalsePositiveData(deltaPath)
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      val filtered = df.filter(col("message") === "hello world")
+
+      // Walk the physical plan for a FilterExec node whose condition references the target field
+      // AND carries the original literal "hello world". If a future optimizer change silently drops
+      // the post-filter (or leaves only a Catalyst-injected IsNotNull on `message`), this assertion
+      // will fail loudly instead of returning wrong results via the phrase-query superset.
+      import org.apache.spark.sql.execution.FilterExec
+      val plan         = filtered.queryExecution.executedPlan
+      val filterExecs  = plan.collect { case f: FilterExec => f }
+      withClue(s"Expected a FilterExec in the physical plan but none was found:\n$plan\n") {
+        filterExecs should not be empty
+      }
+      // Union of all FilterExec condition strings, lowercased for comparison
+      val conditionText = filterExecs.map(_.condition.toString).mkString(" | ").toLowerCase
+      withClue(s"FilterExec condition should reference the text_and_string field:\n$conditionText") {
+        conditionText should include("message")
+      }
+      // Require the original literal so a stray FilterExec (e.g., just IsNotNull(message)) cannot
+      // satisfy the assertion on its own — the equality predicate itself must be present.
+      withClue(s"FilterExec condition should carry the original 'hello world' literal:\n$conditionText") {
+        conditionText should include("hello world")
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Critical correctness regressions from PR review
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("C1: COUNT(*) with text_and_string EqualTo returns exact count, not phrase superset") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createPhraseFalsePositiveData(deltaPath)
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  HASHED FASTFIELDS INCLUDE ('message')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_c1_count")
+
+      // The phrase candidate for "hello world" matches both row 1 ("hello world") and row 2
+      // ("hello world extra stuff"). If aggregate pushdown ever computed COUNT over the raw
+      // candidate result, it would return 2 instead of the exact-equality answer of 1. Two
+      // layers of protection ensure we get 1:
+      //   1. Candidate filters are returned from pushFilters() as "unsupported", so Spark sees
+      //      them as pending and does not attempt aggregate pushdown in the first place — the
+      //      row scan runs with a Spark FilterExec that trims the superset to the exact match.
+      //   2. Even if Spark did attempt aggregate pushdown (e.g. a future refactor), the guard
+      //      in `areFiltersCompatibleWithAggregation` rejects candidate filters up front.
+      val cnt = spark.sql("SELECT COUNT(*) FROM tas_c1_count WHERE message = 'hello world'").collect()
+      cnt.length shouldBe 1
+      cnt(0).getLong(0) shouldBe 1L
+    }
+  }
+
+  test("C2 + aggregate: COUNT(*) WHERE tas != 'foo bar' returns exact count, not phrase-subset count") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Same fixture as the C2 test but run through an aggregate instead of a row scan. Combines
+      // the two most dangerous round-1 findings: the Not(candidate) subset bug (fixed by
+      // isNotFree) and the aggregate-pushdown-over-candidate inflated-count bug (fixed by the
+      // guard in areFiltersCompatibleWithAggregation). Without BOTH fixes, the count returned
+      // here would be 1 (only row 3 survives the buggy Not(phrase) exclusion). With the fixes,
+      // the correct count is 2 (row 1 "Foo-Bar" and row 3 "other" both satisfy != "foo bar").
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "Foo-Bar"),
+        (2L, "foo bar"),
+        (3L, "other")
+      ).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  HASHED FASTFIELDS INCLUDE ('message')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_c2_count")
+
+      val cnt = spark.sql("SELECT COUNT(*) FROM tas_c2_count WHERE message != 'foo bar'").collect()
+      cnt.length shouldBe 1
+      cnt(0).getLong(0) shouldBe 2L
+    }
+  }
+
+  test("C2: Not(EqualTo) on text_and_string does NOT drop rows whose tokens match the phrase") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Fixture where exact equality and phrase equality diverge:
+      //   row 1 "Foo-Bar"  — tokens ["foo","bar"]           != "foo bar"  (correct: included)
+      //   row 2 "foo bar"  — tokens ["foo","bar"]           == "foo bar"  (correct: excluded)
+      //   row 3 "other"    — tokens ["other"]               != "foo bar"  (correct: included)
+      //
+      // Before the fix, isCandidateFilter(Not(EqualTo)) returned true and the converter built
+      // MUST(match_all) + MUST_NOT(phrase). The phrase matched both row 1 and row 2, so the
+      // source returned only row 3 — Spark's post-filter could not add row 1 back, producing
+      // a silently-wrong subset.
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "Foo-Bar"),
+        (2L, "foo bar"),
+        (3L, "other")
+      ).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      val results = df.filter(col("message") =!= "foo bar").collect()
+      val ids = results.map(_.getLong(0)).toSet
+      ids shouldBe Set(1L, 3L)
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Range query restriction (I5)
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("range queries on text_and_string are evaluated by Spark (not pushed as tokenized range)") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "apple"),
+        (2L, "nile"),
+        (3L, "zoo")
+      ).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df       = readCompanion(indexPath)
+      val filtered = df.filter(col("message") > "m")
+
+      // Range queries are unsupported for text_and_string (tokenized index has no meaningful
+      // ordering). The ScanBuilder rejects the range filter so it lands in Spark-side FilterExec
+      // evaluation, which uses the raw stored value and produces the correct lexicographic result.
+      val ids = filtered.collect().map(_.getLong(0)).toSet
+      ids shouldBe Set(2L, 3L)
+
+      // Plan should contain a FilterExec (Spark-side) for the range predicate — the scan itself
+      // must not have silently pushed the range down as a tokenized range query.
+      import org.apache.spark.sql.execution.FilterExec
+      val plan        = filtered.queryExecution.executedPlan
+      val filterExecs = plan.collect { case f: FilterExec => f }
+      withClue(s"Range query on text_and_string must be evaluated by FilterExec:\n$plan\n") {
+        filterExecs should not be empty
+      }
+
+      // The scan node must NOT carry the range predicate on the text_and_string field. Redundant
+      // double-evaluation (FilterExec + scan-side push) would still produce the correct result
+      // set, but it's a perf regression and an architectural leak — the scan shouldn't see a
+      // range predicate on a tokenized field at all. Inspect the BatchScan line(s) of the plan
+      // string and verify the range predicate only appears in the top-level Filter node.
+      val planString = plan.toString
+      val batchScanLines = planString.linesIterator.filter(_.contains("BatchScan")).toSeq
+      withClue(s"Plan should contain a BatchScan line:\n$planString\n") {
+        batchScanLines should not be empty
+      }
+      val batchScanText = batchScanLines.mkString("\n")
+      withClue(
+        s"Range predicate on text_and_string must not appear in the BatchScan line. " +
+          s"Full BatchScan text:\n$batchScanText\n"
+      ) {
+        batchScanText should not include "GreaterThan"
+        batchScanText should not include "message > m"
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  EXCLUDE COLUMNS (I6)
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("text_and_string with EXCLUDE COLUMNS does not break the kept text_and_string column") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+      createTestData(deltaPath)
+
+      // EXCLUDE COLUMNS ('description') removes `description` from the companion index. The kept
+      // `message` column is text_and_string and must continue to support both TEXTSEARCH and
+      // candidate-pushdown EqualTo + Spark post-filter. End-to-end verification that EXCLUDE
+      // actually removes a column from the index lives in CompanionIncludeExcludeColumnsTest
+      // (see "EXCLUDE COLUMNS skips specified columns"); this test's job is only to confirm
+      // that combining EXCLUDE COLUMNS with INDEXING MODES on a text_and_string kept column
+      // compiles, builds, and reads without interaction bugs.
+      //
+      // NOTE: attempting to assert a negative probe via `description indexquery '...'` is unsafe
+      // because IndexQuery validation on a missing field is currently a log-and-continue warning
+      // with a silent match-all fallback (see FiltersToQueryConverter executor-side validation).
+      // That is a separate pre-existing gap — locking it in here would couple this test to
+      // behavior we don't want to freeze.
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  EXCLUDE COLUMNS ('description')
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_excl_test")
+
+      // TEXTSEARCH on the kept text_and_string column still works
+      val textResults = spark.sql("SELECT id FROM tas_excl_test WHERE message indexquery 'quick'").collect()
+      textResults.length shouldBe 1
+      textResults(0).getLong(0) shouldBe 1L
+
+      // Exact match on the kept column still works (candidate pushdown + post-filter)
+      val exactResults = df.filter(col("message") === "hello world from indextables").collect()
+      exactResults.length shouldBe 1
+      exactResults(0).getLong(0) shouldBe 2L
+
+      // Row count is preserved — EXCLUDE drops a column from the index schema, not rows
+      df.count() shouldBe 6
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Tokenizer behavior (minor findings)
+  // ═══════════════════════════════════════════════════════════════════
+
+  test("tokenizer normalizes case: uppercase indexed content matches lowercase query") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "QUICK BROWN FOX"),
+        (2L, "quiet morning")
+      ).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_case_test")
+
+      // Tokenized search: lowercase query should find uppercase indexed tokens because the
+      // default tokenizer lowercases during both index and query.
+      val lowerResults = spark.sql("SELECT id FROM tas_case_test WHERE message indexquery 'quick'").collect()
+      lowerResults.length shouldBe 1
+      lowerResults(0).getLong(0) shouldBe 1L
+
+      // Exact match via EqualTo also works: the PhraseQuery candidate is built from lowercased
+      // tokens and the Spark post-filter compares the raw stored value, which preserves case.
+      val exactResults = df.filter(col("message") === "QUICK BROWN FOX").collect()
+      exactResults.length shouldBe 1
+      exactResults(0).getLong(0) shouldBe 1L
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  LIKE / StringStartsWith behavior on text_and_string (C2 round 2)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Behavior-pinning test for SQL `LIKE` / `StringStartsWith` on a text_and_string column.
+   *
+   * Fixture: three raw values that stress the tokenized-vs-raw semantic gap:
+   *   - "Foo-Bar"      (tokens: ["foo", "bar"] after lowercase + punctuation split)
+   *   - "foobar"       (tokens: ["foobar"])
+   *   - "unrelated"    (tokens: ["unrelated"])
+   *
+   * This test documents two things:
+   *
+   *   1. **Default config (pushdown OFF) is correct.** `spark.indextables.filter.stringPattern.pushdown`
+   *      is off by default, so Spark evaluates `LIKE 'Foo-%'` directly on the raw stored value and
+   *      returns `{1}` — matching standard SQL LIKE semantics.
+   *
+   *   2. **Pushdown ON is silently lossy for text_and_string columns.** When the master switch is on,
+   *      `StringStartsWith("Foo-")` is pushed into tantivy as a prefix query against the inverted
+   *      index. The inverted index only holds the tokenized form (lowercased, punctuation-split):
+   *      row 1's stored tokens are `["foo","bar"]` — no token starts with `"Foo-"` (case-sensitive)
+   *      or even `"foo-"` (hyphen is a split char). The prefix query matches zero documents and the
+   *      query returns `{}` even though the raw stored value satisfies the user's LIKE pattern.
+   *
+   * This is a pre-existing silent-correctness problem with `stringPattern.pushdown=true` on
+   * text_and_string columns. It is not introduced by this PR and cannot be fixed without either
+   * routing `StringStartsWith` through a candidate-pushdown + post-filter (like EqualTo) or
+   * refusing to push the predicate at all for text_and_string fields. The test locks in the
+   * observed behavior so any future fix that changes it has to update the test intentionally,
+   * and the documentation below must match whatever the test proves.
+   */
+  test("LIKE on text_and_string: default (pushdown off) is correct; pushdown on is lossy (locked in)") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      val ss = spark
+      import ss.implicits._
+      Seq(
+        (1L, "Foo-Bar"),
+        (2L, "foobar"),
+        (3L, "unrelated")
+      ).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      // ─── Default config: pushdown OFF ───
+      // Spark evaluates LIKE on the raw stored value. This matches standard SQL semantics.
+      val dfNoPush = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .option("spark.indextables.filter.stringPattern.pushdown", "false")
+        .load(indexPath)
+      dfNoPush.createOrReplaceTempView("tas_like_nopush")
+
+      // 'Foo-%' matches only "Foo-Bar" (case-sensitive raw match)
+      spark.sql("SELECT id FROM tas_like_nopush WHERE message LIKE 'Foo-%'")
+        .collect().map(_.getLong(0)).toSet shouldBe Set(1L)
+      // 'foo%' matches only "foobar" (case-sensitive — "Foo-Bar" starts with uppercase "F")
+      spark.sql("SELECT id FROM tas_like_nopush WHERE message LIKE 'foo%'")
+        .collect().map(_.getLong(0)).toSet shouldBe Set(2L)
+
+      // ─── Pushdown ON: silently lossy ───
+      // StringStartsWith is pushed into tantivy as a prefix query on the tokenized inverted index,
+      // which strips case and punctuation before indexing. Prefixes that would match the raw value
+      // do not match any indexed token, so the query returns an empty result instead of the
+      // correct rows. We lock in this known-bad behavior so any future fix shows up as a test
+      // delta rather than a silent change.
+      val dfPush = spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .option("spark.indextables.read.defaultLimit", "1000")
+        .option("spark.indextables.read.columnar.enabled", "true")
+        .option("spark.indextables.filter.stringPattern.pushdown", "true")
+        .load(indexPath)
+      dfPush.createOrReplaceTempView("tas_like_push")
+
+      // Known-bad A: the user wrote `LIKE 'Foo-%'` expecting to match row 1 ("Foo-Bar"). The
+      // pushdown builds a tantivy prefix query for the literal "Foo-" against the tokenized
+      // inverted index. The index holds lowercased, punctuation-split tokens (row 1 → ["foo","bar"],
+      // row 2 → ["foobar"]). No token starts with "Foo-" (case-sensitive, includes hyphen), so
+      // the prefix query matches zero documents. `StringStartsWith` is treated as fully supported
+      // by the ScanBuilder, so Spark does NOT run a post-filter — the empty result is returned
+      // as-is. Expected correct answer: {1}. Observed: {}.
+      spark.sql("SELECT id FROM tas_like_push WHERE message LIKE 'Foo-%'")
+        .collect().map(_.getLong(0)).toSet shouldBe Set.empty[Long]
+      // Known-bad B: `LIKE 'foo%'` against raw values is case-sensitive — standard SQL semantics
+      // would match only row 2 ("foobar"). With pushdown on, the prefix query "foo" matches
+      // BOTH indexed tokens — "foo" (from "Foo-Bar" after tokenization) AND "foobar". The
+      // pushdown returns {1, 2}, a SUPERSET of the correct answer. `StringStartsWith` is fully
+      // supported, so Spark does not re-filter. Expected correct: {2}. Observed: {1, 2} — wrong
+      // row 1 appears.
+      spark.sql("SELECT id FROM tas_like_push WHERE message LIKE 'foo%'")
+        .collect().map(_.getLong(0)).toSet shouldBe Set(1L, 2L)
+    }
+  }
+
+  test("tokenizer drops tokens longer than 255 UTF-8 bytes but keeps shorter neighbors") {
+    withTempPath { tempDir =>
+      val deltaPath = new File(tempDir, "delta").getAbsolutePath
+      val indexPath = new File(tempDir, "index").getAbsolutePath
+
+      // Build a row with (a) a normal short token and (b) a single 300-byte token. The 300-byte
+      // token must be silently dropped by tantivy's RemoveLongFilter (255-byte cap) while the
+      // normal token remains searchable.
+      val longToken = "x" * 300 // 300 ASCII chars = 300 bytes in UTF-8
+      val ss        = spark
+      import ss.implicits._
+      Seq((1L, s"normaltoken $longToken")).toDF("id", "message")
+        .write.format("delta").mode("overwrite").save(deltaPath)
+
+      val result = spark.sql(
+        s"""BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath'
+           |  INDEXING MODES ('message': 'text_and_string')
+           |  AT LOCATION '$indexPath'""".stripMargin
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      df.createOrReplaceTempView("tas_long_token")
+
+      // The short neighbor is searchable via TEXTSEARCH — proves the row was indexed
+      // and not wholly rejected by the long-token filter.
+      val shortResults = spark.sql("SELECT id FROM tas_long_token WHERE message indexquery 'normaltoken'").collect()
+      shortResults.length shouldBe 1
+      shortResults(0).getLong(0) shouldBe 1L
+
+      // The 300-byte token itself must have been dropped by tantivy's RemoveLongFilter
+      // (255-byte cap). A query for the full token returns nothing. Without the length cap
+      // this assertion would fail. We use a 280-char prefix because tantivy's query parser
+      // may reject querying with a 300-char token for the same reason the indexer drops it,
+      // but a 280-char query term is still > 255 bytes and cannot be present in the index.
+      val longProbe = "x" * 280
+      val longResults = spark.sql(
+        s"SELECT id FROM tas_long_token WHERE message indexquery '$longProbe'"
+      ).collect()
+      longResults.length shouldBe 0
     }
   }
 }

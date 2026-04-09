@@ -1477,8 +1477,14 @@ object FiltersToQueryConverter {
           val terms = tokenizeForPhraseQuery(convertedValue.toString)
           if (terms.isEmpty) {
             // Empty value after tokenization (e.g., empty string) — use match-all as candidate filter;
-            // Spark post-filter will handle the actual equality check
-            queryLog(s"EqualTo on '$attribute': empty value after tokenization, using match-all (Spark will post-filter)")
+            // Spark post-filter will handle the actual equality check. Log at WARN because the
+            // "match-all" fallback degrades the query to a full split scan, and operators need to
+            // see this if it happens at scale.
+            logger.warn(
+              s"EqualTo on '$attribute': value '${convertedValue}' tokenized to zero terms — " +
+                s"falling back to match-all candidate query; Spark's FilterExec will enforce " +
+                s"exact equality but the tantivy scan will read the full split."
+            )
             Some(new SplitMatchAllQuery())
           } else {
             queryLog(s"EqualTo on '$attribute': using SplitPhraseQuery(slop=0) with terms=${terms}")
@@ -1560,17 +1566,40 @@ object FiltersToQueryConverter {
       case In(attribute, values) if values.nonEmpty =>
         val fieldType = getFieldType(schema, attribute)
         if (shouldUseTokenizedQuery(attribute, options) || isTextAndStringField(attribute, options)) {
-          // For tokenized text fields and text_and_string fields, use SplitPhraseQuery for each value
+          // For tokenized text fields and text_and_string fields, use SplitPhraseQuery for each value.
+          // Values that tokenize to zero terms (empty string, all-punctuation, all-oversize tokens)
+          // are skipped when building the candidate OR. Spark's FilterExec re-evaluates the original
+          // IN list including those values, so correctness is preserved; only the tantivy-side
+          // narrowing is lost.
+          val droppedValues = scala.collection.mutable.ListBuffer.empty[String]
           val phraseQueries = values.flatMap { value =>
             val converted = convertSparkValueToTantivy(value, fieldType)
             val terms = tokenizeForPhraseQuery(converted.toString)
-            if (terms.isEmpty) None
-            else Some(SplitPhraseQuery.exactPhrase(attribute, terms))
+            if (terms.isEmpty) {
+              droppedValues += converted.toString
+              None
+            } else Some(SplitPhraseQuery.exactPhrase(attribute, terms))
           }.toList
 
+          // Log exactly one WARN describing the degradation: either every value was empty (full
+          // fallback to match-all on the tantivy side) or some values were dropped (partial
+          // degradation). Spark's FilterExec handles correctness in both cases.
           if (phraseQueries.isEmpty) {
+            logger.warn(
+              s"In on '$attribute': all ${values.length} value(s) tokenized to zero terms — " +
+                s"falling back to match-all candidate query; tantivy will scan the full split and " +
+                s"Spark's FilterExec will enforce the IN list."
+            )
             Some(new SplitMatchAllQuery())
           } else {
+            if (droppedValues.nonEmpty) {
+              logger.warn(
+                s"In on '$attribute': ${droppedValues.size} of ${values.length} value(s) tokenized " +
+                  s"to zero terms and were skipped when building the tantivy candidate query " +
+                  s"(dropped=${droppedValues.mkString("[", ", ", "]")}); Spark's FilterExec still " +
+                  s"enforces the full IN list but the tantivy-side narrowing is lost for those values."
+              )
+            }
             val boolQuery = new SplitBooleanQuery()
             phraseQueries.foreach(query => boolQuery.addShould(query))
             Some(boolQuery)
@@ -2206,8 +2235,9 @@ object FiltersToQueryConverter {
 
   /**
    * Look up the configured indexing type for a field (e.g., "string", "text", "text_and_string"). Returns None if
-   * options are unavailable or the field has no explicit configuration. Centralizes the boilerplate shared by
-   * `shouldUseTokenizedQuery` and `isTextAndStringField`.
+   * options are unavailable or the field has no explicit configuration. The returned value is lowercased so callers
+   * can compare case-insensitively. Centralizes the boilerplate shared by `shouldUseTokenizedQuery` and
+   * `isTextAndStringField`.
    */
   private def getFieldIndexingType(
     fieldName: String,
@@ -2216,10 +2246,22 @@ object FiltersToQueryConverter {
     options.flatMap { opts =>
       try {
         val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(opts)
-        tantivyOptions.getFieldIndexingConfig(fieldName).fieldType
+        // `parseDualSyntaxConfig` in IndexTables4SparkOptions already lowercases values at ingest
+        // time, so this `.toLowerCase` is defensive belt-and-suspenders — it keeps the contract
+        // of this helper ("returns a lowercase value") independent of upstream casing.
+        tantivyOptions.getFieldIndexingConfig(fieldName).fieldType.map(_.toLowerCase(java.util.Locale.ROOT))
       } catch {
         case scala.util.control.NonFatal(e) =>
-          logger.warn(s"Failed to resolve field indexing type for '$fieldName': ${e.getMessage}")
+          // IMPORTANT: returning None demotes the field to the default "string/term" query
+          // semantics. For `text_and_string` and `text` fields this may produce wrong results
+          // (term lookup against a tokenized index returns nothing); for plain `string` fields
+          // it's the correct default, so we deliberately do NOT rethrow here. We log at WARN so
+          // operators can see the degradation and the log mentions the consequence to stay
+          // actionable in production.
+          logger.warn(
+            s"Failed to resolve field indexing type for '$fieldName' — filter will fall back to default " +
+              s"term-query semantics which may produce wrong results for text_and_string or text fields: ${e.getMessage}"
+          )
           None
       }
     }
@@ -2242,7 +2284,7 @@ object FiltersToQueryConverter {
     fieldName: String,
     options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): Boolean =
-    getFieldIndexingType(fieldName, options).exists(_.toLowerCase == "text_and_string")
+    getFieldIndexingType(fieldName, options).contains("text_and_string")
 
   /**
    * Tokenize a value using simple lowercase splitting to produce terms for a PhraseQuery. This mirrors tantivy's

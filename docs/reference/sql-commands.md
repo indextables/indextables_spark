@@ -789,20 +789,31 @@ The `text_and_string` mode stores each column as a **single tantivy field** that
 
 **Exact Match (`=`, `IN`):**
 - Spark `EqualTo`/`In` filters push down as `SplitPhraseQuery(slop=0)` candidate queries built from the value's tokens
-- Tantivy returns documents whose tokens include the phrase; Spark applies a `FilterExec` post-filter to enforce exact equality
-- Empty values and values that tokenize to zero terms fall back to match-all candidates with full reliance on the Spark post-filter
-- `IN` lists with one or more empty strings drop the empty entries from the tantivy `OR` but the post-filter still handles them correctly
+- Tantivy returns documents whose tokens include the phrase (a superset of exact equality); Spark applies a `FilterExec` post-filter to trim the superset down to the exact result
+- Empty values and values that tokenize to zero terms fall back to match-all candidates with full reliance on the Spark post-filter (logged at WARN because they degrade the tantivy side to a full split scan)
+- `IN` lists containing empty strings: the empty entries are **skipped when building the tantivy-side phrase-query `OR`** (an empty token list cannot be expressed as a phrase query), and a WARN is logged naming the skipped values. Spark's `FilterExec` still evaluates the full original `IN` list including empty strings against the raw stored values, so the final result is correct — only the tantivy-side narrowing is lost for the skipped values.
 
 **Full-Text Search (`TEXTSEARCH`, `indexquery`, `IndexQueryAll`):**
 - Operators execute directly against the single field — no routing logic
 - `IndexQueryAll` (`_indexall indexquery '...'`) hits `text_and_string` fields along with other text fields with no special handling
 
 **Unsupported / Restricted:**
-- **Range queries** (`>`, `<`, `BETWEEN`) are blocked for `text_and_string` fields — tokenized inverted indexes have no meaningful lexical ordering across term boundaries
+- **Range queries** (`>`, `<`, `BETWEEN`) are not pushed for `text_and_string` fields — tokenized inverted indexes have no meaningful lexical ordering across term boundaries. The filters fall back to Spark-side evaluation on the raw stored value, so queries remain correct but lose the tantivy-side narrowing.
+- **`LIKE` / `StringStartsWith` / `StringContains` / `StringEndsWith`**: `LIKE` on `text_and_string` columns is **correct by default** because `spark.indextables.filter.stringPattern.pushdown` is off by default — Spark evaluates the predicate on the raw stored value. **Do NOT enable `spark.indextables.filter.stringPattern.pushdown=true` if any of your columns are configured as `text_and_string`** — the pushdown is silently lossy on this field type in two directions:
+  - **Missing rows**: `LIKE 'Foo-%'` against `"Foo-Bar"` returns an empty result because the indexed tokens are lowercased and punctuation-split to `["foo","bar"]` — nothing starts with `"Foo-"`.
+  - **Extra rows**: `LIKE 'foo%'` against a dataset containing both `"Foo-Bar"` and `"foobar"` returns both rows (standard SQL would return only `"foobar"` because of case sensitivity) — the prefix `"foo"` matches the lowercased `"foo"` token from `"Foo-Bar"`. `StringStartsWith` is classified as fully supported, so Spark does not post-filter.
+
+  Use `string` mode on the column if you need pushdown-correct SQL `LIKE`. See `CompanionTextAndStringTest::LIKE on text_and_string` for the pinned behavior.
+- **Aggregate pushdown + candidate filter**: `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, `GROUP BY`, and bucket aggregations combined with an `EqualTo`/`IN` filter on a `text_and_string` field are **rejected** at pushdown time. Aggregate pushdown has no row-level post-filter to trim the phrase-query candidate superset, so allowing it would produce silently-inflated counts. Three workarounds:
+  - Reformulate the query to avoid the candidate filter (filter by a different indexed column).
+  - Switch the field to `string` mode if you only need exact matching.
+  - Set `spark.indextables.read.requireAggregatePushdown=false` to let the query fall back to Spark row-scan evaluation. Results are still correct — Spark reads all matching rows (narrowed by `FilterExec`) and aggregates them itself; only the tantivy-side aggregate speedup is lost.
 
 **Compatibility:**
-- `HASHED FASTFIELDS`: supported — hashes are computed over the raw representation
-- `INCLUDE COLUMNS` / `EXCLUDE COLUMNS`: supported
+- `HASHED FASTFIELDS`: supported — hashes are computed over the raw representation. Unfiltered `GROUP BY` on a `text_and_string` column uses the hashed fast field for efficient grouping.
+- `INCLUDE COLUMNS` / `EXCLUDE COLUMNS`: supported.
+
+> **When to prefer `string` mode over `text_and_string`:** if you only need exact matching and never run `TEXTSEARCH` / `indexquery` on the column, use `string` mode. It avoids the phrase-query candidate pushdown and Spark post-filter overhead, and it allows aggregate pushdown to combine with equality filters on the column.
 
 - Creates minimal Quickwit splits that reference external parquet files (45-70% split size reduction)
 - Supports incremental sync via anti-join reconciliation (detects new/removed parquet files)

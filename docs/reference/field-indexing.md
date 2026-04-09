@@ -27,9 +27,21 @@ spark.indextables.indexing.json.mode: "full" (default) or "minimal"
 
 - **`EqualTo` and `IN` filters** push down as `SplitPhraseQuery(slop=0)` candidate filters — tantivy returns documents whose tokens include the phrase, and Spark applies a `FilterExec` post-filter to guarantee exact-match correctness. Empty values and values that tokenize to zero terms fall back to a match-all candidate and rely entirely on the Spark post-filter.
 - **`TEXTSEARCH` / `indexquery`** operators run directly against the same field with no auto-routing or companion-field indirection.
-- **Range queries** (`>`, `<`, `BETWEEN`) are **not supported** on `text_and_string` fields — tokenized inverted indexes have no meaningful lexical ordering across term boundaries.
-- **`GROUP BY` and fast-field aggregations** work via the retained raw fast field.
+- **Range queries** (`>`, `<`, `BETWEEN`) are **not supported** as pushdowns on `text_and_string` fields — tokenized inverted indexes have no meaningful lexical ordering across term boundaries. The filters are evaluated by Spark on the raw stored value instead, so queries remain correct but lose the tantivy-side narrowing.
+- **`LIKE` / `StringStartsWith` / `StringContains` / `StringEndsWith`**: SQL `LIKE` is **correct by default** on `text_and_string` columns because `spark.indextables.filter.stringPattern.pushdown` is off by default — Spark evaluates the predicate directly on the raw stored value. **Do not enable `spark.indextables.filter.stringPattern.pushdown=true` for any column configured as `text_and_string`** — pushdown is silently lossy on this field type in two directions:
+
+  1. **Missing rows:** the pushdown builds a prefix query against the tokenized inverted index, which is lowercased and punctuation-split. `LIKE 'Foo-%'` against a raw value of `"Foo-Bar"` returns zero rows (instead of matching), because the indexed tokens are `["foo","bar"]` — none starts with `"Foo-"`.
+  2. **Extra rows:** for a column with values `"Foo-Bar"` and `"foobar"`, the standard SQL (case-sensitive) query `LIKE 'foo%'` should return only `"foobar"`. With pushdown on, the prefix `"foo"` matches both tokens `"foo"` (from `"Foo-Bar"`) and `"foobar"`, returning both rows. Since `StringStartsWith` is classified as fully supported by the data source, Spark does **not** re-evaluate the predicate after the scan, so the superset is never trimmed back.
+
+  Neither failure mode is observable by the user without running a reference query — results are just wrong. If you need SQL `LIKE` with pushdown, use `string` mode on the column instead. See `CompanionTextAndStringTest::LIKE on text_and_string` for the pinned behavior.
+- **Aggregate pushdown** (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, `GROUP BY`, bucket aggregations) combined with an `EqualTo`/`IN` filter on a `text_and_string` field is **rejected**. Aggregate pushdown has no row-level post-filter to trim the phrase-query candidate superset, so allowing it would produce silently-inflated counts. Three workarounds:
+    - Reformulate the query to avoid the candidate filter (e.g., filter by a different indexed column).
+    - Switch the field to `string` mode if you only need exact matching — aggregate pushdown combines freely with `string`-mode equality filters.
+    - Set `spark.indextables.read.requireAggregatePushdown=false` to let the query fall back to Spark row-scan evaluation. The result is still correct — Spark reads all matching rows (with the candidate filter trimmed by `FilterExec`) and aggregates them itself. The only cost is that tantivy no longer computes the aggregate directly, so large queries may run slower.
+- **`GROUP BY` and fast-field aggregations** (without a candidate filter on the same field) work via the retained raw fast field.
 - **`HASHED FASTFIELDS`** are compatible (the hash is computed over the field's raw representation).
+
+> **When to prefer `string` mode over `text_and_string`:** if you only need exact matching and never run `TEXTSEARCH` / `indexquery` on the column, use `string` mode. It avoids the phrase-query candidate pushdown and Spark post-filter overhead, and it allows combined aggregate pushdown on the filtered column.
 
 ## List-Based Typemap Syntax (Recommended)
 

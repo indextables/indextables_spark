@@ -1329,27 +1329,17 @@ class IndexTables4SparkScanBuilder(
    * Check if a filter should be treated as a "candidate" filter — pushed down to the data source for approximate
    * filtering (PhraseQuery) and ALSO re-evaluated by Spark for exact correctness. This is the partial pushdown
    * pattern used by text_and_string fields.
+   *
+   * Delegates to the pure function [[IndexTables4SparkScanBuilder.classifyCandidateFilter]] so the logic can be
+   * unit-tested in isolation without constructing a full ScanBuilder instance. See the companion object's scaladoc
+   * for the superset invariant and why `Not` is rejected.
    */
   private def isCandidateFilter(filter: Filter): Boolean = {
-    import org.apache.spark.sql.sources._
-
-    def isFieldCandidateForExactMatch(attribute: String): Boolean = {
+    val isCandidateField: String => Boolean = attribute => {
       val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
-      effectiveConfig.get(fieldTypeKey) match {
-        case Some(mode) => io.indextables.spark.util.IndexingModes.supportsCandidateExactMatchPushdown(mode)
-        case None       => false
-      }
+      effectiveConfig.get(fieldTypeKey).exists(io.indextables.spark.util.IndexingModes.supportsCandidateExactMatchPushdown)
     }
-
-    filter match {
-      case EqualTo(attribute, _)       => isFieldCandidateForExactMatch(attribute)
-      case EqualNullSafe(attribute, _) => isFieldCandidateForExactMatch(attribute)
-      case In(attribute, _)            => isFieldCandidateForExactMatch(attribute)
-      case And(left, right)            => isCandidateFilter(left) || isCandidateFilter(right)
-      case Or(left, right)             => isCandidateFilter(left) || isCandidateFilter(right)
-      case Not(child)                  => isCandidateFilter(child)
-      case _                           => false
-    }
+    IndexTables4SparkScanBuilder.classifyCandidateFilter(filter, isCandidateField)
   }
 
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
@@ -1981,15 +1971,50 @@ class IndexTables4SparkScanBuilder(
   /**
    * Check if current filters are compatible with aggregate pushdown. This validates fast field configuration and throws
    * exceptions for validation failures.
+   *
+   * The filter set is retrieved with the same instance-then-relation fallback used by `build()`: Spark's
+   * V2ScanRelationPushDown may create multiple ScanBuilder instances for a single query and call `pushAggregation`
+   * on an instance whose local `_pushedFilters` is empty, while the filters live in relation-scoped storage
+   * (`storePushedFilters(relation, _)` / `getPushedFilters(relation)`). Reading only `_pushedFilters` would leave
+   * the candidate-filter guard as a no-op in that scenario.
    */
   private def areFiltersCompatibleWithAggregation(): Boolean = {
+    // Retrieve filters with the same instance → relation-scope fallback used by build().
+    val filtersToCheck: Array[Filter] =
+      if (_pushedFilters.nonEmpty) _pushedFilters
+      else
+        IndexTables4SparkScanBuilder.getCurrentRelation() match {
+          case Some(relation) => IndexTables4SparkScanBuilder.getPushedFilters(relation)
+          case None           => Array.empty[Filter]
+        }
+
     // If there are no filters, aggregation is compatible
-    if (_pushedFilters.isEmpty) {
+    if (filtersToCheck.isEmpty) {
       return true
     }
 
+    // CRITICAL: candidate filters (e.g. text_and_string EqualTo/In pushed down as
+    // SplitPhraseQuery) are supersets of the exact match. Row scans rely on Spark's
+    // FilterExec to narrow the superset back to the exact result, but the aggregate
+    // pushdown path computes counts/sums/etc. directly in tantivy and never runs a
+    // row-level post-filter. Pushing a candidate filter into aggregate scans would
+    // silently inflate results. Throw an IllegalArgumentException here — the enclosing
+    // try/catch in `pushAggregation` will route it through `rejectAggregatePushdownFailure`
+    // so users see a clear IllegalStateException with the guidance about disabling the
+    // aggregate-pushdown requirement or switching the field to `string` mode.
+    filtersToCheck.foreach { filter =>
+      if (isCandidateFilter(filter)) {
+        throw new IllegalArgumentException(
+          s"Candidate filter (e.g. text_and_string EqualTo/In) cannot be combined with " +
+            s"aggregate pushdown — the pushed query is an approximate superset that requires " +
+            s"Spark's row-level FilterExec to be correct, but aggregate pushdown has no row-level " +
+            s"post-filter: $filter"
+        )
+      }
+    }
+
     // Check if filter types are supported and if filter fields are fast fields
-    _pushedFilters.foreach { filter =>
+    filtersToCheck.foreach { filter =>
       val isFilterTypeSupported = filter match {
         // Supported filter types
         case _: org.apache.spark.sql.sources.EqualTo            => true
@@ -2617,5 +2642,63 @@ object IndexTables4SparkScanBuilder {
     relationAggregationRequested.synchronized {
       Option(relationAggregationRequested.get(relation)).exists(_.booleanValue())
     }
+
+  /**
+   * Classify a filter as a "candidate" for text_and_string-style partial pushdown. A candidate filter is pushed to
+   * the data source for approximate filtering (SplitPhraseQuery(slop=0)) AND re-evaluated by Spark's FilterExec
+   * for exact correctness.
+   *
+   * The pushed-down form of a candidate must be a SUPERSET of the true result set so Spark's row-level post-filter
+   * can narrow it back to exact correctness. Leaf candidates (EqualTo/EqualNullSafe/In on text_and_string fields)
+   * are supersets by construction. Compound filters (`And`/`Or`) preserve the superset property only if every
+   * subtree is also a superset.
+   *
+   * `Not(superset)` is a SUBSET of `Not(exact)`, not a superset, so `Not` over any candidate inverts the safety
+   * invariant: Spark's post-filter runs on the rows the source returned and cannot add back rows the source
+   * incorrectly excluded. Therefore ANY filter tree containing a `Not` anywhere in its structure is rejected as a
+   * candidate, even if one of its leaves is a candidate.
+   *
+   * Concrete example: a text_and_string column `msg` contains the raw value `"Foo-Bar"`. The tokenized form is
+   * `["foo","bar"]`. A user writes `WHERE msg != "foo bar"`. Spark sends `Not(EqualTo("msg","foo bar"))` to the
+   * data source. If this were classified as a candidate, the converter would build
+   * `MUST(match_all) + MUST_NOT(SplitPhraseQuery(["foo","bar"]))` — which excludes EVERY row whose tokens contain
+   * the phrase, including the `"Foo-Bar"` row (its tokens DO contain the phrase even though the exact strings
+   * differ). Spark's post-filter would then run on the source's (already subset) result and cannot re-include the
+   * `"Foo-Bar"` row. Result: silently missing rows. The classifier rejects the tree as non-candidate, so Spark
+   * evaluates `Not(EqualTo)` natively on the raw value and correctness is preserved.
+   *
+   * See the `C2: Not(EqualTo) on text_and_string does NOT drop rows whose tokens match the phrase` integration
+   * test and the `IndexTables4SparkScanBuilderClassifierTest` unit tests for more cases.
+   *
+   * @param filter            the Spark filter to classify
+   * @param isCandidateField  predicate that returns true if the given field name is configured as a candidate-eligible
+   *                          field type (i.e. `IndexingModes.supportsCandidateExactMatchPushdown` returned true for
+   *                          the configured mode). Injected as a function to keep this helper pure and testable.
+   * @return true iff the filter should be classified as a candidate (partial pushdown + Spark post-filter)
+   */
+  private[core] def classifyCandidateFilter(filter: Filter, isCandidateField: String => Boolean): Boolean = {
+    import org.apache.spark.sql.sources._
+
+    def hasCandidateLeaf(f: Filter): Boolean = f match {
+      case EqualTo(attribute, _)       => isCandidateField(attribute)
+      case EqualNullSafe(attribute, _) => isCandidateField(attribute)
+      case In(attribute, _)            => isCandidateField(attribute)
+      case And(l, r)                   => hasCandidateLeaf(l) || hasCandidateLeaf(r)
+      case Or(l, r)                    => hasCandidateLeaf(l) || hasCandidateLeaf(r)
+      case Not(c)                      => hasCandidateLeaf(c)
+      case _                           => false
+    }
+
+    // A tree is "Not-free" if no Not node appears anywhere. This is required for the
+    // superset invariant to be preserved across compound filters.
+    def isNotFree(f: Filter): Boolean = f match {
+      case And(l, r) => isNotFree(l) && isNotFree(r)
+      case Or(l, r)  => isNotFree(l) && isNotFree(r)
+      case Not(_)    => false
+      case _         => true
+    }
+
+    hasCandidateLeaf(filter) && isNotFree(filter)
+  }
 
 }
