@@ -29,7 +29,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Integration tests for PURGE INDEXTABLE command. Tests actual file operations with orphaned splits. */
-class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PurgeIndexTableIntegrationTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: String     = _
@@ -605,9 +608,9 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     println(s"After second batch - all checkpoint files: ${allCheckpointFiles.mkString(", ")}")
 
     // Find part files - pattern: checkpoint.<uuid>.<partnum>.json
-    val partFilePattern   = """(\d+)\.checkpoint\.([a-f0-9]+)\.\d{5}\.json""".r
-    val manifestPattern   = """(\d+)\.checkpoint\.json""".r
-    val avroStateDirPat   = """state-v(\d{20})""".r
+    val partFilePattern = """(\d+)\.checkpoint\.([a-f0-9]+)\.\d{5}\.json""".r
+    val manifestPattern = """(\d+)\.checkpoint\.json""".r
+    val avroStateDirPat = """state-v(\d{20})""".r
 
     val partFilesByVersion = allCheckpointFiles
       .flatMap(f => partFilePattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))

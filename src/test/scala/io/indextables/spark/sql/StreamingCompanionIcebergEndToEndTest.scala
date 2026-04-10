@@ -48,7 +48,11 @@ import org.scalatest.BeforeAndAfterAll
  * unmodified.</li> <li>A second new snapshot is picked up by a subsequent cycle.</li> <li>A restart resumes from the
  * last synced snapshot without re-indexing existing data.</li> </ol>
  */
-class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class StreamingCompanionIcebergEndToEndTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

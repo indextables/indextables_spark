@@ -26,6 +26,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.indextables.OutputMetricsUpdater
 
 import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.util.CloudPathUtils
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.ParquetCompanionConfig
 import org.slf4j.LoggerFactory
@@ -298,9 +299,7 @@ object SyncTaskExecutor {
       downloadFromAzure(sourcePath, destFile, storageConfig)
     } else {
       // Local filesystem copy — path may be a plain path or a file:// URI (Iceberg uses file:// URIs)
-      val localPath =
-        if (sourcePath.startsWith("file:")) new java.net.URI(sourcePath).getPath
-        else sourcePath
+      val localPath  = CloudPathUtils.stripFileScheme(sourcePath)
       val sourceFile = new File(localPath)
       Files.copy(sourceFile.toPath, destFile.toPath, StandardCopyOption.REPLACE_EXISTING)
       sourceFile.length()
@@ -413,7 +412,6 @@ object SyncTaskExecutor {
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(localPath, destPath, uploadConfig, tablePath)
   }
 
-
   /**
    * Extract the table base path from a full file path by stripping the filename and any trailing Hive-style partition
    * segments (key=value/).
@@ -422,7 +420,7 @@ object SyncTaskExecutor {
    */
   def extractTableBasePath(filePath: String): String = {
     // Strip scheme prefix, remember it for reconstruction
-    val schemePattern     = "^(s3a?://|abfss?://|wasbs?://)".r
+    val schemePattern     = "^(s3a?://|abfss?://|wasbs?://|file://)".r
     val scheme            = schemePattern.findFirstIn(filePath).getOrElse("")
     val pathWithoutScheme = filePath.substring(scheme.length)
 

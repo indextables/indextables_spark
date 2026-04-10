@@ -266,7 +266,11 @@ class IndexTables4SparkTable(
 
 }
 
-class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.catalog.TableProvider {
+class IndexTables4SparkTableProvider
+    extends org.apache.spark.sql.connector.catalog.TableProvider
+    with org.apache.spark.sql.sources.DataSourceRegister {
+
+  override def shortName(): String = "indextables"
 
   /**
    * Extracts paths from options, supporting both direct path parameters and multiple paths. Handles paths from
@@ -303,13 +307,10 @@ class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.cata
       ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     }
 
-    val sparkTantivyConfigs =
-      try {
-        import io.indextables.spark.util.ConfigNormalization
-        ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-      } catch {
-        case _: Exception => Map.empty[String, String]
-      }
+    val sparkTantivyConfigs = {
+      import io.indextables.spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    }
 
     val readTantivyConfigs = {
       import io.indextables.spark.util.ConfigNormalization
@@ -357,13 +358,10 @@ class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.cata
       ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     }
 
-    val sparkTantivyConfigs =
-      try {
-        import io.indextables.spark.util.ConfigNormalization
-        ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-      } catch {
-        case _: Exception => Map.empty[String, String]
-      }
+    val sparkTantivyConfigs = {
+      import io.indextables.spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    }
 
     val tableTantivyConfigs = {
       import io.indextables.spark.util.ConfigNormalization

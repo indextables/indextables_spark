@@ -162,39 +162,45 @@ class CompanionModeTest extends TestBase {
       try {
         transactionLog.initialize(getTestSchema())
 
-        transactionLog.addFile(AddAction(
-          path = "companion-1.split",
-          partitionValues = Map("date" -> "2024-01-01"),
-          size = 50000L,
-          modificationTime = 1700000000000L,
-          dataChange = true,
-          numRecords = Some(1000L),
-          companionSourceFiles =
-            Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")),
-          companionDeltaVersion = Some(42L),
-          companionFastFieldMode = Some("HYBRID")
-        ))
+        transactionLog.addFile(
+          AddAction(
+            path = "companion-1.split",
+            partitionValues = Map("date" -> "2024-01-01"),
+            size = 50000L,
+            modificationTime = 1700000000000L,
+            dataChange = true,
+            numRecords = Some(1000L),
+            companionSourceFiles =
+              Some(Seq("date=2024-01-01/part-00001.parquet", "date=2024-01-01/part-00002.parquet")),
+            companionDeltaVersion = Some(42L),
+            companionFastFieldMode = Some("HYBRID")
+          )
+        )
 
-        transactionLog.addFile(AddAction(
-          path = "companion-2.split",
-          partitionValues = Map("date" -> "2024-01-02"),
-          size = 60000L,
-          modificationTime = 1700000100000L,
-          dataChange = true,
-          numRecords = Some(2000L),
-          companionSourceFiles = Some(Seq("date=2024-01-02/part-00003.parquet")),
-          companionDeltaVersion = Some(42L),
-          companionFastFieldMode = Some("PARQUET_ONLY")
-        ))
+        transactionLog.addFile(
+          AddAction(
+            path = "companion-2.split",
+            partitionValues = Map("date" -> "2024-01-02"),
+            size = 60000L,
+            modificationTime = 1700000100000L,
+            dataChange = true,
+            numRecords = Some(2000L),
+            companionSourceFiles = Some(Seq("date=2024-01-02/part-00003.parquet")),
+            companionDeltaVersion = Some(42L),
+            companionFastFieldMode = Some("PARQUET_ONLY")
+          )
+        )
 
-        transactionLog.addFile(AddAction(
-          path = "regular.split",
-          partitionValues = Map.empty,
-          size = 30000L,
-          modificationTime = 1700000200000L,
-          dataChange = true,
-          numRecords = Some(500L)
-        ))
+        transactionLog.addFile(
+          AddAction(
+            path = "regular.split",
+            partitionValues = Map.empty,
+            size = 30000L,
+            modificationTime = 1700000200000L,
+            dataChange = true,
+            numRecords = Some(500L)
+          )
+        )
 
         val files = transactionLog.listFiles()
         files should have size 3

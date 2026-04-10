@@ -31,7 +31,10 @@ import org.slf4j.LoggerFactory
  *   - First query should populate the cache
  *   - Second identical query should get 100% cache hits (no new components)
  */
-class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class CacheBehaviorWithoutPrewarmTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[CacheBehaviorWithoutPrewarmTest])
 

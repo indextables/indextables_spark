@@ -3,13 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
   build-and-test-macos:
     name: Build & Test (macOS ARM64)
     runs-on: [self-hosted, macOS, ARM64]
-    environment: self-hosted
+    environment: test-runners
     env:
       JAVA_HOME: /opt/homebrew/opt/openjdk@11
       PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
@@ -25,12 +26,24 @@ jobs:
         run: make compile
 
       - name: Test
+        id: test-macos
         run: make test
+
+      - name: Upload test logs
+        if: failure() && steps.test-macos.outputs.log_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-logs
+          path: ${{ steps.test-macos.outputs.log_dir }}/
+          if-no-files-found: warn
+          retention-days: 7
 
   build-and-test-linux:
     name: Build & Test (Linux X64)
     runs-on: [self-hosted, Linux, X64]
-    environment: self-hosted
+    environment: test-runners
+    env:
+      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
 
     steps:
       - name: Checkout
@@ -43,4 +56,14 @@ jobs:
         run: make compile
 
       - name: Test
+        id: test-linux
         run: make test
+
+      - name: Upload test logs
+        if: failure() && steps.test-linux.outputs.log_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-logs
+          path: ${{ steps.test-linux.outputs.log_dir }}/
+          if-no-files-found: warn
+          retention-days: 7

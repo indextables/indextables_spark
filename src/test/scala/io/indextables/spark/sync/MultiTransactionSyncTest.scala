@@ -36,7 +36,11 @@ import org.scalatest.BeforeAndAfterAll
  * Uses delta-spark (Spark SQL) for all Delta table manipulations rather than delta-standalone, providing realistic
  * Delta transaction histories.
  */
-class MultiTransactionSyncTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class MultiTransactionSyncTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

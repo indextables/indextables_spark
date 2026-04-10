@@ -110,6 +110,10 @@ statement
         AT (path=STRING | table=qualifiedName)                #unsetTableRoot
     | DESCRIBE indexTablesKeyword TABLE ROOTS
         AT (path=STRING | table=qualifiedName)                #describeTableRoots
+    | ENABLE indexTablesKeyword PROFILER                       #enableProfiler
+    | DISABLE indexTablesKeyword PROFILER                      #disableProfiler
+    | DESCRIBE indexTablesKeyword PROFILER CACHE?              #describeProfiler
+    | RESET indexTablesKeyword PROFILER CACHE?                 #resetProfiler
     | .*?                                                       #passThrough
     ;
 
@@ -179,6 +183,7 @@ nonReserved
     | SET | UNSET | TABLE | ROOT | ROOTS
     | STREAMING | POLL | INTERVAL | SECONDS | MINUTES
     | COLUMNS
+    | ENABLE | DISABLE | RESET | PROFILER
     ;
 
 // Keywords (case-insensitive)
@@ -204,6 +209,7 @@ REPAIR: [Rr][Ee][Pp][Aa][Ii][Rr];
 INDEXFILES: [Ii][Nn][Dd][Ee][Xx][Ff][Ii][Ll][Ee][Ss];
 AT: [Aa][Tt];
 LOCATION: [Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn];
+PROFILER: [Pp][Rr][Oo][Ff][Ii][Ll][Ee][Rr];
 PURGE: [Pp][Uu][Rr][Gg][Ee];
 OLDER: [Oo][Ll][Dd][Ee][Rr];
 THAN: [Tt][Hh][Aa][Nn];
@@ -211,6 +217,7 @@ DAYS: [Dd][Aa][Yy][Ss];
 HOURS: [Hh][Oo][Uu][Rr][Ss];
 DRY: [Dd][Rr][Yy];
 RUN: [Rr][Uu][Nn];
+RESET: [Rr][Ee][Ss][Ee][Tt];
 RETENTION: [Rr][Ee][Tt][Ee][Nn][Tt][Ii][Oo][Nn];
 DESCRIBE: [Dd][Ee][Ss][Cc][Rr][Ii][Bb][Ee];
 INCLUDE: [Ii][Nn][Cc][Ll][Uu][Dd][Ee];
@@ -232,6 +239,7 @@ STATS: [Ss][Tt][Aa][Tt][Ss];
 DEST: [Dd][Ee][Ss][Tt];
 SOURCE: [Ss][Oo][Uu][Rr][Cc][Ee];
 PER: [Pp][Ee][Rr];
+ENABLE: [Ee][Nn][Aa][Bb][Ll][Ee];
 ENVIRONMENT: [Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt];
 CHECKPOINT: [Cc][Hh][Ee][Cc][Kk][Pp][Oo][Ii][Nn][Tt];
 COMPACT: [Cc][Oo][Mm][Pp][Aa][Cc][Tt];
@@ -254,6 +262,7 @@ INDEXING: [Ii][Nn][Dd][Ee][Xx][Ii][Nn][Gg];
 MODES: [Mm][Oo][Dd][Ee][Ss];
 FASTFIELDS: [Ff][Aa][Ss][Tt][Ff][Ii][Ee][Ll][Dd][Ss];
 HYBRID: [Hh][Yy][Bb][Rr][Ii][Dd];
+DISABLE: [Dd][Ii][Ss][Aa][Bb][Ll][Ee];
 DISABLED: [Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd];
 PARQUET_ONLY: [Pp][Aa][Rr][Qq][Uu][Ee][Tt]'_'[Oo][Nn][Ll][Yy];
 INPUT: [Ii][Nn][Pp][Uu][Tt];

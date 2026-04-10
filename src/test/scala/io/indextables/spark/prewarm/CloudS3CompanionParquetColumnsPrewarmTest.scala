@@ -46,7 +46,9 @@ import io.indextables.spark.CloudS3TestBase
  *   - Run with: TANTIVY4JAVA_PERFLOG=1 mvn test-compile scalatest:test \
  *     -DwildcardSuites='io.indextables.spark.prewarm.CloudS3CompanionParquetColumnsPrewarmTest'
  */
-class CloudS3CompanionParquetColumnsPrewarmTest extends CloudS3TestBase with io.indextables.spark.testutils.FileCleanupHelper {
+class CloudS3CompanionParquetColumnsPrewarmTest
+    extends CloudS3TestBase
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val S3_BUCKET    = System.getProperty("test.s3.bucket", "test-tantivy4sparkbucket")
   private val S3_REGION    = System.getProperty("test.s3.region", "us-east-2")

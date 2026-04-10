@@ -48,8 +48,8 @@ object CloudPathUtils {
   /**
    * Parse an Azure storage path into (container, blobPath).
    *
-   * Supports azure://, wasb://, wasbs://, abfs://, and abfss:// schemes. Handles Hadoop-style
-   * container@account.host URLs.
+   * Supports azure://, wasb://, wasbs://, abfs://, and abfss:// schemes. Handles Hadoop-style container@account.host
+   * URLs.
    *
    * @param path
    *   Azure path (e.g., "wasbs://container@account.blob.core.windows.net/path")
@@ -86,4 +86,23 @@ object CloudPathUtils {
         (container, blobPath)
     }
   }
+
+  /**
+   * Strip the `file:` URI scheme from a path, returning the bare filesystem path.
+   *
+   * Handles all valid `file:` URI forms (`file:///path`, `file:/path`, `file://hostname/path`). Non-`file:` paths are
+   * returned unchanged. Malformed URIs (e.g., unescaped spaces) fall back to substring stripping.
+   */
+  def stripFileScheme(path: String): String =
+    if (path.startsWith("file:"))
+      try {
+        val parsed = new URI(path).getPath
+        if (parsed != null) parsed else stripFileSchemeBySubstring(path)
+      } catch { case _: java.net.URISyntaxException => stripFileSchemeBySubstring(path) }
+    else path
+
+  private def stripFileSchemeBySubstring(path: String): String =
+    if (path.startsWith("file:///")) path.substring(7)
+    else if (path.startsWith("file:/")) path.substring(5)
+    else path
 }

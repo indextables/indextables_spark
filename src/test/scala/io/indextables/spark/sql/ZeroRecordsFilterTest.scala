@@ -28,7 +28,11 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
 /** Test to validate that files with zero records are not inserted into the transaction log */
-class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class ZeroRecordsFilterTest
+    extends AnyFlatSpec
+    with Matchers
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: File       = _

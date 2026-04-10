@@ -822,3 +822,97 @@ BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data'
 - Breaking type changes (e.g., `string` to `int`): error, requires `INVALIDATE ALL PARTITIONS`
 - Dropped columns in stored metadata: silently skipped on incremental sync
 - New columns added to the source: warning if `EXCLUDE COLUMNS` is active (new columns will be auto-indexed)
+
+---
+
+## FFI Profiler
+
+Control the tantivy4java FFI read-path profiler. The profiler tracks invocation count, total time, min time, and max time for 54 code sections across all FFI read operations, plus hit/miss counters for 5 cache layers. Overhead is ~1ns per section when disabled, ~64ns when enabled.
+
+### Enable / Disable
+
+```sql
+ENABLE INDEXTABLES PROFILER;
+DISABLE INDEXTABLES PROFILER;
+```
+
+`ENABLE` auto-resets all counters for a clean start. `DISABLE` preserves counters (still readable after disable). Both commands broadcast to all executor hosts.
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `status` | String | `"enabled"` or `"disabled"` |
+| `host_count` | Integer | Number of executor hosts reached |
+| `message` | String | Descriptive status message |
+
+### Describe Profiler (Section Timings)
+
+```sql
+DESCRIBE INDEXTABLES PROFILER;
+```
+
+Returns per-section timing counters aggregated across all hosts. Sections with zero invocations are omitted.
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `section` | String | Section name (e.g., `"leaf_search"`, `"doc_batch_prefetch"`) |
+| `category` | String | Logical group (`"search"`, `"aggregation"`, `"doc_retrieval"`, `"streaming"`, etc.) |
+| `calls` | Long | Number of invocations |
+| `total_ms` | Double | Cumulative wall-clock milliseconds |
+| `avg_us` | Double | Average microseconds per call |
+| `min_us` | Double | Fastest invocation in microseconds |
+| `max_us` | Double | Slowest invocation in microseconds |
+
+### Describe Profiler Cache
+
+```sql
+DESCRIBE INDEXTABLES PROFILER CACHE;
+```
+
+Returns cache hit/miss counters aggregated across all hosts. Caches with zero hits and misses are omitted.
+
+**Output schema:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `cache` | String | Cache name (`"byte_range"`, `"l2_disk"`, `"searcher"`, `"parquet_metadata"`, `"pq_column"`) |
+| `hits` | Long | Hit count |
+| `misses` | Long | Miss count |
+| `hit_rate` | Double | `hits / (hits + misses)`, or null if both are 0 |
+
+### Reset Profiler
+
+```sql
+RESET INDEXTABLES PROFILER;
+RESET INDEXTABLES PROFILER CACHE;
+```
+
+Atomically reads and zeros counters on all hosts. Returns the pre-reset values using the same schema as the corresponding `DESCRIBE` command.
+
+### Example Workflow
+
+```sql
+-- Enable profiling
+ENABLE INDEXTABLES PROFILER;
+
+-- Run workload
+SELECT * FROM my_index WHERE title = 'example' LIMIT 100;
+SELECT COUNT(*), AVG(score) FROM my_index WHERE category = 'tech';
+
+-- Check timing breakdown
+DESCRIBE INDEXTABLES PROFILER;
+
+-- Check cache effectiveness
+DESCRIBE INDEXTABLES PROFILER CACHE;
+
+-- Reset and run another workload to compare
+RESET INDEXTABLES PROFILER;
+SELECT * FROM my_index WHERE content indexquery 'machine learning';
+DESCRIBE INDEXTABLES PROFILER;
+
+-- Disable when done
+DISABLE INDEXTABLES PROFILER;
+```

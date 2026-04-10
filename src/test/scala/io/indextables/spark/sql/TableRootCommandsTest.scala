@@ -41,7 +41,11 @@ import org.scalatest.BeforeAndAfterAll
  *   - BUILD COMPANION with TABLE ROOTS clause
  *   - Read-time designator root selection
  */
-class TableRootCommandsTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class TableRootCommandsTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _

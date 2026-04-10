@@ -36,7 +36,11 @@ import org.scalatest.BeforeAndAfterAll
  * End-to-end integration tests for distributed log read in BUILD INDEXTABLES COMPANION. Tests the full pipeline with
  * distributed enabled vs disabled, verifying identical results.
  */
-class DistributedDeltaSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class DistributedDeltaSyncIntegrationTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

@@ -147,7 +147,7 @@ case class TruncateTimeTravelCommand(
           val versionFiles    = scala.collection.mutable.ListBuffer[(Long, String)]()
           val checkpointFiles = scala.collection.mutable.ListBuffer[(Long, String)]()
           val partFiles       = scala.collection.mutable.ListBuffer[(Long, String, String)]() // (version, uuid, path)
-          val avroStateFiles  = scala.collection.mutable.ListBuffer[(Long, String)]() // (version, file path)
+          val avroStateFiles  = scala.collection.mutable.ListBuffer[(Long, String)]()         // (version, file path)
 
           allFiles.foreach { f =>
             val filePath = new Path(f.path)
@@ -170,8 +170,10 @@ case class TruncateTimeTravelCommand(
             }
           }
 
-          logger.info(s"Found ${versionFiles.size} version files, ${checkpointFiles.size} JSON checkpoints, " +
-            s"${partFiles.size} checkpoint parts, ${avroStateFiles.map(_._1).toSet.size} Avro state checkpoints")
+          logger.info(
+            s"Found ${versionFiles.size} version files, ${checkpointFiles.size} JSON checkpoints, " +
+              s"${partFiles.size} checkpoint parts, ${avroStateFiles.map(_._1).toSet.size} Avro state checkpoints"
+          )
 
           // Identify files to delete:
           // - Version files with version < checkpointVersion
@@ -183,10 +185,13 @@ case class TruncateTimeTravelCommand(
           val partsToDelete       = partFiles.filter(_._1 < checkpointVersion)
           val avroStateToDelete   = avroStateFiles.filter(_._1 < checkpointVersion)
 
-          val totalFilesToDelete = versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size + avroStateToDelete.size
+          val totalFilesToDelete =
+            versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size + avroStateToDelete.size
 
-          logger.info(s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, " +
-            s"${partsToDelete.size} parts, ${avroStateToDelete.size} Avro state files")
+          logger.info(
+            s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, " +
+              s"${partsToDelete.size} parts, ${avroStateToDelete.size} Avro state files"
+          )
 
           if (totalFilesToDelete == 0) {
             return Seq(
@@ -313,7 +318,7 @@ case class TruncateTimeTravelCommand(
       } finally
         transactionLog.close()
     } catch {
-      case e: Exception =>
+      case scala.util.control.NonFatal(e) =>
         val errorMsg = s"Failed to truncate time travel data: ${e.getMessage}"
         logger.error(errorMsg, e)
         Seq(
@@ -345,21 +350,17 @@ case class TruncateTimeTravelCommand(
 
     logger.info(s"Creating checkpoint at version $currentVersion with ${allFiles.length + 2} actions")
 
-    // Create checkpoint via native TransactionLogWriter
-    val nativeTablePath = io.indextables.spark.transaction.ConfigMapper.normalizeTablePath(resolvedPath)
-    val nativeConfig    = io.indextables.spark.transaction.ConfigMapper.toNativeConfig(options)
-
     val protocolJson = ActionJsonSerializer.protocolToJson(protocol)
     val metadataJson = ActionJsonSerializer.metadataToJson(metadata)
     val addsJson     = ActionJsonSerializer.addActionsToJson(allFiles)
 
-    io.indextables.jni.txlog.TransactionLogWriter.createCheckpoint(
-      nativeTablePath, nativeConfig, addsJson, metadataJson, protocolJson
-    )
+    // Use the transaction log instance so resolved credentials (including Unity Catalog) are used.
+    val checkpointInfo = transactionLog.createCheckpoint(addsJson, metadataJson, protocolJson)
     // Invalidate snapshot cache so subsequent reads see the new checkpoint
     transactionLog.invalidateCache()
-    logger.info(s"Created checkpoint at version $currentVersion")
-    currentVersion
+    val checkpointVersion = checkpointInfo.getVersion
+    logger.info(s"Created checkpoint at version $checkpointVersion")
+    checkpointVersion
   }
 
   /** Resolve table path from string path or table identifier. */

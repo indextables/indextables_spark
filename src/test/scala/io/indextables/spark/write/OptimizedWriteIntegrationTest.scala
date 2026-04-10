@@ -32,9 +32,8 @@ class OptimizedWriteIntegrationTest extends TestBase {
   private val GB     = 1024L * 1024 * 1024
 
   // Helper to create a TransactionLog for direct API testing
-  private def createTxLog(tablePath: Path): TransactionLogInterface = {
+  private def createTxLog(tablePath: Path): TransactionLogInterface =
     TransactionLogFactory.create(tablePath, spark)
-  }
 
   // Helper to create a WriteBuilder for API testing
   private def createWriteBuilder(
