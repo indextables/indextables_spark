@@ -26,12 +26,11 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.transaction.TransactionLogFactory
+import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
-import io.indextables.spark.transaction.TransactionLogFactory
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -48,8 +47,7 @@ class CompanionMergeSplitsTest
     extends AnyFunSuite
     with Matchers
     with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper
-    with IcebergSnapshotHelper {
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -308,6 +306,50 @@ class CompanionMergeSplitsTest
     Types.NestedField.required(4, "score", Types.DoubleType.get())
   )
 
+  private def appendIcebergSnapshot(
+    server: EmbeddedIcebergRestServer,
+    tableId: TableIdentifier,
+    rows: Seq[Row],
+    rootDir: File,
+    batchId: Int
+  ): Unit = {
+    // Write parquet to a staging directory (Spark needs its own output directory)
+    val stagingDir = new File(rootDir, s"staging-$batchId")
+    val df         = spark.createDataFrame(spark.sparkContext.parallelize(rows), sparkSchema)
+    df.coalesce(1).write.parquet(s"file://${stagingDir.getAbsolutePath}")
+
+    // Move parquet files to a common data directory so all files share
+    // the same parent — extractTableBasePath() computes the storage root
+    // from the first file's path, and companion reads resolve all source
+    // files relative to that root.
+    val dataDir = new File(rootDir, "data")
+    dataDir.mkdirs()
+
+    val parquetFiles = stagingDir
+      .listFiles()
+      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
+      .map { src =>
+        val dest = new File(dataDir, src.getName)
+        java.nio.file.Files.move(src.toPath, dest.toPath)
+        dest
+      }
+
+    val table    = server.catalog.loadTable(tableId)
+    val appendOp = table.newAppend()
+    parquetFiles.foreach { pf =>
+      appendOp.appendFile(
+        DataFiles
+          .builder(table.spec())
+          .withPath(s"file://${pf.getAbsolutePath}")
+          .withFileSizeInBytes(pf.length())
+          .withRecordCount(rows.size.toLong)
+          .withFormat(FileFormat.PARQUET)
+          .build()
+      )
+    }
+    appendOp.commit()
+  }
+
   private def withIcebergMerge(f: (String, DataFrame) => Unit): Unit = {
     val root         = Files.createTempDirectory("iceberg-merge-splits").toFile
     val warehouseDir = new File(root, "warehouse").getAbsolutePath
@@ -327,7 +369,7 @@ class CompanionMergeSplitsTest
       spark.conf.set("spark.indextables.iceberg.uri", server.restUri)
 
       // Snapshot 1: batch 1
-      appendIcebergSnapshot(server, tableId, batch1Rows, sparkSchema, root, 1)
+      appendIcebergSnapshot(server, tableId, batch1Rows, root, 1)
 
       // Use tiny TARGET INPUT SIZE to force one split per file
       spark
@@ -338,7 +380,7 @@ class CompanionMergeSplitsTest
         .getString(2) shouldBe "success"
 
       // Snapshot 2: batch 2
-      appendIcebergSnapshot(server, tableId, batch2Rows, sparkSchema, root, 2)
+      appendIcebergSnapshot(server, tableId, batch2Rows, root, 2)
 
       flushCaches()
 
@@ -369,9 +411,9 @@ class CompanionMergeSplitsTest
 
       f(indexPath, df)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      try spark.conf.unset("spark.indextables.iceberg.catalogType")
       catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      try spark.conf.unset("spark.indextables.iceberg.uri")
       catch { case _: Exception => }
       server.close()
       deleteRecursively(root)

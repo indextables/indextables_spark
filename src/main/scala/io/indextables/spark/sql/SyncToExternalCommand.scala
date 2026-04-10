@@ -478,7 +478,9 @@ case class SyncToExternalCommand(
             .map { json =>
               import com.fasterxml.jackson.core.`type`.TypeReference
               io.indextables.spark.util.JsonUtil.mapper
-                .readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
+                .readValue(json, new TypeReference[java.util.Map[String, String]]() {})
+                .asScala
+                .toMap
             }
             .getOrElse(Map.empty)
         } catch {
@@ -567,12 +569,14 @@ case class SyncToExternalCommand(
       // When no HASHED FASTFIELDS clause is specified, tantivy4java hashes ALL string columns by default,
       // which can produce oversized splits with many useless hashed columns.
       if (effectiveHfInclude.isEmpty && effectiveHfExclude.isEmpty) {
-        val textFields = effectiveIndexingModes.collect { case (f, m) if m.toLowerCase == "text" => f.toLowerCase }.toSet
+        val textFields = effectiveIndexingModes.collect {
+          case (f, m) if m.toLowerCase == "text" => f.toLowerCase
+        }.toSet
         val partitionFieldsLower = partitionColumns.map(_.toLowerCase).toSet
         val hashableStringColumns = sourceSchema.fields.count { field =>
           field.dataType == StringType &&
-            !textFields.contains(field.name.toLowerCase) &&
-            !partitionFieldsLower.contains(field.name.toLowerCase)
+          !textFields.contains(field.name.toLowerCase) &&
+          !partitionFieldsLower.contains(field.name.toLowerCase)
         }
         val maxAutomaticHashedFastfields = mergedConfigs
           .get("spark.indextables.companion.maxAutomaticHashedFastfields")
@@ -1123,9 +1127,10 @@ case class SyncToExternalCommand(
             )
           } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
                                   Map(
-                                    "indextables.companion.indexingModes" -> io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(
-                                      effectiveIndexingModes.asJava
-                                    )
+                                    "indextables.companion.indexingModes" -> io.indextables.spark.util.JsonUtil.mapper
+                                      .writeValueAsString(
+                                        effectiveIndexingModes.asJava
+                                      )
                                   )
                                 } else Map.empty) ++ (if (effectiveWherePredicates.nonEmpty) {
                                                         Map(

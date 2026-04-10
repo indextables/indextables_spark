@@ -45,7 +45,10 @@ import org.scalatest.BeforeAndAfterEach
  *   - With current BUGGY code: Tests should FAIL
  *   - After fix is applied: Tests should PASS
  */
-class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PurgeRaceConditionBugReproductionTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var fs: FileSystem      = _

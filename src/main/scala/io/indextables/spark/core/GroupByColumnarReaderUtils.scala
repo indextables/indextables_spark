@@ -338,16 +338,19 @@ object GroupByColumnarReaderUtils {
     aggExprs: Array[AggregateFunc],
     dataGroupByCols: Array[String],
     schema: StructType,
-    columnTypes: Array[String] = Array.empty
+    columnTypes: Array[String] = Array.empty,
+    isRangeAggregation: Boolean = false
   ): ColumnarBatch = {
     val numRows = ffiBatch.numRows()
 
     if (numRows == 0) {
-      val numKeyColumns = columnNames.count(n => n == "key" || n.startsWith("key_"))
-      return createEmptyBatch(Math.max(numKeyColumns, 1) + aggExprs.length, dataGroupByCols, aggExprs, schema)
+      // Empty split: size the output batch from the actual output schema (GROUP BY cols + aggregates),
+      // not the FFI column count (which is 0 for empty splits and causes ArrayIndexOutOfBoundsException).
+      val numOutCols = dataGroupByCols.length + aggExprs.length
+      return createEmptyBatch(numOutCols, dataGroupByCols, aggExprs, schema)
     }
 
-    val isRange = columnNames.contains("from") || columnNames.contains("to")
+    val isRange = isRangeAggregation
 
     val ffiKeyIndices = columnNames.zipWithIndex.collect {
       case (name, idx) if name == "key" || name.startsWith("key_") => idx
@@ -358,17 +361,20 @@ object GroupByColumnarReaderUtils {
 
     ffiKeyIndices.zipWithIndex.foreach {
       case (ffiIdx, outIdx) =>
-        val keyColName = if (outIdx < dataGroupByCols.length) dataGroupByCols(outIdx) else "key"
+        val keyColName   = if (outIdx < dataGroupByCols.length) dataGroupByCols(outIdx) else "key"
+        val keyArrowType = arrowTypeAt(columnTypes, ffiIdx)
         val keyTargetType =
-          if (outIdx == 0 && isRange) StringType
+          // If the Arrow column is Utf8 the key is a string value (e.g. Range bucket labels in
+          // tantivy4java 0.34.0, which dropped "from"/"to" columns so isRange may be false).
+          if (keyArrowType == ARROW_UTF8) StringType
+          else if (outIdx == 0 && isRange) StringType
           else schema.fields.find(_.name == keyColName).map(_.dataType).getOrElse(StringType)
-        vectors(outIdx) =
-          castColumnSafe(ffiBatch.column(ffiIdx), keyTargetType, numRows, arrowTypeAt(columnTypes, ffiIdx))
+        vectors(outIdx) = castColumnSafe(ffiBatch.column(ffiIdx), keyTargetType, numRows, keyArrowType)
     }
 
     val docCountIdx   = columnNames.indexOf("doc_count")
     val colNameToIdx  = columnNames.zipWithIndex.toMap
-    val reservedNames = Set("doc_count", "from", "to")
+    val reservedNames = Set("doc_count")
     val subAggColIndices = columnNames.zipWithIndex.collect {
       case (name, idx) if !reservedNames.contains(name) && name != "key" && !name.startsWith("key_") => idx
     }

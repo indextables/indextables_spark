@@ -26,7 +26,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 /** Tests to verify that prewarm command tracks and reports locality correctly. */
-class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PrewarmLocalityVerificationTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession   = _
   var tempTablePath: String = _

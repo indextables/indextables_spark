@@ -41,7 +41,11 @@ import org.scalatest.BeforeAndAfterAll
  *   - Schema projection (subset of columns)
  *   - Row vs columnar equivalence
  */
-class CompanionColumnarReadTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionColumnarReadTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

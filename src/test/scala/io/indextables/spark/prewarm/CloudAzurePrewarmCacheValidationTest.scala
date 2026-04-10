@@ -43,7 +43,9 @@ import io.indextables.spark.CloudAzureTestBase
  *   1. System properties: test.azure.storageAccount, test.azure.accountKey 2. ~/.azure/credentials file (matches
  *      tantivy4java pattern) 3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
  */
-class CloudAzurePrewarmCacheValidationTest extends CloudAzureTestBase with io.indextables.spark.testutils.FileCleanupHelper {
+class CloudAzurePrewarmCacheValidationTest
+    extends CloudAzureTestBase
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   // Generate unique test run ID to avoid conflicts
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)

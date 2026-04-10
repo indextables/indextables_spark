@@ -26,7 +26,11 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
-class DownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class DownloadManagerTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var tempDir: File = _
 

@@ -18,6 +18,7 @@
 package io.indextables.spark.util
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.slf4j.LoggerFactory
 
 /**

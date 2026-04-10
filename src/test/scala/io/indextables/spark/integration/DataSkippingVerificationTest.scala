@@ -37,7 +37,7 @@ import org.scalatest.BeforeAndAfterEach
 
 class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
-  private var testTablePath: Path            = _
+  private var testTablePath: Path                     = _
   private var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {

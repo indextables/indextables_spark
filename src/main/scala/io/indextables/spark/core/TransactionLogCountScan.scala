@@ -24,6 +24,7 @@ import org.apache.spark.sql.types.{DateType, LongType, StringType, StructField, 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
+import io.indextables.spark.sync.DistributedSourceScanner
 import io.indextables.spark.transaction.TransactionLogInterface
 import org.slf4j.LoggerFactory
 
@@ -121,15 +122,16 @@ class TransactionLogCountBatch(
     }
 
   /** Compute the count from transaction log on the driver side. */
-  private def computeCountFromTransactionLog(transactionLog: TransactionLogInterface, pushedFilters: Array[Filter]): Long =
+  private def computeCountFromTransactionLog(transactionLog: TransactionLogInterface, pushedFilters: Array[Filter])
+    : Long =
     if (pushedFilters.isEmpty) {
       // No filters - return total count from transaction log
       transactionLog.getTotalRowCount()
     } else {
-      // Apply partition filters and sum counts
-      val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog))
-      val allFiles         = transactionLog.listFiles()
-      val matchingFiles    = allFiles.filter(file => matchesPartitionFilters(file, partitionFilters))
+      // Split into partition + data filters for native partition pruning + data skipping
+      val (partFilters, dataFilters) = io.indextables.spark.transaction.SparkFilterToNativeFilter
+        .splitFilters(pushedFilters, transactionLog.getPartitionColumns())
+      val matchingFiles = transactionLog.listFilesWithAllFilters(partFilters, dataFilters)
 
       matchingFiles.map { file =>
         file.numRecords
@@ -148,17 +150,11 @@ class TransactionLogCountBatch(
 
   /** Compute grouped counts from transaction log for GROUP BY partition columns. */
   private def computeGroupByCountFromTransactionLog(groupByCols: Array[String]): Seq[(Array[String], Long)] = {
-    // Get all files from transaction log
-    val allFiles = transactionLog.listFiles()
-
-    // Apply partition filters if any
-    val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog))
-
-    val matchingFiles = if (partitionFilters.isEmpty) {
-      allFiles
-    } else {
-      allFiles.filter(file => matchesPartitionFilters(file, partitionFilters))
-    }
+    // Get filtered files from transaction log (native filtering handles partition pruning)
+    val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog)).toSeq
+    val (partFilters2, dataFilters2) = io.indextables.spark.transaction.SparkFilterToNativeFilter
+      .splitFilters(pushedFilters, transactionLog.getPartitionColumns())
+    val matchingFiles = transactionLog.listFilesWithAllFilters(partFilters2, dataFilters2)
 
     // Group by partition values and sum record counts
     val grouped = matchingFiles.groupBy { file =>
@@ -199,10 +195,7 @@ class TransactionLogCountBatch(
   private def getFilterReferencedColumns(filter: Filter): Set[String] =
     io.indextables.spark.util.FilterUtils.extractFieldNames(filter)
 
-  /** Check if a file matches the given partition filters. Delegates to PartitionPruning.evaluateFilter. */
-  private def matchesPartitionFilters(file: io.indextables.spark.transaction.AddAction, filters: Array[Filter]): Boolean =
-    if (filters.isEmpty) true
-    else filters.forall(f => io.indextables.spark.transaction.PartitionPruning.evaluateFilter(file.partitionValues, f))
+  // matchesPartitionFilters removed — partition filtering now handled natively via listFilesWithPartitionFilters
 
   override def createReaderFactory(): PartitionReaderFactory =
     new TransactionLogCountReaderFactory(config)
@@ -337,22 +330,32 @@ class TransactionLogGroupByCountPartitionReader(
         }
 
       case DateType =>
-        // Convert date string to days since epoch (Int) as Spark expects
+        // Handle both ISO date strings (e.g., "2026-03-22") and epoch-day numbers
+        // (e.g., "20527" from Iceberg). Try ISO first since build-side normalization
+        // makes it the common case.
         try {
           val localDate = if (value.contains("T")) {
-            // ISO datetime format - extract date part
             LocalDate.parse(value.substring(0, 10))
           } else {
-            // Simple date format YYYY-MM-DD
             LocalDate.parse(value)
           }
           localDate.toEpochDay.toInt
         } catch {
-          case e: Exception =>
-            throw new IllegalArgumentException(
-              s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e.getMessage}",
-              e
-            )
+          case _: Exception =>
+            val n =
+              try value.toInt
+              catch {
+                case e: NumberFormatException =>
+                  throw new IllegalArgumentException(
+                    s"Cannot convert partition value '$value' for column '$columnName' to DateType: ${e.getMessage}",
+                    e
+                  )
+              }
+            if (!DistributedSourceScanner.isPlausibleEpochDay(n))
+              throw new IllegalArgumentException(
+                s"Partition value '$value' for column '$columnName' is numeric but not a plausible epoch day (range: -100000..100000)"
+              )
+            n
         }
 
       case TimestampType =>

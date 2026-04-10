@@ -36,7 +36,12 @@ import org.scalatest.matchers.should.Matchers
  * Spark requires `spark.memory.offHeap.enabled=true` with a non-zero `spark.memory.offHeap.size` for off-heap
  * allocations to succeed.
  */
-class NativeMemoryIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class NativeMemoryIntegrationTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
   protected var tempDir: String     = _

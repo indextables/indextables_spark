@@ -83,12 +83,17 @@ object MergeIOConfig {
   /** Create configuration from a case-insensitive string map (Spark options). */
   def fromOptions(options: CaseInsensitiveStringMap): MergeIOConfig =
     MergeIOConfig(
-      maxConcurrencyPerCore = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
+      maxConcurrencyPerCore = io.indextables.spark.util.ConfigParsingUtils
+        .getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
       memoryBudgetBytes = parseBytes(options.getOrDefault(KEY_MEMORY_BUDGET, formatBytes(DEFAULT_MEMORY_BUDGET_BYTES))),
-      downloadRetries = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_RETRIES),
-      uploadMaxConcurrency = io.indextables.spark.util.ConfigParsingUtils.getIntOption(options, KEY_UPLOAD_MAX_CONCURRENCY, DEFAULT_UPLOAD_MAX_CONCURRENCY),
-      retryBaseDelayMs = io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, KEY_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
-      retryMaxDelayMs = io.indextables.spark.util.ConfigParsingUtils.getLongOption(options, KEY_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS)
+      downloadRetries = io.indextables.spark.util.ConfigParsingUtils
+        .getIntOption(options, KEY_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_RETRIES),
+      uploadMaxConcurrency = io.indextables.spark.util.ConfigParsingUtils
+        .getIntOption(options, KEY_UPLOAD_MAX_CONCURRENCY, DEFAULT_UPLOAD_MAX_CONCURRENCY),
+      retryBaseDelayMs = io.indextables.spark.util.ConfigParsingUtils
+        .getLongOption(options, KEY_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
+      retryMaxDelayMs = io.indextables.spark.util.ConfigParsingUtils
+        .getLongOption(options, KEY_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS)
     ).validate()
 
   /**

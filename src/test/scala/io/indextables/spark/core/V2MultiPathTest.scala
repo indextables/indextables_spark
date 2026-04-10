@@ -208,8 +208,8 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
         .save(siblingPath)
 
       // Read each path individually to verify separation
-      val parentResult = spark.read.format(INDEXTABLES_FORMAT).load(parentPath)
-      val childResult  = spark.read.format(INDEXTABLES_FORMAT).load(childPath)
+      val parentResult  = spark.read.format(INDEXTABLES_FORMAT).load(parentPath)
+      val childResult   = spark.read.format(INDEXTABLES_FORMAT).load(childPath)
       val siblingResult = spark.read.format(INDEXTABLES_FORMAT).load(siblingPath)
 
       // Verify each dataset is distinct

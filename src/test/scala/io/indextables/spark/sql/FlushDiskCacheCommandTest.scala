@@ -35,7 +35,10 @@ import org.slf4j.LoggerFactory
  *   - Output schema validation
  *   - Integration with GlobalSplitCacheManager and DriverSplitLocalityManager
  */
-class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class FlushDiskCacheCommandTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[FlushDiskCacheCommandTest])
 

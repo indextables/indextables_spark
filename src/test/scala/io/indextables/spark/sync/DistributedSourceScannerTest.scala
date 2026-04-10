@@ -35,7 +35,12 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for DistributedSourceScanner — verifies that distributed Delta and Parquet scans produce the same file set as
  * the existing single-call readers.
  */
-class DistributedSourceScannerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper with IcebergSnapshotHelper {
+class DistributedSourceScannerTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper
+    with IcebergSnapshotHelper {
 
   protected var spark: SparkSession = _
 

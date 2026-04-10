@@ -28,13 +28,16 @@ import io.indextables.spark.sql.{
   DescribeComponentSizesCommand,
   DescribeDiskCacheCommand,
   DescribeEnvironmentCommand,
+  DescribeFfiProfilerCommand,
   DescribeMergeJobsCommand,
   DescribePrewarmJobsCommand,
   DescribeStateCommand,
   DescribeStorageStatsCommand,
   DescribeTableRootsCommand,
   DescribeTransactionLogCommand,
+  DisableFfiProfilerCommand,
   DropPartitionsCommand,
+  EnableFfiProfilerCommand,
   FlushDiskCacheCommand,
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
@@ -42,6 +45,7 @@ import io.indextables.spark.sql.{
   PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand,
+  ResetFfiProfilerCommand,
   SetTableRootCommand,
   SyncToExternalCommand,
   TruncateTimeTravelCommand,
@@ -331,6 +335,18 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
 
   override def visitFlushDiskCache(ctx: FlushDiskCacheContext): LogicalPlan =
     FlushDiskCacheCommand()
+
+  override def visitEnableProfiler(ctx: EnableProfilerContext): LogicalPlan =
+    EnableFfiProfilerCommand()
+
+  override def visitDisableProfiler(ctx: DisableProfilerContext): LogicalPlan =
+    DisableFfiProfilerCommand()
+
+  override def visitDescribeProfiler(ctx: DescribeProfilerContext): LogicalPlan =
+    DescribeFfiProfilerCommand(cacheOnly = ctx.CACHE() != null)
+
+  override def visitResetProfiler(ctx: ResetProfilerContext): LogicalPlan =
+    ResetFfiProfilerCommand(cacheOnly = ctx.CACHE() != null)
 
   override def visitInvalidateIndexTablesTransactionLogCache(ctx: InvalidateIndexTablesTransactionLogCacheContext)
     : LogicalPlan = {

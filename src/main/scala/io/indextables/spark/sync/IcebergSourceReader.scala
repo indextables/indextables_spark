@@ -21,6 +21,7 @@ import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.types._
 
+import io.indextables.spark.util.JsonUtil
 import io.indextables.tantivy4java.iceberg.IcebergTableReader
 import io.indextables.tantivy4java.parquet.ParquetSchemaReader
 import org.slf4j.LoggerFactory
@@ -45,6 +46,92 @@ object IcebergSourceReader {
     icebergMap.get("adls.account-name").foreach(v => config.put("azure_account_name", v))
     icebergMap.get("adls.account-key").foreach(v => config.put("azure_access_key", v))
     config
+  }
+
+  private val logger         = LoggerFactory.getLogger(getClass)
+  private val decimalPattern = """decimal\((\d+),\s*(\d+)\)""".r
+  private val fixedPattern   = """fixed\[(\d+)\]""".r
+
+  /** Parse schema JSON to Spark StructType, trying Spark format first and falling back to Iceberg format conversion. */
+  def parseSchemaJson(schemaJson: String): StructType =
+    try
+      DataType.fromJson(schemaJson).asInstanceOf[StructType]
+    catch {
+      case _: Exception =>
+        logger.info("Schema JSON is not Spark-compatible, converting from Iceberg format")
+        convertIcebergSchemaToSpark(schemaJson)
+    }
+
+  /**
+   * Convert Iceberg-format schema JSON to Spark StructType. Iceberg format: {"schema-id":0, "type":"struct",
+   * "fields":[{"id":1, "name":"...", "required":false, "type":"long"}]} Spark format: {"type":"struct",
+   * "fields":[{"name":"...", "type":"long", "nullable":true, "metadata":{}}]}
+   */
+  def convertIcebergSchemaToSpark(schemaJson: String): StructType = {
+    val root   = JsonUtil.mapper.readTree(schemaJson)
+    val fields = root.get("fields")
+
+    val sparkFields = (0 until fields.size()).map { i =>
+      val field       = fields.get(i)
+      val name        = field.get("name").asText()
+      val nullable    = !field.get("required").asBoolean(false)
+      val icebergType = field.get("type")
+      val dataType    = icebergTypeToSparkType(icebergType)
+      StructField(name, dataType, nullable)
+    }
+    StructType(sparkFields)
+  }
+
+  private def icebergTypeToSparkType(typeNode: com.fasterxml.jackson.databind.JsonNode): DataType =
+    if (typeNode.isTextual) {
+      icebergPrimitiveToSpark(typeNode.asText())
+    } else if (typeNode.isObject) {
+      val typeName = typeNode.get("type").asText()
+      typeName match {
+        case "struct" =>
+          val fields = typeNode.get("fields")
+          val sparkFields = (0 until fields.size()).map { i =>
+            val f        = fields.get(i)
+            val name     = f.get("name").asText()
+            val nullable = !f.get("required").asBoolean(false)
+            StructField(name, icebergTypeToSparkType(f.get("type")), nullable)
+          }
+          StructType(sparkFields)
+        case "list" =>
+          val elementField    = typeNode.get("element")
+          val elementNullable = !typeNode.get("element-required").asBoolean(false)
+          ArrayType(icebergTypeToSparkType(elementField), elementNullable)
+        case "map" =>
+          val keyType       = icebergTypeToSparkType(typeNode.get("key"))
+          val valueType     = icebergTypeToSparkType(typeNode.get("value"))
+          val valueNullable = !typeNode.get("value-required").asBoolean(false)
+          MapType(keyType, valueType, valueNullable)
+        case other =>
+          logger.warn(s"Unknown Iceberg complex type '$other', defaulting to StringType")
+          StringType
+      }
+    } else {
+      logger.warn(s"Unexpected Iceberg type node: $typeNode, defaulting to StringType")
+      StringType
+    }
+
+  private def icebergPrimitiveToSpark(icebergType: String): DataType = icebergType match {
+    case "boolean"                                                       => BooleanType
+    case "int" | "integer"                                               => IntegerType
+    case "long"                                                          => LongType
+    case "float"                                                         => FloatType
+    case "double"                                                        => DoubleType
+    case "string"                                                        => StringType
+    case "binary" | "fixed"                                              => BinaryType
+    case "date"                                                          => DateType
+    case "timestamp" | "timestamptz" | "timestamp_ns" | "timestamptz_ns" => TimestampType
+    case "time"                                                          => LongType
+    case "uuid"                                                          => StringType
+    case fixedPattern(_)                                                 => BinaryType
+    case decimalPattern(precision, scale)                                => DecimalType(precision.toInt, scale.toInt)
+    case other =>
+      logger.warn(s"Unknown Iceberg type '$other', defaulting to StringType")
+      StringType
   }
 }
 
@@ -138,11 +225,20 @@ class IcebergSourceReader(
 
     val root = computedStorageRoot
 
-    // Build files with absolute paths first (needed for partition value extraction)
+    // Extract DATE column names so we can convert Iceberg epoch-day partition
+    // values to ISO format (e.g., "20527" -> "2026-03-22").
+    val schemaOpt =
+      try Some(parsedSchema)
+      catch { case _: Exception => None }
+    val dateColumns = DistributedSourceScanner.extractDateColumns(schemaOpt)
+
+    // Build files with absolute paths first (needed for partition value extraction).
+    // Normalize DATE partition values from Iceberg epoch days to ISO strings.
     val absoluteFiles = parquetFiles.map { entry =>
       CompanionSourceFile(
         path = entry.getPath,
-        partitionValues = entry.getPartitionValues.asScala.toMap,
+        partitionValues =
+          DistributedSourceScanner.normalizeIcebergDatePartitions(entry.getPartitionValues.asScala.toMap, dateColumns),
         size = entry.getFileSizeBytes
       )
     }
@@ -231,19 +327,14 @@ class IcebergSourceReader(
     }
   }
 
-  override def schema(): StructType = {
-    val schemaJson = icebergTableSchema.getSchemaJson()
-    val sparkSchema =
-      try
-        DataType.fromJson(schemaJson).asInstanceOf[StructType]
-      catch {
-        case _: Exception =>
-          logger.info("Iceberg schema JSON is not Spark-compatible, converting from Iceberg format")
-          convertIcebergSchemaToSpark(schemaJson)
-      }
+  private lazy val parsedSchema: StructType = {
+    val schemaJson  = icebergTableSchema.getSchemaJson()
+    val sparkSchema = IcebergSourceReader.parseSchemaJson(schemaJson)
     logger.info(s"Iceberg schema: ${sparkSchema.fields.length} fields")
     sparkSchema
   }
+
+  override def schema(): StructType = parsedSchema
 
   override def schemaSourceParquetFile(): Option[String] = None // Iceberg provides schema via catalog
 
@@ -286,77 +377,4 @@ class IcebergSourceReader(
   private def buildParquetReaderStorageConfig(): java.util.Map[String, String] =
     IcebergSourceReader.buildParquetReaderStorageConfig(icebergConfig)
 
-  /**
-   * Convert Iceberg-format schema JSON to Spark StructType. Iceberg format: {"schema-id":0, "type":"struct",
-   * "fields":[{"id":1, "name":"...", "required":false, "type":"long"}]} Spark format: {"type":"struct",
-   * "fields":[{"name":"...", "type":"long", "nullable":true, "metadata":{}}]}
-   */
-  private def convertIcebergSchemaToSpark(schemaJson: String): StructType = {
-    val mapper = io.indextables.spark.util.JsonUtil.mapper
-    val root   = mapper.readTree(schemaJson)
-    val fields = root.get("fields")
-
-    val sparkFields = (0 until fields.size()).map { i =>
-      val field       = fields.get(i)
-      val name        = field.get("name").asText()
-      val nullable    = !field.get("required").asBoolean(false)
-      val icebergType = field.get("type")
-      val dataType    = icebergTypeToSparkType(icebergType)
-      StructField(name, dataType, nullable)
-    }
-    StructType(sparkFields)
-  }
-
-  private def icebergTypeToSparkType(typeNode: com.fasterxml.jackson.databind.JsonNode): DataType =
-    if (typeNode.isTextual) {
-      icebergPrimitiveToSpark(typeNode.asText())
-    } else if (typeNode.isObject) {
-      val typeName = typeNode.get("type").asText()
-      typeName match {
-        case "struct" =>
-          val fields = typeNode.get("fields")
-          val sparkFields = (0 until fields.size()).map { i =>
-            val f        = fields.get(i)
-            val name     = f.get("name").asText()
-            val nullable = !f.get("required").asBoolean(false)
-            StructField(name, icebergTypeToSparkType(f.get("type")), nullable)
-          }
-          StructType(sparkFields)
-        case "list" =>
-          val elementField    = typeNode.get("element")
-          val elementNullable = !typeNode.get("element-required").asBoolean(false)
-          ArrayType(icebergTypeToSparkType(elementField), elementNullable)
-        case "map" =>
-          val keyType       = icebergTypeToSparkType(typeNode.get("key"))
-          val valueType     = icebergTypeToSparkType(typeNode.get("value"))
-          val valueNullable = !typeNode.get("value-required").asBoolean(false)
-          MapType(keyType, valueType, valueNullable)
-        case other =>
-          logger.warn(s"Unknown Iceberg complex type '$other', defaulting to StringType")
-          StringType
-      }
-    } else {
-      logger.warn(s"Unexpected Iceberg type node: $typeNode, defaulting to StringType")
-      StringType
-    }
-
-  private val decimalPattern = """decimal\((\d+),\s*(\d+)\)""".r
-
-  private def icebergPrimitiveToSpark(icebergType: String): DataType = icebergType match {
-    case "boolean"                                                       => BooleanType
-    case "int" | "integer"                                               => IntegerType
-    case "long"                                                          => LongType
-    case "float"                                                         => FloatType
-    case "double"                                                        => DoubleType
-    case "string"                                                        => StringType
-    case "binary" | "fixed"                                              => BinaryType
-    case "date"                                                          => DateType
-    case "timestamp" | "timestamptz" | "timestamp_ns" | "timestamptz_ns" => TimestampType
-    case "time"                           => LongType // Iceberg time stored as microseconds since midnight
-    case "uuid"                           => StringType
-    case decimalPattern(precision, scale) => DecimalType(precision.toInt, scale.toInt)
-    case other =>
-      logger.warn(s"Unknown Iceberg type '$other', defaulting to StringType")
-      StringType
-  }
 }

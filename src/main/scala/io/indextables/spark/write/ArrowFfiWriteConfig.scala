@@ -17,32 +17,28 @@
 
 package io.indextables.spark.write
 
-import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.slf4j.LoggerFactory
 
 /**
  * Configuration for Arrow FFI columnar ingestion on the write path.
  *
- * When enabled, InternalRows are buffered into Arrow VectorSchemaRoot on the JVM and flushed to Rust via Arrow C Data
- * Interface FFI (zero-copy pointer handoff). This eliminates the TANT serialize/deserialize overhead (~9ms per batch),
- * replacing it with FFI pointer handoff (~0.25ms per batch).
+ * InternalRows are buffered into Arrow VectorSchemaRoot on the JVM and flushed to Rust via Arrow C Data Interface FFI
+ * (zero-copy pointer handoff).
  *
  * MIGRATION NOTE: The `batchSize` config controls how many InternalRows are buffered before exporting via FFI. This
  * parameter becomes irrelevant when Spark adds native `DataWriter[ColumnarBatch]` support (Spark controls batch size
  * upstream). The config is retained for backward compatibility but will be deprecated when columnar writes are
  * available.
  *
- * @param enabled
- *   Whether Arrow FFI write path is enabled (default: true)
  * @param batchSize
  *   Number of rows to buffer before flushing via FFI (default: 8192)
  * @param heapSize
- *   Heap size in bytes for the native split writer. Reads from the shared `spark.indextables.indexWriter.heapSize`
- *   config (same as the TANT batch path) so users don't need to configure heap size separately. Default: 256MB.
+ *   Heap size in bytes for the native split writer. Default: 256MB.
  */
 case class ArrowFfiWriteConfig(
-  enabled: Boolean = ArrowFfiWriteConfig.DEFAULT_ENABLED,
   batchSize: Int = ArrowFfiWriteConfig.DEFAULT_BATCH_SIZE,
   heapSize: Long = ArrowFfiWriteConfig.DEFAULT_HEAP_SIZE) {
 
@@ -62,44 +58,57 @@ case class ArrowFfiWriteConfig(
 object ArrowFfiWriteConfig {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // Deprecated key — the TANT batch write path has been removed and Arrow FFI is now the only write path.
+  // Retained only for logging a deprecation warning when users still pass this config.
+  private val KEY_ENABLED_DEPRECATED = "spark.indextables.write.arrowFfi.enabled"
+
   // Configuration key constants
-  val KEY_ENABLED    = "spark.indextables.write.arrowFfi.enabled"
   val KEY_BATCH_SIZE = "spark.indextables.write.arrowFfi.batchSize"
-  // Shared with TANT batch path — both write paths use the same heap size config
-  val KEY_HEAP_SIZE = "spark.indextables.indexWriter.heapSize"
+  val KEY_HEAP_SIZE  = "spark.indextables.indexWriter.heapSize"
 
   // Default values
-  val DEFAULT_ENABLED: Boolean = true
-  val DEFAULT_BATCH_SIZE: Int  = 8192
-  val DEFAULT_HEAP_SIZE: Long  = 256L * 1024 * 1024 // 256MB
+  val DEFAULT_BATCH_SIZE: Int = 8192
+  val DEFAULT_HEAP_SIZE: Long = 256L * 1024 * 1024 // 256MB
 
   def default: ArrowFfiWriteConfig = ArrowFfiWriteConfig()
 
-  def fromOptions(options: CaseInsensitiveStringMap): ArrowFfiWriteConfig = {
-    val enabled   = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
-    val batchSize = ConfigParsingUtils.getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
-    val heapSize  = ConfigParsingUtils.getLongOption(options, KEY_HEAP_SIZE, DEFAULT_HEAP_SIZE, mustBePositive = true, supportSizeSuffix = true)
+  private val deprecatedKeyWarned = new java.util.concurrent.atomic.AtomicBoolean(false)
 
-    val config = ArrowFfiWriteConfig(
-      enabled = enabled,
-      batchSize = batchSize,
-      heapSize = heapSize
-    )
-
-    if (enabled) {
-      logger.info(s"ArrowFfiWriteConfig: enabled=$enabled, batchSize=$batchSize")
-    } else {
-      logger.debug(s"ArrowFfiWriteConfig: disabled")
+  private def warnIfDeprecatedKeyPresent(hasKey: String => Boolean): Unit =
+    if (hasKey(KEY_ENABLED_DEPRECATED) && deprecatedKeyWarned.compareAndSet(false, true)) {
+      logger.warn(
+        s"Configuration key '$KEY_ENABLED_DEPRECATED' is deprecated and ignored. " +
+          "The legacy TANT batch write path has been removed; Arrow FFI is now the only write path. " +
+          "You can safely remove this setting."
+      )
     }
 
+  def fromOptions(options: CaseInsensitiveStringMap): ArrowFfiWriteConfig = {
+    warnIfDeprecatedKeyPresent(key => options.containsKey(key))
+
+    val batchSize = ConfigParsingUtils.getIntOption(options, KEY_BATCH_SIZE, DEFAULT_BATCH_SIZE, mustBePositive = true)
+    val heapSize = ConfigParsingUtils.getLongOption(
+      options,
+      KEY_HEAP_SIZE,
+      DEFAULT_HEAP_SIZE,
+      mustBePositive = true,
+      supportSizeSuffix = true
+    )
+
+    val config = ArrowFfiWriteConfig(
+      batchSize = batchSize,
+      heapSize = heapSize
+    ).validate()
+
+    logger.info(s"ArrowFfiWriteConfig: batchSize=$batchSize")
     config
   }
 
   def fromMap(configs: Map[String, String]): ArrowFfiWriteConfig = {
     val get = ConfigParsingUtils.caseInsensitiveLookup(configs)
+    warnIfDeprecatedKeyPresent(key => get(key).isDefined)
 
     ArrowFfiWriteConfig(
-      enabled = get(KEY_ENABLED).map(_.toBoolean).getOrElse(DEFAULT_ENABLED),
       batchSize = get(KEY_BATCH_SIZE).map(_.toInt).getOrElse(DEFAULT_BATCH_SIZE),
       heapSize = get(KEY_HEAP_SIZE).map(SizeParser.parseSize).getOrElse(DEFAULT_HEAP_SIZE)
     ).validate()

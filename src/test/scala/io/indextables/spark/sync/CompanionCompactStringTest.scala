@@ -39,7 +39,11 @@ import org.scalatest.BeforeAndAfterAll
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionCompactStringTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -1214,9 +1218,8 @@ class CompanionCompactStringTest extends AnyFunSuite with Matchers with BeforeAn
             s"AT LOCATION '$indexPath'"
         )
         result.collect()(0).getString(2) shouldBe "success"
-      } finally {
+      } finally
         spark.conf.unset("spark.indextables.companion.maxAutomaticHashedFastfields")
-      }
     }
   }
 

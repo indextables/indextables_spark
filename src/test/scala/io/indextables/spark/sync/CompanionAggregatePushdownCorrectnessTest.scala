@@ -28,7 +28,6 @@ import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -37,7 +36,8 @@ import org.scalatest.BeforeAndAfterAll
  * Tests for aggregate pushdown correctness on companion tables built from Delta and Iceberg sources.
  *
  * Unlike CompanionAggregateGuardTest (which tests the guard mechanism), this suite verifies that actual computed values
- * (COUNT, SUM, AVG, MIN, MAX) are correct when aggregate pushdown succeeds on companion tables with fast fields enabled.
+ * (COUNT, SUM, AVG, MIN, MAX) are correct when aggregate pushdown succeeds on companion tables with fast fields
+ * enabled.
  *
  * Uses a deterministic 20-row dataset with pre-calculated expected values for all aggregations.
  */
@@ -93,8 +93,8 @@ class CompanionAggregatePushdownCorrectnessTest
   //
   // department  | rows | SUM(score) | MIN(score) | MAX(score) | AVG(score)
   // engineering |   8  |   780.0    |   50.0     |   150.0    |   97.5
-  // marketing   |   6  |   510.0    |   60.0     |   105.0    |   85.0
-  // sales       |   6  |   510.0    |   55.0     |   120.0    |   85.0
+  // marketing   |   6  |   510.0    |   60.0     |   120.0    |   85.0
+  // sales       |   6  |   510.0    |   55.0     |   130.0    |   85.0
   // ────────────+──────+────────────+────────────+────────────+──────────
   // TOTAL       |  20  |  1800.0    |   50.0     |   150.0    |   90.0
 
@@ -258,9 +258,9 @@ class CompanionAggregatePushdownCorrectnessTest
 
       f(companionDf)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      try spark.conf.unset("spark.indextables.iceberg.catalogType")
       catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      try spark.conf.unset("spark.indextables.iceberg.uri")
       catch { case _: Exception => }
       server.close()
       deleteRecursively(root)
@@ -369,7 +369,7 @@ class CompanionAggregatePushdownCorrectnessTest
       grouped.length shouldBe 3
 
       for (row <- grouped) {
-        val dept                                = row.getString(0)
+        val dept                                     = row.getString(0)
         val (expCnt, expSum, expAvg, expMin, expMax) = DeptExpected(dept)
 
         withClue(s"department=$dept: ") {
@@ -388,9 +388,7 @@ class CompanionAggregatePushdownCorrectnessTest
   // ═══════════════════════════════════════════════════════════════════════════
 
   test("COUNT(*) on Iceberg companion returns exact row count") {
-    withIcebergCompanion { df =>
-      df.count() shouldBe TotalRows
-    }
+    withIcebergCompanion(df => df.count() shouldBe TotalRows)
   }
 
   test("SUM and AVG on Iceberg companion return correct values") {
@@ -424,7 +422,7 @@ class CompanionAggregatePushdownCorrectnessTest
       grouped.length shouldBe 3
 
       for (row <- grouped) {
-        val dept                                = row.getString(0)
+        val dept                                     = row.getString(0)
         val (expCnt, expSum, expAvg, expMin, expMax) = DeptExpected(dept)
 
         withClue(s"department=$dept: ") {

@@ -36,8 +36,8 @@ import org.slf4j.LoggerFactory
  */
 class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEach {
 
-  private val logger                         = LoggerFactory.getLogger(classOf[DocumentPreservationValidationTest])
-  private var tempTablePath: String          = _
+  private val logger                = LoggerFactory.getLogger(classOf[DocumentPreservationValidationTest])
+  private var tempTablePath: String = _
   private var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {
@@ -152,7 +152,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     )
 
     // Step 4: Query all documents BEFORE merge (baseline)
-    val beforeMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val beforeMergeDF     = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
     val beforeMergeCount  = beforeMergeDF.count()
     val beforeMergeDocIds = beforeMergeDF.select("id").collect().map(_.getLong(0)).sorted
 
@@ -201,7 +201,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     )
 
     // Step 7: Query all documents AFTER merge (validation)
-    val afterMergeDF = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
+    val afterMergeDF     = spark.read.format(INDEXTABLES_FORMAT).load(tempTablePath)
     val afterMergeCount  = afterMergeDF.count()
     val afterMergeDocIds = afterMergeDF.select("id").collect().map(_.getLong(0)).sorted
 

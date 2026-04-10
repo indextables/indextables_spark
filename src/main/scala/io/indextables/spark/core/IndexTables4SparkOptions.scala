@@ -54,7 +54,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   private val ValidIndexRecordOptions = Set("basic", "freq", "position")
 
   /** Valid tokenizer names for list-based syntax detection. */
-  private val ValidTokenizers = Set("default", "raw", "whitespace", "en_stem")
+  private val ValidTokenizers = Set("default", "raw", "whitespace")
 
   /**
    * Token length constants matching tantivy4java's TokenLength class. Used for detecting list-based syntax (e.g.,
@@ -144,8 +144,8 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    * Get tokenizer override configuration. Maps field names to their tokenizer types.
    *
    * Supports both syntaxes:
-   *   - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.en_stem = "content,body")
-   *   - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "en_stem")
+   *   - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.whitespace = "content,body")
+   *   - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "whitespace")
    */
   lazy val getTokenizerOverrides: Map[String, String] =
     parseDualSyntaxConfig("spark.indextables.indexing.tokenizer.", ValidTokenizers)

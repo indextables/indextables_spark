@@ -34,7 +34,11 @@ import org.scalatest.BeforeAndAfterAll
  *      in the next cycle. 3. A no-changes poll leaves the companion unmodified. 4. A second new commit is picked up by
  *      a subsequent cycle. 5. A restart resumes from the last synced version without re-indexing existing data.
  */
-class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class StreamingCompanionEndToEndTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

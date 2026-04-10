@@ -35,7 +35,11 @@ import org.scalatest.BeforeAndAfterAll
  * group-by aggregate path must all exclude it before converting to a Tantivy query. Otherwise the query returns
  * incorrect results (zero or wrong).
  */
-class CompanionPartitionFilterBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionPartitionFilterBugTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

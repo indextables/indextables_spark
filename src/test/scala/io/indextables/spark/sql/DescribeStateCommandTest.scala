@@ -18,14 +18,13 @@
 package io.indextables.spark.sql
 
 import org.apache.spark.sql.types.{StringType => SparkStringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import io.indextables.spark.TestBase
-
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 class DescribeStateCommandTest extends TestBase {
 

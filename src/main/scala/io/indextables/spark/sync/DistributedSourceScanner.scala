@@ -17,11 +17,13 @@
 
 package io.indextables.spark.sync
 
+import java.time.LocalDate
+
 import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.types.{DataType, DateType, StructType}
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.arrow.ArrowFfiBridge
@@ -77,7 +79,8 @@ object DistributedSourceScanner {
 
   private[sync] def icebergEntryToCompanionFile(
     entry: IcebergFileEntry,
-    storageRoot: Option[String]
+    storageRoot: Option[String],
+    dateColumns: Set[String]
   ): CompanionSourceFile = {
     val absolutePath    = entry.getPath
     val partitionValues = entry.getPartitionValues.asScala.toMap
@@ -95,12 +98,7 @@ object DistributedSourceScanner {
       case None => absolutePath
     }
 
-    // If partition values from catalog are empty, extract from Hive-style path
-    val effectivePartitionValues = if (partitionValues.isEmpty && storageRoot.isDefined) {
-      extractPartitionValuesFromPath(absolutePath, storageRoot.get)
-    } else {
-      partitionValues
-    }
+    val effectivePartitionValues = resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
 
     CompanionSourceFile(
       path = relativePath,
@@ -185,6 +183,53 @@ object DistributedSourceScanner {
       case _: Exception => Map.empty
     }
   }
+
+  /** Normalize Iceberg epoch-day DATE partition values to ISO strings (e.g., "20527" -> "2026-03-22"). */
+  private[sync] def normalizeIcebergDatePartitions(
+    partitionValues: Map[String, String],
+    dateColumns: Set[String]
+  ): Map[String, String] = {
+    if (dateColumns.isEmpty) return partitionValues
+    partitionValues.map {
+      case (key, value) =>
+        if (dateColumns.contains(key)) {
+          try {
+            val epochDay = value.toLong
+            if (isPlausibleEpochDay(epochDay)) {
+              key -> LocalDate.ofEpochDay(epochDay).toString
+            } else {
+              key -> value // implausibly large — likely a compact ISO date, pass through
+            }
+          } catch {
+            case _: NumberFormatException => key -> value
+          }
+        } else {
+          key -> value
+        }
+    }
+  }
+
+  /**
+   * Plausibility check: epoch days outside -100000..100000 (~year -304 to ~2243) are likely compact ISO dates (e.g.,
+   * 20260322) rather than real epoch days.
+   */
+  private[spark] def isPlausibleEpochDay(n: Long): Boolean = n >= -100000 && n <= 100000
+
+  /** Extract the set of DATE column names from a Spark StructType schema. */
+  private[sync] def extractDateColumns(schema: Option[StructType]): Set[String] =
+    schema.map(_.fields.filter(_.dataType == DateType).map(_.name).toSet).getOrElse(Set.empty)
+
+  /** Resolve effective partition values: extract from Hive-style path if empty, otherwise normalize dates. */
+  private[sync] def resolvePartitionValues(
+    partitionValues: Map[String, String],
+    absolutePath: String,
+    storageRoot: Option[String],
+    dateColumns: Set[String]
+  ): Map[String, String] =
+    if (partitionValues.isEmpty && storageRoot.isDefined)
+      extractPartitionValuesFromPath(absolutePath, storageRoot.get)
+    else
+      normalizeIcebergDatePartitions(partitionValues, dateColumns)
 
   /**
    * Read a Delta checkpoint part via Arrow FFI (zero-copy columnar export). Columns: 0=path (Utf8), 1=size (Int64),
@@ -282,7 +327,8 @@ object DistributedSourceScanner {
     config: java.util.Map[String, String],
     manifestPath: String,
     filter: PartitionFilter,
-    storageRoot: Option[String]
+    storageRoot: Option[String],
+    dateColumns: Set[String]
   ): Iterator[CompanionSourceFile] = {
     val numCols = 7
     val bridge  = new ArrowFfiBridge()
@@ -345,10 +391,8 @@ object DistributedSourceScanner {
                 case None => absolutePath
               }
 
-              // If partition values from catalog are empty, extract from Hive-style path
-              val effectivePartitionValues = if (partitionValues.isEmpty && storageRoot.isDefined) {
-                extractPartitionValuesFromPath(absolutePath, storageRoot.get)
-              } else partitionValues
+              val effectivePartitionValues =
+                resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
 
               results += CompanionSourceFile(
                 path = relativePath,
@@ -659,9 +703,13 @@ class DistributedSourceScanner(spark: SparkSession) {
       try {
         val schemaJson = snapshotInfo.getSchemaJson
         if (schemaJson != null && schemaJson.nonEmpty)
-          Some(DataType.fromJson(schemaJson).asInstanceOf[StructType])
+          Some(IcebergSourceReader.parseSchemaJson(schemaJson))
         else None
       } catch { case _: Exception => None }
+
+    // Extract DATE column names once — used by both the incremental and distributed paths
+    // to convert Iceberg epoch-day partition values to ISO format.
+    val dateCols = extractDateColumns(icebergSchemaOpt)
 
     // ── Incremental fast-path ──────────────────────────────────────────────
     // When fromSnapshotId is provided (streaming incremental cycle), compute changes via
@@ -775,7 +823,7 @@ class DistributedSourceScanner(spark: SparkSession) {
                     val partCols = anyEntry
                       .map(_.getPartitionValues.keySet.asScala.toSeq.sorted)
                       .getOrElse(Seq.empty)
-                    val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot)).toSeq
+                    val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot, dateCols)).toSeq
 
                     // Normalize removed paths relative to storage root (same relative-path output
                     // as added files). Apply stripFileScheme + normalizeLocalPath to handle file:
@@ -842,6 +890,7 @@ class DistributedSourceScanner(spark: SparkSession) {
     val broadcastRoot     = sc.broadcast(computedStorageRoot)
     val broadcastFilter   = sc.broadcast(partitionFilter.orNull)
     val broadcastArrowFfi = sc.broadcast(arrowFfiEnabled)
+    val broadcastDateCols = sc.broadcast(dateCols)
 
     val numPartitions = math.min(math.max(manifestPaths.size, 1), sc.defaultParallelism)
     val allFilesRDD: RDD[CompanionSourceFile] = sc
@@ -850,8 +899,9 @@ class DistributedSourceScanner(spark: SparkSession) {
         val (cat, ns, tbl, config) = broadcastConfig.value
         val filter                 = broadcastFilter.value
         val root                   = broadcastRoot.value
+        val dCols                  = broadcastDateCols.value
         if (broadcastArrowFfi.value) {
-          readIcebergManifestArrowFfi(cat, ns, tbl, config, manifestPath, filter, root)
+          readIcebergManifestArrowFfi(cat, ns, tbl, config, manifestPath, filter, root, dCols)
         } else if (filter != null) {
           val entries = IcebergTableReader.readManifestFile(cat, ns, tbl, config, manifestPath, false, filter)
           entries.asScala
@@ -859,7 +909,7 @@ class DistributedSourceScanner(spark: SparkSession) {
               val fmt = entry.getFileFormat
               fmt == null || fmt.equalsIgnoreCase("parquet")
             }
-            .map(entry => icebergEntryToCompanionFile(entry, root))
+            .map(entry => icebergEntryToCompanionFile(entry, root, dCols))
             .iterator
         } else {
           val entries = IcebergTableReader.readManifestFile(cat, ns, tbl, config, manifestPath)
@@ -868,7 +918,7 @@ class DistributedSourceScanner(spark: SparkSession) {
               val fmt = entry.getFileFormat
               fmt == null || fmt.equalsIgnoreCase("parquet")
             }
-            .map(entry => icebergEntryToCompanionFile(entry, root))
+            .map(entry => icebergEntryToCompanionFile(entry, root, dCols))
             .iterator
         }
       }

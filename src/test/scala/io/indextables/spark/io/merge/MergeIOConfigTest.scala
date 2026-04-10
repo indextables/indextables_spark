@@ -56,7 +56,7 @@ class MergeIOConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("format bytes to string") {
-    MergeIOConfig.formatBytes(512L) shouldBe "512B"
+    MergeIOConfig.formatBytes(512L) shouldBe "512 bytes"
     MergeIOConfig.formatBytes(1024L) shouldBe "1K"
     MergeIOConfig.formatBytes(2L * 1024 * 1024) shouldBe "2M"
     MergeIOConfig.formatBytes(4L * 1024 * 1024 * 1024) shouldBe "4G"

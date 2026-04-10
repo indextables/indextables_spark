@@ -130,12 +130,12 @@ for fqcn in "${all_class_names[@]}"; do
         if [[ "$simple_name" == $ONLY_PATTERN ]]; then
             class_names+=("$fqcn")
         else
-            ((skipped++))
+            ((skipped++)) || true
         fi
     elif [[ -n "$EXCLUDE_PATTERN" ]]; then
         # shellcheck disable=SC2053
         if [[ "$simple_name" == $EXCLUDE_PATTERN ]]; then
-            ((skipped++))
+            ((skipped++)) || true
         else
             class_names+=("$fqcn")
         fi
@@ -233,6 +233,8 @@ echo ""
 # ---------------------------------------------------------------------------
 LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/indextables-tests.XXXXXX")
 echo "[INFO] Per-test log files: $LOG_DIR"
+# Export for CI artifact upload
+[[ -n "${GITHUB_OUTPUT:-}" ]] && echo "log_dir=$LOG_DIR" >> "$GITHUB_OUTPUT"
 echo "[INFO] Parallelism: $PARALLEL_JOBS"
 echo "=================================================================="
 echo ""

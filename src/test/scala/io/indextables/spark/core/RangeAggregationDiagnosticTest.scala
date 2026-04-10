@@ -14,7 +14,10 @@ import org.scalatest.matchers.should.Matchers
  * Diagnostic test: Range aggregation works at tantivy4java level but returns NULL|6 via Spark SQL. This test isolates
  * where the bug is.
  */
-class RangeAggregationDiagnosticTest extends AnyFunSuite with Matchers with io.indextables.spark.testutils.FileCleanupHelper {
+class RangeAggregationDiagnosticTest
+    extends AnyFunSuite
+    with Matchers
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   test("Range aggregation directly via tantivy4java on Spark-written split") {
     val spark = SparkSession

@@ -91,8 +91,8 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     val txLogPath = new Path(s"$tablePath/_transaction_log")
 
     // Verify we have transaction log files and a checkpoint
-    val txLogEntries = fs.listStatus(txLogPath)
-    val filesBeforeCleanup = txLogEntries.map(_.getPath.getName).toSet
+    val txLogEntries        = fs.listStatus(txLogPath)
+    val filesBeforeCleanup  = txLogEntries.map(_.getPath.getName).toSet
     val avroStateDirPattern = """^state-v\d{20}$""".r
     val hasCheckpoint = filesBeforeCleanup.exists(_.contains(".checkpoint.json")) ||
       txLogEntries.exists(s => s.isDirectory && avroStateDirPattern.findFirstIn(s.getPath.getName).isDefined)
@@ -375,8 +375,8 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
 
     // Also verify we have a checkpoint at version 12
     val txLogEntriesBefore = fs.listStatus(txLogPath)
-    val filesBeforePurge = txLogEntriesBefore.map(_.getPath.getName).toSet
-    val avroStateDirPat = """^state-v\d{20}$""".r
+    val filesBeforePurge   = txLogEntriesBefore.map(_.getPath.getName).toSet
+    val avroStateDirPat    = """^state-v\d{20}$""".r
     val hasCheckpointBefore = filesBeforePurge.exists(_.contains(".checkpoint.json")) ||
       txLogEntriesBefore.exists(s => s.isDirectory && avroStateDirPat.findFirstIn(s.getPath.getName).isDefined)
     assert(hasCheckpointBefore, "Should have checkpoint file or Avro state directory")
@@ -401,7 +401,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     val filesAfterPurgeList = fs.listStatus(txLogPath).map(_.getPath.getName).sorted
     println(s"Transaction log files after purge: ${filesAfterPurgeList.mkString(", ")}")
 
-    val filesAfterPurge = filesAfterPurgeList.toSet
+    val filesAfterPurge        = filesAfterPurgeList.toSet
     val txLogEntriesAfterPurge = fs.listStatus(txLogPath)
     val hasCheckpointAfterPurge = filesAfterPurge.exists(_.contains(".checkpoint.json")) ||
       txLogEntriesAfterPurge.exists(s => s.isDirectory && avroStateDirPat.findFirstIn(s.getPath.getName).isDefined)

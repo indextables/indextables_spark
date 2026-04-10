@@ -27,15 +27,23 @@ import org.apache.spark.sql.connector.read.{
   SupportsReportStatistics
 }
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{DateType, DoubleType, FloatType, IntegerType, LongType, StructType}
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.metrics._
 import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
-import io.indextables.spark.stats.{DataSkippingMetrics, ExpressionSimplifier, FilterExpressionCache}
+import io.indextables.spark.stats.DataSkippingMetrics
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLogInterface}
+import io.indextables.spark.transaction.{
+  AddAction,
+  NativeFilteringMetrics,
+  NativeListFilesResult,
+  NativeTransactionLog,
+  PartitionPredicateUtils,
+  SparkFilterToNativeFilter,
+  TransactionLogInterface
+}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -63,51 +71,69 @@ class IndexTables4SparkScan(
   // Set via enableMetricsCollection() for testing/monitoring
   private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
 
-  // Data skipping metrics for Spark UI reporting (captured during applyDataSkipping)
+  // Data skipping metrics for Spark UI reporting (captured from native filtering metrics)
   @volatile private var lastScanTotalFiles: Long           = 0L
   @volatile private var lastScanPartitionPrunedFiles: Long = 0L
   @volatile private var lastScanDataSkippedFiles: Long     = 0L
   @volatile private var lastScanResultFiles: Long          = 0L
   @volatile private var lastScanTotalSkipRate: Double      = 0.0
 
+  // Read pipeline timing metrics for driver-side planning
+  private val planningMetrics = new ScanPlanningMetrics(transactionLog.getTablePath().toString)
+
   // Cache for filtered actions (computed once, reused between planInputPartitions and estimateStatistics)
-  // This avoids duplicate calls to transactionLog.listFiles() and applyDataSkipping()
-  // Uses lazy val for thread-safe, once-only initialization (replaces @volatile + check-then-act pattern)
-  private lazy val cachedFilteredActions: Seq[AddAction] = {
-    // Extract partition-only filters for Avro manifest pruning optimization
-    val partitionColumns = transactionLog.getPartitionColumns()
-    val partitionFilters = if (partitionColumns.nonEmpty && pushedFilters.nonEmpty) {
-      pushedFilters.filter { filter =>
-        val referencedCols = getFilterReferencedColumns(filter)
-        referencedCols.nonEmpty && referencedCols.forall(partitionColumns.contains)
-      }.toSeq
-    } else {
-      Seq.empty
+  // Uses lazy val for thread-safe, once-only initialization
+  private lazy val cachedFilteredActions: Seq[AddAction] = cachedListFilesResult.files
+
+  // Full result including metadata and metrics — computed once via single native JNI call
+  // Replaces: getPartitionColumns + listFilesWithPartitionFilters + applyDataSkipping + getSchema
+  private lazy val cachedListFilesResult: NativeListFilesResult = {
+    // Separate partition vs data filters using shared utility
+    val partitionColumns                = transactionLog.getPartitionColumns()
+    val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
+
+    // Single native call: partition pruning + data skipping + cooldown filtering + metadata
+    val result = transactionLog match {
+      case ntl: NativeTransactionLog =>
+        ntl.listFilesWithMetadata(partitionFilters, dataFilters, excludeCooldown = false)
+      case _ =>
+        // Fallback for non-native implementations (tests with mock txlog)
+        val files = transactionLog.listFilesWithAllFilters(partitionFilters, dataFilters)
+        NativeListFilesResult(
+          files = files,
+          schema = transactionLog.getSchema(),
+          partitionColumns = transactionLog.getPartitionColumns(),
+          protocol = transactionLog.getProtocol(),
+          metadataConfig = Map.empty,
+          metrics = NativeFilteringMetrics(files.size, files.size, files.size, files.size, 0, 0)
+        )
     }
 
-    // Use partition filter pass-through for Avro state format optimization
-    val addActions = if (partitionFilters.nonEmpty) {
-      logger.debug(s"Passing ${partitionFilters.length} partition filters for Avro manifest pruning")
-      transactionLog.listFilesWithPartitionFilters(partitionFilters)
-    } else {
-      transactionLog.listFiles()
-    }
+    // Record native filtering metrics
+    val m = result.metrics
+    lastScanTotalFiles = m.totalFilesBeforeFiltering
+    lastScanPartitionPrunedFiles = m.totalFilesBeforeFiltering - m.filesAfterPartitionPruning
+    lastScanDataSkippedFiles = m.filesAfterPartitionPruning - m.filesAfterDataSkipping
+    lastScanResultFiles = result.files.size
+    lastScanTotalSkipRate = if (m.totalFilesBeforeFiltering > 0) {
+      1.0 - (result.files.size.toDouble / m.totalFilesBeforeFiltering)
+    } else 0.0
 
-    applyDataSkipping(addActions, pushedFilters)
-  }
+    DataSkippingMetrics.recordScan(
+      transactionLog.getTablePath().toString,
+      m.totalFilesBeforeFiltering,
+      m.filesAfterPartitionPruning,
+      result.files.size.toLong
+    )
 
-  // Pre-computed filter hash for cache lookups (computed once in constructor)
-  // This avoids recomputing O(filters) hash on every cache lookup in applyDataSkipping
-  private val precomputedFilterHash: Long = computeFilterHash(pushedFilters)
+    logger.debug(
+      s"Native filtering: ${m.totalFilesBeforeFiltering} total → " +
+        s"${m.filesAfterPartitionPruning} after partition → " +
+        s"${m.filesAfterDataSkipping} after data skip → " +
+        s"${result.files.size} final (${m.manifestsPruned}/${m.manifestsTotal} manifests pruned)"
+    )
 
-  /**
-   * Compute a hash for the filter array (computed once in constructor). Uses toString to capture full filter structure,
-   * matching PartitionFilterCache pattern.
-   */
-  private def computeFilterHash(filters: Array[Filter]): Long = {
-    if (filters.isEmpty) return 0L
-    val filterString = filters.map(_.toString).sorted.mkString("|")
-    filterString.hashCode.toLong & 0xffffffffL
+    result
   }
 
   /**
@@ -128,6 +154,8 @@ class IndexTables4SparkScan(
   override def toBatch: Batch = this
 
   override def planInputPartitions(): Array[InputPartition] = {
+    val planStart = System.nanoTime()
+
     // Capture baseline metrics at scan start for delta computation
     // User can call getMetricsDelta() after query to get per-query metrics
     val tablePath = transactionLog.getTablePath().toString
@@ -155,8 +183,14 @@ class IndexTables4SparkScan(
       }
     }
 
-    // Use cached filtered actions (avoids duplicate listFiles + applyDataSkipping calls)
-    val filteredActions = getFilteredActions()
+    // Use cached filtered actions (avoids duplicate native listFiles calls)
+    // Time this call to capture native filtering cost within the planInputPartitions window.
+    // If estimateStatistics() already triggered the lazy val, this returns instantly (0 ns).
+    val nativeFilterStart = System.nanoTime()
+    val filteredActions   = getFilteredActions()
+    planningMetrics.nativeFilteringNs = System.nanoTime() - nativeFilterStart
+    planningMetrics.totalFilesBeforeFiltering = cachedListFilesResult.metrics.totalFilesBeforeFiltering
+    planningMetrics.resultFiles = filteredActions.size
 
     // Check if pre-warm is enabled (supports both old and new config paths)
     val isPreWarmEnabled = config
@@ -279,8 +313,10 @@ class IndexTables4SparkScan(
     )
 
     // Batch-assign all splits for this query using per-query load balancing
-    val splitPaths  = filteredActions.map(_.path)
-    val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    val localityStart = System.nanoTime()
+    val splitPaths    = filteredActions.map(_.path)
+    val assignments   = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    planningMetrics.localityAssignmentNs = System.nanoTime() - localityStart
     logger.debug(s"Assigned ${assignments.size} splits to hosts")
 
     // Group splits by assigned host for locality-aware batching
@@ -366,6 +402,10 @@ class IndexTables4SparkScan(
     }
     logger.info(s"Planned ${partitions.length} multi-split partitions (${filteredActions.length} splits, $splitsPerTask per task, $totalPreferred with locality hints)")
 
+    planningMetrics.totalPlanNs = System.nanoTime() - planStart
+    planningMetrics.resultPartitions = partitions.length
+    planningMetrics.logSummary()
+
     partitions.toArray[InputPartition]
   }
 
@@ -432,7 +472,7 @@ class IndexTables4SparkScan(
     try {
       logger.info("Estimating statistics for IndexTables4Spark table")
 
-      // Use cached filtered actions (avoids duplicate listFiles + applyDataSkipping calls)
+      // Use cached filtered actions (avoids duplicate native listFiles calls)
       // This is the same filtered dataset that will be read, reused from planInputPartitions
       val filteredActions = getFilteredActions()
 
@@ -456,611 +496,12 @@ class IndexTables4SparkScan(
         IndexTables4SparkStatistics.unknown()
     }
 
-  def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
-    if (filters.isEmpty) {
-      // Record metrics even for no-filter case
-      val tablePath = transactionLog.getTablePath().toString
-      DataSkippingMetrics.recordScan(tablePath, addActions.length, addActions.length, addActions.length)
-      // Update Spark UI metrics
-      lastScanTotalFiles = addActions.length
-      lastScanPartitionPrunedFiles = 0
-      lastScanDataSkippedFiles = 0
-      lastScanResultFiles = addActions.length
-      lastScanTotalSkipRate = 0.0
-      return addActions
-    }
+  // ============================================================================
+  // Filter utilities
+  // ============================================================================
 
-    val partitionColumns = transactionLog.getPartitionColumns()
-    val initialCount     = addActions.length
-
-    // Step 0: Apply expression simplification (cached, using pre-computed filter hash)
-    val simplifiedFilters = FilterExpressionCache.getOrSimplifyWithHash(filters, fullTableSchema, precomputedFilterHash)
-
-    // Check if simplification determined no files can match
-    if (simplifiedFilters.exists(ExpressionSimplifier.isAlwaysFalse)) {
-      logger.info("Expression simplification determined no files can match - returning empty result")
-      val tablePath = transactionLog.getTablePath().toString
-      DataSkippingMetrics.recordScan(tablePath, initialCount, 0, 0, Map("ExpressionSimplification" -> initialCount))
-      // Update Spark UI metrics
-      lastScanTotalFiles = initialCount
-      lastScanPartitionPrunedFiles = initialCount
-      lastScanDataSkippedFiles = 0
-      lastScanResultFiles = 0
-      lastScanTotalSkipRate = 1.0
-      return Seq.empty
-    }
-
-    // Check if simplification determined all files match (no filtering needed)
-    val effectiveFilters =
-      if (simplifiedFilters.isEmpty || simplifiedFilters.forall(ExpressionSimplifier.isAlwaysTrue)) {
-        Array.empty[Filter]
-      } else {
-        // Filter out AlwaysTrue entries
-        simplifiedFilters.filterNot(ExpressionSimplifier.isAlwaysTrue)
-      }
-
-    if (effectiveFilters.isEmpty) {
-      val tablePath = transactionLog.getTablePath().toString
-      DataSkippingMetrics.recordScan(tablePath, initialCount, initialCount, initialCount)
-      // Update Spark UI metrics
-      lastScanTotalFiles = initialCount
-      lastScanPartitionPrunedFiles = 0
-      lastScanDataSkippedFiles = 0
-      lastScanResultFiles = initialCount
-      lastScanTotalSkipRate = 0.0
-      return addActions
-    }
-
-    // Step 1: Apply partition pruning with configurable optimizations
-    val partitionPrunedActions = if (partitionColumns.nonEmpty) {
-      val filterCacheEnabled =
-        config.getOrElse("spark.indextables.partitionPruning.filterCacheEnabled", "true").toBoolean
-      val indexEnabled      = config.getOrElse("spark.indextables.partitionPruning.indexEnabled", "true").toBoolean
-      val parallelThreshold = config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100").toInt
-      val selectivityOrdering =
-        config.getOrElse("spark.indextables.partitionPruning.selectivityOrdering", "true").toBoolean
-
-      // Get table path and version for PartitionIndex caching
-      // This enables O(1) cache hits on repeated queries to the same table version
-      val tablePath    = transactionLog.getTablePath().toString
-      val tableVersion = transactionLog.getVersions().lastOption.getOrElse(-1L)
-
-      val pruned = PartitionPruning.prunePartitionsOptimized(
-        addActions,
-        partitionColumns,
-        effectiveFilters,
-        filterCacheEnabled = filterCacheEnabled,
-        indexEnabled = indexEnabled,
-        parallelThreshold = parallelThreshold,
-        selectivityOrdering = selectivityOrdering,
-        tablePath = Some(tablePath),
-        tableVersion = Some(tableVersion)
-      )
-      val prunedCount = addActions.length - pruned.length
-      if (prunedCount > 0) {
-        logger.info(s"Partition pruning: filtered out $prunedCount of ${addActions.length} split files")
-      }
-      pruned
-    } else {
-      addActions
-    }
-
-    // Step 2: Apply min/max value skipping on remaining files
-    val nonPartitionFilters = effectiveFilters.filterNot { filter =>
-      // Only apply min/max skipping to non-partition columns to avoid double filtering
-      getFilterReferencedColumns(filter).exists(partitionColumns.contains)
-    }
-
-    // Track which filter types skip files for metrics (thread-safe for parallel processing)
-    val filterTypeSkips = new java.util.concurrent.ConcurrentHashMap[String, java.util.concurrent.atomic.AtomicLong]()
-
-    // Get parallelism threshold from config (reuse partition pruning threshold)
-    val dataSkippingParallelThreshold = config
-      .getOrElse(
-        "spark.indextables.dataSkipping.parallelThreshold",
-        config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100")
-      )
-      .toInt
-
-    val finalActions = if (nonPartitionFilters.nonEmpty) {
-      // Use parallel processing for large file counts
-      val useParallel = partitionPrunedActions.length >= dataSkippingParallelThreshold
-
-      val skipped = if (useParallel) {
-        partitionPrunedActions.par.filter { addAction =>
-          val canMatch = canFileMatchFilters(addAction, nonPartitionFilters)
-          if (!canMatch) {
-            // Track which filter types contributed to skipping (thread-safe)
-            nonPartitionFilters.foreach { filter =>
-              if (!canFilterMatchFile(addAction, filter)) {
-                val filterType = getFilterTypeName(filter)
-                filterTypeSkips
-                  .computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L))
-                  .incrementAndGet()
-              }
-            }
-          }
-          canMatch
-        }.seq
-      } else {
-        partitionPrunedActions.filter { addAction =>
-          val canMatch = canFileMatchFilters(addAction, nonPartitionFilters)
-          if (!canMatch) {
-            // Track which filter types contributed to skipping
-            nonPartitionFilters.foreach { filter =>
-              if (!canFilterMatchFile(addAction, filter)) {
-                val filterType = getFilterTypeName(filter)
-                filterTypeSkips
-                  .computeIfAbsent(filterType, _ => new java.util.concurrent.atomic.AtomicLong(0L))
-                  .incrementAndGet()
-              }
-            }
-          }
-          canMatch
-        }
-      }
-
-      val skippedCount = partitionPrunedActions.length - skipped.length
-      if (skippedCount > 0) {
-        logger.info(
-          s"Data skipping (min/max): filtered out $skippedCount of ${partitionPrunedActions.length} files" +
-            (if (useParallel) " (parallel)" else "")
-        )
-      }
-      skipped
-    } else {
-      partitionPrunedActions
-    }
-
-    val totalSkipped = initialCount - finalActions.length
-    if (totalSkipped > 0) {
-      logger.info(
-        s"Total data skipping: $initialCount files -> ${finalActions.length} files (skipped $totalSkipped total)"
-      )
-    }
-
-    // Record metrics
-    val tablePath = transactionLog.getTablePath().toString
-    // Convert ConcurrentHashMap[String, AtomicLong] to Map[String, Long]
-    import scala.jdk.CollectionConverters._
-    val filterTypeSkipsMap = filterTypeSkips.asScala.map { case (k, v) => k -> v.get() }.toMap
-    DataSkippingMetrics.recordScan(
-      tablePath,
-      initialCount,
-      partitionPrunedActions.length,
-      finalActions.length,
-      filterTypeSkipsMap
-    )
-
-    // Update Spark UI metrics
-    lastScanTotalFiles = initialCount
-    lastScanPartitionPrunedFiles = initialCount - partitionPrunedActions.length
-    lastScanDataSkippedFiles = partitionPrunedActions.length - finalActions.length
-    lastScanResultFiles = finalActions.length
-    lastScanTotalSkipRate = if (initialCount > 0) (initialCount - finalActions.length).toDouble / initialCount else 0.0
-
-    finalActions
-  }
-
-  /** Get a human-readable name for a filter type (for metrics). */
-  private def getFilterTypeName(filter: Filter): String = {
-    import org.apache.spark.sql.sources._
-    filter match {
-      case _: EqualTo            => "EqualTo"
-      case _: EqualNullSafe      => "EqualNullSafe"
-      case _: GreaterThan        => "GreaterThan"
-      case _: GreaterThanOrEqual => "GreaterThanOrEqual"
-      case _: LessThan           => "LessThan"
-      case _: LessThanOrEqual    => "LessThanOrEqual"
-      case _: In                 => "In"
-      case _: IsNull             => "IsNull"
-      case _: IsNotNull          => "IsNotNull"
-      case _: StringStartsWith   => "StringStartsWith"
-      case _: StringEndsWith     => "StringEndsWith"
-      case _: StringContains     => "StringContains"
-      case _: And                => "And"
-      case _: Or                 => "Or"
-      case _: Not                => "Not"
-      case _                     => filter.getClass.getSimpleName
-    }
-  }
-
-  // TODO: Fix options flow from read operations to scan for proper field type detection
-  // /**
-  //  * Check if a field is configured as a text field (tokenized) for data skipping purposes.
-  //  * Uses the indexing configuration to determine field type.
-  //  * Currently disabled due to options flow issues.
-  //  */
-  // private def isTextFieldForTokenization(fieldName: String): Boolean = {
-  //   // Implementation commented out - options don't flow correctly from read to scan
-  //   false
-  // }
-
-  private def getFilterReferencedColumns(filter: Filter): Set[String] = {
-    import org.apache.spark.sql.sources._
-    filter match {
-      case EqualTo(attribute, _)            => Set(attribute)
-      case EqualNullSafe(attribute, _)      => Set(attribute)
-      case GreaterThan(attribute, _)        => Set(attribute)
-      case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _)           => Set(attribute)
-      case LessThanOrEqual(attribute, _)    => Set(attribute)
-      case In(attribute, _)                 => Set(attribute)
-      case IsNull(attribute)                => Set(attribute)
-      case IsNotNull(attribute)             => Set(attribute)
-      case StringStartsWith(attribute, _)   => Set(attribute)
-      case StringEndsWith(attribute, _)     => Set(attribute)
-      case StringContains(attribute, _)     => Set(attribute)
-      case And(left, right)                 => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Or(left, right)                  => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Not(child)                       => getFilterReferencedColumns(child)
-      case _                                => Set.empty
-    }
-  }
-
-  /**
-   * Determine if a file can potentially match the given filters. This implements proper OR/AND logic for data skipping.
-   */
-  private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter]): Boolean = {
-    // If no min/max values available, conservatively keep the file
-    if (addAction.minValues.isEmpty || addAction.maxValues.isEmpty) {
-      return true
-    }
-
-    // A file can match only if ALL filters can potentially match
-    // Filters at this level are combined with AND logic by Spark
-    filters.forall(filter => canFilterMatchFile(addAction, filter))
-  }
-
-  /** Determine if a single filter can potentially match a file. Handles complex nested AND/OR logic correctly. */
-  private def canFilterMatchFile(addAction: AddAction, filter: Filter): Boolean = {
-    import org.apache.spark.sql.sources._
-
-    filter match {
-      case And(left, right) =>
-        // For AND: both sides must be able to match
-        canFilterMatchFile(addAction, left) && canFilterMatchFile(addAction, right)
-
-      case Or(left, right) =>
-        // For OR: at least one side must be able to match
-        canFilterMatchFile(addAction, left) || canFilterMatchFile(addAction, right)
-
-      case Not(child) =>
-        // For NOT filters with min/max range data: we cannot prove that ALL values
-        // in the range fail to satisfy the NOT condition. For example, if range is
-        // [business, tech] and filter is NOT(category = business), the range contains
-        // both business AND non-business values, so the file should not be skipped.
-        // NOT filters should only skip based on exact partition values, not ranges.
-        true
-
-      case _ =>
-        // For all other filters, use the existing shouldSkipFile logic (inverted)
-        !shouldSkipFile(addAction, filter)
-    }
-  }
-
-  private def shouldSkipFile(addAction: AddAction, filter: Filter): Boolean = {
-    import org.apache.spark.sql.sources._
-
-    (addAction.minValues, addAction.maxValues) match {
-      case (Some(minVals), Some(maxVals)) =>
-        filter match {
-          case EqualTo(attribute, value) =>
-            val minVal = minVals.get(attribute)
-            val maxVal = maxVals.get(attribute)
-            (minVal, maxVal) match {
-              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
-                val (convertedValue, convertedMin, convertedMax) = convertValuesForComparison(attribute, value, min, max)
-
-                // Simple lexicographic comparison: skip if value is outside [min, max] range
-                // EqualTo should always be exact equality regardless of field type
-                convertedValue.compareTo(convertedMin) < 0 || convertedValue.compareTo(convertedMax) > 0
-              case _ =>
-                false
-            }
-
-          // IN filter optimization: check if file's [min,max] range overlaps with IN list's [min,max]
-          case In(attribute, values) if values.nonEmpty =>
-            val minVal = minVals.get(attribute)
-            val maxVal = maxVals.get(attribute)
-            (minVal, maxVal) match {
-              case (Some(fileMin), Some(fileMax)) if fileMin.nonEmpty && fileMax.nonEmpty =>
-                // Get or compute the IN list's min/max range (cached)
-                FilterExpressionCache.getOrComputeInRange(attribute, values) match {
-                  case Some(inRange) =>
-                    // Convert file stats and IN range values to comparable types
-                    val (_, convertedFileMin, convertedFileMax) =
-                      convertValuesForComparison(attribute, inRange.minValue, fileMin, fileMax)
-
-                    // Also convert IN list min/max to same type for comparison
-                    val inMinStr               = inRange.minValue.toString
-                    val inMaxStr               = inRange.maxValue.toString
-                    val (convertedInMin, _, _) = convertValuesForComparison(attribute, inMinStr, inMinStr, inMinStr)
-                    val (convertedInMax, _, _) = convertValuesForComparison(attribute, inMaxStr, inMaxStr, inMaxStr)
-
-                    // Skip if file's range doesn't overlap with IN list's range
-                    // No overlap if: fileMax < inMin OR fileMin > inMax
-                    convertedFileMax.compareTo(convertedInMin) < 0 ||
-                    convertedFileMin.compareTo(convertedInMax) > 0
-
-                  case None =>
-                    // Could not compute IN range - don't skip
-                    false
-                }
-              case _ =>
-                false
-            }
-
-          case GreaterThan(attribute, value) =>
-            maxVals.get(attribute) match {
-              case Some(max) if max.nonEmpty =>
-                val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
-                convertedMax.compareTo(convertedValue) <= 0
-              case _ => false // No statistics or empty string - don't skip
-            }
-          case LessThan(attribute, value) =>
-            minVals.get(attribute) match {
-              case Some(min) if min.nonEmpty =>
-                val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
-                convertedMin.compareTo(convertedValue) >= 0
-              case _ => false // No statistics or empty string - don't skip
-            }
-          case GreaterThanOrEqual(attribute, value) =>
-            maxVals.get(attribute) match {
-              case Some(max) if max.nonEmpty =>
-                val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
-                val valueStr                          = convertedValue.toString
-                val maxStr                            = convertedMax.toString
-                // Skip if max < filterValue (all values in file are too small)
-                // BUT don't skip if filterValue starts with max (truncated max means actual value could be >= filterValue)
-                // Example: max="aaa" (truncated), filterValue="aaab" - actual could be "aaac" which is >= "aaab"
-                convertedMax.compareTo(convertedValue) < 0 && !valueStr.startsWith(maxStr)
-              case _ => false // No statistics or empty string - don't skip
-            }
-          case LessThanOrEqual(attribute, value) =>
-            minVals.get(attribute) match {
-              case Some(min) if min.nonEmpty =>
-                val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
-                val valueStr                          = convertedValue.toString
-                val minStr                            = convertedMin.toString
-                // Skip if min > filterValue (all values in file are too large)
-                // BUT don't skip if filterValue starts with min (truncated min means actual value could be <= filterValue)
-                // Example: min="bbb" (truncated), filterValue="bbbc" - actual could be "bbba" which is <= "bbbc"
-                convertedMin.compareTo(convertedValue) > 0 && !valueStr.startsWith(minStr)
-              case _ => false // No statistics or empty string - don't skip
-            }
-          case StringStartsWith(attribute, value) =>
-            // For startsWith, check if any string in [min, max] could start with the value
-            val minVal = minVals.get(attribute)
-            val maxVal = maxVals.get(attribute)
-            (minVal, maxVal) match {
-              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
-                val valueStr = value.toString
-                // Skip if the prefix is lexicographically greater than max value
-                // or if max value is shorter than prefix and doesn't start with it
-                valueStr.compareTo(max) > 0 || (!max.startsWith(valueStr) && max.compareTo(valueStr) < 0)
-              case _ => false
-            }
-          case StringEndsWith(attribute, value) =>
-            // For endsWith, this is harder to optimize with min/max, so be conservative
-            // Only skip if we can determine with certainty
-            val minVal = minVals.get(attribute)
-            val maxVal = maxVals.get(attribute)
-            (minVal, maxVal) match {
-              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
-                val valueStr = value.toString
-                // Very conservative: only skip if min and max are identical and don't end with value
-                min == max && !min.endsWith(valueStr)
-              case _ => false
-            }
-          case StringContains(attribute, value) =>
-            // For contains, be conservative - only skip if min==max and doesn't contain value
-            val minVal = minVals.get(attribute)
-            val maxVal = maxVals.get(attribute)
-            (minVal, maxVal) match {
-              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
-                val valueStr = value.toString
-                min == max && !min.contains(valueStr)
-              case _ => false
-            }
-          case _ => false
-        }
-      case _ => false
-    }
-  }
-
-  /** Generic utility to convert numeric values for comparison, handling optional min/max */
-  private def convertNumericValues[T](
-    typeName: String,
-    filterValue: Any,
-    minValue: String,
-    maxValue: String,
-    parser: String => T,
-    boxer: T => Comparable[Any],
-    logger: org.slf4j.Logger
-  ): (Comparable[Any], Comparable[Any], Comparable[Any]) =
-    try {
-      val filterNum = parser(filterValue.toString)
-      val minNum    = if (minValue.nonEmpty) Some(parser(minValue)) else None
-      val maxNum    = if (maxValue.nonEmpty) Some(parser(maxValue)) else None
-
-      (minNum, maxNum) match {
-        case (Some(min), Some(max)) =>
-          (boxer(filterNum), boxer(min), boxer(max))
-        case (Some(min), None) =>
-          (boxer(filterNum), boxer(min), "".asInstanceOf[Comparable[Any]])
-        case (None, Some(max)) =>
-          (boxer(filterNum), "".asInstanceOf[Comparable[Any]], boxer(max))
-        case (None, None) =>
-          (
-            filterValue.toString.asInstanceOf[Comparable[Any]],
-            "".asInstanceOf[Comparable[Any]],
-            "".asInstanceOf[Comparable[Any]]
-          )
-      }
-    } catch {
-      case _: Exception =>
-        (
-          filterValue.toString.asInstanceOf[Comparable[Any]],
-          minValue.asInstanceOf[Comparable[Any]],
-          maxValue.asInstanceOf[Comparable[Any]]
-        )
-    }
-
-  private def convertValuesForComparison(
-    attribute: String,
-    filterValue: Any,
-    minValue: String,
-    maxValue: String
-  ): (Comparable[Any], Comparable[Any], Comparable[Any]) = {
-    import java.time.LocalDate
-    import java.sql.Date
-    import org.apache.spark.sql.types.TimestampType
-
-    // Find the field data type in the FULL table schema (not just projected columns)
-    // This is critical because filters may reference columns not in the projection
-    val fieldType = fullTableSchema.fields.find(_.name == attribute).map(_.dataType)
-
-    fieldType match {
-      case Some(DateType) =>
-        // For DateType, the table stores values as days since epoch (integer)
-        try {
-          val filterDaysSinceEpoch = filterValue match {
-            case dateStr: String =>
-              val filterDate = LocalDate.parse(dateStr)
-              val epochDate  = LocalDate.of(1970, 1, 1)
-              epochDate.until(filterDate).getDays
-            case sqlDate: Date =>
-              // Use direct calculation from milliseconds since epoch
-              val millisSinceEpoch = sqlDate.getTime
-              (millisSinceEpoch / (24 * 60 * 60 * 1000)).toInt
-            case intVal: Int =>
-              intVal
-            case _ =>
-              val filterDate = LocalDate.parse(filterValue.toString)
-              val epochDate  = LocalDate.of(1970, 1, 1)
-              epochDate.until(filterDate).getDays
-          }
-
-          // Helper function to parse date string or integer to days since epoch.
-          // Statistics values may be: date strings ("2023-02-15"), days-since-epoch integers,
-          // or microsecond timestamps from tantivy's internal date representation.
-          def parseDateOrInt(value: String): Option[Int] =
-            if (value.isEmpty) None
-            else if (value.contains("-")) {
-              val date      = LocalDate.parse(value)
-              val epochDate = LocalDate.of(1970, 1, 1)
-              Some(java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt)
-            } else {
-              val longVal = value.toLong
-              if (longVal > Int.MaxValue || longVal < Int.MinValue) {
-                // Microsecond timestamp from tantivy — convert to days since epoch
-                Some((longVal / (1000000L * 86400L)).toInt)
-              } else {
-                Some(longVal.toInt)
-              }
-            }
-
-          val minDays = parseDateOrInt(minValue)
-          val maxDays = parseDateOrInt(maxValue)
-          (
-            filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
-            minDays.map(_.asInstanceOf[Comparable[Any]]).getOrElse("".asInstanceOf[Comparable[Any]]),
-            maxDays.map(_.asInstanceOf[Comparable[Any]]).getOrElse("".asInstanceOf[Comparable[Any]])
-          )
-        } catch {
-          case ex: Exception =>
-            logger.warn(
-              s"DATE CONVERSION FAILED: $filterValue (${filterValue.getClass.getSimpleName}) - ${ex.getMessage}"
-            )
-            // Fallback to string comparison
-            (
-              filterValue.toString.asInstanceOf[Comparable[Any]],
-              minValue.asInstanceOf[Comparable[Any]],
-              maxValue.asInstanceOf[Comparable[Any]]
-            )
-        }
-
-      case Some(IntegerType) =>
-        convertNumericValues[Int](
-          "INTEGER",
-          filterValue,
-          minValue,
-          maxValue,
-          (s: String) => s.toInt,
-          (n: Int) => Integer.valueOf(n).asInstanceOf[Comparable[Any]],
-          logger
-        )
-
-      case Some(LongType) =>
-        convertNumericValues[Long](
-          "LONG",
-          filterValue,
-          minValue,
-          maxValue,
-          (s: String) => s.toLong,
-          (n: Long) => Long.box(n).asInstanceOf[Comparable[Any]],
-          logger
-        )
-
-      case Some(FloatType) =>
-        convertNumericValues[Float](
-          "FLOAT",
-          filterValue,
-          minValue,
-          maxValue,
-          (s: String) => s.toFloat,
-          (n: Float) => Float.box(n).asInstanceOf[Comparable[Any]],
-          logger
-        )
-
-      case Some(DoubleType) =>
-        convertNumericValues[Double](
-          "DOUBLE",
-          filterValue,
-          minValue,
-          maxValue,
-          (s: String) => s.toDouble,
-          (n: Double) => Double.box(n).asInstanceOf[Comparable[Any]],
-          logger
-        )
-
-      case Some(TimestampType) =>
-        // Convert timestamps to microseconds since epoch for numeric comparison
-        import java.sql.Timestamp
-
-        // Convert filter value to microseconds
-        val filterMicros: Long = filterValue match {
-          case ts: Timestamp =>
-            // Spark stores timestamps as microseconds since epoch
-            TimestampUtils.toMicros(ts)
-          case l: Long => l
-          case _       =>
-            // Try to parse as timestamp string
-            val ts = Timestamp.valueOf(filterValue.toString)
-            TimestampUtils.toMicros(ts)
-        }
-
-        // Min/max values are stored as Long strings (microseconds since epoch)
-        val minMicros = if (minValue.isEmpty) 0L else minValue.toLong
-        val maxMicros = if (maxValue.isEmpty) 0L else maxValue.toLong
-
-        (
-          Long.box(filterMicros).asInstanceOf[Comparable[Any]],
-          Long.box(minMicros).asInstanceOf[Comparable[Any]],
-          Long.box(maxMicros).asInstanceOf[Comparable[Any]]
-        )
-
-      case _ =>
-        // For other data types (strings, etc.), use string comparison
-        logger.debug(s"STRING CONVERSION: Using string comparison for $attribute")
-        (
-          filterValue.toString.asInstanceOf[Comparable[Any]],
-          minValue.asInstanceOf[Comparable[Any]],
-          maxValue.asInstanceOf[Comparable[Any]]
-        )
-    }
-  }
+  private def getFilterReferencedColumns(filter: Filter): Set[String] =
+    SparkFilterToNativeFilter.extractReferencedColumns(filter)
 
   // ============================================================================
   // DataSource V2 Custom Metrics for Spark UI
@@ -1076,7 +517,14 @@ class IndexTables4SparkScan(
       new PartitionPrunedFiles(),
       new DataSkippedFiles(),
       new ResultFiles(),
-      new TotalSkipRate()
+      new TotalSkipRate(),
+      new NativeFilteringTime(),
+      new ScanPlanTotalTime(),
+      new SplitEngineCreationTime(),
+      new QueryBuildTime(),
+      new StreamingSessionStartTime(),
+      new NextBatchTime(),
+      new BatchAssemblyTime()
     )
 
   /**
@@ -1089,6 +537,8 @@ class IndexTables4SparkScan(
       new TaskPartitionPrunedFiles(lastScanPartitionPrunedFiles),
       new TaskDataSkippedFiles(lastScanDataSkippedFiles),
       new TaskResultFiles(lastScanResultFiles),
-      new TaskTotalSkipRate(lastScanTotalSkipRate)
+      new TaskTotalSkipRate(lastScanTotalSkipRate),
+      new TaskNativeFilteringTime(Math.round(planningMetrics.nativeFilteringMs)),
+      new TaskScanPlanTotalTime(Math.round(planningMetrics.totalPlanMs))
     )
 }

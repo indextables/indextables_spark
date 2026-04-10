@@ -33,7 +33,10 @@ import org.slf4j.LoggerFactory
  *
  * Tests that prewarm executes automatically when reading data with appropriate config set.
  */
-class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PrewarmReadTimeIntegrationTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmReadTimeIntegrationTest])
 

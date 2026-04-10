@@ -96,8 +96,9 @@ case class InvalidateTransactionLogCacheCommand(
         val totalRequests = hitsBefore + missesBefore
         val hitRateBefore = if (totalRequests > 0) f"${(hitsBefore.toDouble / totalRequests) * 100}%.1f%%" else "N/A"
 
-        // Clear all global caches
+        // Clear all global caches: JVM-level doc mapping cache and native txlog snapshot/manifest cache
         io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+        io.indextables.jni.txlog.TransactionLogReader.invalidateCacheGlobal()
 
         logger.info("Global transaction log caches cleared successfully")
         Seq(
@@ -116,7 +117,9 @@ case class InvalidateTransactionLogCacheCommand(
       // Resolve the table path
       val resolvedPath = resolveTablePath(path, sparkSession)
 
-      // Create a temporary TransactionLog to access the cache
+      // Create a temporary TransactionLog to validate the path and access the cache.
+      // Empty options are intentional: no writes occur here, so PATH_READ_WRITE credentials
+      // are not needed. TransactionLogFactory.create merges Spark and Hadoop conf for reads.
       val transactionLog = TransactionLogFactory.create(
         resolvedPath,
         sparkSession,
