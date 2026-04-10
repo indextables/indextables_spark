@@ -566,51 +566,51 @@ case class SyncToExternalCommand(
             sourceSchema.fields
               .filter(f => indexedColumnsLower.contains(f.name.toLowerCase))
               .foreach { field =>
-              val colLower = field.name.toLowerCase
-              storedColumnTypes.get(colLower).foreach { storedType =>
-                val currentType = field.dataType.simpleString
-                if (storedType != currentType) {
-                  // Spark simpleString values: tinyint, smallint, int, bigint, float, double, decimal(p,s)
-                  val isWidening = (storedType, currentType) match {
-                    case ("tinyint", "smallint") | ("tinyint", "int") | ("tinyint", "bigint") => true
-                    case ("smallint", "int") | ("smallint", "bigint")                         => true
-                    case ("int", "bigint")                                                     => true
-                    case ("float", "double")                                                   => true
-                    case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
-                      (storedType, currentType) match {
-                        case (decPattern(sp, ss), decPattern(cp, cs)) =>
-                          val precisionOk = cp.toInt >= sp.toInt
-                          val scaleOk = cs.toInt >= ss.toInt
-                          if (precisionOk && scaleOk) {
-                            true
-                          } else {
-                            val reasons = Seq(
-                              if (!precisionOk) Some(s"precision decreased from $sp to $cp") else None,
-                              if (!scaleOk) Some(s"scale decreased from $ss to $cs") else None
-                            ).flatten.mkString(" and ")
-                            throw new IllegalArgumentException(
-                              s"Column '${field.name}' decimal type changed from $storedType to $currentType ($reasons). " +
-                                s"Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
-                            )
-                          }
-                        case _ => false
-                      }
-                    case _                                                                     => false
-                  }
-                  if (isWidening) {
-                    logger.warn(
-                      s"Column '${field.name}' type widened from $storedType to $currentType. " +
-                        s"Old splits retain the original type."
-                    )
-                  } else {
-                    throw new IllegalArgumentException(
-                      s"Column '${field.name}' type changed from $storedType to $currentType. " +
-                        s"This is a breaking change. Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
-                    )
+                val colLower = field.name.toLowerCase
+                storedColumnTypes.get(colLower).foreach { storedType =>
+                  val currentType = field.dataType.simpleString
+                  if (storedType != currentType) {
+                    // Spark simpleString values: tinyint, smallint, int, bigint, float, double, decimal(p,s)
+                    val isWidening = (storedType, currentType) match {
+                      case ("tinyint", "smallint") | ("tinyint", "int") | ("tinyint", "bigint") => true
+                      case ("smallint", "int") | ("smallint", "bigint")                         => true
+                      case ("int", "bigint")                                                     => true
+                      case ("float", "double")                                                   => true
+                      case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
+                        (storedType, currentType) match {
+                          case (decPattern(sp, ss), decPattern(cp, cs)) =>
+                            val precisionOk = cp.toInt >= sp.toInt
+                            val scaleOk = cs.toInt >= ss.toInt
+                            if (precisionOk && scaleOk) {
+                              true
+                            } else {
+                              val reasons = Seq(
+                                if (!precisionOk) Some(s"precision decreased from $sp to $cp") else None,
+                                if (!scaleOk) Some(s"scale decreased from $ss to $cs") else None
+                              ).flatten.mkString(" and ")
+                              throw new IllegalArgumentException(
+                                s"Column '${field.name}' decimal type changed from $storedType to $currentType ($reasons). " +
+                                  s"Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
+                              )
+                            }
+                          case _ => false
+                        }
+                      case _                                                                     => false
+                    }
+                    if (isWidening) {
+                      logger.warn(
+                        s"Column '${field.name}' type widened from $storedType to $currentType. " +
+                          s"Old splits retain the original type."
+                      )
+                    } else {
+                      throw new IllegalArgumentException(
+                        s"Column '${field.name}' type changed from $storedType to $currentType. " +
+                          s"This is a breaking change. Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
+                      )
+                    }
                   }
                 }
               }
-            }
           }
         }
 
