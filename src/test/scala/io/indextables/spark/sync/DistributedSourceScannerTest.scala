@@ -452,6 +452,36 @@ class DistributedSourceScannerTest
     }
   }
 
+  test("scanIcebergTable incremental detects both added and removed files after overwrite") {
+    withIcebergTest("iceberg_incr_overwrite") { (server, tableId, root, icebergConfig) =>
+      // Snapshot 1: initial data
+      val paths1 = appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 1)
+
+      val scanner      = new DistributedSourceScanner(spark)
+      val fullResult   = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None)
+      val syncedSnapId = fullResult.version.get
+
+      // Delete existing files then append new ones (two separate snapshots, not a single
+      // Iceberg overwrite). The incremental scanner diffs manifests between the synced snapshot
+      // and the latest, so it sees both the removed files and the added files.
+      val table = server.catalog.loadTable(tableId)
+      val deleteOp = table.newDelete()
+      val dataFiles = table.currentSnapshot().addedDataFiles(table.io()).iterator()
+      while (dataFiles.hasNext) deleteOp.deleteFile(dataFiles.next())
+      deleteOp.commit()
+      // Append new data after the delete (new snapshot with added files)
+      val paths2 = appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 2)
+
+      val incrResult = scanner.scanIcebergTable("default_catalog", "default", "scanner_test", icebergConfig, snapshotId = None, fromSnapshotId = Some(syncedSnapId))
+
+      incrResult.isIncremental shouldBe true
+      // Should see both adds and removes — exact counts, not just non-empty
+      incrResult.removedSourcePaths.size shouldBe paths1.size
+      val addedFiles = incrResult.filesRDD.collect()
+      addedFiles.length shouldBe paths2.size
+    }
+  }
+
   test("scanIcebergTable without fromSnapshotId is not incremental") {
     withIcebergTest("iceberg_non_incr") { (server, tableId, root, icebergConfig) =>
       appendIcebergSnapshot(server, tableId, icebergTestRows, icebergSparkSchema, root, batchId = 1)

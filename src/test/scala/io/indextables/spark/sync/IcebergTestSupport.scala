@@ -228,6 +228,82 @@ trait IcebergTestSupport {
 }
 
 /**
+ * Shared base trait for companion integration tests. Provides SparkSession lifecycle, cache flushing,
+ * temp directory management, and companion reading — the 5 helpers that were previously duplicated across
+ * every Companion*Test file.
+ *
+ * Mix in with `AnyFunSuite with Matchers with BeforeAndAfterAll with FileCleanupHelper` and call
+ * `initSpark(appName)` from your `beforeAll()`, or override `beforeAll()` to use the default setup.
+ */
+trait CompanionTestBase extends org.scalatest.BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+  this: org.scalatest.funsuite.AnyFunSuite =>
+
+  protected var spark: SparkSession = _
+
+  /** Override to customize the app name. Default: the test class simple name. */
+  protected def appName: String = getClass.getSimpleName
+
+  override def beforeAll(): Unit = {
+    SparkSession.getActiveSession.foreach(_.stop())
+    SparkSession.getDefaultSession.foreach(_.stop())
+
+    spark = SparkSession
+      .builder()
+      .appName(appName)
+      .master("local[2]")
+      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.driver.host", "127.0.0.1")
+      .config("spark.driver.bindAddress", "127.0.0.1")
+      .config(
+        "spark.sql.extensions",
+        "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
+          "io.delta.sql.DeltaSparkSessionExtension"
+      )
+      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+      .config("spark.sql.adaptive.enabled", "false")
+      .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
+      .config("spark.indextables.aws.accessKey", "test-default-access-key")
+      .config("spark.indextables.aws.secretKey", "test-default-secret-key")
+      .config("spark.indextables.aws.sessionToken", "test-default-session-token")
+      .config("spark.indextables.s3.pathStyleAccess", "true")
+      .config("spark.indextables.aws.region", "us-east-1")
+      .config("spark.indextables.s3.endpoint", "http://localhost:10101")
+      .getOrCreate()
+
+    spark.sparkContext.setLogLevel("WARN")
+
+    _root_.io.indextables.spark.storage.SplitConversionThrottle.initialize(
+      maxParallelism = Runtime.getRuntime.availableProcessors() max 1
+    )
+  }
+
+  override def afterAll(): Unit =
+    if (spark != null) spark.stop()
+
+  protected def flushCaches(): Unit = {
+    import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
+    GlobalSplitCacheManager.flushAllCaches()
+    DriverSplitLocalityManager.clear()
+  }
+
+  protected def withTempPath(f: String => Unit): Unit = {
+    val path = Files.createTempDirectory("companion-test").toString
+    try {
+      flushCaches()
+      f(path)
+    } finally
+      deleteRecursively(new File(path))
+  }
+
+  protected def readCompanion(indexPath: String): org.apache.spark.sql.DataFrame =
+    spark.read
+      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+      .option("spark.indextables.read.defaultLimit", "1000")
+      .load(indexPath)
+}
+
+/**
  * Shared helper for appending parquet files to an Iceberg table in tests.
  *
  * Writes to a staging directory then moves files into a common `data/` directory so

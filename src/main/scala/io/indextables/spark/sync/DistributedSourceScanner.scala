@@ -85,17 +85,12 @@ object DistributedSourceScanner {
     val absolutePath    = entry.getPath
     val partitionValues = entry.getPartitionValues.asScala.toMap
 
-    // Convert absolute paths to relative (bucket-independent for cross-region failover)
+    // Relativize using the same 3-branch logic as Parquet paths. Iceberg paths are typically
+    // catalog-normalized (consistent scheme+prefix), but on S3 with certain configurations the
+    // object-key fallback is needed — using the shared method prevents add vs remove mismatches.
     val relativePath = storageRoot match {
-      case Some(basePath) =>
-        val normalizedBase = basePath.stripSuffix("/")
-        val normalizedPath = absolutePath.stripSuffix("/")
-        if (normalizedPath.startsWith(normalizedBase)) {
-          normalizedPath.substring(normalizedBase.length).stripPrefix("/")
-        } else {
-          absolutePath
-        }
-      case None => absolutePath
+      case Some(basePath) => relativizeToStorageRoot(absolutePath, basePath)
+      case None           => absolutePath
     }
 
     val effectivePartitionValues = resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
@@ -107,34 +102,43 @@ object DistributedSourceScanner {
     )
   }
 
-  private[sync] def parquetEntryToCompanionFile(entry: ParquetFileEntry, basePath: String): CompanionSourceFile = {
-    val rawPath = entry.getPath
-    // Normalize: strip file: URI scheme, ensure consistent leading-slash handling.
-    // The native ParquetTableReader may return local paths without leading slash (e.g. "var/folders/...")
-    // while the basePath has one ("/var/folders/...").
-    val absolutePath   = normalizeLocalPath(CloudPathUtils.stripFileScheme(rawPath))
+  private[sync] def parquetEntryToCompanionFile(entry: ParquetFileEntry, basePath: String): CompanionSourceFile =
+    CompanionSourceFile(
+      path = relativizeToStorageRoot(entry.getPath, basePath),
+      partitionValues = entry.getPartitionValues.asScala.toMap,
+      size = entry.getSize
+    )
+
+  /**
+   * Relativize an absolute file path against a storage root, producing the relative path used as a companion split
+   * key. This is the single source of truth for path relativization — called by `parquetEntryToCompanionFile`,
+   * `icebergEntryToCompanionFile`, and the incremental-deletion removed-paths normalization.
+   *
+   * Three strategies, tried in order:
+   *   1. Prefix match after scheme-stripping (`file://` → bare path) + leading-slash normalization
+   *   2. S3 object-key match (bare keys without scheme+bucket prefix)
+   *   3. Filename only (last resort — lossy but better than an absolute path that matches nothing)
+   */
+  private[sync] def relativizeToStorageRoot(rawPath: String, basePath: String): String = {
+    val normalizedPath = normalizeLocalPath(CloudPathUtils.stripFileScheme(rawPath)).stripSuffix("/")
     val normalizedBase = normalizeLocalPath(CloudPathUtils.stripFileScheme(basePath)).stripSuffix("/")
-    val normalizedAbs  = absolutePath.stripSuffix("/")
-    val relativePath = if (normalizedAbs.startsWith(normalizedBase)) {
-      normalizedAbs.substring(normalizedBase.length).stripPrefix("/")
+    if (normalizedPath.startsWith(normalizedBase)) {
+      normalizedPath.substring(normalizedBase.length).stripPrefix("/")
     } else {
-      // The native ParquetTableReader may return S3 object keys without the scheme+bucket prefix
-      // (e.g. "path/to/data/part.parquet" instead of "s3a://bucket/path/to/data/part.parquet").
+      // Middle branch: S3 object keys may lack the scheme+bucket prefix (e.g., Iceberg returns
+      // "path/to/data/part.parquet" instead of "s3a://bucket/path/to/data/part.parquet").
       // Extract the key portion from basePath and try matching against the raw path.
+      // S3 object-key fallback for paths that lack the scheme+bucket prefix.
       val baseKey       = ParquetDirectoryReader.extractObjectKey(basePath)
       val rawNormalized = rawPath.stripSuffix("/")
       if (baseKey.nonEmpty && rawNormalized.startsWith(baseKey)) {
         rawNormalized.substring(baseKey.length).stripPrefix("/")
       } else {
-        // Last resort: use filename only
+        // Last resort: use filename only. Returning the raw absolute path would never match
+        // a relative companion split key.
         rawPath.substring(rawPath.lastIndexOf('/') + 1)
       }
     }
-    CompanionSourceFile(
-      path = relativePath,
-      partitionValues = entry.getPartitionValues.asScala.toMap,
-      size = entry.getSize
-    )
   }
 
   /** Ensure local filesystem paths have a leading slash for consistent comparison. */
@@ -747,9 +751,13 @@ class DistributedSourceScanner(spark: SparkSession) {
           val totalChangedManifests = oldOnlyManifests.size + newOnlyManifests.size
 
           // Check whether each side of the manifest delta is small enough for driver-side reads.
-          // Old-only and new-only are capped independently so that pure appends (0 old, N new)
-          // retain the same 50-manifest threshold as before, while compaction-heavy workloads
-          // (N old, 1 new) are also capped to avoid driver OOM from reading many old manifests.
+          // Old-only and new-only are capped independently (default 50 each) so that:
+          //   - Pure appends (0 old, N new): capped at 50 new manifests (same as before)
+          //   - Compaction-heavy (N old, 1 new): capped at 50 old manifests (prevents driver OOM)
+          //   - Mixed (N old, M new): each side capped independently
+          // NOTE: prior to this change, only new manifests were counted against the threshold.
+          // The per-side cap means compaction workloads (many old manifests) now fall back to
+          // full scan earlier than before, which is the intended safety behavior.
           val maxIncrementalManifests = scala.util
             .Try(
               spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
@@ -825,19 +833,13 @@ class DistributedSourceScanner(spark: SparkSession) {
                       .getOrElse(Seq.empty)
                     val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot, dateCols)).toSeq
 
-                    // Normalize removed paths relative to storage root (same relative-path output
-                    // as added files). Apply stripFileScheme + normalizeLocalPath to handle file:
-                    // scheme variations between entries from different manifests.
+                    // Normalize removed paths to relative companion-split-key format using the
+                    // same `relativizeToStorageRoot` method that added files go through via
+                    // `icebergEntryToCompanionFile`. This guarantees add and remove paths use
+                    // identical normalization — no silent deletion misses from format mismatches.
                     val normalizedRemovedPaths = storageRoot match {
-                      case Some(basePath) =>
-                        val normalizedBase = normalizeLocalPath(CloudPathUtils.stripFileScheme(basePath)).stripSuffix("/")
-                        removedPaths.map { p =>
-                          val normalized = normalizeLocalPath(CloudPathUtils.stripFileScheme(p)).stripSuffix("/")
-                          if (normalized.startsWith(normalizedBase))
-                            normalized.substring(normalizedBase.length).stripPrefix("/")
-                          else p
-                        }
-                      case None => removedPaths
+                      case Some(basePath) => removedPaths.map(relativizeToStorageRoot(_, basePath))
+                      case None           => removedPaths
                     }
 
                     logger.info(
