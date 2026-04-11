@@ -87,6 +87,31 @@ Finds `IndexQueryExpression` and `IndexQueryAllExpression` nodes in the logical 
 ### `catalyst/V2BucketExpressionRule.scala`
 Detects `DateHistogramExpression` / `HistogramExpression` / `RangeExpression` in `Aggregate` GROUP BY keys and rewrites them as ordinary attribute references, stashing the bucket configs where `IndexTables4SparkScanBuilder` can find them. Without this rule Spark would refuse to push the aggregation down because the group key would be an unknown expression.
 
+## Split locality
+
+Locality matters for read performance: if the same split is consistently read by the same executor host, the Tantivy `SplitCacheManager` and the L2 disk cache on that host stay warm. These modules exist to make that happen.
+
+### `storage/DriverSplitLocalityManager.scala`
+Driver-side sticky split-to-host assignment. Given a list of splits and the set of available executors, it returns stable assignments so the same split is reliably picked up by the same host across queries. Replaces an older broadcast-based approach: persistent assignments live on the driver and feed `IndexTables4SparkScan`'s `InputPartition.preferredLocations()`. Also tracks per-split prewarm state so the prewarm subsystem below knows which splits are already warm on which hosts.
+
+## Cache prewarming
+
+Prewarm is a read-performance subsystem: it warms the Tantivy index components a query will need *before* the query runs, so the first batch of every split is hot. Triggered by the `PREWARM INDEXTABLES CACHE` SQL command (chapter 08) and optionally implicitly before large scans.
+
+### `prewarm/PreWarmManager.scala`
+Two-phase orchestration:
+
+1. **Pre-scan** — using `DriverSplitLocalityManager`, distribute warmup tasks to the executors that already hold the relevant splits in cache.
+2. **Post-warm** — when the main query starts, join on the warmup futures so no split is read cold.
+
+Returns `PreWarmStats` with cache-hit/miss counts for observability.
+
+### `prewarm/AsyncPrewarmJobManager.scala`
+JVM-wide singleton tracking async prewarm jobs on executors. Semaphore-bounded concurrency, a job registry for `DESCRIBE INDEXTABLES PREWARM JOBS`, and auto-cleanup of old completed jobs. Structurally mirrors `AsyncMergeOnWriteManager` (chapter 07) — same pattern, different purpose.
+
+### `prewarm/IndexComponentMapping.scala`
+Maps SQL-level component names (`TERM`, `FASTFIELD`, `POSTINGS`, `POSITIONS`, `FIELDNORM`, `STORE`) to the `tantivy4java` `IndexComponent` enum, and defines the default component set warmed when the user does not specify one.
+
 ## How the pieces connect
 
 ```
@@ -108,6 +133,13 @@ Scan.planInputPartitions()
          ├─ SplitSearchEngine             (search/)
          ├─ ArrowFfiBridge                (arrow/)
          └─ ColumnarBatch → Spark
+
+Locality / prewarm (optional, before the scan):
+  DriverSplitLocalityManager    (sticky split→host assignments)
+        ↓
+  PreWarmManager
+    └─ AsyncPrewarmJobManager (on executors)
+         └─ warms IndexComponentMapping components
 ```
 
 Write-path chapter next.

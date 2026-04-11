@@ -46,12 +46,12 @@ src/main/scala/io/indextables/
 Each chapter is self-contained but they build on each other:
 
 1. [01 — Entry Points](01-entry-points.md) — the public provider and extension classes Spark loads first.
-2. [02 — Read Path](02-read-path.md) — how a `spark.read` call becomes a scan, gets pushdown, and returns `ColumnarBatch`es.
+2. [02 — Read Path](02-read-path.md) — how a `spark.read` call becomes a scan, gets pushdown, and returns `ColumnarBatch`es; also covers split locality and cache prewarming.
 3. [03 — Write Path](03-write-path.md) — how a `df.write.save()` call becomes split files and a committed transaction.
 4. [04 — Transaction Log](04-transaction-log.md) — the Delta-style log that is the source of truth for table state.
 5. [05 — Search Engine](05-search-engine.md) — the Tantivy facade, query parsing, filters, and FFI bridges.
 6. [06 — Storage and Merge I/O](06-storage-io.md) — cloud storage abstraction and the async merge I/O pipeline.
-7. [07 — Merge, Purge, Prewarm](07-merge-and-purge.md) — post-commit maintenance subsystems.
+7. [07 — Merge and Purge](07-merge-and-purge.md) — post-commit maintenance subsystems (merge-on-write and purge-on-write).
 8. [08 — SQL Commands](08-sql-commands.md) — the `INDEXTABLES`/`TANTIVY4SPARK` SQL extension.
 9. [09 — Companion Sync](09-sync-companion.md) — building search companions for external Delta/Parquet/Iceberg tables.
 10. [10 — Config, Auth, Utilities](10-config-auth-util.md) — cross-cutting infrastructure.
@@ -60,6 +60,6 @@ Each chapter is self-contained but they build on each other:
 
 A one-paragraph mental model:
 
-> When Spark loads the data source, `provider/IndexTablesProvider` is instantiated. Reads flow through `core/IndexTables4SparkScanBuilder` → `core/IndexTables4SparkScan` → one of the columnar `*PartitionReader`s, which use `search/SplitSearchEngine` to query `.split` files and return data via `arrow/ArrowFfiBridge`. Writes flow through `core/IndexTables4SparkWriteBuilder` → `IndexTables4SparkOptimizedWrite`/`StandardWrite` → `IndexTables4SparkArrowDataWriter`, which exports rows via `arrow/ArrowFfiWriteBridge` into Tantivy. Every read and write consults the `transaction/` log for file listings and commits. Filter and aggregation pushdown is coordinated by `catalyst/` rules plus `filters/`, `expressions/`, and `json/JsonPredicateTranslator`. Storage is abstracted behind `io/CloudStorageProvider`. Post-commit maintenance (merge-on-write, purge-on-write, prewarm) runs through singletons in `merge/`, `purge/`, and `prewarm/`. SQL extensions in `sql/` add operational commands, and `sync/` builds companion indexes over foreign Delta/Parquet/Iceberg tables.
+> When Spark loads the data source, `provider/IndexTablesProvider` is instantiated. Reads flow through `core/IndexTables4SparkScanBuilder` → `core/IndexTables4SparkScan` → one of the columnar `*PartitionReader`s, which use `search/SplitSearchEngine` to query `.split` files and return data via `arrow/ArrowFfiBridge`. The read path is assisted by `storage/DriverSplitLocalityManager` (sticky split→host assignments) and `prewarm/` (cache warming). Writes flow through `core/IndexTables4SparkWriteBuilder` → `IndexTables4SparkOptimizedWrite`/`StandardWrite` → `IndexTables4SparkArrowDataWriter`, which exports rows via `arrow/ArrowFfiWriteBridge` into Tantivy. Every read and write consults the `transaction/` log for file listings and commits. Filter and aggregation pushdown is coordinated by `catalyst/` rules plus `filters/`, `expressions/`, and `json/JsonPredicateTranslator`. Storage is abstracted behind `io/CloudStorageProvider`. Post-commit maintenance (merge-on-write, purge-on-write) runs through singletons in `merge/` and `purge/`. SQL extensions in `sql/` add operational commands, and `sync/` builds companion indexes over foreign Delta/Parquet/Iceberg tables.
 
 Subsequent chapters zoom in on each of those responsibilities.
