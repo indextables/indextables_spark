@@ -22,13 +22,12 @@ The main scan for row-producing queries. Implements `Scan` and `SupportsReportSt
 - Builds a `PartitionReaderFactory` that dispatches to the right columnar reader.
 
 ### `core/IndexTables4SparkPartitions.scala`
-Defines the `InputPartition` classes that the scan emits:
+Defines the two `InputPartition` classes that the standard-row scan emits:
 
-- `IndexTables4SparkStandardPartition` — rows or projections.
-- `IndexTables4SparkSimpleAggregatePartition` — COUNT/SUM/AVG/MIN/MAX without grouping.
-- `IndexTables4SparkGroupByAggregatePartition` — GROUP BY including bucket aggregations.
+- `IndexTables4SparkInputPartition` — one split per Spark task.
+- `IndexTables4SparkMultiSplitInputPartition` — multiple splits per Spark task (the default on larger tables, so one task can early-terminate across splits when a `LIMIT` is pushed down).
 
-Each partition carries a serialized list of `AddAction`s and enough config to rebuild a `SplitSearchEngine` on the executor.
+Each partition carries a serialized list of `AddAction`s and enough config to rebuild a `SplitSearchEngine` on the executor. Aggregate scans define their own partition classes inside the aggregate scan files rather than here.
 
 ### `core/IndexTables4SparkStatistics.scala`
 Implements Spark's `Statistics` so the optimizer can cost-estimate an IndexTables scan. Numbers come from the `numRecords` and `sizeInBytes` fields of `AddAction` plus per-column min/max stats when present.
@@ -79,7 +78,7 @@ Used by the reader to translate between a Spark `StructType` and the Tantivy sch
 
 ## Catalyst rules
 
-These rules run inside the Spark optimizer after the DataSource V2 logical plan is built and must coordinate with `IndexTables4SparkScanBuilder` via `ThreadLocal`s.
+These rules are injected as *resolution* rules (via `injectResolutionRule`), so they run during the analysis phase — before the logical plan has been fully optimized. That placement matters: resolution rules can still see unresolved attributes and run early enough to shape what the DataSource V2 pushdown machinery later sees. They coordinate with `IndexTables4SparkScanBuilder` via `ThreadLocal`s.
 
 ### `catalyst/V2IndexQueryExpressionRule.scala`
 Finds `IndexQueryExpression` and `IndexQueryAllExpression` nodes in the logical plan and rewrites them as `IndexQueryV2Filter` so Spark pushes them through its filter interfaces. It also clears stale ThreadLocal state between analysis and optimization phases (which is important for multi-statement sessions).
@@ -127,7 +126,7 @@ IndexTables4SparkTable.newScanBuilder
 
 Scan.planInputPartitions()
  → transaction log list + partition pruning
- → IndexTables4SparkPartitions (Standard / SimpleAgg / GroupByAgg)
+ → IndexTables4SparkInputPartition / IndexTables4SparkMultiSplitInputPartition
      └─ on executor: PartitionReader
          ├─ SplitReaderContext            (shared setup)
          ├─ SplitSearchEngine             (search/)

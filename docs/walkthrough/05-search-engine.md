@@ -8,13 +8,13 @@ This chapter covers everything under `spark/search/`, `spark/filters/`, `spark/e
 The modern search engine used by every read path. Wraps `tantivy4java`'s `SplitSearcher` and its global `SplitCacheManager`, handling split open/close, footer retrieval, and `SplitQuery` execution. All partition readers instantiate one of these per split (or reuse one via the cache). Replaces an older zip-file-based engine that is no longer used.
 
 ### `search/IndexTablesSearchEngine.scala`
-Historical façade around the Tantivy index writer used by the build-side of a few tests. Wraps `TantivyDirectInterface` with `CaseInsensitiveStringMap` options handling and working-directory setup. Kept because the indexing/test harness still references it — the production read path uses `SplitSearchEngine`.
+Defines `class TantivySearchEngine` (plus companion `object`). Historical façade around the Tantivy index writer used by the build-side of a few tests. Wraps `TantivyDirectInterface` with `CaseInsensitiveStringMap` options handling and working-directory setup. Kept because the indexing/test harness still references it — the production read path uses `SplitSearchEngine`.
 
 ### `search/IndexTablesDirectInterface.scala`
-The core FFI wrapper for a Tantivy `Index` + `IndexWriter` on a single executor. Handles document appending, commit, and the global schema-creation lock that prevents two threads from racing when building a new Tantivy schema. Per-executor lifecycle: one instance per table path.
+Defines `class TantivyDirectInterface` (plus companion `object`). The core FFI wrapper for a Tantivy `Index` + `IndexWriter` on a single executor. Handles document appending, commit, and the global schema-creation lock that prevents two threads from racing when building a new Tantivy schema. Per-executor lifecycle: one instance per table path.
 
 ### `search/IndexTablesJavaInterface.scala`
-Legacy adapter that maps `Long`-handle APIs to `TantivyDirectInterface`. Exists for backward compatibility with older call sites that still assume handle-based interop.
+Contains `object TantivyJavaAdapter` (the actual `Long`-handle → `TantivyDirectInterface` map used when legacy callers pass opaque handles) and `object TantivyNative` (compatibility shim for older call sites). Exists purely for backward compatibility with handle-based interop.
 
 ### `search/QueryParser.scala`
 Parses a human query string (supporting wildcards, phrases, field-specific queries, prefix queries) into a Tantivy `Query` object. Used when an `IndexQueryFilter` is pushed down.

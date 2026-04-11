@@ -26,8 +26,8 @@ Configuration merging (Spark session conf → Hadoop conf → write/read options
 The real implementation behind the public alias. As a `SparkSessionExtensions => Unit` function it:
 
 - Injects `sql/IndexTables4SparkSqlParser` so the custom `MERGE SPLITS`, `PURGE INDEXTABLE`, `DESCRIBE INDEXTABLES …` grammar is recognized.
-- Registers the SQL functions `tantivy4spark_indexquery`, `indextables_date_histogram`, `indextables_histogram`, `indextables_range`, and friends via `expressions/BucketFunctionBuilder`.
-- Injects two optimizer rules from `catalyst/`:
+- Registers the SQL functions. The IndexQuery functions (`tantivy4spark_indexquery`, `tantivy4spark_indexqueryall`) are registered with inline lambdas that instantiate `IndexQueryExpression` / `IndexQueryAllExpression` directly. The bucket functions (`indextables_date_histogram`, `indextables_histogram`, `indextables_range`) route through `expressions/BucketFunctionBuilder`.
+- Injects two resolution rules from `catalyst/` (via `injectResolutionRule`, so they run during the analysis phase):
   - `V2IndexQueryExpressionRule` — rewrites IndexQuery expressions into pushdown-friendly V2 filters.
   - `V2BucketExpressionRule` — rewrites bucket aggregation expressions in `GROUP BY` clauses.
 
@@ -48,9 +48,10 @@ user: spark.sql.extensions = "io.indextables.extensions.IndexTablesSparkExtensio
   └─ extensions/IndexTablesSparkExtensions
        └─ spark/extensions/IndexTables4SparkExtensions
             ├─ sql/IndexTables4SparkSqlParser         (chapter 08)
-            ├─ catalyst/V2IndexQueryExpressionRule    (chapter 02)
-            ├─ catalyst/V2BucketExpressionRule        (chapter 02)
-            └─ expressions/BucketFunctionBuilder       (chapter 05)
+            ├─ catalyst/V2IndexQueryExpressionRule    (resolution rule — chapter 02)
+            ├─ catalyst/V2BucketExpressionRule        (resolution rule — chapter 02)
+            ├─ injectFunction(tantivy4spark_indexquery…)     (inline lambdas)
+            └─ expressions/BucketFunctionBuilder       (bucket fns — chapter 05)
 ```
 
 The next chapter follows the read path from `IndexTables4SparkTable.newScanBuilder()` all the way down to the Tantivy split.
