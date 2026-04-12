@@ -350,8 +350,8 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
         ).collect()
       }
       assert(
-        ex.getMessage.contains(s"Cannot use ${spec.name.toUpperCase}"),
-        s"Expected 'Cannot use ${spec.name.toUpperCase}' in error, got: ${ex.getMessage}"
+        ex.getMessage.contains(s"Cannot use ${spec.keyword.toUpperCase}"),
+        s"Expected 'Cannot use ${spec.keyword.toUpperCase}' in error, got: ${ex.getMessage}"
       )
       assert(ex.getMessage.contains(spec.wrongColumn), s"Expected column name in error, got: ${ex.getMessage}")
       for (substring <- spec.errorSubstrings) {
@@ -376,7 +376,7 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
         ).collect()
       }
       assert(
-        ex.getMessage.contains(s"Cannot use ${spec.name.toUpperCase}"),
+        ex.getMessage.contains(s"Cannot use ${spec.keyword.toUpperCase}"),
         s"Expected rejection message in compound WHERE, got: ${ex.getMessage}"
       )
     }
@@ -605,6 +605,9 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
         assert(resultIds == expectedIds,
           s"${spec.name} on uniform table: expected $expectedIds, got $resultIds")
       } else {
+        // indexquery/indexqueryall with no type validation: searches all fields on the mixed table.
+        // "spark" matches tokenized content in rows 1, 3. No false positives from exact-match
+        // fields (status="active"/"inactive") because "spark" doesn't match those values.
         val view = freshView("mixed", sharedTablePath)
         val whereClause = spec.sqlTemplate("spark")
         val results = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()

@@ -51,17 +51,17 @@ case class IndexQueryAllExpression(
   override lazy val deterministic: Boolean = false
 
   override def prettyName: String = searchType match {
-    case SearchType.TextSearch  => "textsearch_all"
-    case SearchType.FieldMatch  => "fieldmatch_all"
-    case SearchType.IndexQuery  => "indexquery_all"
-    case _                      => "indexqueryall"
+    case SearchType.TextSearch    => "textsearch_all"
+    case SearchType.FieldMatch    => "fieldmatch_all"
+    case SearchType.IndexQuery    => "indexquery_all"
+    case SearchType.IndexQueryAll => "indexqueryall"
   }
 
   private def displayKeyword: String = searchType match {
-    case SearchType.TextSearch => "TEXTSEARCH"
-    case SearchType.FieldMatch => "FIELDMATCH"
-    case SearchType.IndexQuery => "indexquery"
-    case _                     => "indexqueryall"
+    case SearchType.TextSearch    => "TEXTSEARCH"
+    case SearchType.FieldMatch    => "FIELDMATCH"
+    case SearchType.IndexQuery    => "indexquery"
+    case SearchType.IndexQueryAll => "indexqueryall"
   }
 
   override def sql: String = searchType match {

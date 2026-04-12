@@ -625,17 +625,16 @@ class IndexTables4SparkScanBuilder(
         }
 
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
-        val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+        val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
         logger.debug(
-          s"BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan"
+          s"BUILD DEBUG: Extracted ${indexQueryFilters.length} IndexQuery filters directly from plan"
         )
-        extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
+        indexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
         // CRITICAL: Validate IndexQuery field existence and types on driver before creating scan
         // This prevents task failures on executors when fields don't exist
         // Same pattern as PR #122's syntax validation - fail fast on driver
-        val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
         validateIndexQueryFieldsExist(indexQueryFilters)
         validateIndexQueryFieldTypes(indexQueryFilters)
         logger.debug(s"BUILD: IndexQuery field validation passed for regular scan")
@@ -654,7 +653,7 @@ class IndexTables4SparkScanBuilder(
           options,
           _limit,
           effectiveConfig,
-          extractedIndexQueryFilters
+          indexQueryFilters
         )
     }
 
@@ -2150,6 +2149,11 @@ class IndexTables4SparkScanBuilder(
     // Validate * TEXTSEARCH / * FIELDMATCH — throw on type mismatches.
     // Only examine text-type fields from docMapping (type == "text"). Non-text fields
     // (i64, f64, bool, etc.) aren't text-searchable and shouldn't trigger validation errors.
+    // Note: unlike single-field validation above (which checks effectiveConfig first, then
+    // docMapping), wildcards use docMapping.fieldTypes directly. For companion tables,
+    // effectiveConfig may include typemap entries from indexingModes that aren't in docMapping.
+    // In practice these should be consistent since both are written during companion build,
+    // but if they diverge, wildcard validation may miss fields that single-field validation sees.
     val allQueryAllFilters: Seq[IndexQueryAllFilter] = indexQueryFilters.flatMap {
       case filter: IndexQueryAllFilter => Seq(filter)
       case mixedFilter: MixedBooleanFilter =>

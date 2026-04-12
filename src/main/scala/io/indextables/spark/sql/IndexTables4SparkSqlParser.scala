@@ -170,6 +170,11 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
           }
         } catch {
           case e: ParseException =>
+            // The regex can false-positive match non-operator SQL (e.g., a column named
+            // "textsearch"), so we fall back to Spark's parser. Known limitation: this also
+            // swallows parse errors from genuine TEXTSEARCH/FIELDMATCH usage with malformed
+            // sub-expressions (e.g., "@#$ TEXTSEARCH 'q'"), producing a confusing Spark
+            // parse error instead of an operator-specific message.
             delegate.parseExpression(sqlText)
         }
 
@@ -179,6 +184,7 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
           IndexQueryAllExpression(query)
         } catch {
           case e: ParseException =>
+            // Same false-positive fallback as above
             delegate.parseExpression(sqlText)
         }
 
