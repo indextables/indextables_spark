@@ -288,17 +288,14 @@ case class SyncToExternalCommand(
       .get("spark.indextables.companion.sync.distributedLogRead.enabled")
       .forall(_.equalsIgnoreCase("true"))
 
-    // For non-streaming re-syncs, read the last synced version from the companion transaction
-    // log so the scanner can use the incremental fast path and return no_action when unchanged.
-    // Streaming sets lastSyncedVersion directly; one-shot syncs need to read it from the log.
-    // Skip the log read when SQL already provides a version (FROM VERSION / FROM SNAPSHOT).
-    // Note: the stored value is a Delta version number or Iceberg snapshot ID depending on
-    // sourceFormat. Switching formats on the same companion index is not supported.
-    val effectiveLastSynced = lastSyncedVersion.orElse(
-      if (fromVersion.isDefined || fromSnapshot.isDefined) None
-      else if (sourceFormat == "iceberg" || sourceFormat == "delta") readLastSyncedVersionFromLog(sparkSession)
-      else None
-    )
+    // `lastSyncedVersion` is populated only by streaming cycles via copy() in the streaming
+    // loop. One-shot BUILDs deliberately leave it None and do NOT auto-read the companion's
+    // last synced version from the transaction log: that value reflects source-side state at
+    // last sync and does not account for local companion-side mutations (DROP PARTITIONS,
+    // manual invalidations) that leave the companion diverged from what the source snapshot
+    // ID alone would imply. Using it as `fromSnapshotId` would silently short-circuit re-sync
+    // to `no_action` even when the companion is missing dropped partitions that still exist
+    // in the source.
 
     // Attempt distributed scan if enabled.
     // WHERE predicates are passed to the scanner so it can build the PartitionFilter
@@ -315,7 +312,7 @@ case class SyncToExternalCommand(
               deltaPath,
               sourceCredentials,
               wherePredicates = wherePredicates,
-              fromVersion = effectiveLastSynced.orElse(fromVersion)
+              fromVersion = lastSyncedVersion.orElse(fromVersion)
             )
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
@@ -331,7 +328,7 @@ case class SyncToExternalCommand(
               icebergConfig,
               snapshotId = fromSnapshot,
               wherePredicates = wherePredicates,
-              fromSnapshotId = effectiveLastSynced
+              fromSnapshotId = lastSyncedVersion
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
