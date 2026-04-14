@@ -105,43 +105,4 @@ class DeltaCompanionColumnsTest extends CompanionColumnsTestBase {
     val c = if (clauses.nonEmpty) s" $clauses" else ""
     s"BUILD INDEXTABLES COMPANION FOR DELTA '$tableId'$c AT LOCATION '$indexPath'"
   }
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  Delta-only test
-  // ═══════════════════════════════════════════════════════════════════
-
-  test("BUG5: INCLUDE COLUMNS with comma in column name round-trips through metadata") {
-    withTempPath { tempDir =>
-      val parquetPath = new File(tempDir, "parquet").getAbsolutePath
-      val indexPath = new File(tempDir, "index").getAbsolutePath
-
-      val sparkImplicits = spark.implicits
-      import sparkImplicits._
-
-      // Create a Parquet table with a column name containing a comma (legal in Parquet/Iceberg)
-      Seq((1, "a", "x"), (2, "b", "y")).toDF("id", "revenue,usd", "name")
-        .write.format("parquet").mode("overwrite").save(parquetPath)
-
-      // Initial sync with INCLUDE COLUMNS including the comma-bearing column
-      val result1 = spark.sql(
-        s"""BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath'
-           |  INCLUDE COLUMNS ('id', 'revenue,usd')
-           |  AT LOCATION '$indexPath'""".stripMargin
-      ).collect()
-      result1(0).getString(2) shouldBe "success"
-
-      // Add more data
-      Seq((3, "c", "z")).toDF("id", "revenue,usd", "name")
-        .write.format("parquet").mode("append").save(parquetPath)
-
-      // Incremental sync should correctly restore "revenue,usd" from JSON metadata
-      val result2 = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' AT LOCATION '$indexPath'"
-      ).collect()
-      result2(0).getString(2) shouldBe "success"
-
-      val df = readCompanion(indexPath)
-      df.count() shouldBe 3
-    }
-  }
 }

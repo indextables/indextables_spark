@@ -21,8 +21,13 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
 
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.transaction.TransactionLogFactory
 
 import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec, Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
@@ -209,6 +214,118 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
       )
     }
     appendOp.commit()
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Iceberg-specific tests (not in shared base trait)
+  // ─────────────────────────────────────────────────────────────────────
+
+  test("explicit CATALOG TYPE WAREHOUSE SQL clause builds companion end-to-end") {
+    // Scott noted that all other Iceberg tests configure the catalog via SparkConf,
+    // so the grammar-to-runtime path for CATALOG '...' TYPE '...' WAREHOUSE '...'
+    // SQL syntax is never exercised. This test does exactly that: it issues a
+    // BUILD COMPANION SQL with an explicit catalog clause and verifies both
+    // the build succeeds AND the SQL-supplied catalog name flows through to
+    // the persisted companion metadata.
+    withTempPath { tempDir =>
+      val indexPath = new File(tempDir, "explicit_catalog_idx").getAbsolutePath
+      val tableId = newTableId(tempDir, "explicit_catalog")
+      createSimpleTable(tableId, sharedTableSchema, sharedTableData)
+
+      // The SparkConf provides URI + catalogType=rest already, but the
+      // catalogName 'my_explicit_catalog' is supplied ONLY via the SQL clause
+      // — if it shows up in the persisted metadata, the SQL parse-and-route
+      // path is provably exercised (the SparkConf fallback would write 'default').
+      //
+      // Grammar order (IndexTables4SparkSqlBase.g4): CATALOG → WAREHOUSE → INCLUDE COLUMNS.
+      val sql = s"""BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableId'
+                   |  CATALOG 'my_explicit_catalog' TYPE 'rest'
+                   |  WAREHOUSE 'file://$warehouseDir'
+                   |  INCLUDE COLUMNS ('id', 'name')
+                   |  AT LOCATION '$indexPath'""".stripMargin
+
+      val result = spark.sql(sql).collect()
+      withClue(s"build status: ${result(0).getString(2)}, message: ${result(0).getString(10)}") {
+        result(0).getString(2) shouldBe "success"
+      }
+
+      // Verify the catalog name from the SQL clause was persisted in the
+      // companion metadata (not the default "default" fallback).
+      val txLog = TransactionLogFactory.create(
+        new Path(indexPath), spark,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
+      )
+      try {
+        txLog.invalidateCache()
+        val config = txLog.getMetadata().configuration
+        config.get("indextables.companion.icebergCatalog") shouldBe Some("my_explicit_catalog")
+      } finally
+        txLog.close()
+
+      // Sanity: the companion is queryable.
+      val df = readCompanion(indexPath)
+      df.filter(col("name") === "alice").count() shouldBe 1L
+      df.count() shouldBe 3L
+    }
+  }
+
+  test("incremental sync restores CATALOG / WAREHOUSE from companion metadata") {
+    // Regression for the previously-missing restore path: the initial sync
+    // provides CATALOG/TYPE/WAREHOUSE via the SQL clause, then a subsequent
+    // incremental sync omits them entirely. Before the Item 7 fix, the
+    // second sync fell back to "default" catalog and silently clobbered the
+    // stored icebergCatalog metadata key with "default". After the fix, the
+    // stored value survives and the sync succeeds using the restored config.
+    withTempPath { tempDir =>
+      val indexPath = new File(tempDir, "catalog_restore_idx").getAbsolutePath
+      val tableId = newTableId(tempDir, "catalog_restore")
+      createSimpleTable(tableId, sharedTableSchema, sharedTableData)
+
+      // Initial sync with explicit CATALOG/WAREHOUSE and an unusual catalog
+      // name that could not come from the SparkConf fallback ("rest" + URI
+      // are the only SparkConf values — catalogName is SQL-only).
+      val initialSql = s"""BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableId'
+                          |  CATALOG 'restore_test_catalog' TYPE 'rest'
+                          |  WAREHOUSE 'file://$warehouseDir'
+                          |  INCLUDE COLUMNS ('id', 'name')
+                          |  AT LOCATION '$indexPath'""".stripMargin
+      val initialResult = spark.sql(initialSql).collect()
+      withClue(s"initial build: ${initialResult(0).getString(2)}, ${initialResult(0).getString(10)}") {
+        initialResult(0).getString(2) shouldBe "success"
+      }
+
+      // Append more data so the incremental sync has something to do.
+      appendData(tableId, sharedTableSchema, Seq(
+        Row(4, "dave", 400.0, 4000L, true, "more data", "10.0.0.4", "cat_c",
+          new java.math.BigDecimal("400.50"), new java.math.BigDecimal("400.50"),
+          new java.math.BigDecimal("400.50000"), 400, 4, "drop_d")
+      ))
+
+      // Incremental sync WITHOUT re-specifying CATALOG/TYPE/WAREHOUSE —
+      // these must be restored from companion metadata.
+      val incrementalSql = s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableId' AT LOCATION '$indexPath'"
+      val incrementalResult = spark.sql(incrementalSql).collect()
+      withClue(s"incremental build: ${incrementalResult(0).getString(2)}, ${incrementalResult(0).getString(10)}") {
+        incrementalResult(0).getString(2) shouldBe "success"
+      }
+
+      // Verify the stored catalog name was NOT clobbered with "default".
+      val txLog = TransactionLogFactory.create(
+        new Path(indexPath), spark,
+        new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
+      )
+      try {
+        txLog.invalidateCache()
+        val config = txLog.getMetadata().configuration
+        config.get("indextables.companion.icebergCatalog") shouldBe Some("restore_test_catalog")
+        config.get("indextables.companion.icebergCatalogType") shouldBe Some("rest")
+        config.get("indextables.companion.icebergWarehouse") shouldBe Some(s"file://$warehouseDir")
+      } finally
+        txLog.close()
+
+      // Companion should have indexed the new row too.
+      readCompanion(indexPath).count() shouldBe 4L
+    }
   }
 
   /**

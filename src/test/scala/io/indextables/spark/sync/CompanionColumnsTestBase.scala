@@ -208,7 +208,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
       buildEvo("drop_indexed", "INCLUDE COLUMNS ('evo_type_breaking', 'name')"),
       buildEvo("add_col", "INCLUDE COLUMNS ('id', 'name')"),
       buildEvo("drop_unindexed_inc", "INCLUDE COLUMNS ('id', 'name')"),
-      buildEvo("drop_unindexed_exc", s"EXCLUDE COLUMNS ($evoExclude)")
+      buildEvo("drop_unindexed_exc", s"EXCLUDE COLUMNS ($evoExclude)"),
+      // INCLUDE drop-all: both columns get dropped by the success mutation.
+      // The error fires before R6 type-change validation, so this companion
+      // can share the success mutation.
+      buildEvo("drop_all_include", "INCLUDE COLUMNS ('evo_type_breaking', 'evo_drop')"),
+      // EXCLUDE drop-all: the warn-and-continue path still runs R6 type-change
+      // validation downstream. Use a single non-evolution column so an isolated
+      // drop-only mutation can clean it without touching type-changing fields.
+      buildEvo("drop_all_exclude", "EXCLUDE COLUMNS ('category')")
     )
 
     // Apply the combined success mutation — all success tests run against this state.
@@ -326,9 +334,40 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
-      // Filter on excluded column — ScanBuilder defers to Spark, returns correct result.
+      // Regression for the silent-wrong-results bug: filtering on the
+      // excluded 'ip_addr' column must return the correct row count (1),
+      // not zero. Pre-fix, ScanBuilder pushed the filter to tantivy, which
+      // searched a non-existent field and returned 0. Post-fix, ScanBuilder
+      // defers the filter to Spark which post-filters correctly. The
+      // assertion of 1 row is the load-bearing verification — anything
+      // that re-introduces unconditional pushdown will return 0 here.
       df.filter(col("ip_addr") === "192.168.1.1").collect().length shouldBe 1
       df.filter(col("name") === "alice").collect().length shouldBe 1
+    }
+  }
+
+  test("In filter on text-mode field is not pushed to tantivy") {
+    // Regression for the unconditional In pushdown bug. Prior to this PR the
+    // V2 ScanBuilder pushed In(...) filters even for text-mode fields, where
+    // tokenization makes exact matching impossible — searching for
+    // "hello world" on a tokenized text field returns 0 rows even though
+    // a row with that exact value exists. The fix gates In pushdown on
+    // isFieldSuitableForExactMatching, so text-mode fields fall back to
+    // post-scan Spark filtering.
+    //
+    // The shared table has 3 rows with 'message' values "hello world",
+    // "foo bar baz", "search query text". The In filter targets the first
+    // two. Pre-fix: 0 results (wrong). Post-fix: 2 results (correct).
+    withTempIndex { indexPath =>
+      val result = spark.sql(
+        buildCompanionSql(sharedTableId,
+          "INCLUDE COLUMNS ('id', 'name', 'message') INDEXING MODES ('message':'text')", indexPath)
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      val df = readCompanion(indexPath)
+      val matched = df.filter(col("message").isin("hello world", "foo bar baz")).collect()
+      matched.length shouldBe 2
     }
   }
 
@@ -528,6 +567,37 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     }
   }
 
+  test("BUG3: HASHED FASTFIELDS EXCLUDE on EXCLUDE'd column returns error") {
+    // EXCLUDE COLUMNS removes 'name' from the index; HASHED FASTFIELDS EXCLUDE
+    // also references 'name' — contradictory because the field is already gone.
+    withTempIndex { indexPath =>
+      val result = spark.sql(
+        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS EXCLUDE ('name')", indexPath)
+      ).collect()
+      result(0).getString(2) shouldBe "error"
+      result(0).getString(10) should include("HASHED FASTFIELDS")
+      result(0).getString(10) should include("EXCLUDE COLUMNS")
+    }
+  }
+
+  test("HASHED FASTFIELDS EXCLUDE with field not in EXCLUDE COLUMNS succeeds") {
+    // Independent clauses: EXCLUDE COLUMNS removes 'name', HASHED FASTFIELDS
+    // EXCLUDE keeps 'ip_addr' as a regular (non-hashed) string column. Both
+    // are string fields, neither overlaps — should build successfully.
+    withTempIndex { indexPath =>
+      val result = spark.sql(
+        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS EXCLUDE ('ip_addr')", indexPath)
+      ).collect()
+      result(0).getString(2) shouldBe "success"
+
+      // Sanity: non-excluded column is queryable, excluded column is absent
+      // from the index (filter is deferred to Spark by ScanBuilder).
+      val df = readCompanion(indexPath)
+      df.filter(col("ip_addr") === "192.168.1.1").collect().length shouldBe 1
+      df.count() shouldBe 3
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   //  Phase 1: Read-only tests — shared partitioned table
   // ═══════════════════════════════════════════════════════════════════
@@ -617,6 +687,57 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     }
   }
 
+  test("BUG5: INCLUDE COLUMNS with comma in column name round-trips through metadata") {
+    // Uses an isolated table with a comma-bearing column name so the shared
+    // table schema is not perturbed. The metadata serializer must store the
+    // INCLUDE list as a JSON array (not CSV) to preserve the comma.
+    //
+    // Some formats (e.g., Delta without column-mapping mode) reject comma in
+    // column names at write time. Skip the test on those formats — the JSON
+    // serializer round-trip is also covered format-independently by
+    // JsonUtilTest.
+    withTempPath { tempDir =>
+      val schema = StructType(Seq(
+        StructField("id", IntegerType),
+        StructField("revenue,usd", DoubleType),
+        StructField("name", StringType)
+      ))
+      val data = Seq(
+        Row(1, 100.50, "alice"),
+        Row(2, 250.00, "bob")
+      )
+      val tableId = newTableId(tempDir, "bug5_comma")
+      try {
+        createSimpleTable(tableId, schema, data)
+      } catch {
+        case e: Exception if e.getMessage != null &&
+            (e.getMessage.contains("INVALID_CHARACTERS") ||
+             e.getMessage.contains("invalid character") ||
+             e.getMessage.contains("revenue,usd")) =>
+          cancel(s"$formatName format rejects comma in column names " +
+            s"at write time — JsonUtil round-trip covered by JsonUtilTest. (${e.getMessage.take(120)})")
+      }
+
+      val indexPath = new File(tempDir, "bug5_index").getAbsolutePath
+
+      // Initial sync with INCLUDE COLUMNS containing the comma-bearing column
+      val result1 = spark.sql(
+        buildCompanionSql(tableId, "INCLUDE COLUMNS ('id', 'revenue,usd')", indexPath)
+      ).collect()
+      result1(0).getString(2) shouldBe "success"
+
+      // Append a row and run incremental sync — the stored INCLUDE list must
+      // round-trip through the JSON serializer with the comma intact.
+      appendData(tableId, schema, Seq(Row(3, 50.00, "charlie")))
+      val result2 = spark.sql(
+        buildCompanionSql(tableId, "", indexPath)
+      ).collect()
+      result2(0).getString(2) shouldBe "success"
+
+      readCompanion(indexPath).count() shouldBe 3
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   //  Phase 3: Evolution tests — shared table
   //
@@ -667,6 +788,18 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     syncEvolution("drop_unindexed_exc").getString(2) shouldBe "success"
   }
 
+  test("R5: dropping all stored INCLUDE columns returns specific error on incremental sync") {
+    // Both evo_type_breaking and evo_drop were removed in success mutation,
+    // and they were the entire INCLUDE list — should error with a specific
+    // message naming the dropped columns rather than the generic
+    // zero-indexed-columns error.
+    val row = syncEvolution("drop_all_include")
+    row.getString(2) shouldBe "error"
+    row.getString(10) should include("All stored INCLUDE COLUMNS")
+    row.getString(10) should include("evo_type_breaking")
+    row.getString(10) should include("evo_drop")
+  }
+
   // --- Error cases (isolated mutations) ---
   // Each recreateTable changes exactly one column to trigger a specific error.
 
@@ -695,5 +828,25 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     row.getString(2) shouldBe "error"
     row.getString(10) should include("type changed")
     row.getString(10) should include("INVALIDATE ALL PARTITIONS")
+  }
+
+  test("R5: dropping all stored EXCLUDE columns warns and continues on incremental sync") {
+    // Isolated mutation: drop only 'category' (the sole excluded column for
+    // the drop_all_exclude companion). Using an isolated mutation rather than
+    // the combined success mutation ensures no other columns have type
+    // changes that would trigger downstream R6 validation errors.
+    val droppedFields = sharedTableSchema.fields.filterNot(_.name == "category")
+    val droppedSchema = StructType(droppedFields)
+    val categoryIdx = sharedTableSchema.fieldIndex("category")
+    val droppedData = sharedTableData.map { row =>
+      Row.fromSeq(row.toSeq.zipWithIndex.filterNot(_._2 == categoryIdx).map(_._1))
+    }
+    recreateTable(sharedTableId, droppedSchema, droppedData)
+
+    val row = syncEvolution("drop_all_exclude")
+    row.getString(2) shouldBe "success"
+    // Verify the companion is queryable after the drop-all warning path.
+    val df = readCompanion(evolutionCompanions("drop_all_exclude"))
+    df.count() should be > 0L
   }
 }

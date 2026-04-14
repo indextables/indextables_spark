@@ -95,9 +95,20 @@ case class SyncToExternalCommand(
   /**
    * CATALOG and WAREHOUSE are interchangeable in SQL syntax: "CATALOG" is the UC term, "WAREHOUSE" is the Iceberg REST
    * term, but they refer to the same concept. When only one is specified, it fills in the other.
+   *
+   * Fallback order on incremental sync: SQL clause > stored companion metadata > absent. This lets subsequent syncs
+   * reuse the originally-configured catalog without re-specifying `CATALOG`/`WAREHOUSE` in the SQL.
    */
-  private def effectiveCatalogName: Option[String] = catalogName.orElse(warehouse)
-  private def effectiveWarehouse: Option[String]   = warehouse.orElse(catalogName)
+  private def effectiveCatalogName(storedConfig: Map[String, String] = Map.empty): Option[String] =
+    catalogName
+      .orElse(warehouse)
+      .orElse(storedConfig.get("indextables.companion.icebergCatalog").filterNot(_ == "default"))
+      .orElse(storedConfig.get("indextables.companion.deltaCatalog").filterNot(_.isEmpty))
+
+  private def effectiveWarehouse(storedConfig: Map[String, String] = Map.empty): Option[String] =
+    warehouse
+      .orElse(catalogName)
+      .orElse(storedConfig.get("indextables.companion.icebergWarehouse"))
 
   /** Default target input size per indexing group: 2GB */
   private val DEFAULT_TARGET_INPUT_SIZE: Long = 2L * 1024L * 1024L * 1024L
@@ -181,6 +192,24 @@ case class SyncToExternalCommand(
     val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
       ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
+    // Load stored companion metadata early so CATALOG/TYPE/WAREHOUSE can be
+    // restored from a prior sync before the source reader is created. Skipped
+    // for formats that don't use catalog config (parquet) and tolerates the
+    // "no transaction log yet" case on initial syncs.
+    val earlyStoredConfig: Map[String, String] =
+      if (sourceFormat == "iceberg" || sourceFormat == "delta") {
+        try {
+          val txLog = TransactionLogFactory.create(
+            new Path(destPath),
+            sparkSession,
+            new CaseInsensitiveStringMap(baseMergedConfigs.asJava)
+          )
+          try txLog.getMetadata().configuration
+          catch { case _: Exception => Map.empty[String, String] }
+          finally txLog.close()
+        } catch { case _: Exception => Map.empty[String, String] }
+      } else Map.empty[String, String]
+
     // For Iceberg and Delta + table credential providers: auto-derive catalog config
     // defaults, resolve the table UUID (and storage location for Delta) on the driver,
     // and inject into configs so executors can use the table-based credential API.
@@ -196,7 +225,7 @@ case class SyncToExternalCommand(
             }
           } else baseMergedConfigs
 
-          val fullTableName = buildFullTableName(effectiveCatalogName, sourcePath)
+          val fullTableName = buildFullTableName(effectiveCatalogName(earlyStoredConfig), sourcePath)
           logger.info(s"Resolving table info for '$fullTableName' via ${provider.getClass.getName}")
           try {
             val tableInfo = provider.resolveTableInfo(fullTableName, withDefaults)
@@ -238,14 +267,19 @@ case class SyncToExternalCommand(
       case "parquet" =>
         new ParquetDirectoryReader(sourcePath, sourceCredentials, schemaSourcePath)
       case "iceberg" =>
-        val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials)
-        new IcebergSourceReader(sourcePath, effectiveCatalogName.getOrElse("default"), icebergConfig, fromSnapshot)
+        val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials, earlyStoredConfig)
+        new IcebergSourceReader(
+          sourcePath,
+          effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
+          icebergConfig,
+          fromSnapshot
+        )
       case other =>
         throw new IllegalArgumentException(s"Unsupported source format: $other")
     }
 
     try
-      executeSyncWithReader(sparkSession, reader, mergedConfigs, resolvedStorageLocation, startTime)
+      executeSyncWithReader(sparkSession, reader, mergedConfigs, resolvedStorageLocation, startTime, earlyStoredConfig)
     finally
       reader.close()
   }
@@ -284,7 +318,8 @@ case class SyncToExternalCommand(
     reader: CompanionSourceReader,
     mergedConfigs: Map[String, String],
     resolvedStorageLocation: Option[String],
-    startTime: Long
+    startTime: Long,
+    earlyStoredConfig: Map[String, String] = Map.empty
   ): Seq[Row] = {
     // 1. Check if distributed log read is enabled (default: true)
     val distributedEnabled = mergedConfigs
@@ -318,7 +353,7 @@ case class SyncToExternalCommand(
             // fromSnapshot means "return changes added after this snapshot" (incremental filter),
             // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
             scanner.scanIcebergTable(
-              effectiveCatalogName.getOrElse("default"),
+              effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
@@ -532,6 +567,28 @@ case class SyncToExternalCommand(
           }
         } else {
           effExclude
+        }
+
+        // R5: Drop-all detection on metadata-restore path.
+        // INCLUDE drop-all → error: the index would cover zero columns, but the
+        // downstream zero-indexed-columns guard emits a generic message. Surface
+        // a specific error pointing at the dropped columns instead.
+        if (includeColumns.isEmpty && storedInclude.nonEmpty && cleanedInclude.isEmpty) {
+          throw new IllegalArgumentException(
+            s"All stored INCLUDE COLUMNS (${storedInclude.mkString(", ")}) have been dropped " +
+              s"from the source schema. Cannot continue incremental sync — drop the companion " +
+              s"index and rebuild with a new INCLUDE COLUMNS clause."
+          )
+        }
+        // EXCLUDE drop-all → warn: semantically equivalent to "exclude nothing"
+        // (the excluded columns no longer exist), so continue with a full-schema
+        // index. Log a warning so the user notices the now-vacuous EXCLUDE list.
+        if (excludeColumns.isEmpty && storedExclude.nonEmpty && cleanedExclude.isEmpty) {
+          logger.warn(
+            s"All stored EXCLUDE COLUMNS (${storedExclude.mkString(", ")}) have been dropped " +
+              s"from the source schema. Continuing with a full-schema index — this companion " +
+              s"now indexes every remaining column. Rebuild the companion explicitly if this is unintended."
+          )
         }
 
         // R6: Warn on new columns with EXCLUDE COLUMNS and detect type changes
@@ -1075,7 +1132,11 @@ case class SyncToExternalCommand(
           sampleFilePath
             .map { url =>
               try {
-                val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
+                val icebergConfig = buildIcebergConfig(
+                  mergedConfigs,
+                  resolveCredentials(mergedConfigs, sourcePath),
+                  earlyStoredConfig
+                )
                 val icebergTableSchema = fromSnapshot match {
                   case Some(id) =>
                     val (ns, tbl) = {
@@ -1083,7 +1144,7 @@ case class SyncToExternalCommand(
                       (parts(0), parts(1))
                     }
                     io.indextables.tantivy4java.iceberg.IcebergTableReader.readSchema(
-                      effectiveCatalogName.getOrElse("default"),
+                      effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
                       ns,
                       tbl,
                       icebergConfig,
@@ -1095,7 +1156,7 @@ case class SyncToExternalCommand(
                       (parts(0), parts(1))
                     }
                     io.indextables.tantivy4java.iceberg.IcebergTableReader.readSchema(
-                      effectiveCatalogName.getOrElse("default"),
+                      effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
                       ns,
                       tbl,
                       icebergConfig
@@ -1162,7 +1223,8 @@ case class SyncToExternalCommand(
         Some(sourceSchema),
         filteredIncludeColumns,
         filteredExcludeColumns,
-        effectiveSkipFields
+        effectiveSkipFields,
+        earlyStoredConfig
       )
     } finally
       transactionLog.close()
@@ -1192,7 +1254,8 @@ case class SyncToExternalCommand(
     sourceSchema: Option[StructType] = None,
     filteredIncludeColumns: Seq[String] = Seq.empty,
     filteredExcludeColumns: Seq[String] = Seq.empty,
-    effectiveSkipFields: Seq[String] = Seq.empty
+    effectiveSkipFields: Seq[String] = Seq.empty,
+    storedConfig: Map[String, String] = Map.empty
   ): Seq[Row] = {
     import scala.collection.parallel.ForkJoinTaskSupport
     import java.util.concurrent.ForkJoinPool
@@ -1336,7 +1399,8 @@ case class SyncToExternalCommand(
                     sourceSchema,
                     filteredIncludeColumns,
                     filteredExcludeColumns,
-                    skipFields = effectiveSkipFields
+                    skipFields = effectiveSkipFields,
+                    storedConfig = storedConfig
                   )
                 )
 
@@ -1439,7 +1503,8 @@ case class SyncToExternalCommand(
     sourceSchema: Option[StructType] = None,
     filteredIncludeColumns: Seq[String] = Seq.empty,
     filteredExcludeColumns: Seq[String] = Seq.empty,
-    skipFields: Seq[String] = Seq.empty
+    skipFields: Seq[String] = Seq.empty,
+    storedConfig: Map[String, String] = Map.empty
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
     val builder = Map.newBuilder[String, String]
@@ -1453,14 +1518,20 @@ case class SyncToExternalCommand(
     )
 
     if (sourceFormat == "iceberg") {
-      builder += "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
-      effectiveWarehouse.foreach(w => builder += "indextables.companion.icebergWarehouse" -> w)
-      catalogType.foreach(ct => builder += "indextables.companion.icebergCatalogType" -> ct)
+      // Use the restored effective values (SQL > stored metadata) so that on
+      // incremental sync without an explicit CATALOG/WAREHOUSE clause, the
+      // previously-stored values are preserved rather than clobbered with
+      // "default" / absent.
+      builder += "indextables.companion.icebergCatalog" -> effectiveCatalogName(storedConfig).getOrElse("default")
+      effectiveWarehouse(storedConfig).foreach(w => builder += "indextables.companion.icebergWarehouse" -> w)
+      catalogType
+        .orElse(storedConfig.get("indextables.companion.icebergCatalogType"))
+        .foreach(ct => builder += "indextables.companion.icebergCatalogType" -> ct)
       externalStorageRoot.foreach(root => builder += "indextables.companion.parquetStorageRoot" -> root)
     } else if (sourceFormat == "delta" && isTableName(sourcePath) && externalStorageRoot.isDefined) {
       builder += "indextables.companion.parquetStorageRoot" -> externalStorageRoot.get
       builder += "indextables.companion.deltaTableName"     -> sourcePath
-      builder += "indextables.companion.deltaCatalog"       -> effectiveCatalogName.getOrElse("")
+      builder += "indextables.companion.deltaCatalog"       -> effectiveCatalogName(storedConfig).getOrElse("")
     }
 
     if (effectiveIndexingModes.nonEmpty) {
@@ -1755,17 +1826,23 @@ case class SyncToExternalCommand(
   /**
    * Build Iceberg catalog configuration from merged Spark configs and source credentials. Maps
    * spark.indextables.iceberg.* properties to IcebergTableReader config keys.
+   *
+   * Catalog config fallback order: SQL clause > stored companion metadata > SparkConf. The
+   * `storedConfig` parameter lets incremental syncs reuse CATALOG/TYPE/WAREHOUSE from a prior
+   * sync without the user having to re-specify them.
    */
   private def buildIcebergConfig(
     mergedConfigs: Map[String, String],
-    sourceCredentials: Map[String, String]
+    sourceCredentials: Map[String, String],
+    storedConfig: Map[String, String] = Map.empty
   ): java.util.Map[String, String] = {
     val config = new java.util.HashMap[String, String]()
 
-    // Catalog config: SQL clause values take precedence over spark.indextables.iceberg.*
+    // Catalog config: SQL clause > stored companion metadata > SparkConf
     val effectiveCatalogType = catalogType
+      .orElse(storedConfig.get("indextables.companion.icebergCatalogType"))
       .orElse(mergedConfigs.get("spark.indextables.iceberg.catalogType"))
-    val effectiveWh = effectiveWarehouse
+    val effectiveWh = effectiveWarehouse(storedConfig)
       .orElse(mergedConfigs.get("spark.indextables.iceberg.warehouse"))
 
     effectiveCatalogType.foreach(v => config.put("catalog_type", v))
@@ -1848,6 +1925,22 @@ case class SyncToExternalCommand(
         ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
           ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
       }
+      // Load stored companion metadata once so the cheap path can also honor
+      // the SQL > stored > SparkConf catalog config fallback chain.
+      val cheapStoredConfig: Map[String, String] =
+        if (sourceFormat == "iceberg" || sourceFormat == "delta") {
+          try {
+            val txLog = TransactionLogFactory.create(
+              new Path(destPath),
+              sparkSession,
+              new CaseInsensitiveStringMap(mergedConfigs.asJava)
+            )
+            try txLog.getMetadata().configuration
+            catch { case _: Exception => Map.empty[String, String] }
+            finally txLog.close()
+          } catch { case _: Exception => Map.empty[String, String] }
+        } else Map.empty[String, String]
+
       sourceFormat match {
         case "delta" =>
           val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -1856,14 +1949,14 @@ case class SyncToExternalCommand(
           Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
         case "iceberg" =>
           val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
-          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials)
+          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials, cheapStoredConfig)
           val parts             = sourcePath.split("\\.", 2)
           if (parts.length != 2) None
           else {
             val (ns, tbl) = (parts(0), parts(1))
             Some(
               io.indextables.tantivy4java.iceberg.IcebergTableReader
-                .getCurrentSnapshotId(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig)
+                .getCurrentSnapshotId(effectiveCatalogName(cheapStoredConfig).getOrElse("default"), ns, tbl, icebergConfig)
             )
           }
         case _ => None
