@@ -81,6 +81,8 @@ case class SyncToExternalCommand(
   warehouse: Option[String] = None,
   hashedFastfieldsInclude: Seq[String] = Seq.empty,
   hashedFastfieldsExclude: Seq[String] = Seq.empty,
+  includeColumns: Seq[String] = Seq.empty,
+  excludeColumns: Seq[String] = Seq.empty,
   wherePredicates: Seq[String] = Seq.empty,
   invalidateAllPartitions: Boolean = false,
   tableRoots: Map[String, String] = Map.empty,
@@ -93,9 +95,20 @@ case class SyncToExternalCommand(
   /**
    * CATALOG and WAREHOUSE are interchangeable in SQL syntax: "CATALOG" is the UC term, "WAREHOUSE" is the Iceberg REST
    * term, but they refer to the same concept. When only one is specified, it fills in the other.
+   *
+   * Fallback order on incremental sync: SQL clause > stored companion metadata > absent. This lets subsequent syncs
+   * reuse the originally-configured catalog without re-specifying `CATALOG`/`WAREHOUSE` in the SQL.
    */
-  private def effectiveCatalogName: Option[String] = catalogName.orElse(warehouse)
-  private def effectiveWarehouse: Option[String]   = warehouse.orElse(catalogName)
+  private def effectiveCatalogName(storedConfig: Map[String, String] = Map.empty): Option[String] =
+    catalogName
+      .orElse(warehouse)
+      .orElse(storedConfig.get("indextables.companion.icebergCatalog").filterNot(_ == "default"))
+      .orElse(storedConfig.get("indextables.companion.deltaCatalog").filterNot(_.isEmpty))
+
+  private def effectiveWarehouse(storedConfig: Map[String, String] = Map.empty): Option[String] =
+    warehouse
+      .orElse(catalogName)
+      .orElse(storedConfig.get("indextables.companion.icebergWarehouse"))
 
   /** Default target input size per indexing group: 2GB */
   private val DEFAULT_TARGET_INPUT_SIZE: Long = 2L * 1024L * 1024L * 1024L
@@ -179,6 +192,24 @@ case class SyncToExternalCommand(
     val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
       ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
+    // Load stored companion metadata early so CATALOG/TYPE/WAREHOUSE can be
+    // restored from a prior sync before the source reader is created. Skipped
+    // for formats that don't use catalog config (parquet) and tolerates the
+    // "no transaction log yet" case on initial syncs.
+    val earlyStoredConfig: Map[String, String] =
+      if (sourceFormat == "iceberg" || sourceFormat == "delta") {
+        try {
+          val txLog = TransactionLogFactory.create(
+            new Path(destPath),
+            sparkSession,
+            new CaseInsensitiveStringMap(baseMergedConfigs.asJava)
+          )
+          try txLog.getMetadata().configuration
+          catch { case _: Exception => Map.empty[String, String] }
+          finally txLog.close()
+        } catch { case _: Exception => Map.empty[String, String] }
+      } else Map.empty[String, String]
+
     // For Iceberg and Delta + table credential providers: auto-derive catalog config
     // defaults, resolve the table UUID (and storage location for Delta) on the driver,
     // and inject into configs so executors can use the table-based credential API.
@@ -194,7 +225,7 @@ case class SyncToExternalCommand(
             }
           } else baseMergedConfigs
 
-          val fullTableName = buildFullTableName(effectiveCatalogName, sourcePath)
+          val fullTableName = buildFullTableName(effectiveCatalogName(earlyStoredConfig), sourcePath)
           logger.info(s"Resolving table info for '$fullTableName' via ${provider.getClass.getName}")
           try {
             val tableInfo = provider.resolveTableInfo(fullTableName, withDefaults)
@@ -236,14 +267,19 @@ case class SyncToExternalCommand(
       case "parquet" =>
         new ParquetDirectoryReader(sourcePath, sourceCredentials, schemaSourcePath)
       case "iceberg" =>
-        val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials)
-        new IcebergSourceReader(sourcePath, effectiveCatalogName.getOrElse("default"), icebergConfig, fromSnapshot)
+        val icebergConfig = buildIcebergConfig(mergedConfigs, sourceCredentials, earlyStoredConfig)
+        new IcebergSourceReader(
+          sourcePath,
+          effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
+          icebergConfig,
+          fromSnapshot
+        )
       case other =>
         throw new IllegalArgumentException(s"Unsupported source format: $other")
     }
 
     try
-      executeSyncWithReader(sparkSession, reader, mergedConfigs, resolvedStorageLocation, startTime)
+      executeSyncWithReader(sparkSession, reader, mergedConfigs, resolvedStorageLocation, startTime, earlyStoredConfig)
     finally
       reader.close()
   }
@@ -282,7 +318,8 @@ case class SyncToExternalCommand(
     reader: CompanionSourceReader,
     mergedConfigs: Map[String, String],
     resolvedStorageLocation: Option[String],
-    startTime: Long
+    startTime: Long,
+    earlyStoredConfig: Map[String, String] = Map.empty
   ): Seq[Row] = {
     // 1. Check if distributed log read is enabled (default: true)
     val distributedEnabled = mergedConfigs
@@ -316,7 +353,7 @@ case class SyncToExternalCommand(
             // fromSnapshot means "return changes added after this snapshot" (incremental filter),
             // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
             scanner.scanIcebergTable(
-              effectiveCatalogName.getOrElse("default"),
+              effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
@@ -458,25 +495,293 @@ case class SyncToExternalCommand(
       val sourceSchema                   = sourceSchemaOpt.getOrElse(reader.schema())
       val (existingFiles, isInitialSync) = determineSyncMode(transactionLog, sourceSchema, partitionColumns)
 
+      // Precompute lowercase sets used throughout validation
+      val partitionColumnsLower = partitionColumns.map(_.toLowerCase).toSet
+      val dataColumnsLower      = sourceSchema.fieldNames.map(_.toLowerCase).toSet
+      val allSourceColumnsLower = dataColumnsLower ++ partitionColumnsLower
+      val fieldByLowerName      = sourceSchema.fields.map(f => f.name.toLowerCase -> f).toMap
+
+      // Read stored companion metadata once for incremental sync
+      val storedConfig: Map[String, String] = if (!isInitialSync) {
+        try { transactionLog.getMetadata().configuration } catch { case _: Exception => Map.empty }
+      } else Map.empty
+
+      def storedCsv(key: String): Seq[String] =
+        storedConfig.get(key).filter(_.nonEmpty).map { value =>
+          if (value.startsWith("[")) {
+            // JSON array format (new)
+            io.indextables.spark.util.JsonUtil.parseStringArray(value)
+          } else {
+            // CSV format (legacy)
+            value.split(",").map(_.trim).toSeq
+          }
+        }.getOrElse(Seq.empty)
+
+      def storedJsonMap(key: String): Map[String, String] =
+        storedConfig.get(key).map { json =>
+          import com.fasterxml.jackson.core.`type`.TypeReference
+          io.indextables.spark.util.JsonUtil.mapper
+            .readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
+        }.getOrElse(Map.empty)
+
+      // 6a. Resolve effective include/exclude columns
+      val (effectiveIncludeColumns, effectiveExcludeColumns) = {
+        val storedInclude = storedCsv("indextables.companion.includeColumns")
+        val storedExclude = storedCsv("indextables.companion.excludeColumns")
+
+        val effInclude = if (includeColumns.nonEmpty) includeColumns
+          else storedInclude
+        val effExclude = if (excludeColumns.nonEmpty) excludeColumns
+          else storedExclude
+
+        // R5: Warn if column selection changed between syncs
+        if (!isInitialSync && includeColumns.nonEmpty && storedInclude.nonEmpty &&
+            includeColumns.map(_.toLowerCase).toSet != storedInclude.map(_.toLowerCase).toSet) {
+          logger.warn("INCLUDE COLUMNS changed since last sync. Old splits may have different indexed columns.")
+        }
+        if (!isInitialSync && excludeColumns.nonEmpty && storedExclude.nonEmpty &&
+            excludeColumns.map(_.toLowerCase).toSet != storedExclude.map(_.toLowerCase).toSet) {
+          logger.warn("EXCLUDE COLUMNS changed since last sync. Old splits may have different indexed columns.")
+        }
+
+        // R5: Warn and skip dropped columns — only for columns restored from metadata, not user-specified
+        val cleanedInclude = if (includeColumns.isEmpty && storedInclude.nonEmpty) {
+          // Restoring from metadata: silently skip dropped columns
+          effInclude.filter { col =>
+            if (!allSourceColumnsLower.contains(col.toLowerCase)) {
+              logger.warn(s"Column '$col' in stored INCLUDE COLUMNS no longer exists in source schema. Skipping.")
+              false
+            } else true
+          }
+        } else {
+          effInclude // user-specified: will be validated later with error
+        }
+
+        // R5: Warn and skip dropped columns for EXCLUDE — only for columns restored from metadata
+        val cleanedExclude = if (excludeColumns.isEmpty && storedExclude.nonEmpty) {
+          effExclude.filter { col =>
+            if (!allSourceColumnsLower.contains(col.toLowerCase)) {
+              logger.warn(s"Column '$col' in stored EXCLUDE COLUMNS no longer exists in source schema. Skipping.")
+              false
+            } else true
+          }
+        } else {
+          effExclude
+        }
+
+        // R5: Drop-all detection on metadata-restore path.
+        // INCLUDE drop-all → error: the index would cover zero columns, but the
+        // downstream zero-indexed-columns guard emits a generic message. Surface
+        // a specific error pointing at the dropped columns instead.
+        if (includeColumns.isEmpty && storedInclude.nonEmpty && cleanedInclude.isEmpty) {
+          throw new IllegalArgumentException(
+            s"All stored INCLUDE COLUMNS (${storedInclude.mkString(", ")}) have been dropped " +
+              s"from the source schema. Cannot continue incremental sync — drop the companion " +
+              s"index and rebuild with a new INCLUDE COLUMNS clause."
+          )
+        }
+        // EXCLUDE drop-all → warn: semantically equivalent to "exclude nothing"
+        // (the excluded columns no longer exist), so continue with a full-schema
+        // index. Log a warning so the user notices the now-vacuous EXCLUDE list.
+        if (excludeColumns.isEmpty && storedExclude.nonEmpty && cleanedExclude.isEmpty) {
+          logger.warn(
+            s"All stored EXCLUDE COLUMNS (${storedExclude.mkString(", ")}) have been dropped " +
+              s"from the source schema. Continuing with a full-schema index — this companion " +
+              s"now indexes every remaining column. Rebuild the companion explicitly if this is unintended."
+          )
+        }
+
+        // R6: Warn on new columns with EXCLUDE COLUMNS and detect type changes
+        if (!isInitialSync) {
+          val storedColumnTypes: Map[String, String] = storedJsonMap("indextables.companion.columnTypes")
+
+          if (storedColumnTypes.nonEmpty) {
+            // R6: Warn on new columns with EXCLUDE COLUMNS
+            if (effExclude.nonEmpty) {
+              val excludedLower = effExclude.map(_.toLowerCase).toSet
+              sourceSchema.fields.foreach { field =>
+                val colLower = field.name.toLowerCase
+                if (!excludedLower.contains(colLower) && !partitionColumnsLower.contains(colLower) &&
+                    !storedColumnTypes.contains(colLower)) {
+                  logger.warn(
+                    s"New column '${field.name}' detected in source schema, not in EXCLUDE COLUMNS, will be indexed."
+                  )
+                }
+              }
+            }
+
+            // R6: Detect type changes (widening vs breaking) — only for indexed columns
+            val indexedColumnsLower: Set[String] = if (cleanedInclude.nonEmpty) {
+              cleanedInclude.map(_.toLowerCase).toSet
+            } else if (cleanedExclude.nonEmpty) {
+              val excludedLower = cleanedExclude.map(_.toLowerCase).toSet
+              dataColumnsLower -- excludedLower
+            } else {
+              dataColumnsLower
+            }
+            val decPattern = """decimal\((\d+),(\d+)\)""".r
+            sourceSchema.fields
+              .filter(f => indexedColumnsLower.contains(f.name.toLowerCase))
+              .foreach { field =>
+                val colLower = field.name.toLowerCase
+                storedColumnTypes.get(colLower).foreach { storedType =>
+                  val currentType = field.dataType.simpleString
+                  if (storedType != currentType) {
+                    // Spark simpleString values: tinyint, smallint, int, bigint, float, double, decimal(p,s)
+                    val isWidening = (storedType, currentType) match {
+                      case ("tinyint", "smallint") | ("tinyint", "int") | ("tinyint", "bigint") => true
+                      case ("smallint", "int") | ("smallint", "bigint")                         => true
+                      case ("int", "bigint")                                                     => true
+                      case ("float", "double")                                                   => true
+                      case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
+                        (storedType, currentType) match {
+                          case (decPattern(sp, ss), decPattern(cp, cs)) =>
+                            val precisionOk = cp.toInt >= sp.toInt
+                            val scaleOk = cs.toInt >= ss.toInt
+                            if (precisionOk && scaleOk) {
+                              true
+                            } else {
+                              val reasons = Seq(
+                                if (!precisionOk) Some(s"precision decreased from $sp to $cp") else None,
+                                if (!scaleOk) Some(s"scale decreased from $ss to $cs") else None
+                              ).flatten.mkString(" and ")
+                              throw new IllegalArgumentException(
+                                s"Column '${field.name}' decimal type changed from $storedType to $currentType ($reasons). " +
+                                  s"Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
+                              )
+                            }
+                          case _ => false
+                        }
+                      case _                                                                     => false
+                    }
+                    if (isWidening) {
+                      logger.warn(
+                        s"Column '${field.name}' type widened from $storedType to $currentType. " +
+                          s"Old splits retain the original type."
+                      )
+                    } else {
+                      throw new IllegalArgumentException(
+                        s"Column '${field.name}' type changed from $storedType to $currentType. " +
+                          s"This is a breaking change. Use INVALIDATE ALL PARTITIONS to rebuild the companion index."
+                      )
+                    }
+                  }
+                }
+              }
+          }
+        }
+
+        (cleanedInclude, cleanedExclude)
+      }
+
+      // Defensive guard: mutual exclusivity should be enforced at parse time, but verify
+      // after metadata restore in case stored metadata is corrupted
+      require(!(effectiveIncludeColumns.nonEmpty && effectiveExcludeColumns.nonEmpty),
+        "Cannot have both INCLUDE COLUMNS and EXCLUDE COLUMNS — check stored companion metadata for corruption.")
+
+      // Helper: format available columns truncated at 20
+      def formatAvailableColumns(cols: Seq[String]): String = {
+        val maxShow = 20
+        if (cols.size <= maxShow) cols.mkString(", ")
+        else cols.take(maxShow).mkString(", ") + s", ... (showing $maxShow of ${cols.size})"
+      }
+      val dataOnlyColumns = sourceSchema.fieldNames.filterNot(c => partitionColumnsLower.contains(c.toLowerCase))
+      val availableColumnsFormatted = formatAvailableColumns(dataOnlyColumns)
+
+      // R1: Detect duplicate columns
+      def checkDuplicates(cols: Seq[String], clauseName: String): Unit = {
+        val seen = scala.collection.mutable.Set.empty[String]
+        cols.foreach { col =>
+          val lower = col.toLowerCase
+          if (!seen.add(lower)) {
+            throw new IllegalArgumentException(s"Duplicate column '$col' in $clauseName.")
+          }
+        }
+      }
+      if (effectiveIncludeColumns.nonEmpty) checkDuplicates(effectiveIncludeColumns, "INCLUDE COLUMNS")
+      if (effectiveExcludeColumns.nonEmpty) checkDuplicates(effectiveExcludeColumns, "EXCLUDE COLUMNS")
+
+      // R1: Separate partition columns (warn and ignore) from data columns
+      def filterPartitionColumns(cols: Seq[String], clauseName: String): Seq[String] =
+        cols.filter { col =>
+          if (partitionColumnsLower.contains(col.toLowerCase)) {
+            logger.warn(
+              s"Column '$col' is a partition column — partition columns are indexed automatically. " +
+                s"Ignoring in $clauseName."
+            )
+            false
+          } else true
+        }
+
+      val filteredIncludeColumns = filterPartitionColumns(effectiveIncludeColumns, "INCLUDE COLUMNS")
+      val filteredExcludeColumns = filterPartitionColumns(effectiveExcludeColumns, "EXCLUDE COLUMNS")
+
+      // R1: Guard against INCLUDE COLUMNS containing only partition columns
+      if (includeColumns.nonEmpty && filteredIncludeColumns.isEmpty) {
+        throw new IllegalArgumentException(
+          "INCLUDE COLUMNS contains only partition columns. " +
+            "Partition columns are always indexed — specify at least one non-partition column."
+        )
+      }
+
+      // R1: Validate columns exist in source schema (after filtering out partition columns)
+      filteredIncludeColumns.foreach { col =>
+        if (!dataColumnsLower.contains(col.toLowerCase) && !partitionColumnsLower.contains(col.toLowerCase)) {
+          throw new IllegalArgumentException(
+            s"Column '$col' in INCLUDE COLUMNS does not exist in source schema. " +
+              s"Available columns: $availableColumnsFormatted"
+          )
+        }
+      }
+      filteredExcludeColumns.foreach { col =>
+        if (!dataColumnsLower.contains(col.toLowerCase) && !partitionColumnsLower.contains(col.toLowerCase)) {
+          throw new IllegalArgumentException(
+            s"Column '$col' in EXCLUDE COLUMNS does not exist in source schema. " +
+              s"Available columns: $availableColumnsFormatted"
+          )
+        }
+      }
+
+      // Compute skip fields from include/exclude columns
+      val effectiveSkipFields: Seq[String] = if (filteredIncludeColumns.nonEmpty) {
+        val included = filteredIncludeColumns.map(_.toLowerCase).toSet
+        sourceSchema.fieldNames.filterNot(c => included.contains(c.toLowerCase)).toSeq
+      } else {
+        // Use actual schema field names for case-correct skip fields (Rust layer does exact matching)
+        val excludedLower = filteredExcludeColumns.map(_.toLowerCase).toSet
+        sourceSchema.fieldNames.filter(c => excludedLower.contains(c.toLowerCase)).toSeq
+      }
+
+      val skipFieldsLower = effectiveSkipFields.map(_.toLowerCase).toSet
+
+      // R3: Zero indexed columns check
+      if (filteredIncludeColumns.nonEmpty || filteredExcludeColumns.nonEmpty) {
+        val indexedDataColumns = sourceSchema.fieldNames.filterNot(c => skipFieldsLower.contains(c.toLowerCase))
+        if (indexedDataColumns.isEmpty) {
+          throw new IllegalArgumentException(
+            "INCLUDE/EXCLUDE COLUMNS results in zero indexed columns. At least one non-partition column must be indexed."
+          )
+        }
+      }
+
+      // R3: Binary column warning
+      sourceSchema.fields.foreach { field =>
+        if (!skipFieldsLower.contains(field.name.toLowerCase)) {
+          if (field.dataType == org.apache.spark.sql.types.BinaryType) {
+            logger.warn(s"Column '${field.name}' (binary) will be stored but not searchable or filterable.")
+          }
+        }
+      }
+
+      if (effectiveSkipFields.nonEmpty) {
+        logger.info(s"Skipping ${effectiveSkipFields.size} columns from indexing: ${effectiveSkipFields.mkString(", ")}")
+      }
+
       // 6. On incremental sync, fall back to stored indexing modes/WHERE if not specified
       val effectiveIndexingModes = if (indexingModes.nonEmpty) {
         indexingModes
       } else if (!isInitialSync) {
-        try {
-          val existingMeta = transactionLog.getMetadata()
-          existingMeta.configuration
-            .get("indextables.companion.indexingModes")
-            .map { json =>
-              import com.fasterxml.jackson.core.`type`.TypeReference
-              io.indextables.spark.util.JsonUtil.mapper
-                .readValue(json, new TypeReference[java.util.Map[String, String]]() {})
-                .asScala
-                .toMap
-            }
-            .getOrElse(Map.empty)
-        } catch {
-          case _: Exception => Map.empty[String, String]
-        }
+        storedJsonMap("indextables.companion.indexingModes")
       } else {
         Map.empty[String, String]
       }
@@ -503,16 +808,129 @@ case class SyncToExternalCommand(
 
       // Validate field names exist in source schema
       if (effectiveIndexingModes.nonEmpty) {
-        val schemaFieldNames = sourceSchema.fieldNames.map(_.toLowerCase).toSet ++
-          partitionColumns.map(_.toLowerCase).toSet
+        val schemaFieldNames = dataColumnsLower ++ partitionColumnsLower
         effectiveIndexingModes.foreach {
-          case (field, mode) =>
+          case (field, _) =>
             if (!schemaFieldNames.contains(field.toLowerCase)) {
               throw new IllegalArgumentException(
                 s"Field '$field' specified in INDEXING MODES does not exist in source schema. " +
-                  s"Available fields: ${(sourceSchema.fieldNames ++ partitionColumns).mkString(", ")}"
+                  s"Available fields: $availableColumnsFormatted"
               )
             }
+        }
+      }
+
+      // R2: Validate INDEXING MODES type compatibility
+      if (effectiveIndexingModes.nonEmpty) {
+        effectiveIndexingModes.foreach { case (field, mode) =>
+          val fieldType = fieldByLowerName.get(field.toLowerCase).map(_.dataType)
+          fieldType.foreach { dt =>
+            val modeLower = mode.toLowerCase
+            val requiresString = modeLower == "text" || modeLower == "ip" || modeLower == "ipaddress" ||
+              modeLower == "exact_only" || modeLower == "string" ||
+              IndexingModes.isCompactStringMode(mode)
+            val isJsonMode = modeLower == "json"
+
+            if (requiresString && dt != org.apache.spark.sql.types.StringType) {
+              throw new IllegalArgumentException(
+                s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode '$mode'. " +
+                  s"Mode '$mode' requires string type."
+              )
+            }
+            if (isJsonMode && dt != org.apache.spark.sql.types.StringType &&
+                !dt.isInstanceOf[org.apache.spark.sql.types.StructType] &&
+                !dt.isInstanceOf[org.apache.spark.sql.types.ArrayType] &&
+                !dt.isInstanceOf[org.apache.spark.sql.types.MapType]) {
+              throw new IllegalArgumentException(
+                s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode 'json'. " +
+                  s"Mode 'json' requires string, struct, array, or map type."
+              )
+            }
+            // Struct/Array/Map columns must use 'json' mode if explicitly set
+            if (!isJsonMode && (dt.isInstanceOf[org.apache.spark.sql.types.StructType] ||
+                dt.isInstanceOf[org.apache.spark.sql.types.ArrayType] ||
+                dt.isInstanceOf[org.apache.spark.sql.types.MapType])) {
+              throw new IllegalArgumentException(
+                s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode '$mode'. " +
+                  s"Struct, array, and map types require mode 'json'."
+              )
+            }
+          }
+        }
+      }
+
+      // Validate INDEXING MODES fields are within included columns (if INCLUDE COLUMNS specified)
+      if (filteredIncludeColumns.nonEmpty && effectiveIndexingModes.nonEmpty) {
+        val included = filteredIncludeColumns.map(_.toLowerCase).toSet
+        effectiveIndexingModes.foreach {
+          case (field, _) =>
+            if (!included.contains(field.toLowerCase)) {
+              throw new IllegalArgumentException(
+                s"Field '$field' in INDEXING MODES is not in INCLUDE COLUMNS. " +
+                  s"Included columns: ${filteredIncludeColumns.mkString(", ")}"
+              )
+            }
+        }
+      }
+
+      // Validate INDEXING MODES fields are not in EXCLUDE COLUMNS
+      if (filteredExcludeColumns.nonEmpty && effectiveIndexingModes.nonEmpty) {
+        val excluded = filteredExcludeColumns.map(_.toLowerCase).toSet
+        effectiveIndexingModes.foreach {
+          case (field, _) =>
+            if (excluded.contains(field.toLowerCase)) {
+              throw new IllegalArgumentException(
+                s"Field '$field' in INDEXING MODES is in EXCLUDE COLUMNS and will not be indexed."
+              )
+            }
+        }
+      }
+
+      // R3: Validate HASHED FASTFIELDS fields are within included columns and have string type
+      if (filteredIncludeColumns.nonEmpty) {
+        val included = filteredIncludeColumns.map(_.toLowerCase).toSet
+        (hashedFastfieldsInclude ++ hashedFastfieldsExclude).foreach { field =>
+          if (!included.contains(field.toLowerCase)) {
+            throw new IllegalArgumentException(
+              s"Field '$field' in HASHED FASTFIELDS is not in INCLUDE COLUMNS. " +
+                s"Included columns: ${filteredIncludeColumns.mkString(", ")}"
+            )
+          }
+        }
+      }
+      // Validate HASHED FASTFIELDS fields are not in EXCLUDE COLUMNS
+      if (filteredExcludeColumns.nonEmpty) {
+        val excluded = filteredExcludeColumns.map(_.toLowerCase).toSet
+        (hashedFastfieldsInclude ++ hashedFastfieldsExclude).foreach { field =>
+          if (excluded.contains(field.toLowerCase)) {
+            throw new IllegalArgumentException(
+              s"Field '$field' in HASHED FASTFIELDS is in EXCLUDE COLUMNS and will not be indexed."
+            )
+          }
+        }
+      }
+      (hashedFastfieldsInclude ++ hashedFastfieldsExclude).foreach { field =>
+        val fieldType = sourceSchema.fields
+          .find(_.name.equalsIgnoreCase(field))
+          .map(_.dataType)
+        fieldType.foreach { dt =>
+          if (dt != org.apache.spark.sql.types.StringType) {
+            throw new IllegalArgumentException(
+              s"Field '$field' in HASHED FASTFIELDS has type ${dt.simpleString}. " +
+                s"Hashed fast fields require string type."
+            )
+          }
+        }
+        // Validate hashed fastfields are not text fields — hashing a tokenized text field is meaningless
+        val fieldMode = effectiveIndexingModes
+          .find(_._1.equalsIgnoreCase(field)).map(_._2)
+        fieldMode.foreach { mode =>
+          if (mode.toLowerCase == "text") {
+            throw new IllegalArgumentException(
+              s"Field '$field' cannot be in both HASHED FASTFIELDS and INDEXING MODES with 'text' mode. " +
+                s"Hashed fast fields store a hash of the raw string value, which is incompatible with tokenized text fields."
+            )
+          }
         }
       }
 
@@ -520,15 +938,7 @@ case class SyncToExternalCommand(
       val effectiveWherePredicates = if (wherePredicates.nonEmpty) {
         wherePredicates
       } else if (!isInitialSync) {
-        try {
-          val existingMeta = transactionLog.getMetadata()
-          existingMeta.configuration
-            .get("indextables.companion.whereClause")
-            .map(Seq(_))
-            .getOrElse(Seq.empty)
-        } catch {
-          case _: Exception => Seq.empty[String]
-        }
+        storedConfig.get("indextables.companion.whereClause").map(Seq(_)).getOrElse(Seq.empty)
       } else {
         Seq.empty[String]
       }
@@ -538,20 +948,9 @@ case class SyncToExternalCommand(
         if (hashedFastfieldsInclude.nonEmpty || hashedFastfieldsExclude.nonEmpty) {
           (hashedFastfieldsInclude, hashedFastfieldsExclude)
         } else if (!isInitialSync) {
-          try {
-            val existingMeta = transactionLog.getMetadata()
-            val inc = existingMeta.configuration
-              .get("indextables.companion.hashedFastfieldsInclude")
-              .map(_.split(",").filter(_.nonEmpty).toSeq)
-              .getOrElse(Seq.empty)
-            val exc = existingMeta.configuration
-              .get("indextables.companion.hashedFastfieldsExclude")
-              .map(_.split(",").filter(_.nonEmpty).toSeq)
-              .getOrElse(Seq.empty)
-            (inc, exc)
-          } catch {
-            case _: Exception => (Seq.empty[String], Seq.empty[String])
-          }
+          val inc = storedCsv("indextables.companion.hashedFastfieldsInclude")
+          val exc = storedCsv("indextables.companion.hashedFastfieldsExclude")
+          (inc, exc)
         } else {
           (Seq.empty[String], Seq.empty[String])
         }
@@ -560,14 +959,12 @@ case class SyncToExternalCommand(
       // When no HASHED FASTFIELDS clause is specified, tantivy4java hashes ALL string columns by default,
       // which can produce oversized splits with many useless hashed columns.
       if (effectiveHfInclude.isEmpty && effectiveHfExclude.isEmpty) {
-        val textFields = effectiveIndexingModes.collect {
-          case (f, m) if m.toLowerCase == "text" => f.toLowerCase
-        }.toSet
-        val partitionFieldsLower = partitionColumns.map(_.toLowerCase).toSet
+        val textFields = effectiveIndexingModes.collect { case (f, m) if m.toLowerCase == "text" => f.toLowerCase }.toSet
         val hashableStringColumns = sourceSchema.fields.count { field =>
           field.dataType == StringType &&
-          !textFields.contains(field.name.toLowerCase) &&
-          !partitionFieldsLower.contains(field.name.toLowerCase)
+            !textFields.contains(field.name.toLowerCase) &&
+            !partitionColumnsLower.contains(field.name.toLowerCase) &&
+            !skipFieldsLower.contains(field.name.toLowerCase)
         }
         val maxAutomaticHashedFastfields = mergedConfigs
           .get("spark.indextables.companion.maxAutomaticHashedFastfields")
@@ -735,7 +1132,11 @@ case class SyncToExternalCommand(
           sampleFilePath
             .map { url =>
               try {
-                val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
+                val icebergConfig = buildIcebergConfig(
+                  mergedConfigs,
+                  resolveCredentials(mergedConfigs, sourcePath),
+                  earlyStoredConfig
+                )
                 val icebergTableSchema = fromSnapshot match {
                   case Some(id) =>
                     val (ns, tbl) = {
@@ -743,7 +1144,7 @@ case class SyncToExternalCommand(
                       (parts(0), parts(1))
                     }
                     io.indextables.tantivy4java.iceberg.IcebergTableReader.readSchema(
-                      effectiveCatalogName.getOrElse("default"),
+                      effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
                       ns,
                       tbl,
                       icebergConfig,
@@ -755,7 +1156,7 @@ case class SyncToExternalCommand(
                       (parts(0), parts(1))
                     }
                     io.indextables.tantivy4java.iceberg.IcebergTableReader.readSchema(
-                      effectiveCatalogName.getOrElse("default"),
+                      effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
                       ns,
                       tbl,
                       icebergConfig
@@ -776,6 +1177,15 @@ case class SyncToExternalCommand(
         case _ => reader.columnNameMapping()
       }
 
+      // Translate logical skip fields to physical column names for column-mapped tables
+      val physicalSkipFields: Seq[String] = if (effectiveSkipFields.nonEmpty && effectiveColumnNameMapping.nonEmpty) {
+        // effectiveColumnNameMapping is physical→logical, we need logical→physical
+        val logicalToPhysical = effectiveColumnNameMapping.map { case (phys, log) => log.toLowerCase -> phys }
+        effectiveSkipFields.map(col => logicalToPhysical.getOrElse(col.toLowerCase, col))
+      } else {
+        effectiveSkipFields
+      }
+
       val syncConfig = SyncConfig(
         indexingModes = effectiveIndexingModes,
         fastFieldMode = fastFieldMode,
@@ -787,7 +1197,8 @@ case class SyncToExternalCommand(
         columnNameMapping = effectiveColumnNameMapping,
         autoDetectNameMapping = sourceFormat == "iceberg",
         hashedFastfieldsInclude = effectiveHfInclude,
-        hashedFastfieldsExclude = effectiveHfExclude
+        hashedFastfieldsExclude = effectiveHfExclude,
+        skipFields = physicalSkipFields
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
@@ -808,7 +1219,12 @@ case class SyncToExternalCommand(
         batchSize,
         maxConcurrentBatches,
         externalStorageRoot,
-        startTime
+        startTime,
+        Some(sourceSchema),
+        filteredIncludeColumns,
+        filteredExcludeColumns,
+        effectiveSkipFields,
+        earlyStoredConfig
       )
     } finally
       transactionLog.close()
@@ -834,7 +1250,12 @@ case class SyncToExternalCommand(
     batchSize: Int,
     maxConcurrentBatches: Int,
     externalStorageRoot: Option[String],
-    startTime: Long
+    startTime: Long,
+    sourceSchema: Option[StructType] = None,
+    filteredIncludeColumns: Seq[String] = Seq.empty,
+    filteredExcludeColumns: Seq[String] = Seq.empty,
+    effectiveSkipFields: Seq[String] = Seq.empty,
+    storedConfig: Map[String, String] = Map.empty
   ): Seq[Row] = {
     import scala.collection.parallel.ForkJoinTaskSupport
     import java.util.concurrent.ForkJoinPool
@@ -974,7 +1395,12 @@ case class SyncToExternalCommand(
                     effectiveHfInclude,
                     effectiveHfExclude,
                     sourceVersion,
-                    externalStorageRoot
+                    externalStorageRoot,
+                    sourceSchema,
+                    filteredIncludeColumns,
+                    filteredExcludeColumns,
+                    skipFields = effectiveSkipFields,
+                    storedConfig = storedConfig
                   )
                 )
 
@@ -1073,53 +1499,84 @@ case class SyncToExternalCommand(
     effectiveHfInclude: Seq[String],
     effectiveHfExclude: Seq[String],
     sourceVersion: Long,
-    externalStorageRoot: Option[String]
+    externalStorageRoot: Option[String],
+    sourceSchema: Option[StructType] = None,
+    filteredIncludeColumns: Seq[String] = Seq.empty,
+    filteredExcludeColumns: Seq[String] = Seq.empty,
+    skipFields: Seq[String] = Seq.empty,
+    storedConfig: Map[String, String] = Map.empty
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
-    val companionConfig = existingMetadata.configuration ++ Map(
+    val builder = Map.newBuilder[String, String]
+
+    builder ++= Map(
       "indextables.companion.enabled"           -> "true",
       "indextables.companion.sourceTablePath"   -> sourcePath,
       "indextables.companion.sourceFormat"      -> sourceFormat,
       "indextables.companion.lastSyncedVersion" -> sourceVersion.toString,
       "indextables.companion.fastFieldMode"     -> fastFieldMode
-    ) ++ (if (sourceFormat == "iceberg") {
-            Map(
-              "indextables.companion.icebergCatalog" -> effectiveCatalogName.getOrElse("default")
-            ) ++ effectiveWarehouse.map(w => "indextables.companion.icebergWarehouse" -> w) ++ catalogType.map(ct =>
-              "indextables.companion.icebergCatalogType" -> ct
-            ) ++ externalStorageRoot.map(root => "indextables.companion.parquetStorageRoot" -> root)
-          } else if (sourceFormat == "delta" && isTableName(sourcePath) && externalStorageRoot.isDefined) {
-            // Delta UC table name resolution: store metadata for read-path credential resolution
-            Map(
-              "indextables.companion.parquetStorageRoot" -> externalStorageRoot.get,
-              "indextables.companion.deltaTableName"     -> sourcePath,
-              "indextables.companion.deltaCatalog"       -> effectiveCatalogName.getOrElse("")
-            )
-          } else Map.empty) ++ (if (effectiveIndexingModes.nonEmpty) {
-                                  Map(
-                                    "indextables.companion.indexingModes" -> io.indextables.spark.util.JsonUtil.mapper
-                                      .writeValueAsString(
-                                        effectiveIndexingModes.asJava
-                                      )
-                                  )
-                                } else Map.empty) ++ (if (effectiveWherePredicates.nonEmpty) {
-                                                        Map(
-                                                          "indextables.companion.whereClause" -> effectiveWherePredicates.head
-                                                        )
-                                                      } else Map.empty) ++ fromVersion.map(v =>
-      "indextables.companion.fromVersion" -> v.toString
-    ) ++ (if (effectiveHfInclude.nonEmpty)
-            Map("indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(","))
-          else Map.empty) ++ (if (effectiveHfExclude.nonEmpty)
-                                Map("indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(","))
-                              else Map.empty) ++ tableRoots.flatMap {
-      case (name, path) =>
-        Map(
-          TableRootUtils.rootKey(name)      -> path,
-          TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
+    )
+
+    if (sourceFormat == "iceberg") {
+      // Use the restored effective values (SQL > stored metadata) so that on
+      // incremental sync without an explicit CATALOG/WAREHOUSE clause, the
+      // previously-stored values are preserved rather than clobbered with
+      // "default" / absent.
+      builder += "indextables.companion.icebergCatalog" -> effectiveCatalogName(storedConfig).getOrElse("default")
+      effectiveWarehouse(storedConfig).foreach(w => builder += "indextables.companion.icebergWarehouse" -> w)
+      catalogType
+        .orElse(storedConfig.get("indextables.companion.icebergCatalogType"))
+        .foreach(ct => builder += "indextables.companion.icebergCatalogType" -> ct)
+      externalStorageRoot.foreach(root => builder += "indextables.companion.parquetStorageRoot" -> root)
+    } else if (sourceFormat == "delta" && isTableName(sourcePath) && externalStorageRoot.isDefined) {
+      builder += "indextables.companion.parquetStorageRoot" -> externalStorageRoot.get
+      builder += "indextables.companion.deltaTableName"     -> sourcePath
+      builder += "indextables.companion.deltaCatalog"       -> effectiveCatalogName(storedConfig).getOrElse("")
+    }
+
+    if (effectiveIndexingModes.nonEmpty) {
+      builder += "indextables.companion.indexingModes" ->
+        io.indextables.spark.util.JsonUtil.toJson(effectiveIndexingModes.asJava)
+    }
+    if (effectiveWherePredicates.nonEmpty) {
+      builder += "indextables.companion.whereClause" -> effectiveWherePredicates.head
+    }
+    fromVersion.foreach(v => builder += "indextables.companion.fromVersion" -> v.toString)
+
+    if (effectiveHfInclude.nonEmpty) {
+      builder += "indextables.companion.hashedFastfieldsInclude" -> effectiveHfInclude.mkString(",")
+    }
+    if (effectiveHfExclude.nonEmpty) {
+      builder += "indextables.companion.hashedFastfieldsExclude" -> effectiveHfExclude.mkString(",")
+    }
+
+    if (filteredIncludeColumns.nonEmpty) {
+      builder += "indextables.companion.includeColumns" ->
+        io.indextables.spark.util.JsonUtil.toJson(filteredIncludeColumns.asJava)
+    }
+    if (filteredExcludeColumns.nonEmpty) {
+      builder += "indextables.companion.excludeColumns" ->
+        io.indextables.spark.util.JsonUtil.toJson(filteredExcludeColumns.asJava)
+    }
+
+    if (skipFields.nonEmpty) {
+      builder += "indextables.companion.skipFields" ->
+        io.indextables.spark.util.JsonUtil.toJson(skipFields.asJava)
+    }
+
+    sourceSchema.foreach { schema =>
+      builder += "indextables.companion.columnTypes" ->
+        io.indextables.spark.util.JsonUtil.toJson(
+          schema.fields.map(f => f.name.toLowerCase -> f.dataType.simpleString).toMap.asJava
         )
     }
-    existingMetadata.copy(configuration = companionConfig)
+
+    tableRoots.foreach { case (name, path) =>
+      builder += TableRootUtils.rootKey(name)      -> path
+      builder += TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
+    }
+
+    existingMetadata.copy(configuration = existingMetadata.configuration ++ builder.result())
   }
 
   /** Build RemoveAction entries for invalidated splits. */
@@ -1369,17 +1826,23 @@ case class SyncToExternalCommand(
   /**
    * Build Iceberg catalog configuration from merged Spark configs and source credentials. Maps
    * spark.indextables.iceberg.* properties to IcebergTableReader config keys.
+   *
+   * Catalog config fallback order: SQL clause > stored companion metadata > SparkConf. The
+   * `storedConfig` parameter lets incremental syncs reuse CATALOG/TYPE/WAREHOUSE from a prior
+   * sync without the user having to re-specify them.
    */
   private def buildIcebergConfig(
     mergedConfigs: Map[String, String],
-    sourceCredentials: Map[String, String]
+    sourceCredentials: Map[String, String],
+    storedConfig: Map[String, String] = Map.empty
   ): java.util.Map[String, String] = {
     val config = new java.util.HashMap[String, String]()
 
-    // Catalog config: SQL clause values take precedence over spark.indextables.iceberg.*
+    // Catalog config: SQL clause > stored companion metadata > SparkConf
     val effectiveCatalogType = catalogType
+      .orElse(storedConfig.get("indextables.companion.icebergCatalogType"))
       .orElse(mergedConfigs.get("spark.indextables.iceberg.catalogType"))
-    val effectiveWh = effectiveWarehouse
+    val effectiveWh = effectiveWarehouse(storedConfig)
       .orElse(mergedConfigs.get("spark.indextables.iceberg.warehouse"))
 
     effectiveCatalogType.foreach(v => config.put("catalog_type", v))
@@ -1462,6 +1925,22 @@ case class SyncToExternalCommand(
         ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
           ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
       }
+      // Load stored companion metadata once so the cheap path can also honor
+      // the SQL > stored > SparkConf catalog config fallback chain.
+      val cheapStoredConfig: Map[String, String] =
+        if (sourceFormat == "iceberg" || sourceFormat == "delta") {
+          try {
+            val txLog = TransactionLogFactory.create(
+              new Path(destPath),
+              sparkSession,
+              new CaseInsensitiveStringMap(mergedConfigs.asJava)
+            )
+            try txLog.getMetadata().configuration
+            catch { case _: Exception => Map.empty[String, String] }
+            finally txLog.close()
+          } catch { case _: Exception => Map.empty[String, String] }
+        } else Map.empty[String, String]
+
       sourceFormat match {
         case "delta" =>
           val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -1470,14 +1949,14 @@ case class SyncToExternalCommand(
           Some(io.indextables.tantivy4java.delta.DeltaTableReader.getCurrentVersion(kernelPath, deltaConfig))
         case "iceberg" =>
           val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
-          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials)
+          val icebergConfig     = buildIcebergConfig(mergedConfigs, sourceCredentials, cheapStoredConfig)
           val parts             = sourcePath.split("\\.", 2)
           if (parts.length != 2) None
           else {
             val (ns, tbl) = (parts(0), parts(1))
             Some(
               io.indextables.tantivy4java.iceberg.IcebergTableReader
-                .getCurrentSnapshotId(effectiveCatalogName.getOrElse("default"), ns, tbl, icebergConfig)
+                .getCurrentSnapshotId(effectiveCatalogName(cheapStoredConfig).getOrElse("default"), ns, tbl, icebergConfig)
             )
           }
         case _ => None

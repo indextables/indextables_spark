@@ -116,3 +116,32 @@ spark.indextables.indexing.text.maxTokenLength: "legacy"
 spark.indextables.indexing.fastfields: "score,value,timestamp"
 // Auto-fast-field: first numeric field becomes fast if not configured
 ```
+
+---
+
+## Selective Column Indexing (Companion Indexes)
+
+Companion indexes built via `BUILD INDEXTABLES COMPANION` support `INCLUDE COLUMNS`
+and `EXCLUDE COLUMNS` clauses to control which columns are indexed. Use `INCLUDE`
+when you want a small allow-list, and `EXCLUDE` when you want to index everything
+except a few columns (for example, PII fields).
+
+```sql
+-- Index only the listed columns
+BUILD INDEXTABLES COMPANION FOR DELTA 'events'
+  INCLUDE COLUMNS ('user_id', 'event_type', 'timestamp')
+  AT LOCATION 's3://bucket/events_idx';
+
+-- Index everything except the listed columns
+BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.raw'
+  EXCLUDE COLUMNS ('pii_email', 'pii_phone')
+  AT LOCATION 's3://bucket/analytics_idx';
+```
+
+Partition columns are always indexed regardless of these clauses. The selected
+column list is persisted in the companion metadata and reused on incremental
+syncs — you do not need to re-specify it after the initial build.
+
+See [sql-commands.md](./sql-commands.md#build-indextables-companion) for full
+syntax, precedence rules, and interactions with `INDEXING MODES` and
+`HASHED FASTFIELDS`.

@@ -89,6 +89,8 @@ statement
         (SCHEMA SOURCE schemaSourcePath=STRING)?
         (CATALOG catalogName=STRING (TYPE catalogType=STRING)?)?
         (WAREHOUSE warehouse=STRING)?
+        (INCLUDE COLUMNS '(' includeColumnsList=stringList ')')?
+        (EXCLUDE COLUMNS '(' excludeColumnsList=stringList ')')?
         (INDEXING MODES '(' indexingModeList ')')?
         (FASTFIELDS MODE fastFieldMode=(HYBRID | DISABLED | PARQUET_ONLY))?
         (HASHED FASTFIELDS hashedFastfieldsMode=(INCLUDE | EXCLUDE) '(' hashedFastfieldsList=stringList ')')?
@@ -180,6 +182,7 @@ nonReserved
     | SCHEMA | CATALOG | SNAPSHOT | TYPE | WAREHOUSE | HASHED | EXCLUDE | INVALIDATE
     | SET | UNSET | TABLE | ROOT | ROOTS
     | STREAMING | POLL | INTERVAL | SECONDS | MINUTES
+    | COLUMNS
     | ENABLE | DISABLE | RESET | PROFILER
     ;
 
@@ -285,6 +288,7 @@ POLL: [Pp][Oo][Ll][Ll];
 INTERVAL: [Ii][Nn][Tt][Ee][Rr][Vv][Aa][Ll];
 SECONDS: [Ss][Ee][Cc][Oo][Nn][Dd][Ss];
 MINUTES: [Mm][Ii][Nn][Uu][Tt][Ee][Ss];
+COLUMNS: [Cc][Oo][Ll][Uu][Mm][Nn][Ss];
 
 // Literals
 STRING

@@ -904,6 +904,22 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
       logger.debug(s"Writer heap size: $writerHeapSize")
 
+      // Include/Exclude columns
+      val includeColumns: Seq[String] = if (ctx.includeColumnsList != null) {
+        ctx.includeColumnsList.STRING().asScala.map(ParserUtils.string(_)).toSeq
+      } else {
+        Seq.empty
+      }
+      val excludeColumns: Seq[String] = if (ctx.excludeColumnsList != null) {
+        ctx.excludeColumnsList.STRING().asScala.map(ParserUtils.string(_)).toSeq
+      } else {
+        Seq.empty
+      }
+      if (includeColumns.nonEmpty && excludeColumns.nonEmpty) {
+        throw new IllegalArgumentException("Cannot specify both INCLUDE COLUMNS and EXCLUDE COLUMNS")
+      }
+      logger.debug(s"Include columns: $includeColumns, Exclude columns: $excludeColumns")
+
       // Indexing modes
       val indexingModes: Map[String, String] = if (ctx.indexingModeList() != null) {
         ctx
@@ -1016,6 +1032,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         warehouse = warehouse,
         hashedFastfieldsInclude = hashedFastfieldsInclude,
         hashedFastfieldsExclude = hashedFastfieldsExclude,
+        includeColumns = includeColumns,
+        excludeColumns = excludeColumns,
         wherePredicates = wherePredicates,
         invalidateAllPartitions = invalidateAllPartitions,
         tableRoots = tableRoots,

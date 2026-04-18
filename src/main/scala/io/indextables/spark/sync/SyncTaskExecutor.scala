@@ -43,7 +43,8 @@ case class SyncConfig(
   columnNameMapping: Map[String, String] = Map.empty,
   autoDetectNameMapping: Boolean = false,
   hashedFastfieldsInclude: Seq[String] = Seq.empty,
-  hashedFastfieldsExclude: Seq[String] = Seq.empty)
+  hashedFastfieldsExclude: Seq[String] = Seq.empty,
+  skipFields: Seq[String] = Seq.empty)
     extends Serializable
 
 /**
@@ -177,6 +178,12 @@ object SyncTaskExecutor {
       }
       if (config.autoDetectNameMapping) {
         companionConfig.withAutoDetectNameMapping(true)
+      }
+
+      // Apply skip fields (from INCLUDE/EXCLUDE COLUMNS)
+      if (config.skipFields.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: skipping ${config.skipFields.size} columns: ${config.skipFields.mkString(", ")}")
+        companionConfig.withSkipFields(config.skipFields: _*)
       }
 
       // Apply hashed fastfields include/exclude configuration
