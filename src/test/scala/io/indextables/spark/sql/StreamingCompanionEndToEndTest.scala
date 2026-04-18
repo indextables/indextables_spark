@@ -20,7 +20,11 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.transaction.TransactionLogFactory
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -34,7 +38,11 @@ import org.scalatest.BeforeAndAfterAll
  *      in the next cycle. 3. A no-changes poll leaves the companion unmodified. 4. A second new commit is picked up by
  *      a subsequent cycle. 5. A restart resumes from the last synced version without re-indexing existing data.
  */
-class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class StreamingCompanionEndToEndTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -198,6 +206,78 @@ class StreamingCompanionEndToEndTest extends AnyFunSuite with Matchers with Befo
         val thirdSynced = waitUntil(30000)(countCompanionRows(indexPath) == 5)
         withClue("streaming should pick up batch 3 (5 total rows) within 30 s") {
           thirdSynced shouldBe true
+        }
+
+      } finally {
+        thread.interrupt()
+        thread.join(5000)
+      }
+    }
+  }
+
+  /** Read companion metadata configuration via the transaction log. */
+  private def readCompanionConfig(indexPath: String): Map[String, String] = {
+    flushCaches()
+    val options = new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
+    val txLog = TransactionLogFactory.create(new Path(indexPath), spark, options)
+    try {
+      txLog.invalidateCache()
+      txLog.getMetadata().configuration
+    } finally
+      txLog.close()
+  }
+
+  test("streaming Delta companion: INCLUDE COLUMNS persists across polling cycles") {
+    withTempDirs { (deltaPath, indexPath) =>
+      val ss = spark; import ss.implicits._
+
+      // Step 1: Write initial Delta table with 4 columns.
+      Seq((1, "alice", 100.0, "secret_a"), (2, "bob", 200.0, "secret_b"))
+        .toDF("id", "name", "score", "secret")
+        .write.format("delta").save(deltaPath)
+
+      // Step 2: Launch streaming sync with INCLUDE COLUMNS — only id, name should be indexed.
+      val command = makeDeltaCommand(deltaPath, indexPath)
+        .copy(includeColumns = Seq("id", "name"), streamingPollIntervalMs = Some(2000L))
+      val thread  = new Thread(() => command.run(spark))
+      thread.setDaemon(true)
+      thread.start()
+
+      try {
+        // Step 3: Wait for initial cycle (2 rows).
+        val initialSynced = waitUntil(30000)(countCompanionRows(indexPath) == 2)
+        withClue("initial cycle should index 2 rows within 30 s") {
+          initialSynced shouldBe true
+        }
+
+        // Step 4: Verify metadata after first cycle has the INCLUDE list.
+        val configAfterFirst = readCompanionConfig(indexPath)
+        withClue(s"first-cycle metadata: $configAfterFirst") {
+          configAfterFirst.get("indextables.companion.includeColumns") shouldBe defined
+          configAfterFirst("indextables.companion.includeColumns") should include("id")
+          configAfterFirst("indextables.companion.includeColumns") should include("name")
+        }
+
+        // Step 5: Append more data and wait for the second cycle.
+        Seq((3, "charlie", 300.0, "secret_c"))
+          .toDF("id", "name", "score", "secret")
+          .write.format("delta").mode("append").save(deltaPath)
+
+        val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 3)
+        withClue("second cycle should index the appended row within 30 s") {
+          secondSynced shouldBe true
+        }
+
+        // Step 6: Verify metadata after second cycle is unchanged — INCLUDE list
+        // must not have been silently dropped or expanded. This is the
+        // load-bearing assertion for the streaming copy-across-cycles fix.
+        // The excluded-column-filter regression itself is already covered by
+        // CompanionColumnsTestBase's "predicate on excluded column returns
+        // zero results" test — no need to duplicate it here.
+        val configAfterSecond = readCompanionConfig(indexPath)
+        withClue(s"second-cycle metadata: $configAfterSecond") {
+          configAfterSecond("indextables.companion.includeColumns") shouldBe
+            configAfterFirst("indextables.companion.includeColumns")
         }
 
       } finally {

@@ -40,7 +40,11 @@ import org.scalatest.BeforeAndAfterAll
  * (EqualTo, range, In, Not, And, Or, StringStartsWith, StringContains, StringEndsWith), aggregations (COUNT, SUM, AVG,
  * MIN, MAX), GROUP BY, and combined filter + aggregation patterns.
  */
-class CompanionMergeAggregationBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CompanionMergeAggregationBugTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

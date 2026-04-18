@@ -26,13 +26,11 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
-
-import io.indextables.spark.transaction.TransactionLogFactory
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -40,8 +38,8 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Tests for TRUNCATE INDEXTABLES TIME TRAVEL on companion tables built from Delta and Iceberg.
  *
- * Verifies that truncation removes old transaction log versions while preserving data integrity
- * and companion metadata, and that DRY RUN mode previews without deleting.
+ * Verifies that truncation removes old transaction log versions while preserving data integrity and companion metadata,
+ * and that DRY RUN mode previews without deleting.
  */
 class CompanionTruncateTimeTravelTest
     extends AnyFunSuite
@@ -127,8 +125,8 @@ class CompanionTruncateTimeTravelTest
     if (files == null) return (0, 0)
     val versionPattern    = """^\d{20}\.json$""".r
     val checkpointPattern = """^\d{20}\.checkpoint""".r
-    val versionCount    = files.count(f => versionPattern.findFirstIn(f.getName).isDefined)
-    val checkpointCount = files.count(f => checkpointPattern.findFirstIn(f.getName).isDefined)
+    val versionCount      = files.count(f => versionPattern.findFirstIn(f.getName).isDefined)
+    val checkpointCount   = files.count(f => checkpointPattern.findFirstIn(f.getName).isDefined)
     (versionCount, checkpointCount)
   }
 
@@ -139,8 +137,8 @@ class CompanionTruncateTimeTravelTest
       .load(indexPath)
 
   /**
-   * Write initial Delta data (5 rows), build companion, then append 1 row and re-sync
-   * `extraSyncs` times to create multiple tx log versions.
+   * Write initial Delta data (5 rows), build companion, then append 1 row and re-sync `extraSyncs` times to create
+   * multiple tx log versions.
    *
    * Returns (deltaPath, indexPath, totalExpectedRows).
    */
@@ -236,10 +234,12 @@ class CompanionTruncateTimeTravelTest
   }
 
   /**
-   * Create an Iceberg companion with multiple snapshots/syncs. Calls `f` with
-   * (indexPath, icebergTableName, server, rootDir, totalExpectedRows).
+   * Create an Iceberg companion with multiple snapshots/syncs. Calls `f` with (indexPath, icebergTableName, server,
+   * rootDir, totalExpectedRows).
    */
-  private def withIcebergCompanionManySyncs(extraSyncs: Int)(
+  private def withIcebergCompanionManySyncs(
+    extraSyncs: Int
+  )(
     f: (String, String, EmbeddedIcebergRestServer, File, Int) => Unit
   ): Unit = {
     val root         = Files.createTempDirectory("iceberg-truncate-tt").toFile
@@ -294,9 +294,9 @@ class CompanionTruncateTimeTravelTest
 
       f(indexPath, "default.truncate_test", server, root, totalRows)
     } finally {
-      try { spark.conf.unset("spark.indextables.iceberg.catalogType") }
+      try spark.conf.unset("spark.indextables.iceberg.catalogType")
       catch { case _: Exception => }
-      try { spark.conf.unset("spark.indextables.iceberg.uri") }
+      try spark.conf.unset("spark.indextables.iceberg.uri")
       catch { case _: Exception => }
       server.close()
       deleteRecursively(root)
@@ -346,11 +346,9 @@ class CompanionTruncateTimeTravelTest
       row.getLong(2) should be >= 0L // checkpoint_version created
 
       // Verify checkpoint was created (check for checkpoint files or _last_checkpoint)
-      val txLogDir = new java.io.File(indexPath, "_transaction_log")
-      val allFiles = Option(txLogDir.listFiles()).getOrElse(Array.empty)
-      val hasCheckpoint = allFiles.exists(f =>
-        f.getName.contains("checkpoint") || f.getName == "_last_checkpoint"
-      )
+      val txLogDir      = new java.io.File(indexPath, "_transaction_log")
+      val allFiles      = Option(txLogDir.listFiles()).getOrElse(Array.empty)
+      val hasCheckpoint = allFiles.exists(f => f.getName.contains("checkpoint") || f.getName == "_last_checkpoint")
       hasCheckpoint shouldBe true
 
       // Verify data still readable
@@ -460,108 +458,136 @@ class CompanionTruncateTimeTravelTest
   // ═══════════════════════════════════════════════════════════════════════════
 
   test("TRUNCATE on Iceberg companion with many syncs should delete old versions and preserve data") {
-    withIcebergCompanionManySyncs(12) { (indexPath, _, _, _, totalRows) =>
-      // Verify we have many version files before truncation
-      val (versionsBefore, _) = countTransactionLogFiles(indexPath)
-      versionsBefore should be >= 12
+    withIcebergCompanionManySyncs(12) {
+      (
+        indexPath,
+        _,
+        _,
+        _,
+        totalRows
+      ) =>
+        // Verify we have many version files before truncation
+        val (versionsBefore, _) = countTransactionLogFiles(indexPath)
+        versionsBefore should be >= 12
 
-      // Truncate
-      val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'")
-      val row    = result.collect().head
+        // Truncate
+        val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'")
+        val row    = result.collect().head
 
-      row.getString(1) shouldBe "SUCCESS"
+        row.getString(1) shouldBe "SUCCESS"
 
-      // Verify version count decreased
-      val (versionsAfter, _) = countTransactionLogFiles(indexPath)
-      versionsAfter should be < versionsBefore
+        // Verify version count decreased
+        val (versionsAfter, _) = countTransactionLogFiles(indexPath)
+        versionsAfter should be < versionsBefore
 
-      // Verify data still readable via count (uses tantivy fast fields)
-      flushCaches()
-      val df = readCompanion(indexPath)
-      df.count() shouldBe totalRows
+        // Verify data still readable via count (uses tantivy fast fields)
+        flushCaches()
+        val df = readCompanion(indexPath)
+        df.count() shouldBe totalRows
     }
   }
 
   test("Data integrity preserved after truncation on Iceberg companion") {
-    withIcebergCompanionManySyncs(8) { (indexPath, _, _, _, totalRows) =>
-      // Compute aggregations before truncation
-      flushCaches()
-      val dfBefore    = readCompanion(indexPath)
-      val countBefore = dfBefore.count()
-      val aggBefore = dfBefore
-        .agg(sum("score"), min("score"), max("score"))
-        .collect()(0)
-      val sumBefore = aggBefore.getDouble(0)
-      val minBefore = aggBefore.getDouble(1)
-      val maxBefore = aggBefore.getDouble(2)
+    withIcebergCompanionManySyncs(8) {
+      (
+        indexPath,
+        _,
+        _,
+        _,
+        totalRows
+      ) =>
+        // Compute aggregations before truncation
+        flushCaches()
+        val dfBefore    = readCompanion(indexPath)
+        val countBefore = dfBefore.count()
+        val aggBefore = dfBefore
+          .agg(sum("score"), min("score"), max("score"))
+          .collect()(0)
+        val sumBefore = aggBefore.getDouble(0)
+        val minBefore = aggBefore.getDouble(1)
+        val maxBefore = aggBefore.getDouble(2)
 
-      countBefore shouldBe totalRows
+        countBefore shouldBe totalRows
 
-      // Truncate
-      spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'").collect()
+        // Truncate
+        spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'").collect()
 
-      // Verify exact same aggregations after truncation
-      flushCaches()
-      val dfAfter    = readCompanion(indexPath)
-      val countAfter = dfAfter.count()
-      val aggAfter = dfAfter
-        .agg(sum("score"), min("score"), max("score"))
-        .collect()(0)
+        // Verify exact same aggregations after truncation
+        flushCaches()
+        val dfAfter    = readCompanion(indexPath)
+        val countAfter = dfAfter.count()
+        val aggAfter = dfAfter
+          .agg(sum("score"), min("score"), max("score"))
+          .collect()(0)
 
-      countAfter shouldBe countBefore
-      aggAfter.getDouble(0) shouldBe sumBefore
-      aggAfter.getDouble(1) shouldBe minBefore
-      aggAfter.getDouble(2) shouldBe maxBefore
+        countAfter shouldBe countBefore
+        aggAfter.getDouble(0) shouldBe sumBefore
+        aggAfter.getDouble(1) shouldBe minBefore
+        aggAfter.getDouble(2) shouldBe maxBefore
     }
   }
 
   test("Companion metadata preserved after truncation on Iceberg companion") {
-    withIcebergCompanionManySyncs(8) { (indexPath, _, _, _, _) =>
-      // Verify companion config exists before truncation
-      val txLogBefore = TransactionLogFactory.create(new Path(indexPath), spark)
-      try {
-        val metadataBefore = txLogBefore.getMetadata()
-        metadataBefore.configuration.get("indextables.companion.enabled") shouldBe Some("true")
-      } finally txLogBefore.close()
+    withIcebergCompanionManySyncs(8) {
+      (
+        indexPath,
+        _,
+        _,
+        _,
+        _
+      ) =>
+        // Verify companion config exists before truncation
+        val txLogBefore = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val metadataBefore = txLogBefore.getMetadata()
+          metadataBefore.configuration.get("indextables.companion.enabled") shouldBe Some("true")
+        } finally txLogBefore.close()
 
-      // Truncate
-      spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'").collect()
+        // Truncate
+        spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'").collect()
 
-      // Verify companion config still present after truncation
-      flushCaches()
-      val txLogAfter = TransactionLogFactory.create(new Path(indexPath), spark)
-      try {
-        val metadataAfter = txLogAfter.getMetadata()
-        metadataAfter.configuration.get("indextables.companion.enabled") shouldBe Some("true")
-      } finally txLogAfter.close()
+        // Verify companion config still present after truncation
+        flushCaches()
+        val txLogAfter = TransactionLogFactory.create(new Path(indexPath), spark)
+        try {
+          val metadataAfter = txLogAfter.getMetadata()
+          metadataAfter.configuration.get("indextables.companion.enabled") shouldBe Some("true")
+        } finally txLogAfter.close()
     }
   }
 
   test("Re-sync after truncation on Iceberg companion should succeed") {
-    withIcebergCompanionManySyncs(6) { (indexPath, tableName, server, root, totalRows) =>
-      // Truncate
-      spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'").collect()
+    withIcebergCompanionManySyncs(6) {
+      (
+        indexPath,
+        tableName,
+        server,
+        root,
+        totalRows
+      ) =>
+        // Truncate
+        spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$indexPath'").collect()
 
-      // Append new snapshot to Iceberg
-      val ns      = Namespace.of("default")
-      val tableId = TableIdentifier.of(ns, "truncate_test")
-      val newBatch = makeBatch(totalRows + 1, 5)
-      appendIcebergSnapshot(server, tableId, newBatch, root, 100)
+        // Append new snapshot to Iceberg
+        val ns       = Namespace.of("default")
+        val tableId  = TableIdentifier.of(ns, "truncate_test")
+        val newBatch = makeBatch(totalRows + 1, 5)
+        appendIcebergSnapshot(server, tableId, newBatch, root, 100)
 
-      flushCaches()
+        flushCaches()
 
-      // Re-sync after truncation
-      val syncResult = spark
-        .sql(
-          s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableName' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
-        )
-        .collect()
-      syncResult(0).getString(2) shouldBe "success"
+        // Re-sync after truncation
+        val syncResult = spark
+          .sql(
+            s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableName' FASTFIELDS MODE HYBRID AT LOCATION '$indexPath'"
+          )
+          .collect()
+        syncResult(0).getString(2) shouldBe "success"
 
-      // Verify new data appears via count
-      flushCaches()
-      val df = readCompanion(indexPath)
-      df.count() shouldBe (totalRows + 5)
+        // Verify new data appears via count
+        flushCaches()
+        val df = readCompanion(indexPath)
+        df.count() shouldBe (totalRows + 5)
     }
   }
 }

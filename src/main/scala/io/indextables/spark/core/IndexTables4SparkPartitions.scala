@@ -234,4 +234,3 @@ class IndexTables4SparkWriterFactory(
     )
   }
 }
-

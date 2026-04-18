@@ -33,7 +33,11 @@ import org.scalatest.BeforeAndAfterEach
  * Integration test to validate that merge operations correctly populate the numRecords field in transaction log
  * AddAction from tantivy4java metadata
  */
-class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class MergeSplitsNumRecordsTest
+    extends AnyFlatSpec
+    with Matchers
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: File       = _
@@ -206,7 +210,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     println(s"✅ Created ${addActionsBeforeMerge.length} separate files ready for merging")
 
     // Verify data integrity
-    val dataCheck = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
+    val dataCheck         = spark.read.format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT).load(tablePath)
     val actualRecordCount = dataCheck.count()
 
     println(s"Actual record count: $actualRecordCount")

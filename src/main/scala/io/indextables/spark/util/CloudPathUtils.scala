@@ -48,8 +48,8 @@ object CloudPathUtils {
   /**
    * Parse an Azure storage path into (container, blobPath).
    *
-   * Supports azure://, wasb://, wasbs://, abfs://, and abfss:// schemes. Handles Hadoop-style
-   * container@account.host URLs.
+   * Supports azure://, wasb://, wasbs://, abfs://, and abfss:// schemes. Handles Hadoop-style container@account.host
+   * URLs.
    *
    * @param path
    *   Azure path (e.g., "wasbs://container@account.blob.core.windows.net/path")

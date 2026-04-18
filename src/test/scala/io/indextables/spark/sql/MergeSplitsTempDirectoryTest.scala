@@ -37,8 +37,8 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsTempDirectoryTest])
 
-  var tempTablePath: String          = _
-  var customTempDir: String          = _
+  var tempTablePath: String                   = _
+  var customTempDir: String                   = _
   var transactionLog: TransactionLogInterface = _
 
   override def beforeEach(): Unit = {

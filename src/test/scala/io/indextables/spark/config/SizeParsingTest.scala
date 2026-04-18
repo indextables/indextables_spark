@@ -10,7 +10,11 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
 /** Test to verify that human-readable size formats work for indexWriter.heapSize */
-class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class SizeParsingTest
+    extends AnyFlatSpec
+    with Matchers
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   var spark: SparkSession = _
   var tempDir: File       = _

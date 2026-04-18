@@ -17,44 +17,36 @@
 
 package io.indextables.spark.transaction
 
-import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
+import com.fasterxml.jackson.databind.JsonNode
 import io.indextables.spark.util.JsonUtil
 
 /**
- * Serializes Scala Action types to JSON formats expected by the native tantivy4java transaction log
- * API.
+ * Serializes Scala Action types to JSON formats expected by the native tantivy4java transaction log API.
  *
  * Two output formats:
- *   - JSON-lines for `writeVersion()` (GAP-1): one JSON object per line with action type
- *     discriminator
+ *   - JSON-lines for `writeVersion()` (GAP-1): one JSON object per line with action type discriminator
  *   - JSON array for `addFiles()`: array of AddAction objects
  */
 object ActionJsonSerializer {
 
   private val mapper = JsonUtil.mapper
 
-  /**
-   * Serialize a sequence of AddActions to a JSON array string for `TransactionLogWriter.addFiles()`.
-   */
+  /** Serialize a sequence of AddActions to a JSON array string for `TransactionLogWriter.addFiles()`. */
   def addActionsToJson(addActions: Seq[AddAction]): String = {
     val arrayNode = mapper.createArrayNode()
-    addActions.foreach { a => arrayNode.add(addActionToObjectNode(a)) }
+    addActions.foreach(a => arrayNode.add(addActionToObjectNode(a)))
     mapper.writeValueAsString(arrayNode)
   }
 
-  /**
-   * Serialize a ProtocolAction to a JSON-lines entry: `{"protocol":{...}}`.
-   */
+  /** Serialize a ProtocolAction to a JSON-lines entry: `{"protocol":{...}}`. */
   def protocolToJsonLine(protocol: ProtocolAction): String = {
     val wrapper = mapper.createObjectNode()
     wrapper.set[ObjectNode]("protocol", protocolToObjectNode(protocol))
     mapper.writeValueAsString(wrapper)
   }
 
-  /**
-   * Serialize a MetadataAction to a JSON-lines entry: `{"metaData":{...}}`.
-   */
+  /** Serialize a MetadataAction to a JSON-lines entry: `{"metaData":{...}}`. */
   def metadataToJsonLine(metadata: MetadataAction): String = {
     val wrapper = mapper.createObjectNode()
     wrapper.set[ObjectNode]("metaData", metadataToObjectNode(metadata))
@@ -105,9 +97,7 @@ object ActionJsonSerializer {
     node
   }
 
-  /**
-   * Serialize a RemoveAction to a JSON-lines entry: `{"remove":{...}}`.
-   */
+  /** Serialize a RemoveAction to a JSON-lines entry: `{"remove":{...}}`. */
   def removeToJsonLine(remove: RemoveAction): String = {
     val wrapper = mapper.createObjectNode()
     val node    = mapper.createObjectNode()
@@ -130,18 +120,14 @@ object ActionJsonSerializer {
     mapper.writeValueAsString(wrapper)
   }
 
-  /**
-   * Serialize an AddAction to a JSON-lines entry: `{"add":{...}}`.
-   */
+  /** Serialize an AddAction to a JSON-lines entry: `{"add":{...}}`. */
   def addToJsonLine(add: AddAction): String = {
     val wrapper = mapper.createObjectNode()
     wrapper.set[ObjectNode]("add", addActionToObjectNode(add))
     mapper.writeValueAsString(wrapper)
   }
 
-  /**
-   * Serialize a SkipAction to a JSON string for `TransactionLogWriter.skipFile()`.
-   */
+  /** Serialize a SkipAction to a JSON string for `TransactionLogWriter.skipFile()`. */
   def skipActionToJson(skip: SkipAction): String = {
     val node = mapper.createObjectNode()
     node.put("path", skip.path)
@@ -164,35 +150,32 @@ object ActionJsonSerializer {
    *
    * Each action is serialized as a single JSON line with an action type discriminator.
    */
-  def actionsToJsonLines(actions: Seq[Action]): String = {
-    actions.map {
-      case p: ProtocolAction => protocolToJsonLine(p)
-      case m: MetadataAction => metadataToJsonLine(m)
-      case a: AddAction      => addToJsonLine(a)
-      case r: RemoveAction   => removeToJsonLine(r)
-      case s: SkipAction =>
-        val wrapper = mapper.createObjectNode()
-        val skipNode = mapper.createObjectNode()
-        skipNode.put("path", s.path)
-        skipNode.put("skipTimestamp", s.skipTimestamp)
-        skipNode.put("reason", s.reason)
-        skipNode.put("operation", s.operation)
-        s.retryAfter.foreach(skipNode.put("retryAfter", _))
-        skipNode.put("skipCount", s.skipCount)
-        wrapper.set[ObjectNode]("skip", skipNode)
-        mapper.writeValueAsString(wrapper)
-    }.mkString("\n")
-  }
+  def actionsToJsonLines(actions: Seq[Action]): String =
+    actions
+      .map {
+        case p: ProtocolAction => protocolToJsonLine(p)
+        case m: MetadataAction => metadataToJsonLine(m)
+        case a: AddAction      => addToJsonLine(a)
+        case r: RemoveAction   => removeToJsonLine(r)
+        case s: SkipAction =>
+          val wrapper  = mapper.createObjectNode()
+          val skipNode = mapper.createObjectNode()
+          skipNode.put("path", s.path)
+          skipNode.put("skipTimestamp", s.skipTimestamp)
+          skipNode.put("reason", s.reason)
+          skipNode.put("operation", s.operation)
+          s.retryAfter.foreach(skipNode.put("retryAfter", _))
+          skipNode.put("skipCount", s.skipCount)
+          wrapper.set[ObjectNode]("skip", skipNode)
+          mapper.writeValueAsString(wrapper)
+      }
+      .mkString("\n")
 
-  /**
-   * Serialize a ProtocolAction to a standalone JSON string (no wrapper).
-   */
+  /** Serialize a ProtocolAction to a standalone JSON string (no wrapper). */
   def protocolToJson(protocol: ProtocolAction): String =
     mapper.writeValueAsString(protocolToObjectNode(protocol))
 
-  /**
-   * Serialize a MetadataAction to a standalone JSON string (no wrapper).
-   */
+  /** Serialize a MetadataAction to a standalone JSON string (no wrapper). */
   def metadataToJson(metadata: MetadataAction): String =
     mapper.writeValueAsString(metadataToObjectNode(metadata))
 

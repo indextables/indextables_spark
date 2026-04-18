@@ -33,7 +33,10 @@ import org.slf4j.LoggerFactory
  *
  * Tests field validation (fail-fast vs warn-skip), segment selection, and output validation.
  */
-class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PrewarmCacheCommandTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheCommandTest])
 

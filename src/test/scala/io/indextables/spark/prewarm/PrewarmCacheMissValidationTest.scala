@@ -39,7 +39,10 @@ import org.slf4j.LoggerFactory
  *      segments 4. Record cache stats after prewarm 5. Execute queries that would normally cause cache misses 6. Verify
  *      no new cache misses occurred
  */
-class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach with io.indextables.spark.testutils.FileCleanupHelper {
+class PrewarmCacheMissValidationTest
+    extends AnyFunSuite
+    with BeforeAndAfterEach
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheMissValidationTest])
 

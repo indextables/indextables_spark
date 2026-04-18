@@ -271,8 +271,16 @@ class GroupByAggregateColumnarReader(
 
     try {
       val dataGroupByCols = partition.groupByColumns.filterNot(partition.partitionColumns.contains)
-      val isRange = bucketConfig.isInstanceOf[RangeConfig]
-      U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema, columnTypes, isRangeAggregation = isRange)
+      val isRange         = bucketConfig.isInstanceOf[RangeConfig]
+      U.assembleBucketBatch(
+        ffiBatch,
+        columnNames,
+        aggExprs,
+        dataGroupByCols,
+        schema,
+        columnTypes,
+        isRangeAggregation = isRange
+      )
     } finally
       ffiBatch.close()
   }
@@ -563,8 +571,16 @@ class MultiSplitGroupByAggregateColumnarReader(
 
     try {
       val dataGroupByCols = partition.groupByColumns.filterNot(partition.partitionColumns.contains)
-      val isRange = bucketConfig.isInstanceOf[RangeConfig]
-      U.assembleBucketBatch(ffiBatch, columnNames, aggExprs, dataGroupByCols, schema, columnTypes, isRangeAggregation = isRange)
+      val isRange         = bucketConfig.isInstanceOf[RangeConfig]
+      U.assembleBucketBatch(
+        ffiBatch,
+        columnNames,
+        aggExprs,
+        dataGroupByCols,
+        schema,
+        columnTypes,
+        isRangeAggregation = isRange
+      )
     } finally
       ffiBatch.close()
   }

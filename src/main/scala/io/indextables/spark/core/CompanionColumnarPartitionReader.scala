@@ -21,6 +21,7 @@ import java.io.IOException
 
 import scala.jdk.CollectionConverters._
 
+import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.read.PartitionReader
 // NOTE: ConstantColumnVector is a Spark-internal API (execution.vectorized package).
 // Stable across 3.4+ but not guaranteed across major versions.
@@ -33,8 +34,16 @@ import org.apache.spark.unsafe.types.UTF8String
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.arrow.ArrowFfiBridge
-import io.indextables.spark.sync.DistributedSourceScanner
+import io.indextables.spark.metrics.{
+  ReadPipelineMetrics,
+  TaskBatchAssemblyTime,
+  TaskNextBatchTime,
+  TaskQueryBuildTime,
+  TaskSplitEngineCreationTime,
+  TaskStreamingSessionStartTime
+}
 import io.indextables.spark.search.SplitSearchEngine
+import io.indextables.spark.sync.DistributedSourceScanner
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.SplitSearcher
 import org.slf4j.LoggerFactory
@@ -98,19 +107,21 @@ class ColumnarPartitionReader(
   // Partition-only single-batch state
   private var partitionOnlyConsumed = false
 
-  // NOTE: Pre-warm join is intentionally omitted for the streaming columnar reader.
-  // The streaming path (startStreamingRetrieval/nextBatch) does not benefit from the
-  // tantivy component pre-warming path used by the old row-based reader.
+  private val pipelineMetrics = new ReadPipelineMetrics(addAction.path)
+
   private def initialize(): Unit =
     if (!initialized) {
       if (initFailed)
         throw new IOException(s"Columnar reader previously failed to initialize for ${addAction.path}", initException)
       try {
+        val t0 = System.nanoTime()
         splitSearchEngine = ctx.createSplitSearchEngine()
+        pipelineMetrics.splitEngineCreationNs = System.nanoTime() - t0
         initialized = true
         logger.info(
           s"ColumnarPartitionReader initialized for ${addAction.path}, " +
-            s"effectiveLimit=$effectiveLimit, readMode=${ctx.readMode}"
+            s"effectiveLimit=$effectiveLimit, readMode=${ctx.readMode}, " +
+            f"splitEngineCreation=${pipelineMetrics.splitEngineCreationMs}%.1f ms"
         )
       } catch {
         case ex: Exception =>
@@ -159,26 +170,36 @@ class ColumnarPartitionReader(
 
     // Start streaming session on first call
     if (streamingSession == null) {
-      val splitQuery    = ctx.buildSplitQuery(splitSearchEngine)
-      val queryAstJson  = splitQuery.toQueryAstJson()
+      val queryBuildT0 = System.nanoTime()
+      val splitQuery   = ctx.buildSplitQuery(splitSearchEngine)
+      val queryAstJson = splitQuery.toQueryAstJson()
+      pipelineMetrics.queryBuildNs = System.nanoTime() - queryBuildT0
+
       val typeHints     = buildTypeHints()
       val maxDocs       = if (effectiveLimit == Int.MaxValue) -1 else effectiveLimit
       val safeTypeHints = if (typeHints != null) typeHints else Array.empty[String]
+
+      val sessionStartT0 = System.nanoTime()
       streamingSession = if (typeHints != null || maxDocs > 0) {
         searcher.startStreamingRetrieval(queryAstJson, dataFieldNames, safeTypeHints, maxDocs)
       } else {
         searcher.startStreamingRetrieval(queryAstJson, dataFieldNames: _*)
       }
+      pipelineMetrics.streamingSessionStartNs = System.nanoTime() - sessionStartT0
+
       logger.info(
         s"Streaming: started session for ${addAction.path}, " +
           s"columnCount=${streamingSession.getColumnCount}, effectiveLimit=$effectiveLimit, maxDocs=$maxDocs" +
-          (if (typeHints != null) s", typeHints=${typeHints.length / 2} fields" else "")
+          (if (typeHints != null) s", typeHints=${typeHints.length / 2} fields" else "") +
+          f", queryBuild=${pipelineMetrics.queryBuildMs}%.1f ms" +
+          f", sessionStart=${pipelineMetrics.streamingSessionStartMs}%.1f ms"
       )
     }
 
     // Get next batch
     val (arrays, schemas, arrayAddrs, schemaAddrs) = bridge.allocateStructs(numCols)
 
+    val nextBatchT0 = System.nanoTime()
     val rows =
       try
         streamingSession.nextBatch(arrayAddrs, schemaAddrs)
@@ -187,6 +208,9 @@ class ColumnarPartitionReader(
           cleanupFfiStructs(arrays, schemas)
           throw ex
       }
+    val nextBatchElapsed = System.nanoTime() - nextBatchT0
+    pipelineMetrics.nextBatchTotalNs += nextBatchElapsed
+    pipelineMetrics.nextBatchCount += 1
 
     if (rows <= 0) {
       cleanupFfiStructs(arrays, schemas)
@@ -201,10 +225,17 @@ class ColumnarPartitionReader(
       return false
     }
 
-    val dataBatch = bridge.importAsColumnarBatchStreaming(arrays, schemas, rows)
+    val assemblyT0 = System.nanoTime()
+    val dataBatch  = bridge.importAsColumnarBatchStreaming(arrays, schemas, rows)
     currentBatch = assembleColumnarBatch(dataBatch, rows)
+    pipelineMetrics.batchAssemblyTotalNs += System.nanoTime() - assemblyT0
+
     totalRowsReturned += rows
-    logger.debug(s"Streaming: batch with $rows rows for ${addAction.path}, totalRowsReturned=$totalRowsReturned")
+    pipelineMetrics.totalRows = totalRowsReturned
+    logger.debug(
+      s"Streaming: batch with $rows rows for ${addAction.path}, totalRowsReturned=$totalRowsReturned" +
+        f", nextBatch=${nextBatchElapsed / 1e6}%.1f ms"
+    )
     true
   }
 
@@ -235,6 +266,8 @@ class ColumnarPartitionReader(
     ctx.collectMetricsDelta()
     ctx.reportBytesRead()
 
+    logger.info(pipelineMetrics.summary)
+
     closePreviousBatch()
 
     if (streamingSession != null) {
@@ -250,6 +283,16 @@ class ColumnarPartitionReader(
       catch { case e: Exception => logger.warn("Error closing SplitSearchEngine", e) }
     }
   }
+
+  override def currentMetricsValues(): Array[CustomTaskMetric] = Array(
+    new TaskSplitEngineCreationTime(Math.round(pipelineMetrics.splitEngineCreationMs)),
+    new TaskQueryBuildTime(Math.round(pipelineMetrics.queryBuildMs)),
+    new TaskStreamingSessionStartTime(Math.round(pipelineMetrics.streamingSessionStartMs)),
+    new TaskNextBatchTime(Math.round(pipelineMetrics.nextBatchTotalMs)),
+    new TaskBatchAssemblyTime(Math.round(pipelineMetrics.batchAssemblyTotalMs))
+  )
+
+  def getReadPipelineMetrics: ReadPipelineMetrics = pipelineMetrics
 
   private def closePreviousBatch(): Unit =
     if (currentBatch != null) {
@@ -399,26 +442,32 @@ class ColumnarPartitionReader(
         case BooleanType => vec.setBoolean(value.toBoolean)
         case ShortType   => vec.setShort(value.toShort)
         case ByteType    => vec.setByte(value.toByte)
-        case DateType =>
+        case DateType    =>
           // Handle both ISO date strings (e.g., "2026-03-22") and epoch-day numbers
           // (e.g., "20527" from older companion indexes). The build-side fix in
           // DistributedSourceScanner normalizes to ISO, so try that first to avoid
           // exception allocation on the common path.
-          val epochDay = try {
-            val dateStr = if (value.contains("T")) value.substring(0, 10) else value
-            java.time.LocalDate.parse(dateStr).toEpochDay.toInt // ISO date string (common case)
-          } catch {
-            case _: Exception =>
-              val n = try { value.toInt } catch {
-                case e: NumberFormatException =>
+          val epochDay =
+            try {
+              val dateStr = if (value.contains("T")) value.substring(0, 10) else value
+              java.time.LocalDate.parse(dateStr).toEpochDay.toInt // ISO date string (common case)
+            } catch {
+              case _: Exception =>
+                val n =
+                  try value.toInt
+                  catch {
+                    case e: NumberFormatException =>
+                      throw new IllegalArgumentException(
+                        s"Cannot convert partition value '$value' to DateType: ${e.getMessage}",
+                        e
+                      )
+                  }
+                if (!DistributedSourceScanner.isPlausibleEpochDay(n))
                   throw new IllegalArgumentException(
-                    s"Cannot convert partition value '$value' to DateType: ${e.getMessage}", e)
-              }
-              if (!DistributedSourceScanner.isPlausibleEpochDay(n))
-                throw new IllegalArgumentException(
-                  s"Partition value '$value' is numeric but not a plausible epoch day (range: -100000..100000)")
-              n
-          }
+                    s"Partition value '$value' is numeric but not a plausible epoch day (range: -100000..100000)"
+                  )
+                n
+            }
           vec.setInt(epochDay)
         case TimestampType =>
           val instant = if (value.contains("T")) {

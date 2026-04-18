@@ -37,7 +37,11 @@ import org.scalatest.BeforeAndAfterAll
  *
  * No cloud credentials needed — runs entirely on local filesystem.
  */
-class LocalSyncIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class LocalSyncIntegrationTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 

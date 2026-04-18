@@ -35,7 +35,15 @@ import io.indextables.spark.metrics._
 import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.stats.DataSkippingMetrics
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, NativeFilteringMetrics, NativeListFilesResult, NativeTransactionLog, PartitionPredicateUtils, SparkFilterToNativeFilter, TransactionLogInterface}
+import io.indextables.spark.transaction.{
+  AddAction,
+  NativeFilteringMetrics,
+  NativeListFilesResult,
+  NativeTransactionLog,
+  PartitionPredicateUtils,
+  SparkFilterToNativeFilter,
+  TransactionLogInterface
+}
 import io.indextables.spark.util.{PartitionUtils, SplitsPerTaskCalculator, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -70,6 +78,9 @@ class IndexTables4SparkScan(
   @volatile private var lastScanResultFiles: Long          = 0L
   @volatile private var lastScanTotalSkipRate: Double      = 0.0
 
+  // Read pipeline timing metrics for driver-side planning
+  private val planningMetrics = new ScanPlanningMetrics(transactionLog.getTablePath().toString)
+
   // Cache for filtered actions (computed once, reused between planInputPartitions and estimateStatistics)
   // Uses lazy val for thread-safe, once-only initialization
   private lazy val cachedFilteredActions: Seq[AddAction] = cachedListFilesResult.files
@@ -78,7 +89,7 @@ class IndexTables4SparkScan(
   // Replaces: getPartitionColumns + listFilesWithPartitionFilters + applyDataSkipping + getSchema
   private lazy val cachedListFilesResult: NativeListFilesResult = {
     // Separate partition vs data filters using shared utility
-    val partitionColumns = transactionLog.getPartitionColumns()
+    val partitionColumns                = transactionLog.getPartitionColumns()
     val (partitionFilters, dataFilters) = SparkFilterToNativeFilter.splitFilters(pushedFilters, partitionColumns)
 
     // Single native call: partition pruning + data skipping + cooldown filtering + metadata
@@ -117,9 +128,9 @@ class IndexTables4SparkScan(
 
     logger.debug(
       s"Native filtering: ${m.totalFilesBeforeFiltering} total → " +
-      s"${m.filesAfterPartitionPruning} after partition → " +
-      s"${m.filesAfterDataSkipping} after data skip → " +
-      s"${result.files.size} final (${m.manifestsPruned}/${m.manifestsTotal} manifests pruned)"
+        s"${m.filesAfterPartitionPruning} after partition → " +
+        s"${m.filesAfterDataSkipping} after data skip → " +
+        s"${result.files.size} final (${m.manifestsPruned}/${m.manifestsTotal} manifests pruned)"
     )
 
     result
@@ -143,6 +154,8 @@ class IndexTables4SparkScan(
   override def toBatch: Batch = this
 
   override def planInputPartitions(): Array[InputPartition] = {
+    val planStart = System.nanoTime()
+
     // Capture baseline metrics at scan start for delta computation
     // User can call getMetricsDelta() after query to get per-query metrics
     val tablePath = transactionLog.getTablePath().toString
@@ -171,7 +184,13 @@ class IndexTables4SparkScan(
     }
 
     // Use cached filtered actions (avoids duplicate native listFiles calls)
-    val filteredActions = getFilteredActions()
+    // Time this call to capture native filtering cost within the planInputPartitions window.
+    // If estimateStatistics() already triggered the lazy val, this returns instantly (0 ns).
+    val nativeFilterStart = System.nanoTime()
+    val filteredActions   = getFilteredActions()
+    planningMetrics.nativeFilteringNs = System.nanoTime() - nativeFilterStart
+    planningMetrics.totalFilesBeforeFiltering = cachedListFilesResult.metrics.totalFilesBeforeFiltering
+    planningMetrics.resultFiles = filteredActions.size
 
     // Check if pre-warm is enabled (supports both old and new config paths)
     val isPreWarmEnabled = config
@@ -294,8 +313,10 @@ class IndexTables4SparkScan(
     )
 
     // Batch-assign all splits for this query using per-query load balancing
-    val splitPaths  = filteredActions.map(_.path)
-    val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    val localityStart = System.nanoTime()
+    val splitPaths    = filteredActions.map(_.path)
+    val assignments   = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    planningMetrics.localityAssignmentNs = System.nanoTime() - localityStart
     logger.debug(s"Assigned ${assignments.size} splits to hosts")
 
     // Group splits by assigned host for locality-aware batching
@@ -380,6 +401,10 @@ class IndexTables4SparkScan(
       logger.debug(s"Partition host distribution: $hostDistribution")
     }
     logger.info(s"Planned ${partitions.length} multi-split partitions (${filteredActions.length} splits, $splitsPerTask per task, $totalPreferred with locality hints)")
+
+    planningMetrics.totalPlanNs = System.nanoTime() - planStart
+    planningMetrics.resultPartitions = partitions.length
+    planningMetrics.logSummary()
 
     partitions.toArray[InputPartition]
   }
@@ -471,8 +496,6 @@ class IndexTables4SparkScan(
         IndexTables4SparkStatistics.unknown()
     }
 
-
-
   // ============================================================================
   // Filter utilities
   // ============================================================================
@@ -494,7 +517,14 @@ class IndexTables4SparkScan(
       new PartitionPrunedFiles(),
       new DataSkippedFiles(),
       new ResultFiles(),
-      new TotalSkipRate()
+      new TotalSkipRate(),
+      new NativeFilteringTime(),
+      new ScanPlanTotalTime(),
+      new SplitEngineCreationTime(),
+      new QueryBuildTime(),
+      new StreamingSessionStartTime(),
+      new NextBatchTime(),
+      new BatchAssemblyTime()
     )
 
   /**
@@ -507,6 +537,8 @@ class IndexTables4SparkScan(
       new TaskPartitionPrunedFiles(lastScanPartitionPrunedFiles),
       new TaskDataSkippedFiles(lastScanDataSkippedFiles),
       new TaskResultFiles(lastScanResultFiles),
-      new TaskTotalSkipRate(lastScanTotalSkipRate)
+      new TaskTotalSkipRate(lastScanTotalSkipRate),
+      new TaskNativeFilteringTime(Math.round(planningMetrics.nativeFilteringMs)),
+      new TaskScanPlanTotalTime(Math.round(planningMetrics.totalPlanMs))
     )
 }

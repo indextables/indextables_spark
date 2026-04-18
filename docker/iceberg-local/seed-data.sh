@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NETWORK="iceberg-local_iceberg-net"
 
-echo "==> Seeding Iceberg test table: default.test_events"
+echo "==> Seeding Iceberg test tables: default.test_events, default.test_events_v2"
 
 # Write a PySpark script that creates and populates the table
 PY_FILE="$(mktemp /tmp/iceberg-seed-XXXXXX.py)"
@@ -72,6 +72,62 @@ snapshots = spark.sql("SELECT snapshot_id FROM demo.default.test_events.snapshot
 for i, s in enumerate(snapshots):
     print(f"  Snapshot {i}: {s[0]}")
 
+# --------------------------------------------------------------------------
+# TABLE_IDENTIFIER_V2 = "default.test_events_v2"
+# Iceberg v2 format with column name mapping enabled.
+# --------------------------------------------------------------------------
+
+print("")
+print("==> Seeding Iceberg v2 table: default.test_events_v2")
+
+spark.sql("DROP TABLE IF EXISTS demo.default.test_events_v2")
+
+spark.sql("""
+CREATE TABLE demo.default.test_events_v2 (
+  event_id   BIGINT,
+  event_type STRING,
+  user_name  STRING,
+  score      DOUBLE,
+  event_time TIMESTAMP,
+  region     STRING
+)
+USING iceberg
+PARTITIONED BY (region)
+TBLPROPERTIES (
+  'format-version' = '2',
+  'write.metadata.column-mapping.mode' = 'name'
+)
+""")
+
+spark.sql("""
+INSERT INTO demo.default.test_events_v2 VALUES
+  (1, 'click',    'alice',   0.95, TIMESTAMP '2024-01-15 10:30:00', 'us-east'),
+  (2, 'purchase', 'bob',     1.50, TIMESTAMP '2024-01-15 11:00:00', 'us-east'),
+  (3, 'click',    'charlie', 0.20, TIMESTAMP '2024-01-15 12:15:00', 'us-west'),
+  (4, 'view',     'diana',   0.00, TIMESTAMP '2024-01-16 08:00:00', 'us-west'),
+  (5, 'click',    'eve',     0.80, TIMESTAMP '2024-01-16 09:30:00', 'eu-west'),
+  (6, 'purchase', 'frank',   2.10, TIMESTAMP '2024-01-16 10:00:00', 'eu-west'),
+  (7, 'view',     'grace',   0.10, TIMESTAMP '2024-01-17 14:00:00', 'us-east'),
+  (8, 'click',    'hank',    0.55, TIMESTAMP '2024-01-17 15:30:00', 'us-west'),
+  (9, 'purchase', 'iris',    3.00, TIMESTAMP '2024-01-18 09:00:00', 'eu-west'),
+  (10,'view',     'jack',    0.05, TIMESTAMP '2024-01-18 11:00:00', 'us-east')
+""")
+
+# Second insert creates a second snapshot (useful for time-travel tests)
+spark.sql("""
+INSERT INTO demo.default.test_events_v2 VALUES
+  (11, 'click',    'kate',   0.70, TIMESTAMP '2024-02-01 10:00:00', 'us-east'),
+  (12, 'purchase', 'leo',    1.80, TIMESTAMP '2024-02-01 11:00:00', 'us-west')
+""")
+
+count_v2 = spark.sql("SELECT COUNT(*) FROM demo.default.test_events_v2").collect()[0][0]
+print(f"==> Table seeded with {count_v2} rows")
+
+# Print snapshot info for time-travel testing
+snapshots_v2 = spark.sql("SELECT snapshot_id FROM demo.default.test_events_v2.snapshots ORDER BY committed_at").collect()
+for i, s in enumerate(snapshots_v2):
+    print(f"  Snapshot {i}: {s[0]}")
+
 spark.stop()
 PYTHON
 
@@ -87,7 +143,9 @@ docker run --rm --network "$NETWORK" \
 rm -f "$PY_FILE"
 
 echo ""
-echo "==> Done. Table default.test_events seeded with 12 rows across 2 snapshots."
+echo "==> Done. Tables seeded:"
+echo "      default.test_events    — 12 rows, 2 snapshots (Iceberg v1)"
+echo "      default.test_events_v2 — 12 rows, 2 snapshots (Iceberg v2, column name mapping)"
 echo ""
 echo "Credentials for ~/.iceberg/credentials:"
 echo ""

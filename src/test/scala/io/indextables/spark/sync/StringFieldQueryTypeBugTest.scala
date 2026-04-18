@@ -38,7 +38,11 @@ import org.scalatest.BeforeAndAfterAll
  *
  * See TANTIVY4JAVA_STRING_FIELD_TYPE_BUG.md for root cause details.
  */
-class StringFieldQueryTypeBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class StringFieldQueryTypeBugTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private val FORMAT = io.indextables.spark.TestBase.INDEXTABLES_FORMAT
 

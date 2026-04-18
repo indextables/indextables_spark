@@ -29,8 +29,8 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Tests for WRITER HEAP SIZE clause with Delta companion builds.
  *
- * Validates that the WRITER HEAP SIZE clause is accepted and produces correct companion indexes
- * with different size units (M, G), as well as confirming builds succeed without the clause.
+ * Validates that the WRITER HEAP SIZE clause is accepted and produces correct companion indexes with different size
+ * units (M, G), as well as confirming builds succeed without the clause.
  */
 class CompanionWriterHeapSizeTest
     extends AnyFunSuite
@@ -98,16 +98,56 @@ class CompanionWriterHeapSizeTest
   private def createDeltaSource(deltaPath: String): Unit = {
     val ss = spark; import ss.implicits._
     Seq(
-      (1, "alice", "The quick brown fox jumps over the lazy dog. This is a sample document with enough content to make heap size relevant."),
-      (2, "bob", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."),
-      (3, "charlie", "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."),
-      (4, "dave", "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."),
-      (5, "eve", "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."),
-      (6, "frank", "A short text field with some content for testing writer heap size configurations in companion builds."),
-      (7, "grace", "Another piece of text content used in the companion writer heap size test to validate split creation."),
-      (8, "heidi", "Testing various heap size units including megabytes and gigabytes for the companion indexing pipeline."),
-      (9, "ivan", "The writer heap size controls how much memory the tantivy index writer allocates during split creation."),
-      (10, "judy", "Larger heap sizes can improve indexing throughput by reducing the number of intermediate segment merges.")
+      (
+        1,
+        "alice",
+        "The quick brown fox jumps over the lazy dog. This is a sample document with enough content to make heap size relevant."
+      ),
+      (
+        2,
+        "bob",
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+      ),
+      (
+        3,
+        "charlie",
+        "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."
+      ),
+      (
+        4,
+        "dave",
+        "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."
+      ),
+      (
+        5,
+        "eve",
+        "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
+      ),
+      (
+        6,
+        "frank",
+        "A short text field with some content for testing writer heap size configurations in companion builds."
+      ),
+      (
+        7,
+        "grace",
+        "Another piece of text content used in the companion writer heap size test to validate split creation."
+      ),
+      (
+        8,
+        "heidi",
+        "Testing various heap size units including megabytes and gigabytes for the companion indexing pipeline."
+      ),
+      (
+        9,
+        "ivan",
+        "The writer heap size controls how much memory the tantivy index writer allocates during split creation."
+      ),
+      (
+        10,
+        "judy",
+        "Larger heap sizes can improve indexing throughput by reducing the number of intermediate segment merges."
+      )
     ).toDF("id", "name", "content")
       .write
       .format("delta")
@@ -124,9 +164,11 @@ class CompanionWriterHeapSizeTest
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       createDeltaSource(deltaPath)
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WRITER HEAP SIZE 512M AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WRITER HEAP SIZE 512M AT LOCATION '$indexPath'"
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
       result(0).getInt(4) should be > 0 // splits created
       readCompanion(indexPath).count() shouldBe 10
@@ -139,9 +181,11 @@ class CompanionWriterHeapSizeTest
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       createDeltaSource(deltaPath)
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WRITER HEAP SIZE 2G AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' WRITER HEAP SIZE 2G AT LOCATION '$indexPath'"
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
       readCompanion(indexPath).count() shouldBe 10
     }
@@ -153,9 +197,11 @@ class CompanionWriterHeapSizeTest
       val indexPath = new File(tempDir, "index").getAbsolutePath
 
       createDeltaSource(deltaPath)
-      val result = spark.sql(
-        s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
-      ).collect()
+      val result = spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR DELTA '$deltaPath' AT LOCATION '$indexPath'"
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
       readCompanion(indexPath).count() shouldBe 10
     }

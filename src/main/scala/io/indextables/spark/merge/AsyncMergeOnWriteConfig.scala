@@ -17,8 +17,9 @@
 
 package io.indextables.spark.merge
 
-import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.util.{ConfigParsingUtils, SizeParser}
 import org.slf4j.LoggerFactory
 
 /**
@@ -163,13 +164,35 @@ object AsyncMergeOnWriteConfig {
    *   Parsed configuration
    */
   def fromOptions(options: CaseInsensitiveStringMap): AsyncMergeOnWriteConfig = {
-    val enabled              = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
-    val asyncEnabled         = ConfigParsingUtils.getBooleanOption(options, KEY_ASYNC_ENABLED, DEFAULT_ASYNC_ENABLED)
-    val batchCpuFraction     = ConfigParsingUtils.getDoubleOption(options, KEY_BATCH_CPU_FRACTION, DEFAULT_BATCH_CPU_FRACTION, minExclusive = Some(0.0), maxInclusive = Some(1.0))
-    val maxConcurrentBatches = ConfigParsingUtils.getIntOption(options, KEY_MAX_CONCURRENT_BATCHES, DEFAULT_MAX_CONCURRENT_BATCHES, mustBePositive = true)
-    val minBatchesToTrigger  = ConfigParsingUtils.getIntOption(options, KEY_MIN_BATCHES_TO_TRIGGER, DEFAULT_MIN_BATCHES_TO_TRIGGER, mustBePositive = true)
-    val targetSizeBytes      = SizeParser.parseSize(options.getOrDefault(KEY_TARGET_SIZE, SizeParser.formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
-    val shutdownTimeoutMs    = ConfigParsingUtils.getLongOption(options, KEY_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS, mustBePositive = true)
+    val enabled      = ConfigParsingUtils.getBooleanOption(options, KEY_ENABLED, DEFAULT_ENABLED)
+    val asyncEnabled = ConfigParsingUtils.getBooleanOption(options, KEY_ASYNC_ENABLED, DEFAULT_ASYNC_ENABLED)
+    val batchCpuFraction = ConfigParsingUtils.getDoubleOption(
+      options,
+      KEY_BATCH_CPU_FRACTION,
+      DEFAULT_BATCH_CPU_FRACTION,
+      minExclusive = Some(0.0),
+      maxInclusive = Some(1.0)
+    )
+    val maxConcurrentBatches = ConfigParsingUtils.getIntOption(
+      options,
+      KEY_MAX_CONCURRENT_BATCHES,
+      DEFAULT_MAX_CONCURRENT_BATCHES,
+      mustBePositive = true
+    )
+    val minBatchesToTrigger = ConfigParsingUtils.getIntOption(
+      options,
+      KEY_MIN_BATCHES_TO_TRIGGER,
+      DEFAULT_MIN_BATCHES_TO_TRIGGER,
+      mustBePositive = true
+    )
+    val targetSizeBytes =
+      SizeParser.parseSize(options.getOrDefault(KEY_TARGET_SIZE, SizeParser.formatBytes(DEFAULT_TARGET_SIZE_BYTES)))
+    val shutdownTimeoutMs = ConfigParsingUtils.getLongOption(
+      options,
+      KEY_SHUTDOWN_TIMEOUT_MS,
+      DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      mustBePositive = true
+    )
 
     val config = AsyncMergeOnWriteConfig(
       enabled = enabled,
@@ -216,6 +239,5 @@ object AsyncMergeOnWriteConfig {
       shutdownTimeoutMs = get(KEY_SHUTDOWN_TIMEOUT_MS).map(_.toLong).getOrElse(DEFAULT_SHUTDOWN_TIMEOUT_MS)
     ).validate()
   }
-
 
 }

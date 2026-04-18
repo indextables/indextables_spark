@@ -28,7 +28,11 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 
 /** Tests for CHECKPOINT INDEXTABLES command. */
-class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class CheckpointCommandTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   private var spark: SparkSession = _
   private var tempDir: File       = _
@@ -229,5 +233,50 @@ class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfte
 
     val v4Count = spark.sql("SELECT * FROM checkpoint_result WHERE protocol_version = 4").count()
     v4Count shouldBe 1
+  }
+
+  /**
+   * Regression test: CHECKPOINT INDEXTABLES must resolve credentials via TransactionLogFactory.create(), not bypass it
+   * with a freshly-built nativeConfig from ConfigMapper.toNativeConfig(options).
+   *
+   * Before the fix (commit c75465ba), CheckpointCommand called TransactionLogWriter.createCheckpoint with a
+   * nativeConfig built directly from raw options — bypassing resolveCredentialsOnDriver. On Databricks/UC, this meant
+   * no credentials were injected into nativeConfig, causing the native Rust layer to use anonymous/instance-role access
+   * and fail with 403 on UC-controlled S3 paths.
+   *
+   * After the fix, CheckpointCommand delegates through transactionLog.createCheckpoint(), which uses the
+   * NativeTransactionLog's own nativeConfig (populated via TransactionLogFactory.create's resolveCredentialsOnDriver
+   * call) and also calls refreshCredentials() before the write.
+   *
+   * We verify via MockTableCredentialProvider: if CHECKPOINT calls resolveCredentialsOnDriver, getCredentials() is
+   * invoked and pathCredentialCallCount increments. If it bypasses resolution, the count stays unchanged after
+   * checkpoint.
+   */
+  test("CHECKPOINT INDEXTABLES invokes credential provider from Spark conf (regression for credential bypass bug)") {
+    import io.indextables.spark.testutils.MockTableCredentialProvider
+    MockTableCredentialProvider.resetCounts()
+
+    val providerClass = classOf[MockTableCredentialProvider].getName
+    spark.conf.set("spark.indextables.aws.credentialsProviderClass", providerClass)
+
+    try {
+      val tablePath = new File(tempDir, "cred_provider_checkpoint_test").getAbsolutePath
+      createTestTable(tablePath)
+
+      // Record provider call count after table creation (createTestTable also uses the txlog)
+      val callsBefore = MockTableCredentialProvider.pathCredentialCallCount.get()
+
+      // Run CHECKPOINT — must invoke resolveCredentialsOnDriver → getCredentials()
+      val rows = spark.sql(s"CHECKPOINT INDEXTABLES '$tablePath'").collect()
+      rows.length shouldBe 1
+      rows.head.getString(1) shouldBe "SUCCESS"
+
+      // Credential provider must have been invoked at least once during checkpoint
+      // (TransactionLogFactory.create → resolveCredentialsOnDriver → provider.getCredentials)
+      MockTableCredentialProvider.pathCredentialCallCount.get() should be > callsBefore
+    } finally {
+      spark.conf.unset("spark.indextables.aws.credentialsProviderClass")
+      MockTableCredentialProvider.resetCounts()
+    }
   }
 }

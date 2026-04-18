@@ -20,10 +20,13 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import io.indextables.spark.sync.EmbeddedIcebergRestServer
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.apache.iceberg.{DataFiles, FileFormat}
 import org.apache.iceberg.{Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
@@ -48,7 +51,11 @@ import org.scalatest.BeforeAndAfterAll
  * unmodified.</li> <li>A second new snapshot is picked up by a subsequent cycle.</li> <li>A restart resumes from the
  * last synced snapshot without re-indexing existing data.</li> </ol>
  */
-class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+class StreamingCompanionIcebergEndToEndTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   protected var spark: SparkSession = _
 
@@ -263,6 +270,149 @@ class StreamingCompanionIcebergEndToEndTest extends AnyFunSuite with Matchers wi
             val thirdSynced = waitUntil(30000)(countCompanionRows(indexPath) == 5)
             withClue("streaming should pick up snapshot 3 (5 total rows) within 30 s") {
               thirdSynced shouldBe true
+            }
+
+          } finally {
+            thread.interrupt()
+            thread.join(5000)
+          }
+        } finally {
+          clearSparkIcebergConfig()
+          server.close()
+        }
+    }
+  }
+
+  /** Read companion metadata configuration via the transaction log. */
+  private def readCompanionConfig(indexPath: String): Map[String, String] = {
+    flushCaches()
+    val options = new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
+    val txLog = TransactionLogFactory.create(new Path(indexPath), spark, options)
+    try {
+      txLog.invalidateCache()
+      txLog.getMetadata().configuration
+    } finally
+      txLog.close()
+  }
+
+  /** Wide-schema variant of appendIcebergSnapshot for the 4-column streaming test. */
+  private def appendWideIcebergSnapshot(
+    server: EmbeddedIcebergRestServer,
+    tableId: TableIdentifier,
+    schema: StructType,
+    rows: Seq[Row],
+    batchId: Int
+  ): Unit = {
+    val tableLocalDir = s"${server.warehouseDir}/../parquet-data/wide-batch-$batchId"
+
+    val df = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+    df.coalesce(1).write.parquet(s"file://$tableLocalDir")
+
+    val parquetFiles = new File(tableLocalDir)
+      .listFiles()
+      .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
+    require(parquetFiles.nonEmpty, s"No Parquet files written to $tableLocalDir")
+
+    val table    = server.catalog.loadTable(tableId)
+    val appendOp = table.newAppend()
+    parquetFiles.foreach { f =>
+      appendOp.appendFile(
+        DataFiles
+          .builder(table.spec())
+          .withPath(s"file://${f.getAbsolutePath}")
+          .withFileSizeInBytes(f.length())
+          .withRecordCount(rows.size.toLong)
+          .withFormat(FileFormat.PARQUET)
+          .build()
+      )
+    }
+    appendOp.commit()
+  }
+
+  test("streaming Iceberg companion: INCLUDE COLUMNS persists across polling cycles") {
+    withTempDirs {
+      (
+        warehouseDir,
+        indexPath,
+        _
+      ) =>
+        val server = new EmbeddedIcebergRestServer(warehouseDir)
+        try {
+          val ns      = Namespace.of("default")
+          val tableId = TableIdentifier.of(ns, "test_wide_table")
+          server.catalog.createNamespace(ns, java.util.Collections.emptyMap())
+
+          // 4-column Iceberg schema: id, name, score, secret
+          val icebergSchema = new IcebergSchema(
+            Types.NestedField.optional(1, "id", Types.LongType.get()),
+            Types.NestedField.optional(2, "name", Types.StringType.get()),
+            Types.NestedField.optional(3, "score", Types.DoubleType.get()),
+            Types.NestedField.optional(4, "secret", Types.StringType.get())
+          )
+          server.catalog.buildTable(tableId, icebergSchema).create()
+
+          val wideSchema = StructType(Seq(
+            StructField("id", LongType, nullable = true),
+            StructField("name", StringType, nullable = true),
+            StructField("score", DoubleType, nullable = true),
+            StructField("secret", StringType, nullable = true)
+          ))
+
+          // Snapshot 1
+          appendWideIcebergSnapshot(server, tableId, wideSchema,
+            Seq(Row(1L, "alice", 100.0, "secret_a"), Row(2L, "bob", 200.0, "secret_b")), batchId = 1)
+
+          configureSparkForEmbeddedCatalog(server)
+
+          val command = SyncToExternalCommand(
+            sourceFormat = "iceberg",
+            sourcePath = "default.test_wide_table",
+            destPath = indexPath,
+            indexingModes = Map.empty,
+            fastFieldMode = "HYBRID",
+            targetInputSize = None,
+            catalogType = Some("rest"),
+            includeColumns = Seq("id", "name"),
+            streamingPollIntervalMs = Some(2000L),
+            dryRun = false
+          )
+          val thread = new Thread(() => command.run(spark))
+          thread.setDaemon(true)
+          thread.start()
+
+          try {
+            // Initial cycle
+            val initialSynced = waitUntil(30000)(countCompanionRows(indexPath) == 2)
+            withClue("initial cycle should index 2 rows within 30 s") {
+              initialSynced shouldBe true
+            }
+
+            val configAfterFirst = readCompanionConfig(indexPath)
+            withClue(s"first-cycle metadata: $configAfterFirst") {
+              configAfterFirst.get("indextables.companion.includeColumns") shouldBe defined
+              configAfterFirst("indextables.companion.includeColumns") should include("id")
+              configAfterFirst("indextables.companion.includeColumns") should include("name")
+            }
+
+            // Snapshot 2: append more rows while streaming.
+            appendWideIcebergSnapshot(server, tableId, wideSchema,
+              Seq(Row(3L, "charlie", 300.0, "secret_c")), batchId = 2)
+
+            val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 3)
+            withClue("second cycle should index appended row within 30 s") {
+              secondSynced shouldBe true
+            }
+
+            // Metadata must be unchanged after the incremental cycle. This
+            // is the load-bearing assertion for the streaming
+            // copy-across-cycles fix. The excluded-column-filter regression
+            // itself is already covered by CompanionColumnsTestBase's
+            // "predicate on excluded column returns zero results" test — no
+            // need to duplicate it here.
+            val configAfterSecond = readCompanionConfig(indexPath)
+            withClue(s"second-cycle metadata: $configAfterSecond") {
+              configAfterSecond("indextables.companion.includeColumns") shouldBe
+                configAfterFirst("indextables.companion.includeColumns")
             }
 
           } finally {

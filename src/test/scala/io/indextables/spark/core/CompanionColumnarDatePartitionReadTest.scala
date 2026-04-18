@@ -24,8 +24,8 @@ import org.apache.spark.sql.types._
 import io.indextables.spark.TestBase
 
 /**
- * Integration tests for DateType handling in CompanionColumnarPartitionReader.createConstantColumnVector.
- * Validates that date-partitioned data round-trips correctly through write and read paths.
+ * Integration tests for DateType handling in CompanionColumnarPartitionReader.createConstantColumnVector. Validates
+ * that date-partitioned data round-trips correctly through write and read paths.
  */
 class CompanionColumnarDatePartitionReadTest extends TestBase {
 
@@ -80,9 +80,7 @@ class CompanionColumnarDatePartitionReadTest extends TestBase {
       val result = df.filter(df("event_date") === "2024-01-15").collect()
 
       result.length shouldBe 2
-      result.foreach { row =>
-        row.getAs[Date]("event_date") shouldBe Date.valueOf("2024-01-15")
-      }
+      result.foreach(row => row.getAs[Date]("event_date") shouldBe Date.valueOf("2024-01-15"))
       val ids = result.map(_.getAs[String]("id")).sorted
       ids shouldBe Array("a", "b")
     }

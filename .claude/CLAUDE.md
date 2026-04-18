@@ -51,7 +51,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Batch retrieval optimization**: 90-95% reduction in S3 GET requests (enabled by default)
 - **L2 Disk Cache**: Persistent NVMe caching, auto-enabled on Databricks/EMR when `/local_disk0` detected
 - **Optimized Writes**: Iceberg-style shuffle before writing for well-sized splits
-- **Companion/sync**: Build companion search indexes for external Delta, Parquet, and Iceberg tables
+- **Companion/sync**: Build companion search indexes for external Delta, Parquet, and Iceberg tables with selective column indexing (`INCLUDE COLUMNS` / `EXCLUDE COLUMNS`)
 
 ## Field Types
 

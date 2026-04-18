@@ -167,6 +167,11 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
     // Register V2 IndexQuery expression conversion rule in resolution phase
     // This runs during analysis, before scan planning
     extensions.injectResolutionRule(session => V2IndexQueryExpressionRule)
+    // Also register as an optimizer rule so the ThreadLocal is refreshed immediately before
+    // scan planning. For catalog-backed tables Spark may re-resolve the DataSourceV2Relation
+    // during fixed-point analysis, creating a new object; the optimizer rule ensures the
+    // ThreadLocal tracks the final relation identity even if analysis replaced it.
+    extensions.injectOptimizerRule(session => V2IndexQueryExpressionRule)
 
     // Register V2 Bucket expression conversion rule in resolution phase
     // This transforms bucket aggregation expressions in GROUP BY for V2 pushdown

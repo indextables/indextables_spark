@@ -438,13 +438,13 @@ class IpAddressFieldTest extends TestBase {
 
       // IPs at and around 192.168.1.0/24 boundaries
       val data = Seq(
-        ("outside-low",  "192.168.0.255"),
+        ("outside-low", "192.168.0.255"),
         ("boundary-low", "192.168.1.0"),
-        ("inside1",      "192.168.1.1"),
-        ("inside2",      "192.168.1.128"),
-        ("boundary-hi",  "192.168.1.255"),
-        ("outside-hi",   "192.168.2.0"),
-        ("unrelated",    "10.0.0.1")
+        ("inside1", "192.168.1.1"),
+        ("inside2", "192.168.1.128"),
+        ("boundary-hi", "192.168.1.255"),
+        ("outside-hi", "192.168.2.0"),
+        ("unrelated", "10.0.0.1")
       ).toDF("name", "ip")
 
       data.write
@@ -478,10 +478,10 @@ class IpAddressFieldTest extends TestBase {
       import spark.implicits._
 
       val data = Seq(
-        ("ten-a",    "10.0.0.1"),
-        ("ten-b",    "10.255.255.254"),
-        ("other",    "172.16.0.1"),
-        ("other2",   "192.168.1.1")
+        ("ten-a", "10.0.0.1"),
+        ("ten-b", "10.255.255.254"),
+        ("other", "172.16.0.1"),
+        ("other2", "192.168.1.1")
       ).toDF("name", "ip")
 
       data.write
@@ -534,13 +534,13 @@ class IpAddressFieldTest extends TestBase {
       import spark.implicits._
 
       val data = Seq(
-        ("outside-low",  "192.168.0.255"),
+        ("outside-low", "192.168.0.255"),
         ("boundary-low", "192.168.1.0"),
-        ("inside1",      "192.168.1.1"),
-        ("inside2",      "192.168.1.128"),
-        ("boundary-hi",  "192.168.1.255"),
-        ("outside-hi",   "192.168.2.0"),
-        ("unrelated",    "10.0.0.1")
+        ("inside1", "192.168.1.1"),
+        ("inside2", "192.168.1.128"),
+        ("boundary-hi", "192.168.1.255"),
+        ("outside-hi", "192.168.2.0"),
+        ("unrelated", "10.0.0.1")
       ).toDF("name", "ip")
 
       data.write
@@ -571,9 +571,9 @@ class IpAddressFieldTest extends TestBase {
       import spark.implicits._
 
       val data = Seq(
-        ("ten-a",  "10.0.0.1"),
-        ("ten-b",  "10.0.1.5"),
-        ("other",  "172.16.0.1")
+        ("ten-a", "10.0.0.1"),
+        ("ten-b", "10.0.1.5"),
+        ("other", "172.16.0.1")
       ).toDF("name", "ip")
 
       data.write
@@ -607,9 +607,9 @@ class IpAddressFieldTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
-      val cidrIds      = df.filter($"ip" === "192.168.1.0/24").collect().map(_.getString(0)).toSet
-      val wildcardIds  = df.filter($"ip" === "192.168.1.*").collect().map(_.getString(0)).toSet
-      val explicitIds  = df
+      val cidrIds     = df.filter($"ip" === "192.168.1.0/24").collect().map(_.getString(0)).toSet
+      val wildcardIds = df.filter($"ip" === "192.168.1.*").collect().map(_.getString(0)).toSet
+      val explicitIds = df
         .filter($"ip" >= "192.168.1.0" && $"ip" <= "192.168.1.255")
         .collect()
         .map(_.getString(0))
@@ -626,11 +626,11 @@ class IpAddressFieldTest extends TestBase {
       import spark.implicits._
 
       val data = Seq(
-        ("ten-a",     "10.0.0.1"),
-        ("ten-b",     "10.0.0.2"),
+        ("ten-a", "10.0.0.1"),
+        ("ten-b", "10.0.0.2"),
         ("private-a", "192.168.1.1"),
         ("private-b", "192.168.1.2"),
-        ("other",     "172.16.0.1")
+        ("other", "172.16.0.1")
       ).toDF("name", "ip")
 
       data.write
@@ -657,10 +657,10 @@ class IpAddressFieldTest extends TestBase {
       import spark.implicits._
 
       val data = Seq(
-        ("ten-a",     "10.0.0.1"),
-        ("ten-b",     "10.0.0.2"),
+        ("ten-a", "10.0.0.1"),
+        ("ten-b", "10.0.0.2"),
         ("private-a", "192.168.1.1"),
-        ("other",     "172.16.0.1")
+        ("other", "172.16.0.1")
       ).toDF("name", "ip")
 
       data.write
@@ -686,11 +686,11 @@ class IpAddressFieldTest extends TestBase {
       import spark.implicits._
 
       val data = Seq(
-        ("ten-a",     "10.0.0.1"),
-        ("ten-b",     "10.0.0.2"),
+        ("ten-a", "10.0.0.1"),
+        ("ten-b", "10.0.0.2"),
         ("private-a", "192.168.1.1"),
         ("private-b", "192.168.1.2"),
-        ("other",     "172.16.0.1")
+        ("other", "172.16.0.1")
       ).toDF("name", "ip")
 
       data.write
@@ -843,8 +843,8 @@ class IpAddressFieldTest extends TestBase {
       val data = Seq(
         ("192.168.1.1", "us-east", 100),
         ("192.168.1.2", "us-east", 200),
-        ("192.168.1.3", "eu-west",  50),
-        ("10.0.0.1",    "us-east", 999)  // outside CIDR — must not appear in results
+        ("192.168.1.3", "eu-west", 50),
+        ("10.0.0.1", "us-east", 999) // outside CIDR — must not appear in results
       ).toDF("ip", "region", "requests")
 
       data.write
@@ -867,11 +867,11 @@ class IpAddressFieldTest extends TestBase {
       // 10.0.0.1 must be excluded; only the two 192.168.1.x regions remain
       result.length shouldBe 2
       result(0).getString(0) shouldBe "eu-west"
-      result(0).getLong(1)   shouldBe 1
-      result(0).getLong(2)   shouldBe 50
+      result(0).getLong(1) shouldBe 1
+      result(0).getLong(2) shouldBe 50
       result(1).getString(0) shouldBe "us-east"
-      result(1).getLong(1)   shouldBe 2
-      result(1).getLong(2)   shouldBe 300
+      result(1).getLong(1) shouldBe 2
+      result(1).getLong(2) shouldBe 300
     }
   }
 

@@ -252,9 +252,10 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       println(s"   Nanos: $nanos")
       println(s"   Computed microseconds: $tsMicros")
 
-      // Expected: seconds * 1000000 + microseconds
-      // 2025-11-07 07:00:00.000001 = 1762516800000001 microseconds since epoch
-      val expectedMicros = 1762516800000001L
+      // Compute expected microseconds from the same Timestamp used to write, so the
+      // assertion is timezone-independent (Timestamp.valueOf interprets in JVM-local TZ).
+      val expectedTs     = Timestamp.valueOf("2025-11-07 07:00:00.000001")
+      val expectedMicros = expectedTs.getTime / 1000 * 1000000L + expectedTs.getNanos / 1000L
 
       println(s"\n🔬 Microsecond validation:")
       println(s"   Expected: $expectedMicros microseconds")

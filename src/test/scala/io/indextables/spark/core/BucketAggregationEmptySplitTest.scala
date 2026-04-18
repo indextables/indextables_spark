@@ -17,7 +17,7 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.connector.expressions.aggregate.{CountStar, AggregateFunc}
+import org.apache.spark.sql.connector.expressions.aggregate.{AggregateFunc, CountStar}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
@@ -27,23 +27,29 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Tests for assembleBucketBatch with empty splits (0 rows).
  *
- * Uses CountStar for all aggregate expressions because FieldReference is package-private
- * in Spark 3.5. The fix is about column count sizing, not agg types.
+ * Uses CountStar for all aggregate expressions because FieldReference is package-private in Spark 3.5. The fix is about
+ * column count sizing, not agg types.
  */
 class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
 
   private def emptyBatch: ColumnarBatch = new ColumnarBatch(Array.empty, 0)
 
   test("assembleBucketBatch should handle empty split (0 rows) without exception") {
-    val schema = StructType(Seq(
-      StructField("bucket_key", StringType),
-      StructField("cnt", LongType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("bucket_key", StringType),
+        StructField("cnt", LongType)
+      )
+    )
     val aggExprs: Array[AggregateFunc] = Array(new CountStar())
     val dataGroupByCols                = Array("bucket_key")
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
     try {
       result.numRows() shouldBe 0
@@ -52,13 +58,15 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
   }
 
   test("assembleBucketBatch empty split column count equals groupByCols + aggExprs") {
-    val schema = StructType(Seq(
-      StructField("col1", StringType),
-      StructField("col2", StringType),
-      StructField("cnt", LongType),
-      StructField("total", LongType),
-      StructField("min_val", LongType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("col1", StringType),
+        StructField("col2", StringType),
+        StructField("cnt", LongType),
+        StructField("total", LongType),
+        StructField("min_val", LongType)
+      )
+    )
     val aggExprs: Array[AggregateFunc] = Array(
       new CountStar(),
       new CountStar(),
@@ -67,7 +75,11 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
     val dataGroupByCols = Array("col1", "col2")
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
     try {
       result.numRows() shouldBe 0
@@ -76,14 +88,20 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
   }
 
   test("assembleBucketBatch empty split with single agg and no GROUP BY columns") {
-    val schema = StructType(Seq(
-      StructField("cnt", LongType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("cnt", LongType)
+      )
+    )
     val aggExprs: Array[AggregateFunc] = Array(new CountStar())
     val dataGroupByCols                = Array.empty[String]
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
     try {
       result.numRows() shouldBe 0
@@ -92,15 +110,21 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
   }
 
   test("assembleBucketBatch empty split should produce columns with correct types") {
-    val schema = StructType(Seq(
-      StructField("dt", DateType),
-      StructField("cnt", LongType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("dt", DateType),
+        StructField("cnt", LongType)
+      )
+    )
     val aggExprs: Array[AggregateFunc] = Array(new CountStar())
     val dataGroupByCols                = Array("dt")
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
     try {
       result.numRows() shouldBe 0
@@ -111,13 +135,15 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
   }
 
   test("assembleBucketBatch empty split with multiple GROUP BY and multiple aggs") {
-    val schema = StructType(Seq(
-      StructField("a", StringType),
-      StructField("b", StringType),
-      StructField("c", StringType),
-      StructField("cnt", LongType),
-      StructField("total", LongType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("a", StringType),
+        StructField("b", StringType),
+        StructField("c", StringType),
+        StructField("cnt", LongType),
+        StructField("total", LongType)
+      )
+    )
     val aggExprs: Array[AggregateFunc] = Array(
       new CountStar(),
       new CountStar()
@@ -125,7 +151,11 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
     val dataGroupByCols = Array("a", "b", "c")
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
     try {
       result.numRows() shouldBe 0
@@ -134,20 +164,26 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
   }
 
   test("assembleBucketBatch empty split with multiple GROUP BY cols produces correct column count") {
-    val schema = StructType(Seq(
-      StructField("x", StringType),
-      StructField("y", StringType),
-      StructField("cnt", LongType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("x", StringType),
+        StructField("y", StringType),
+        StructField("cnt", LongType)
+      )
+    )
     val aggExprs: Array[AggregateFunc] = Array(new CountStar())
     val dataGroupByCols                = Array("x", "y")
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
-    try {
+    try
       result.numCols() shouldBe 3
-    } finally result.close()
+    finally result.close()
   }
 
   test("assembleBucketBatch empty split with zero GROUP BY cols and zero aggs") {
@@ -156,7 +192,11 @@ class BucketAggregationEmptySplitTest extends AnyFunSuite with Matchers {
     val dataGroupByCols = Array.empty[String]
 
     val result = GroupByColumnarReaderUtils.assembleBucketBatch(
-      emptyBatch, Array.empty[String], aggExprs, dataGroupByCols, schema
+      emptyBatch,
+      Array.empty[String],
+      aggExprs,
+      dataGroupByCols,
+      schema
     )
     try {
       result.numRows() shouldBe 0

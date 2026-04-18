@@ -914,4 +914,108 @@ class SyncToExternalParsingTest extends TestBase {
     )
     cmd.streamingPollIntervalMs shouldBe Some(30000L)
   }
+
+  // --- INCLUDE/EXCLUDE COLUMNS ---
+
+  test("parse INCLUDE COLUMNS with Delta") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' INCLUDE COLUMNS ('user_id', 'score', 'message') AT LOCATION '/tmp/index'"
+    )
+    cmd.includeColumns shouldBe Seq("user_id", "score", "message")
+    cmd.excludeColumns shouldBe empty
+  }
+
+  test("parse EXCLUDE COLUMNS with Delta") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' EXCLUDE COLUMNS ('giant_blob', 'debug_json') AT LOCATION '/tmp/index'"
+    )
+    cmd.excludeColumns shouldBe Seq("giant_blob", "debug_json")
+    cmd.includeColumns shouldBe empty
+  }
+
+  test("parse INCLUDE COLUMNS with Parquet") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data' INCLUDE COLUMNS ('id', 'name') AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "parquet"
+    cmd.includeColumns shouldBe Seq("id", "name")
+  }
+
+  test("parse INCLUDE COLUMNS with Iceberg") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR ICEBERG 'db.events' CATALOG 'glue' INCLUDE COLUMNS ('event_type', 'timestamp') AT LOCATION 's3://bucket/index'"
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.includeColumns shouldBe Seq("event_type", "timestamp")
+  }
+
+  test("parse INCLUDE COLUMNS with INDEXING MODES combined") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta'
+        |  INCLUDE COLUMNS ('user_id', 'score', 'message', 'ip_addr')
+        |  INDEXING MODES ('message':'text', 'ip_addr':'ipaddress')
+        |  AT LOCATION '/tmp/index'""".stripMargin
+    )
+    cmd.includeColumns shouldBe Seq("user_id", "score", "message", "ip_addr")
+    cmd.indexingModes should have size 2
+    cmd.indexingModes("message") shouldBe "text"
+    cmd.indexingModes("ip_addr") shouldBe "ipaddress"
+  }
+
+  test("parse INCLUDE COLUMNS with single column") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' INCLUDE COLUMNS ('id') AT LOCATION '/tmp/index'"
+    )
+    cmd.includeColumns shouldBe Seq("id")
+  }
+
+  test("INCLUDE and EXCLUDE COLUMNS are mutually exclusive") {
+    val ex = intercept[IllegalArgumentException] {
+      parseSync(
+        "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' INCLUDE COLUMNS ('a') EXCLUDE COLUMNS ('b') AT LOCATION '/tmp/index'"
+      )
+    }
+    ex.getMessage should include("Cannot specify both INCLUDE COLUMNS and EXCLUDE COLUMNS")
+  }
+
+  test("no INCLUDE or EXCLUDE COLUMNS leaves both empty") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' AT LOCATION '/tmp/index'"
+    )
+    cmd.includeColumns shouldBe empty
+    cmd.excludeColumns shouldBe empty
+  }
+
+  test("case-insensitive INCLUDE COLUMNS keywords") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' include columns ('user_id', 'score') AT LOCATION '/tmp/index'"
+    )
+    cmd.includeColumns shouldBe Seq("user_id", "score")
+  }
+
+  test("case-insensitive EXCLUDE COLUMNS keywords") {
+    val cmd = parseSync(
+      "BUILD INDEXTABLES COMPANION FOR DELTA '/tmp/delta' exclude columns ('blob') AT LOCATION '/tmp/index'"
+    )
+    cmd.excludeColumns shouldBe Seq("blob")
+  }
+
+  test("parse INCLUDE COLUMNS with all options combined") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/events'
+        |  INCLUDE COLUMNS ('user_id', 'score', 'message', 'ip_addr', 'timestamp')
+        |  INDEXING MODES ('message':'text', 'ip_addr':'ipaddress')
+        |  FASTFIELDS MODE HYBRID
+        |  HASHED FASTFIELDS INCLUDE ('user_id')
+        |  TARGET INPUT SIZE 1G
+        |  AT LOCATION 's3://bucket/index'
+        |  DRY RUN""".stripMargin
+    )
+    cmd.includeColumns shouldBe Seq("user_id", "score", "message", "ip_addr", "timestamp")
+    cmd.indexingModes("message") shouldBe "text"
+    cmd.fastFieldMode shouldBe "HYBRID"
+    cmd.hashedFastfieldsInclude shouldBe Seq("user_id")
+    cmd.targetInputSize shouldBe defined
+    cmd.dryRun shouldBe true
+  }
 }

@@ -62,25 +62,25 @@ object SplitMetadataFactory {
     }
 
     new QuickwitSplit.SplitMetadata(
-      splitId,                                                              // splitId
-      "tantivy4spark-index",                                                // indexUid
-      0L,                                                                   // partitionId
-      "tantivy4spark-source",                                               // sourceId
-      "tantivy4spark-node",                                                 // nodeId
-      toLongSafe(addAction.numRecords),                                     // numDocs
-      toLongSafe(addAction.uncompressedSizeBytes, addAction.size),          // uncompressedSizeBytes
-      addAction.timeRangeStart.map(Instant.parse).orNull,                   // timeRangeStart
-      addAction.timeRangeEnd.map(Instant.parse).orNull,                     // timeRangeEnd
-      System.currentTimeMillis() / 1000,                                    // createTimestamp
-      "Mature",                                                             // maturity
-      tags,                                                                 // tags
-      footerStartOffset,                                                    // footerStartOffset
-      footerEndOffset,                                                      // footerEndOffset
-      toLongSafe(addAction.deleteOpstamp),                                  // deleteOpstamp
-      addAction.numMergeOps.getOrElse(0),                                   // numMergeOps
-      "doc-mapping-uid",                                                    // docMappingUid
-      addAction.docMappingJson.orNull,                                      // docMappingJson
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()         // skippedSplits
+      splitId,                                                      // splitId
+      "tantivy4spark-index",                                        // indexUid
+      0L,                                                           // partitionId
+      "tantivy4spark-source",                                       // sourceId
+      "tantivy4spark-node",                                         // nodeId
+      toLongSafe(addAction.numRecords),                             // numDocs
+      toLongSafe(addAction.uncompressedSizeBytes, addAction.size),  // uncompressedSizeBytes
+      addAction.timeRangeStart.map(Instant.parse).orNull,           // timeRangeStart
+      addAction.timeRangeEnd.map(Instant.parse).orNull,             // timeRangeEnd
+      System.currentTimeMillis() / 1000,                            // createTimestamp
+      "Mature",                                                     // maturity
+      tags,                                                         // tags
+      footerStartOffset,                                            // footerStartOffset
+      footerEndOffset,                                              // footerEndOffset
+      toLongSafe(addAction.deleteOpstamp),                          // deleteOpstamp
+      addAction.numMergeOps.getOrElse(0),                           // numMergeOps
+      "doc-mapping-uid",                                            // docMappingUid
+      addAction.docMappingJson.orNull,                              // docMappingJson
+      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
     )
   }
 
@@ -90,8 +90,10 @@ object SplitMetadataFactory {
     case Some(i: Int)               => i.toLong
     case Some(i: java.lang.Integer) => i.toLong
     case Some(l: java.lang.Long)    => l
-    case Some(other)                => try { other.toString.toLong } catch { case _: NumberFormatException => fallback }
-    case None                       => fallback
+    case Some(other) =>
+      try other.toString.toLong
+      catch { case _: NumberFormatException => fallback }
+    case None => fallback
   }
 
   /**

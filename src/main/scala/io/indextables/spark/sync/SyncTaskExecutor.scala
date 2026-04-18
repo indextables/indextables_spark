@@ -43,7 +43,8 @@ case class SyncConfig(
   columnNameMapping: Map[String, String] = Map.empty,
   autoDetectNameMapping: Boolean = false,
   hashedFastfieldsInclude: Seq[String] = Seq.empty,
-  hashedFastfieldsExclude: Seq[String] = Seq.empty)
+  hashedFastfieldsExclude: Seq[String] = Seq.empty,
+  skipFields: Seq[String] = Seq.empty)
     extends Serializable
 
 /**
@@ -179,6 +180,12 @@ object SyncTaskExecutor {
         companionConfig.withAutoDetectNameMapping(true)
       }
 
+      // Apply skip fields (from INCLUDE/EXCLUDE COLUMNS)
+      if (config.skipFields.nonEmpty) {
+        logger.info(s"Sync task ${group.groupIndex}: skipping ${config.skipFields.size} columns: ${config.skipFields.mkString(", ")}")
+        companionConfig.withSkipFields(config.skipFields: _*)
+      }
+
       // Apply hashed fastfields include/exclude configuration
       if (config.hashedFastfieldsInclude.nonEmpty) {
         logger.info(s"Sync task ${group.groupIndex}: applying hashed fastfields include: ${config.hashedFastfieldsInclude.mkString(", ")}")
@@ -292,7 +299,7 @@ object SyncTaskExecutor {
       downloadFromAzure(sourcePath, destFile, storageConfig)
     } else {
       // Local filesystem copy — path may be a plain path or a file:// URI (Iceberg uses file:// URIs)
-      val localPath = CloudPathUtils.stripFileScheme(sourcePath)
+      val localPath  = CloudPathUtils.stripFileScheme(sourcePath)
       val sourceFile = new File(localPath)
       Files.copy(sourceFile.toPath, destFile.toPath, StandardCopyOption.REPLACE_EXISTING)
       sourceFile.length()
@@ -404,7 +411,6 @@ object SyncTaskExecutor {
       ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
     io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(localPath, destPath, uploadConfig, tablePath)
   }
-
 
   /**
    * Extract the table base path from a full file path by stripping the filename and any trailing Hive-style partition

@@ -693,6 +693,28 @@ BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
   CATALOG 'uc_catalog' TYPE 'rest'
   WAREHOUSE 's3://unity-warehouse/iceberg'
   AT LOCATION 's3://bucket/index';
+
+-- Selective indexing: only index specific columns
+BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
+  CATALOG 'uc_catalog' TYPE 'rest'
+  WAREHOUSE 's3://unity-warehouse/iceberg'
+  INCLUDE COLUMNS ('message', 'level', 'trace_id')
+  AT LOCATION 's3://bucket/index';
+
+-- Exclude large/unneeded columns from the index
+BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
+  CATALOG 'uc_catalog' TYPE 'rest'
+  WAREHOUSE 's3://unity-warehouse/iceberg'
+  EXCLUDE COLUMNS ('raw_payload', 'binary_data', 'debug_state')
+  AT LOCATION 's3://bucket/index';
+
+-- Combine selective indexing with indexing modes
+BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
+  CATALOG 'uc_catalog' TYPE 'rest'
+  WAREHOUSE 's3://unity-warehouse/iceberg'
+  INCLUDE COLUMNS ('message', 'trace_id', 'status')
+  INDEXING MODES ('message':'text', 'trace_id':'exact_only')
+  AT LOCATION 's3://bucket/index';
 ```
 
 **Output schema:**
@@ -725,6 +747,8 @@ BUILD INDEXTABLES COMPANION FOR ICEBERG 'analytics.web_events'
 | `WRITER HEAP SIZE size` | All | Writer heap memory per executor |
 | `FROM VERSION n` | Delta only | Start from a specific Delta version |
 | `FROM SNAPSHOT n` | Iceberg only | Start from a specific snapshot ID |
+| `INCLUDE COLUMNS (...)` | All | Index only the listed columns. Mutually exclusive with EXCLUDE COLUMNS. |
+| `EXCLUDE COLUMNS (...)` | All | Index all columns except the listed ones. Mutually exclusive with INCLUDE COLUMNS. |
 | `WHERE predicate` | All | Partition filter predicate |
 | `DRY RUN` | All | Preview without creating splits |
 
@@ -770,6 +794,34 @@ BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data'
 - Supports incremental sync via anti-join reconciliation (detects new/removed parquet files)
 - Batched concurrent dispatch using Spark's FAIR scheduler
 - Companion index is read via standard IndexTables DataSource API
+
+### Selective Column Indexing
+
+`INCLUDE COLUMNS` and `EXCLUDE COLUMNS` control which columns are indexed in the companion. This is useful for wide tables where only a subset of columns need to be searchable, reducing index size, storage costs, and sync time.
+
+**Input Validation:**
+- INCLUDE and EXCLUDE are mutually exclusive (specifying both is an error)
+- Column names are case-insensitive (matched against the source schema)
+- Duplicate column names are detected and rejected
+- Non-existent columns produce an error listing available columns (showing 20 of N for wide tables)
+- Partition columns are silently filtered out with a warning (they are always indexed regardless)
+- At least one non-partition column must remain indexed after filtering
+
+**Cross-Feature Validation:**
+- All `INDEXING MODES` fields must be within `INCLUDE COLUMNS` (if specified) and must not be in `EXCLUDE COLUMNS`
+- All `HASHED FASTFIELDS` fields must be within `INCLUDE COLUMNS` (if specified) and must not be in `EXCLUDE COLUMNS`
+- Binary columns produce a warning (stored in the index but not searchable)
+
+**Incremental Sync:**
+- The validated include/exclude column lists are persisted in companion metadata (transaction log configuration)
+- On subsequent syncs without explicit `INCLUDE`/`EXCLUDE`, the stored settings are automatically reused
+- Explicit parameters override stored settings; a warning is logged if the column selection changed
+
+**Schema Evolution:**
+- Type widening (e.g., `int` to `bigint`): logged as a warning, sync continues
+- Breaking type changes (e.g., `string` to `int`): error, requires `INVALIDATE ALL PARTITIONS`
+- Dropped columns in stored metadata: silently skipped on incremental sync
+- New columns added to the source: warning if `EXCLUDE COLUMNS` is active (new columns will be auto-indexed)
 
 ---
 
