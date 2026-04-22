@@ -425,7 +425,10 @@ object CloudStorageProviderFactory {
    * Uses ConfigNormalization to dynamically extract ALL spark.indextables.* keys from the Spark session, including
    * databricks keys for Unity Catalog integration:
    *   - spark.indextables.databricks.workspaceUrl
-   *   - spark.indextables.databricks.apiToken
+   *   - spark.indextables.databricks.apiToken             (static token auth)
+   *   - spark.indextables.databricks.clientId             (OAuth client-credentials auth)
+   *   - spark.indextables.databricks.clientSecret         (OAuth client-credentials auth)
+   *   - spark.indextables.databricks.accountId            (OAuth client-credentials auth)
    *   - spark.indextables.databricks.credential.refreshBuffer.minutes
    *   - etc.
    */

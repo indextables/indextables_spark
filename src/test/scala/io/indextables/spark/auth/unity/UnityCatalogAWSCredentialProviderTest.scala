@@ -941,6 +941,141 @@ class UnityCatalogAWSCredentialProviderTest
     credReqs.last.headers.getOrElse("Authorization", "") shouldBe "Bearer tok-fresh"
   }
 
+  test("OAuth: token with 5 minutes remaining is treated as stale — re-exchange triggered") {
+    // Default refresh buffer = 600s (10 min). expiresInSeconds=3600 → halfLife=1800s → threshold=min(600,1800)=600s (10 min).
+    // A token expiring in 5 minutes has only 300s of freshness left — below the 600s threshold → stale.
+    val accountId = "acct-5min-stale"
+    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-refreshed", expiresIn = 3600))
+    setupMockHandler(200, credentialResponse("KEY-REFRESHED"))
+
+    val cfg = oauthConfigMap(accountId)
+    // fromConfig initialises the process-global caches; we then pre-seed a near-expiry token.
+    UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
+    val fiveMinFromNow = System.currentTimeMillis() + 5 * 60 * 1000L
+    UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
+      "my-client-id",
+      UnityCatalogAWSCredentialProvider.CachedOAuthToken("tok-near-expiry", 3600L, fiveMinFromNow)
+    )
+
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    provider.getCredentials()
+
+    val oidcCalls = requestLog.count(_.path.contains("/v1/token"))
+    oidcCalls shouldBe 1 // Re-exchange triggered because < 10 min remained
+  }
+
+  test("OAuth: token with 30 minutes remaining is treated as fresh — no re-exchange") {
+    // threshold = min(600s, 1800s) = 600s (10 min). A token expiring in 30 min has 1800s left → fresh.
+    val accountId = "acct-30min-fresh"
+    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-should-not-be-used", expiresIn = 3600))
+    setupMockHandler(200, credentialResponse("KEY-CACHED"))
+
+    val cfg = oauthConfigMap(accountId)
+    UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
+    val thirtyMinFromNow = System.currentTimeMillis() + 30 * 60 * 1000L
+    UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
+      "my-client-id",
+      UnityCatalogAWSCredentialProvider.CachedOAuthToken("tok-fresh", 3600L, thirtyMinFromNow)
+    )
+
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    provider.getCredentials()
+
+    val oidcCalls = requestLog.count(_.path.contains("/v1/token"))
+    oidcCalls shouldBe 0 // Token still fresh — OIDC NOT called
+  }
+
+  test("OAuth: custom scope is sent in OIDC POST body when oauth.scope is configured") {
+    val accountId = "acct-scope"
+    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-custom-scope"))
+    setupMockHandler(200, credentialResponse("KEY-SCOPE"))
+
+    val cfg = oauthConfigMap(accountId) +
+      (UnityCatalogAWSCredentialProvider.OAuthScopeKey -> "my-custom-scope")
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    provider.getCredentials()
+
+    val oidcRequest = requestLog.find(_.path.contains("/v1/token"))
+    oidcRequest shouldBe defined
+    oidcRequest.get.body should include("scope=my-custom-scope")
+    oidcRequest.get.body should not include "scope=all-apis"
+  }
+
+  test("OAuth: 429 with Retry-After header uses server-supplied delay instead of exponential backoff") {
+    val accountId     = "acct-429"
+    val oidcCallCount = new AtomicInteger(0)
+    val sleepTimes    = scala.collection.mutable.ArrayBuffer[Long]()
+    val path          = s"/oidc/accounts/$accountId/v1/token"
+    try mockServer.removeContext(path)
+    catch { case _: IllegalArgumentException => }
+    mockServer.createContext(
+      path,
+      (exchange: com.sun.net.httpserver.HttpExchange) => {
+        val count = oidcCallCount.incrementAndGet()
+        if (count == 1) {
+          // First call: rate-limited with a short Retry-After
+          exchange.getResponseHeaders.add("Retry-After", "1")
+          exchange.sendResponseHeaders(429, 0)
+          exchange.getResponseBody.close()
+        } else {
+          // Second call: success
+          val resp = oauthTokenResponse("tok-after-429")
+          exchange.sendResponseHeaders(200, resp.length)
+          val os = exchange.getResponseBody
+          os.write(resp.getBytes)
+          os.close()
+        }
+        new String(exchange.getRequestBody.readAllBytes())
+      }
+    )
+    setupMockHandler(200, credentialResponse("KEY-429"))
+
+    val cfg = oauthConfigMap(accountId) +
+      ("spark.indextables.databricks.retry.attempts" -> "3")
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    val creds = provider.getCredentials()
+
+    // Provider must have retried after the 429 and succeeded on the second attempt
+    oidcCallCount.get() shouldBe 2
+    creds.getAWSAccessKeyId shouldBe "KEY-429"
+  }
+
+  test("OAuth: 429 without Retry-After header falls back to exponential backoff") {
+    val accountId     = "acct-429-noheader"
+    val oidcCallCount = new AtomicInteger(0)
+    val path          = s"/oidc/accounts/$accountId/v1/token"
+    try mockServer.removeContext(path)
+    catch { case _: IllegalArgumentException => }
+    mockServer.createContext(
+      path,
+      (exchange: com.sun.net.httpserver.HttpExchange) => {
+        val count = oidcCallCount.incrementAndGet()
+        if (count == 1) {
+          // 429 with no Retry-After header
+          exchange.sendResponseHeaders(429, 0)
+          exchange.getResponseBody.close()
+        } else {
+          val resp = oauthTokenResponse("tok-after-429-noheader")
+          exchange.sendResponseHeaders(200, resp.length)
+          val os = exchange.getResponseBody
+          os.write(resp.getBytes)
+          os.close()
+        }
+        new String(exchange.getRequestBody.readAllBytes())
+      }
+    )
+    setupMockHandler(200, credentialResponse("KEY-429-NOHEADER"))
+
+    val cfg = oauthConfigMap(accountId) +
+      ("spark.indextables.databricks.retry.attempts" -> "3")
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    val creds = provider.getCredentials()
+
+    // Must have retried and succeeded without a Retry-After header
+    oidcCallCount.get() shouldBe 2
+    creds.getAWSAccessKeyId shouldBe "KEY-429-NOHEADER"
+  }
+
   test("OAuth: backwards compatible — existing apiToken config still works") {
     setupMockHandler(200, credentialResponse("STATIC_KEY"))
 

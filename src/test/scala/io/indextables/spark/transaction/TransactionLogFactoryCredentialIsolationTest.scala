@@ -246,6 +246,51 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
   }
 
   /**
+   * OAuth mirror: TransactionLogFactory.create() must not use a source uc.tableId for destination credential
+   * resolution even when OAuth client-credential keys are present in the config.
+   *
+   * This mirrors the static-token isolation test above but uses a config that would activate OAuth auth mode
+   * (clientId + clientSecret + accountId present). The fix that strips uc.tableId before calling
+   * resolveCredentialsOnDriver must work regardless of the auth mode.
+   *
+   * Because the test environment does not have a live OIDC endpoint we use the mock provider class
+   * (which ignores auth mode and intercepts credential calls at the CredentialProviderFactory level)
+   * and only verify that path-based (not table-based) credentials were used for the destination.
+   */
+  test("TransactionLogFactory credential isolation works when OAuth config keys are present") {
+    import io.indextables.spark.testutils.MockTableCredentialProvider
+    MockTableCredentialProvider.resetCounts()
+
+    withTempPath { destPath =>
+      val sourceTableId = "source-uc-table-id-oauth-mirror"
+
+      // Config contains OAuth-style keys alongside the mock provider.
+      // The mock provider is resolved by CredentialProviderFactory before any OIDC exchange,
+      // so these keys are present in the config map but do not trigger a real OAuth flow.
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.aws.credentialsProviderClass"  -> mockProviderClass,
+          "spark.indextables.iceberg.uc.tableId"            -> sourceTableId,
+          "spark.indextables.databricks.clientId"           -> "my-client-id",
+          "spark.indextables.databricks.clientSecret"       -> "my-client-secret",
+          "spark.indextables.databricks.accountId"          -> "my-account-id"
+        ).asJava
+      )
+
+      val txlog = TransactionLogFactory.create(new Path(destPath), spark, options)
+      try
+        txlog.initialize(getTestSchema())
+      finally
+        txlog.close()
+
+      // Table-based credentials must NOT have been used for the destination txlog
+      MockTableCredentialProvider.tableCredentialCallCount.get() shouldBe 0
+      // Path-based credentials must have been used (uc.tableId was stripped before resolution)
+      MockTableCredentialProvider.pathCredentialCallCount.get() should be > 0
+    }
+  }
+
+  /**
    * Regression test: NativeTransactionLog must re-invoke the credential provider before each READ operation (listFiles,
    * getSnapshot), not just before writes.
    *

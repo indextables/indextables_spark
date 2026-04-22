@@ -98,6 +98,47 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
+   * OAuth mirror: verify that OAuth client-credential keys (clientId / clientSecret / accountId) are visible to
+   * MergeSplitsExecutor via ConfigNormalization, identical to the apiToken diagnostic test above.
+   *
+   * This confirms that the merge-time credential extraction path picks up OAuth keys set at session level,
+   * so a cluster configured with OAuth rather than a static apiToken can still run MERGE SPLITS operations.
+   */
+  test("DIAGNOSTIC OAuth: OAuth client credential keys visible to MergeSplitsExecutor via ConfigNormalization") {
+    // Replace apiToken with OAuth keys at session level
+    spark.conf.unset("spark.indextables.databricks.apiToken")
+    spark.conf.set("spark.indextables.databricks.clientId",     "merge-client-id")
+    spark.conf.set("spark.indextables.databricks.clientSecret", "merge-client-secret")
+    spark.conf.set("spark.indextables.databricks.accountId",    "merge-account-id")
+
+    try {
+      val hadoopConf    = spark.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+      val clientId     = mergedConfigs.get("spark.indextables.databricks.clientId")
+      val clientSecret = mergedConfigs.get("spark.indextables.databricks.clientSecret")
+      val accountId    = mergedConfigs.get("spark.indextables.databricks.accountId")
+
+      logger.info(s"databricks.clientId:     ${clientId.getOrElse("None")}")
+      logger.info(s"databricks.clientSecret: ${clientSecret.map(_ => "***").getOrElse("None")}")
+      logger.info(s"databricks.accountId:    ${accountId.getOrElse("None")}")
+
+      clientId     shouldBe Some("merge-client-id")
+      clientSecret shouldBe Some("merge-client-secret")
+      accountId    shouldBe Some("merge-account-id")
+
+      logger.info("SUCCESS: OAuth client credential keys found in mergedConfigs for MergeSplitsExecutor")
+    } finally {
+      spark.conf.unset("spark.indextables.databricks.clientId")
+      spark.conf.unset("spark.indextables.databricks.clientSecret")
+      spark.conf.unset("spark.indextables.databricks.accountId")
+      spark.conf.set("spark.indextables.databricks.apiToken", fakeApiToken)
+    }
+  }
+
+  /**
    * Test MERGE SPLITS SQL command with session-level Unity Catalog configs. This replicates the exact user scenario.
    */
   test("MERGE SPLITS SQL command should use session-level Unity Catalog configs") {
