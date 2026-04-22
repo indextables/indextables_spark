@@ -66,7 +66,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   import UnityCatalogAWSCredentialProvider._
 
   // Resolve all configuration from the Map
-  private val (_workspaceUrl, _token, _refreshBufferMinutes, _retryAttempts) =
+  private val (_workspaceUrl, _authMode, _refreshBufferMinutes, _retryAttempts) =
     resolveConfigFromMap(config)
 
   private val credentialOperation = resolveCredentialOperation(config)
@@ -77,13 +77,16 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   // Log initialization
   logger.info(s"Initializing UnityCatalogAWSCredentialProvider for URI: $uri")
   logger.info(s"  Workspace URL: ${_workspaceUrl}")
+  logger.info(s"  Auth mode: ${_authMode.getClass.getSimpleName}")
   logger.info(s"  Refresh buffer: ${_refreshBufferMinutes} minutes before expiration")
   logger.info(s"  Credential operation: $credentialOperation")
   logger.info("UnityCatalogAWSCredentialProvider initialized successfully")
 
   // Accessors for resolved config (for cleaner code below)
   private def workspaceUrl: String      = _workspaceUrl
-  private def token: String             = _token
+  // Resolves a fresh-or-cached bearer token on each call. For StaticToken this is a no-op field
+  // read; for ClientCredentials it checks the OAuth token cache and re-exchanges if near expiry.
+  private def token: String             = resolveToken(_authMode)
   private def refreshBufferMinutes: Int = _refreshBufferMinutes
   private def retryAttempts: Int        = _retryAttempts
 
@@ -97,7 +100,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
    */
   override def getCredentials(): AWSCredentials = {
     val path     = extractPath(uri)
-    val cacheKey = buildCacheKey(token, credentialOperation, path)
+    val cacheKey = buildCacheKey(authIdentity(_authMode), credentialOperation, path)
 
     logger.debug(s"Getting credentials for path: $path")
 
@@ -131,7 +134,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   /** Refresh credentials (forced refresh, bypassing cache). */
   override def refresh(): Unit = {
     val path     = extractPath(uri)
-    val cacheKey = buildCacheKey(token, credentialOperation, path)
+    val cacheKey = buildCacheKey(authIdentity(_authMode), credentialOperation, path)
 
     logger.info(s"Refreshing credentials for path: $path")
 
@@ -274,6 +277,14 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   private val CredentialOperationKey = "spark.indextables.databricks.credential.operation"
   private val RetryAttemptsKey       = "spark.indextables.databricks.retry.attempts"
 
+  // Configuration keys - OAuth client credentials (alternative to apiToken)
+  private val ClientIdKey     = "spark.indextables.databricks.clientId"
+  private val ClientSecretKey = "spark.indextables.databricks.clientSecret"
+  private val AccountIdKey    = "spark.indextables.databricks.accountId"
+  // Override for testing — defaults to the Databricks accounts OIDC base URL
+  private[unity] val OidcBaseUrlKey     = "spark.indextables.databricks.oidc.baseUrl"
+  private val DefaultOidcBaseUrl        = "https://accounts.cloud.databricks.com"
+
   // Default values
   private val DefaultRefreshBufferMinutes = 40
   private val DefaultCacheMaxSize         = 100
@@ -304,8 +315,13 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   /**
    * Resolve Databricks configuration from a Map[String, String]. This is the fast path that avoids Hadoop Configuration
    * creation.
+   *
+   * Auth mode priority:
+   *   1. ClientCredentials — when clientId + clientSecret + accountId are all present
+   *   2. StaticToken       — when apiToken is present
+   *   3. Error             — neither is configured
    */
-  private def resolveConfigFromMap(config: Map[String, String]): (String, String, Int, Int) = {
+  private def resolveConfigFromMap(config: Map[String, String]): (String, AuthMode, Int, Int) = {
     val sources: Seq[ConfigSource] = Seq(
       MapConfigSource(config, "spark.indextables.databricks"),
       MapConfigSource(config)
@@ -320,13 +336,33 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
         )
       )
 
-    val token = ConfigurationResolver
-      .resolveString(TokenKey, sources, logMask = true)
-      .getOrElse(
+    val clientId     = config.get(ClientIdKey)
+    val clientSecret = config.get(ClientSecretKey)
+    val accountId    = config.get(AccountIdKey)
+
+    val authMode: AuthMode = (clientId, clientSecret, accountId) match {
+      case (Some(id), Some(secret), Some(acct)) if id.nonEmpty && secret.nonEmpty && acct.nonEmpty =>
+        val oidcBaseUrl = config.getOrElse(OidcBaseUrlKey, DefaultOidcBaseUrl)
+        logger.info(s"Using OAuth client credentials auth (clientId=$id, oidcBaseUrl=$oidcBaseUrl)")
+        ClientCredentials(id, secret, acct, oidcBaseUrl)
+      case (Some(_), _, _) | (_, Some(_), _) | (_, _, Some(_)) =>
+        // Partial OAuth config — give a clear error rather than falling back silently
         throw new IllegalStateException(
-          "Databricks API token not configured. Set spark.indextables.databricks.apiToken"
+          "Incomplete OAuth configuration: spark.indextables.databricks.clientId, " +
+            "spark.indextables.databricks.clientSecret, and " +
+            "spark.indextables.databricks.accountId must all be set together."
         )
-      )
+      case _ =>
+        val token = ConfigurationResolver
+          .resolveString(TokenKey, sources, logMask = true)
+          .getOrElse(
+            throw new IllegalStateException(
+              "Databricks auth not configured. Set spark.indextables.databricks.apiToken " +
+                "or spark.indextables.databricks.clientId/clientSecret/accountId."
+            )
+          )
+        StaticToken(token)
+    }
 
     val refreshBuffer = ConfigurationResolver
       .resolveInt(RefreshBufferKey, sources, DefaultRefreshBufferMinutes)
@@ -334,7 +370,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     val retryAttempts = ConfigurationResolver
       .resolveInt(RetryAttemptsKey, sources, DefaultRetryAttempts)
 
-    (workspaceUrl, token, refreshBuffer, retryAttempts)
+    (workspaceUrl, authMode, refreshBuffer, retryAttempts)
   }
 
   /**
@@ -360,11 +396,17 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   // Table info rarely changes, so we use a 1-hour TTL to avoid unnecessary UC API calls.
   @volatile private var globalTableInfoCache: Cache[String, io.indextables.spark.utils.TableInfo] = _
 
+  // Process-global OAuth token cache (clientId → CachedOAuthToken).
+  // Keyed by clientId so a single cached token is reused across all URIs for the same identity.
+  // We manage expiration ourselves via CachedOAuthToken.expirationTime; the 2-hour safety TTL
+  // here prevents stale entries from surviving indefinitely if the process runs for a long time.
+  @volatile private[unity] var globalOAuthTokenCache: Cache[String, CachedOAuthToken] = _
+
   private val initLock = new Object
 
   /** Initialize the process-global credentials and table info caches from Map config. */
   private def initializeGlobalCacheFromMap(config: Map[String, String]): Unit =
-    if (globalCredentialsCache == null || globalTableInfoCache == null) {
+    if (globalCredentialsCache == null || globalTableInfoCache == null || globalOAuthTokenCache == null) {
       initLock.synchronized {
         if (globalCredentialsCache == null) {
           val sources = Seq(MapConfigSource(config, "spark.indextables.databricks"), MapConfigSource(config))
@@ -386,8 +428,81 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
             .recordStats()
             .build[String, io.indextables.spark.utils.TableInfo]()
         }
+        if (globalOAuthTokenCache == null) {
+          logger.info("Initializing process-global OAuth token cache: maxSize=50, TTL=2h")
+          globalOAuthTokenCache = CacheBuilder
+            .newBuilder()
+            .maximumSize(50)
+            .expireAfterWrite(2, java.util.concurrent.TimeUnit.HOURS)
+            .build[String, CachedOAuthToken]()
+        }
       }
     }
+
+  /**
+   * Resolve a bearer token from the configured auth mode.
+   *
+   * - StaticToken: returns the configured API token as-is.
+   * - ClientCredentials: checks the process-global OAuth token cache; if missing or near expiry
+   *   (within 60 seconds), POSTs to the Databricks OIDC token endpoint and caches the result.
+   */
+  private[unity] def resolveToken(authMode: AuthMode): String = authMode match {
+    case StaticToken(token) => token
+    case ClientCredentials(clientId, clientSecret, accountId, oidcBaseUrl) =>
+      val refreshBufferMs = 60 * 1000L // 60-second buffer before expiry
+      val cached =
+        if (globalOAuthTokenCache != null) globalOAuthTokenCache.getIfPresent(clientId) else null
+      if (cached != null && System.currentTimeMillis() < cached.expirationTime - refreshBufferMs) {
+        logger.debug(s"Using cached OAuth token for clientId=$clientId")
+        return cached.accessToken
+      }
+
+      logger.info(s"Exchanging client credentials for OAuth token (clientId=$clientId, accountId=$accountId)")
+      val tokenUrl = s"$oidcBaseUrl/oidc/accounts/$accountId/v1/token"
+      val formBody =
+        s"grant_type=client_credentials" +
+          s"&client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}" +
+          s"&client_secret=${java.net.URLEncoder.encode(clientSecret, "UTF-8")}" +
+          s"&scope=all-apis"
+
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(tokenUrl))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .timeout(Duration.ofSeconds(30))
+        .POST(HttpRequest.BodyPublishers.ofString(formBody))
+        .build()
+
+      val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+      if (response.statusCode() != 200) {
+        throw new RuntimeException(
+          s"OAuth token exchange failed for clientId=$clientId (${response.statusCode()}): ${response.body()}"
+        )
+      }
+
+      val root        = objectMapper.readTree(response.body())
+      val accessToken = root.get("access_token").asText()
+      val expiresIn   = Option(root.get("expires_in")).map(_.asLong()).getOrElse(3600L)
+      val expiresAt   = System.currentTimeMillis() + expiresIn * 1000L
+
+      val cachedToken = CachedOAuthToken(accessToken, expiresAt)
+      if (globalOAuthTokenCache != null) globalOAuthTokenCache.put(clientId, cachedToken)
+
+      logger.info(s"OAuth token obtained for clientId=$clientId, expires in ${expiresIn}s")
+      accessToken
+  }
+
+  /**
+   * Return a stable identity string for cache-keying purposes.
+   *
+   * For StaticToken this is the token itself (same behaviour as before).
+   * For ClientCredentials this is the clientId, so the AWS credential cache entry survives OAuth
+   * token refreshes — the clientId is stable across token exchanges, the access token is not.
+   */
+  private def authIdentity(authMode: AuthMode): String = authMode match {
+    case StaticToken(token)                => token
+    case ClientCredentials(clientId, _, _, _) => clientId
+  }
 
   /**
    * Build a cache key that includes token identity and credential operation for multi-user support.
@@ -397,13 +512,15 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * credential cache.
    */
   private def buildCacheKey(
-    token: String,
+    authIdentity: String,
     credentialOperation: String,
     path: String
   ): String = {
-    // Use hash of token to avoid storing the full token in memory
-    val tokenHash = Integer.toHexString(token.hashCode)
-    s"$tokenHash:$credentialOperation:$path"
+    // Hash the identity to avoid storing the full token/clientId in memory.
+    // For StaticToken this is the token; for ClientCredentials this is the clientId,
+    // which is stable across OAuth token refreshes.
+    val identityHash = Integer.toHexString(authIdentity.hashCode)
+    s"$identityHash:$credentialOperation:$path"
   }
 
   /** Log cache statistics for monitoring. */
@@ -428,6 +545,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       logger.info("Clearing process-global table info cache")
       globalTableInfoCache.invalidateAll()
     }
+    if (globalOAuthTokenCache != null) {
+      logger.info("Clearing process-global OAuth token cache")
+      globalOAuthTokenCache.invalidateAll()
+    }
   }
 
   /** Get current cache statistics. Useful for monitoring and debugging. */
@@ -446,6 +567,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       if (globalTableInfoCache != null) {
         globalTableInfoCache.invalidateAll()
         globalTableInfoCache = null
+      }
+      if (globalOAuthTokenCache != null) {
+        globalOAuthTokenCache.invalidateAll()
+        globalOAuthTokenCache = null
       }
     }
 
@@ -511,8 +636,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     token: String,
     retryAttempts: Int
   ): io.indextables.spark.utils.TableInfo = {
-    val tokenHash = Integer.toHexString(token.hashCode)
-    val cacheKey  = s"$tokenHash:tableinfo:$fullTableName"
+    val cacheKey = s"${Integer.toHexString(token.hashCode)}:tableinfo:$fullTableName"
 
     // Check cache first
     if (globalTableInfoCache != null) {
@@ -597,9 +721,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    *   The table_id UUID string
    */
   def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
-    val (workspaceUrl, token, _, retryAttempts) = resolveConfigFromMap(config)
+    val (workspaceUrl, authMode, _, retryAttempts) = resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
-    fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts).tableId
+    fetchTableInfoInternal(fullTableName, workspaceUrl, resolveToken(authMode), retryAttempts).tableId
   }
 
   /**
@@ -617,9 +741,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     fullTableName: String,
     config: Map[String, String]
   ): io.indextables.spark.utils.TableInfo = {
-    val (workspaceUrl, token, _, retryAttempts) = resolveConfigFromMap(config)
+    val (workspaceUrl, authMode, _, retryAttempts) = resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
-    fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts)
+    fetchTableInfoInternal(fullTableName, workspaceUrl, resolveToken(authMode), retryAttempts)
   }
 
   /**
@@ -637,12 +761,12 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     tableId: String,
     config: Map[String, String]
   ): io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials = {
-    val (workspaceUrl, token, refreshBufferMinutes, retryAttempts) =
+    val (workspaceUrl, authMode, refreshBufferMinutes, retryAttempts) =
       resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
 
-    val tokenHash = Integer.toHexString(token.hashCode)
-    val cacheKey  = s"$tokenHash:table:$tableId"
+    val token     = resolveToken(authMode)
+    val cacheKey  = s"${Integer.toHexString(authIdentity(authMode).hashCode)}:table:$tableId"
 
     // Check cache first
     val cached = globalCredentialsCache.getIfPresent(cacheKey)
@@ -735,7 +859,8 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * These are returned as defaults — user-explicit values always take precedence.
    */
   override def icebergCatalogDefaults(config: Map[String, String]): Map[String, String] = {
-    val (workspaceUrl, token, _, _) = resolveConfigFromMap(config)
+    val (workspaceUrl, authMode, _, _) = resolveConfigFromMap(config)
+    val token                          = resolveToken(authMode)
 
     val defaults = Map(
       "spark.indextables.iceberg.uri"         -> s"$workspaceUrl/api/2.1/unity-catalog/iceberg-rest",
@@ -750,6 +875,19 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
 
     defaults
   }
+
+  /** Authentication mode — either a static API token or OAuth client credentials. */
+  private[unity] sealed trait AuthMode
+  private[unity] case class StaticToken(token: String) extends AuthMode
+  private[unity] case class ClientCredentials(
+    clientId: String,
+    clientSecret: String,
+    accountId: String,
+    oidcBaseUrl: String = "https://accounts.cloud.databricks.com"
+  ) extends AuthMode
+
+  /** Cached OAuth access token with expiration tracking. */
+  private[unity] case class CachedOAuthToken(accessToken: String, expirationTime: Long)
 
   /** Internal case class for cached credentials with expiration tracking. */
   private[unity] case class CachedCredentials(
