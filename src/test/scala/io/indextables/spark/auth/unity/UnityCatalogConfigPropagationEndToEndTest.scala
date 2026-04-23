@@ -494,6 +494,64 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   }
 
   /**
+   * OAuth mirror: verify that OAuth client-credential keys propagate end-to-end through Spark session →
+   * ConfigNormalization → merged config → UnityCatalogAWSCredentialProvider, identical to the apiToken path.
+   *
+   * The provider will fail to connect (fake workspace URL) but the error proves it received the OAuth config
+   * rather than failing with "not configured" — the same assertion pattern used in the apiToken regression tests.
+   */
+  test("OAuth: clientId/clientSecret/accountId propagate end-to-end through ConfigNormalization") {
+    import io.indextables.spark.util.ConfigNormalization
+
+    // Set OAuth keys at session level (no apiToken)
+    spark.conf.unset("spark.indextables.databricks.apiToken")
+    spark.conf.set("spark.indextables.databricks.clientId",     "e2e-client-id")
+    spark.conf.set("spark.indextables.databricks.clientSecret", "e2e-client-secret")
+    spark.conf.set("spark.indextables.databricks.accountId",    "e2e-account-id")
+
+    try {
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+      // OAuth keys must survive the Spark → merged-config pipeline
+      mergedConfigs should contain key "spark.indextables.databricks.clientId"
+      mergedConfigs should contain key "spark.indextables.databricks.clientSecret"
+      mergedConfigs should contain key "spark.indextables.databricks.accountId"
+      mergedConfigs("spark.indextables.databricks.clientId")  shouldBe "e2e-client-id"
+      mergedConfigs("spark.indextables.databricks.accountId") shouldBe "e2e-account-id"
+      // apiToken must be absent (OAuth path, not static-token path)
+      mergedConfigs should not contain key ("spark.indextables.databricks.apiToken")
+
+      logger.info("OAuth keys present in merged config — provider will receive them")
+
+      // The provider receives the merged config. It will fail to connect (fake workspace URL)
+      // but must NOT throw "not configured" — that would prove OAuth keys were lost in transit.
+      val uri = new java.net.URI(testS3Path)
+      val exception = intercept[Exception] {
+        val provider = UnityCatalogAWSCredentialProvider.fromConfig(uri, mergedConfigs)
+        provider.getCredentials()
+      }
+
+      val fullMessage = getFullExceptionMessage(exception)
+      val configMissing =
+        fullMessage.contains("Databricks workspace URL not configured") ||
+          fullMessage.contains("Databricks auth not configured")
+
+      withClue(s"OAuth keys should reach the provider. Full message: $fullMessage") {
+        configMissing shouldBe false
+      }
+
+      logger.info("VERIFIED: OAuth keys propagate end-to-end through ConfigNormalization")
+    } finally {
+      spark.conf.unset("spark.indextables.databricks.clientId")
+      spark.conf.unset("spark.indextables.databricks.clientSecret")
+      spark.conf.unset("spark.indextables.databricks.accountId")
+      spark.conf.set("spark.indextables.databricks.apiToken", fakeApiToken)
+    }
+  }
+
+  /**
    * REGRESSION TEST for PR #100: Demonstrates the FIXED behavior when config map is populated.
    *
    * This test simulates what IndexTables4SparkPartitionReader does with proper config propagation:

@@ -44,10 +44,33 @@ import org.slf4j.LoggerFactory
  * config. The Hadoop Configuration constructor has been removed to enforce the fast path that avoids expensive Hadoop
  * Configuration creation.
  *
+ * === Auth Modes ===
+ *
+ * Two mutually exclusive auth strategies are supported:
+ *
+ * '''Static API token''' (original mode):
+ *   - spark.indextables.databricks.apiToken: Databricks personal access token
+ *
+ * '''OAuth2 Client Credentials''' (machine-to-machine, no personal token needed):
+ *   - spark.indextables.databricks.clientId: OAuth2 client ID
+ *   - spark.indextables.databricks.clientSecret: OAuth2 client secret
+ *   - spark.indextables.databricks.accountId: Databricks account ID (for the OIDC token endpoint)
+ *
+ * When all three OAuth keys are present they take precedence. Partial OAuth config (only one or two
+ * of the three keys) is an error. OAuth tokens are cached process-globally keyed by clientId and
+ * refreshed automatically when within `spark.indextables.databricks.oauth.refreshBuffer.seconds`
+ * (default: 60) of expiry. The AWS credential cache key is stable across token rotations (keyed by
+ * clientId, not the transient access token).
+ *
  * Configuration:
  *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
- *   - spark.indextables.databricks.apiToken: Databricks API token (required)
- *   - spark.indextables.databricks.credential.refreshBuffer.minutes: Minutes before expiration to refresh (default: 40)
+ *   - spark.indextables.databricks.apiToken: Databricks API token (static auth mode)
+ *   - spark.indextables.databricks.clientId: OAuth2 client ID (OAuth auth mode)
+ *   - spark.indextables.databricks.clientSecret: OAuth2 client secret (OAuth auth mode)
+ *   - spark.indextables.databricks.accountId: Databricks account ID (OAuth auth mode)
+ *   - spark.indextables.databricks.oauth.refreshBuffer.seconds: Seconds before OAuth token expiry to re-exchange (default: 600 = 10 min). Effective threshold is min(this, expires_in/4), guaranteeing at least 75% token reuse.
+ *   - spark.indextables.databricks.oauth.scope: OAuth2 scope for client-credentials grant (default: "all-apis")
+ *   - spark.indextables.databricks.credential.refreshBuffer.minutes: Minutes before AWS credential expiry to refresh (default: 40)
  *   - spark.indextables.databricks.cache.maxSize: Maximum cached entries (default: 100)
  *   - spark.indextables.databricks.credential.operation: PATH_READ or PATH_READ_WRITE (default: PATH_READ_WRITE)
  *   - spark.indextables.databricks.retry.attempts: Retry attempts on failure (default: 3)
@@ -66,7 +89,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   import UnityCatalogAWSCredentialProvider._
 
   // Resolve all configuration from the Map
-  private val (_workspaceUrl, _token, _refreshBufferMinutes, _retryAttempts) =
+  private val (_workspaceUrl, _authMode, _refreshBufferMinutes, _retryAttempts) =
     resolveConfigFromMap(config)
 
   private val credentialOperation = resolveCredentialOperation(config)
@@ -77,13 +100,16 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   // Log initialization
   logger.info(s"Initializing UnityCatalogAWSCredentialProvider for URI: $uri")
   logger.info(s"  Workspace URL: ${_workspaceUrl}")
+  logger.info(s"  Auth mode: ${_authMode.getClass.getSimpleName}")
   logger.info(s"  Refresh buffer: ${_refreshBufferMinutes} minutes before expiration")
   logger.info(s"  Credential operation: $credentialOperation")
   logger.info("UnityCatalogAWSCredentialProvider initialized successfully")
 
   // Accessors for resolved config (for cleaner code below)
   private def workspaceUrl: String      = _workspaceUrl
-  private def token: String             = _token
+  // Resolves a fresh-or-cached bearer token on each call. For StaticToken this is a no-op field
+  // read; for ClientCredentials it checks the OAuth token cache and re-exchanges if near expiry.
+  private def token: String             = resolveToken(_authMode)
   private def refreshBufferMinutes: Int = _refreshBufferMinutes
   private def retryAttempts: Int        = _retryAttempts
 
@@ -97,7 +123,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
    */
   override def getCredentials(): AWSCredentials = {
     val path     = extractPath(uri)
-    val cacheKey = buildCacheKey(token, credentialOperation, path)
+    val cacheKey = buildCacheKey(authIdentity(_authMode), credentialOperation, path)
 
     logger.debug(s"Getting credentials for path: $path")
 
@@ -131,7 +157,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
   /** Refresh credentials (forced refresh, bypassing cache). */
   override def refresh(): Unit = {
     val path     = extractPath(uri)
-    val cacheKey = buildCacheKey(token, credentialOperation, path)
+    val cacheKey = buildCacheKey(authIdentity(_authMode), credentialOperation, path)
 
     logger.info(s"Refreshing credentials for path: $path")
 
@@ -274,11 +300,32 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   private val CredentialOperationKey = "spark.indextables.databricks.credential.operation"
   private val RetryAttemptsKey       = "spark.indextables.databricks.retry.attempts"
 
+  // Configuration keys - OAuth client credentials (bare-leaf form, resolved through ConfigurationResolver
+  // with the same two-source prefix/bare-leaf/case-insensitive semantics as apiToken)
+  private val ClientIdKey     = "clientId"
+  private val ClientSecretKey = "clientSecret"
+  private val AccountIdKey    = "accountId"
+  // Override for testing — defaults to the Databricks accounts OIDC base URL
+  private[unity] val OidcBaseUrlKey = "oidc.baseUrl"
+  private val DefaultOidcBaseUrl    = "https://accounts.cloud.databricks.com"
+  // Configurable refresh buffer for OAuth tokens (seconds before expiry to re-exchange)
+  // Default: 600s (10 minutes). For short-lived tokens the effective threshold is min(this, expires_in/4).
+  private val OAuthRefreshBufferKey        = "oauth.refreshBuffer.seconds"
+  private val DefaultOAuthRefreshBufferSec = 600
+  // Configurable OAuth scope — Databricks currently only supports "all-apis" but may add finer-grained
+  // scopes in the future. Bare-leaf key; resolved through ConfigurationResolver with the same
+  // prefix-aware, case-insensitive semantics as the other OAuth keys.
+  private[unity] val OAuthScopeKey = "oauth.scope"
+  private val DefaultOAuthScope    = "all-apis"
+
   // Default values
   private val DefaultRefreshBufferMinutes = 40
   private val DefaultCacheMaxSize         = 100
   private val DefaultCredentialOperation  = "PATH_READ_WRITE"
   private val DefaultRetryAttempts        = 3
+  // Maximum sleep duration when honouring a Retry-After header on 429 responses (60 seconds).
+  // Caps runaway values from misconfigured proxies or extremely long server-side back-off windows.
+  private val RetryAfterMaxSleepMs        = 60000L
 
   /**
    * Fast factory method that creates a provider from a config Map without creating Hadoop Configuration.
@@ -304,8 +351,13 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   /**
    * Resolve Databricks configuration from a Map[String, String]. This is the fast path that avoids Hadoop Configuration
    * creation.
+   *
+   * Auth mode priority:
+   *   1. ClientCredentials — when clientId + clientSecret + accountId are all present
+   *   2. StaticToken       — when apiToken is present
+   *   3. Error             — neither is configured
    */
-  private def resolveConfigFromMap(config: Map[String, String]): (String, String, Int, Int) = {
+  private def resolveConfigFromMap(config: Map[String, String]): (String, AuthMode, Int, Int) = {
     val sources: Seq[ConfigSource] = Seq(
       MapConfigSource(config, "spark.indextables.databricks"),
       MapConfigSource(config)
@@ -320,13 +372,46 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
         )
       )
 
-    val token = ConfigurationResolver
-      .resolveString(TokenKey, sources, logMask = true)
-      .getOrElse(
+    // Resolve OAuth keys through ConfigurationResolver for the same prefix-aware, case-insensitive,
+    // and log-masked semantics as apiToken (bare-leaf keys + spark.indextables.databricks.* prefix).
+    val clientId     = ConfigurationResolver.resolveString(ClientIdKey, sources)
+    val clientSecret = ConfigurationResolver.resolveString(ClientSecretKey, sources, logMask = true)
+    val accountId    = ConfigurationResolver.resolveString(AccountIdKey, sources)
+    val oidcBaseUrl  = ConfigurationResolver.resolveString(OidcBaseUrlKey, sources)
+                         .getOrElse(DefaultOidcBaseUrl)
+
+    val authMode: AuthMode = (clientId, clientSecret, accountId) match {
+      case (Some(id), Some(secret), Some(acct)) if id.nonEmpty && secret.nonEmpty && acct.nonEmpty =>
+        val oauthRefreshSec = ConfigurationResolver
+          .resolveInt(OAuthRefreshBufferKey, sources, DefaultOAuthRefreshBufferSec).toLong
+        val retryAttempts = ConfigurationResolver
+          .resolveInt(RetryAttemptsKey, sources, DefaultRetryAttempts)
+        val oauthScope = ConfigurationResolver
+          .resolveString(OAuthScopeKey, sources)
+          .getOrElse(DefaultOAuthScope)
+        logger.info(s"Using OAuth client credentials auth (clientId=$id, oidcBaseUrl=$oidcBaseUrl, scope=$oauthScope)")
+        ClientCredentials(id, secret, acct, oidcBaseUrl, retryAttempts, oauthRefreshSec, oauthScope)
+      case (Some(_), _, _) | (_, Some(_), _) | (_, _, Some(_)) =>
+        // Partial OAuth config — give a clear error rather than falling back silently.
+        // If you intended to use a static API token, remove all clientId/clientSecret/accountId
+        // entries. If you intended OAuth, set all three together.
         throw new IllegalStateException(
-          "Databricks API token not configured. Set spark.indextables.databricks.apiToken"
+          "Incomplete OAuth configuration: spark.indextables.databricks.clientId, " +
+            "spark.indextables.databricks.clientSecret, and " +
+            "spark.indextables.databricks.accountId must all be set together. " +
+            "To use a static API token instead, remove all three OAuth keys and set apiToken."
         )
-      )
+      case _ =>
+        val token = ConfigurationResolver
+          .resolveString(TokenKey, sources, logMask = true)
+          .getOrElse(
+            throw new IllegalStateException(
+              "Databricks auth not configured. Set spark.indextables.databricks.apiToken " +
+                "or spark.indextables.databricks.clientId/clientSecret/accountId."
+            )
+          )
+        StaticToken(token)
+    }
 
     val refreshBuffer = ConfigurationResolver
       .resolveInt(RefreshBufferKey, sources, DefaultRefreshBufferMinutes)
@@ -334,7 +419,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     val retryAttempts = ConfigurationResolver
       .resolveInt(RetryAttemptsKey, sources, DefaultRetryAttempts)
 
-    (workspaceUrl, token, refreshBuffer, retryAttempts)
+    (workspaceUrl, authMode, refreshBuffer, retryAttempts)
   }
 
   /**
@@ -360,11 +445,28 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   // Table info rarely changes, so we use a 1-hour TTL to avoid unnecessary UC API calls.
   @volatile private var globalTableInfoCache: Cache[String, io.indextables.spark.utils.TableInfo] = _
 
+  // Process-global OAuth token cache (clientId → CachedOAuthToken).
+  // Keyed by clientId so a single cached token is reused across all URIs for the same identity.
+  // We manage expiration ourselves via CachedOAuthToken.expirationTime; the 2-hour safety TTL
+  // here prevents stale entries from surviving indefinitely if the process runs for a long time.
+  @volatile private[unity] var globalOAuthTokenCache: Cache[String, CachedOAuthToken] = _
+
+  // Per-clientId lock objects for singleflight coordination on OIDC cache misses.
+  // On executor fan-out (hundreds of tasks starting simultaneously after token expiry) this ensures
+  // only one thread per clientId performs the OIDC exchange; all others block on the lock and then
+  // hit the fast path on wake-up, avoiding Databricks OIDC rate-limiting (429) under load.
+  // Bounded to prevent accumulation on long-lived drivers cycling through many distinct identities.
+  private val oauthExchangeLocks: Cache[String, AnyRef] =
+    CacheBuilder.newBuilder()
+      .maximumSize(50)
+      .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+      .build[String, AnyRef]()
+
   private val initLock = new Object
 
   /** Initialize the process-global credentials and table info caches from Map config. */
   private def initializeGlobalCacheFromMap(config: Map[String, String]): Unit =
-    if (globalCredentialsCache == null || globalTableInfoCache == null) {
+    if (globalCredentialsCache == null || globalTableInfoCache == null || globalOAuthTokenCache == null) {
       initLock.synchronized {
         if (globalCredentialsCache == null) {
           val sources = Seq(MapConfigSource(config, "spark.indextables.databricks"), MapConfigSource(config))
@@ -386,8 +488,179 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
             .recordStats()
             .build[String, io.indextables.spark.utils.TableInfo]()
         }
+        if (globalOAuthTokenCache == null) {
+          logger.info("Initializing process-global OAuth token cache: maxSize=50, TTL=2h")
+          globalOAuthTokenCache = CacheBuilder
+            .newBuilder()
+            .maximumSize(50)
+            .expireAfterWrite(2, java.util.concurrent.TimeUnit.HOURS)
+            .recordStats()
+            .build[String, CachedOAuthToken]()
+        }
       }
     }
+
+  /**
+   * Resolve a bearer token from the configured auth mode.
+   *
+   *   - StaticToken: returns the configured API token as-is.
+   *   - ClientCredentials: checks the process-global OAuth token cache; if missing or near expiry,
+   *     POSTs to the Databricks OIDC token endpoint and caches the result.
+   *
+   * Refresh threshold = min(cc.oauthRefreshBufferSec * 1000, expiresInSeconds * 1000 / 2).
+   * The `expires_in / 2` floor ensures we never use more than half the advertised token lifetime,
+   * which protects against unusually short-lived tokens (e.g. an OIDC proxy returning 5-minute
+   * tokens where a 10-minute fixed buffer would be larger than the token's entire lifetime).
+   *
+   * Singleflight: on cache miss a per-clientId lock prevents concurrent OIDC exchanges from the
+   * same process. Only one thread executes the POST; all others block, then hit the cache on wake-up.
+   */
+  private[unity] def resolveToken(authMode: AuthMode): String = authMode match {
+    case StaticToken(token) => token
+    case cc: ClientCredentials =>
+      // Fast path (unsynchronized) — avoids lock contention on the common case.
+      val cached = if (globalOAuthTokenCache != null) globalOAuthTokenCache.getIfPresent(cc.clientId) else null
+      if (cached != null && isOAuthTokenFresh(cached, cc)) {
+        logger.debug(s"Using cached OAuth token for clientId=${cc.clientId}")
+        return cached.accessToken
+      }
+
+      // Cache miss or near-expiry — acquire per-clientId lock to prevent thundering herd.
+      val lock = oauthExchangeLocks.get(cc.clientId, () => new AnyRef)
+      lock.synchronized {
+        // Double-check: a concurrent thread may have already refreshed the token while we waited.
+        val rechecked = if (globalOAuthTokenCache != null) globalOAuthTokenCache.getIfPresent(cc.clientId) else null
+        if (rechecked != null && isOAuthTokenFresh(rechecked, cc)) {
+          logger.debug(s"Using cached OAuth token for clientId=${cc.clientId} (double-check hit)")
+          return rechecked.accessToken
+        }
+
+        logger.info(
+          s"Exchanging client credentials for OAuth token (clientId=${cc.clientId}, accountId=${cc.accountId})"
+        )
+        val tokenUrl = s"${cc.oidcBaseUrl}/oidc/accounts/${cc.accountId}/v1/token"
+        val formBody =
+          s"grant_type=client_credentials" +
+            s"&client_id=${java.net.URLEncoder.encode(cc.clientId, "UTF-8")}" +
+            s"&client_secret=${java.net.URLEncoder.encode(cc.clientSecret, "UTF-8")}" +
+            s"&scope=${java.net.URLEncoder.encode(cc.oauthScope, "UTF-8")}"
+
+        // Retry with exponential backoff — consistent with fetchCredentials and fetchTableInfoInternal.
+        // On HTTP 429 the server-supplied Retry-After header is honoured when present (capped at
+        // RetryAfterMaxSleepMs) so we back off at the rate Databricks OIDC requests rather than
+        // hammering at our own exponential schedule.
+        var lastException: Option[Exception] = None
+        for (attempt <- 1 to cc.retryAttempts) {
+          scala.util.Try {
+            logger.debug(s"OIDC token exchange attempt $attempt/${cc.retryAttempts} for clientId=${cc.clientId}")
+            val t0 = System.currentTimeMillis()
+            val request = HttpRequest
+              .newBuilder()
+              .uri(URI.create(tokenUrl))
+              .header("Content-Type", "application/x-www-form-urlencoded")
+              .timeout(Duration.ofSeconds(30))
+              .POST(HttpRequest.BodyPublishers.ofString(formBody))
+              .build()
+
+            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+            val elapsedMs = System.currentTimeMillis() - t0
+
+            if (response.statusCode() == 429) {
+              // Rate-limited: respect Retry-After if the server provides it.
+              val retryAfterHeader = Option(response.headers().firstValue("Retry-After").orElse(null))
+              val retryAfterMs = retryAfterHeader.flatMap(v => scala.util.Try(v.toLong * 1000L).toOption).getOrElse(0L)
+              val sleepMs = if (retryAfterMs > 0) math.min(retryAfterMs, RetryAfterMaxSleepMs)
+                            else Math.pow(2, attempt - 1).toLong * 1000
+              throw new RateLimitedException(
+                s"OIDC rate-limited (429) for clientId=${cc.clientId} — sleeping ${sleepMs}ms", sleepMs
+              )
+            }
+
+            if (response.statusCode() != 200) {
+              throw new RuntimeException(
+                s"OAuth token exchange failed for clientId=${cc.clientId} " +
+                  s"(${response.statusCode()}): ${response.body()}"
+              )
+            }
+
+            val root = objectMapper.readTree(response.body())
+            val accessToken = Option(root.get("access_token"))
+              .filterNot(_.isNull)
+              .map(_.asText())
+              .getOrElse(
+                throw new RuntimeException(
+                  s"OAuth token response missing 'access_token' field for clientId=${cc.clientId}: ${response.body()}"
+                )
+              )
+            val expiresIn = Option(root.get("expires_in")).map(_.asLong()).getOrElse(3600L)
+            val expiresAt = System.currentTimeMillis() + expiresIn * 1000L
+
+            val cachedToken = CachedOAuthToken(accessToken, expiresIn, expiresAt)
+            if (globalOAuthTokenCache != null) globalOAuthTokenCache.put(cc.clientId, cachedToken)
+
+            logger.info(
+              s"OAuth token obtained for clientId=${cc.clientId}, expires in ${expiresIn}s, " +
+                s"exchange took ${elapsedMs}ms"
+            )
+            accessToken
+          } match {
+            case scala.util.Success(token) => return token
+            case scala.util.Failure(e: RateLimitedException) =>
+              lastException = Some(e)
+              if (attempt < cc.retryAttempts) {
+                logger.warn(s"OIDC token exchange attempt $attempt rate-limited, sleeping ${e.sleepMs}ms")
+                Thread.sleep(e.sleepMs)
+              }
+            case scala.util.Failure(e: Exception) =>
+              lastException = Some(e)
+              if (attempt < cc.retryAttempts) {
+                val backoffMs = Math.pow(2, attempt - 1).toLong * 1000
+                logger.warn(
+                  s"OIDC token exchange attempt $attempt failed, retrying in ${backoffMs}ms: ${e.getMessage}"
+                )
+                Thread.sleep(backoffMs)
+              }
+            case scala.util.Failure(t) => throw t
+          }
+        }
+
+        throw new RuntimeException(
+          s"Failed to obtain OAuth token for clientId=${cc.clientId} after ${cc.retryAttempts} attempts",
+          lastException.orNull
+        )
+      }
+  }
+
+  /**
+   * Returns true if the cached OAuth token has sufficient remaining lifetime to be reused.
+   *
+   * Threshold = min(cc.oauthRefreshBufferSec * 1000, cached.expiresInSeconds * 1000 / 4).
+   * The quarter-life floor guarantees at least 75% of every token's advertised lifetime is used,
+   * regardless of operator configuration or unusually short-lived tokens from an OIDC proxy.
+   *
+   * Examples (default 600s buffer):
+   *   - 3600s token: threshold = min(600s, 900s) = 600s → 3000s reuse (83%)
+   *   - 1800s token: threshold = min(600s, 450s) = 450s → 1350s reuse (75%)
+   *   -  300s token: threshold = min(600s,  75s) =  75s →  225s reuse (75%)
+   */
+  private def isOAuthTokenFresh(cached: CachedOAuthToken, cc: ClientCredentials): Boolean = {
+    val configuredMs  = cc.oauthRefreshBufferSec * 1000L
+    val quarterLifeMs = cached.expiresInSeconds * 1000L / 4
+    val thresholdMs   = math.min(configuredMs, quarterLifeMs)
+    System.currentTimeMillis() < cached.expirationTime - thresholdMs
+  }
+
+  /**
+   * Return a stable identity string for cache-keying purposes.
+   *
+   * For StaticToken this is the token itself (same behaviour as before).
+   * For ClientCredentials this is the clientId, so the AWS credential cache entry survives OAuth
+   * token refreshes — the clientId is stable across token exchanges, the access token is not.
+   */
+  private def authIdentity(authMode: AuthMode): String = authMode match {
+    case StaticToken(token)                => token
+    case ClientCredentials(clientId, _, _, _, _, _, _) => clientId
+  }
 
   /**
    * Build a cache key that includes token identity and credential operation for multi-user support.
@@ -397,17 +670,19 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * credential cache.
    */
   private def buildCacheKey(
-    token: String,
+    authIdentity: String,
     credentialOperation: String,
     path: String
   ): String = {
-    // Use hash of token to avoid storing the full token in memory
-    val tokenHash = Integer.toHexString(token.hashCode)
-    s"$tokenHash:$credentialOperation:$path"
+    // Hash the identity to avoid storing the full token/clientId in memory.
+    // For StaticToken this is the token; for ClientCredentials this is the clientId,
+    // which is stable across OAuth token refreshes.
+    val identityHash = Integer.toHexString(authIdentity.hashCode)
+    s"$identityHash:$credentialOperation:$path"
   }
 
   /** Log cache statistics for monitoring. */
-  private def logCacheStats(): Unit =
+  private def logCacheStats(): Unit = {
     if (globalCredentialsCache != null) {
       val stats = globalCredentialsCache.stats()
       if (stats.requestCount() % 100 == 0 && stats.requestCount() > 0) {
@@ -417,6 +692,16 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
         )
       }
     }
+    if (globalOAuthTokenCache != null) {
+      val stats = globalOAuthTokenCache.stats()
+      if (stats.requestCount() % 100 == 0 && stats.requestCount() > 0) {
+        logger.info(
+          s"OAuth token cache stats: hits=${stats.hitCount()}, misses=${stats.missCount()}, " +
+            s"hitRate=${f"${stats.hitRate() * 100}%.2f"}%%, size=${globalOAuthTokenCache.size()}"
+        )
+      }
+    }
+  }
 
   /** Clear all cached credentials and table info. This is a process-global operation. */
   def clearCache(): Unit = {
@@ -427,6 +712,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     if (globalTableInfoCache != null) {
       logger.info("Clearing process-global table info cache")
       globalTableInfoCache.invalidateAll()
+    }
+    if (globalOAuthTokenCache != null) {
+      logger.info("Clearing process-global OAuth token cache")
+      globalOAuthTokenCache.invalidateAll()
     }
   }
 
@@ -446,6 +735,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       if (globalTableInfoCache != null) {
         globalTableInfoCache.invalidateAll()
         globalTableInfoCache = null
+      }
+      if (globalOAuthTokenCache != null) {
+        globalOAuthTokenCache.invalidateAll()
+        globalOAuthTokenCache = null
       }
     }
 
@@ -509,10 +802,12 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     fullTableName: String,
     workspaceUrl: String,
     token: String,
-    retryAttempts: Int
+    retryAttempts: Int,
+    authMode: AuthMode
   ): io.indextables.spark.utils.TableInfo = {
-    val tokenHash = Integer.toHexString(token.hashCode)
-    val cacheKey  = s"$tokenHash:tableinfo:$fullTableName"
+    // Key by authIdentity (clientId for OAuth, token for static) so the tableInfo cache entry
+    // survives OAuth token rotation — consistent with the AWS credential cache key.
+    val cacheKey = s"${Integer.toHexString(authIdentity(authMode).hashCode)}:tableinfo:$fullTableName"
 
     // Check cache first
     if (globalTableInfoCache != null) {
@@ -597,9 +892,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    *   The table_id UUID string
    */
   def resolveTableId(fullTableName: String, config: Map[String, String]): String = {
-    val (workspaceUrl, token, _, retryAttempts) = resolveConfigFromMap(config)
+    val (workspaceUrl, authMode, _, retryAttempts) = resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
-    fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts).tableId
+    fetchTableInfoInternal(fullTableName, workspaceUrl, resolveToken(authMode), retryAttempts, authMode).tableId
   }
 
   /**
@@ -617,9 +912,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     fullTableName: String,
     config: Map[String, String]
   ): io.indextables.spark.utils.TableInfo = {
-    val (workspaceUrl, token, _, retryAttempts) = resolveConfigFromMap(config)
+    val (workspaceUrl, authMode, _, retryAttempts) = resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
-    fetchTableInfoInternal(fullTableName, workspaceUrl, token, retryAttempts)
+    fetchTableInfoInternal(fullTableName, workspaceUrl, resolveToken(authMode), retryAttempts, authMode)
   }
 
   /**
@@ -637,12 +932,12 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     tableId: String,
     config: Map[String, String]
   ): io.indextables.spark.utils.CredentialProviderFactory.BasicAWSCredentials = {
-    val (workspaceUrl, token, refreshBufferMinutes, retryAttempts) =
+    val (workspaceUrl, authMode, refreshBufferMinutes, retryAttempts) =
       resolveConfigFromMap(config)
     initializeGlobalCacheFromMap(config)
 
-    val tokenHash = Integer.toHexString(token.hashCode)
-    val cacheKey  = s"$tokenHash:table:$tableId"
+    val token     = resolveToken(authMode)
+    val cacheKey  = s"${Integer.toHexString(authIdentity(authMode).hashCode)}:table:$tableId"
 
     // Check cache first
     val cached = globalCredentialsCache.getIfPresent(cacheKey)
@@ -735,7 +1030,8 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * These are returned as defaults — user-explicit values always take precedence.
    */
   override def icebergCatalogDefaults(config: Map[String, String]): Map[String, String] = {
-    val (workspaceUrl, token, _, _) = resolveConfigFromMap(config)
+    val (workspaceUrl, authMode, _, _) = resolveConfigFromMap(config)
+    val token                          = resolveToken(authMode)
 
     val defaults = Map(
       "spark.indextables.iceberg.uri"         -> s"$workspaceUrl/api/2.1/unity-catalog/iceberg-rest",
@@ -750,6 +1046,32 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
 
     defaults
   }
+
+  /** Authentication mode — either a static API token or OAuth client credentials. */
+  private[unity] sealed trait AuthMode
+  private[unity] case class StaticToken(token: String) extends AuthMode
+  private[unity] case class ClientCredentials(
+    clientId: String,
+    clientSecret: String,
+    accountId: String,
+    oidcBaseUrl: String         = "https://accounts.cloud.databricks.com",
+    retryAttempts: Int          = 3,
+    oauthRefreshBufferSec: Long = 600L,
+    oauthScope: String          = "all-apis"
+  ) extends AuthMode
+
+  /** Signals an HTTP 429 response with a pre-computed sleep duration (Retry-After or exponential). */
+  private class RateLimitedException(message: String, val sleepMs: Long) extends Exception(message)
+
+  /**
+   * Cached OAuth access token with expiration tracking.
+   *
+   * @param expiresInSeconds
+   *   The `expires_in` value from the OIDC response (seconds). Stored so the refresh threshold can
+   *   be computed as min(configuredBufferMs, expiresInSeconds * 1000 / 2) on each freshness check,
+   *   preventing the configured buffer from exceeding half the token's advertised lifetime.
+   */
+  private[unity] case class CachedOAuthToken(accessToken: String, expiresInSeconds: Long, expirationTime: Long)
 
   /** Internal case class for cached credentials with expiration tracking. */
   private[unity] case class CachedCredentials(
