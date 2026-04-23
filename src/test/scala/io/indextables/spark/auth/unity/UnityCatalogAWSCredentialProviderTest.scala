@@ -836,6 +836,92 @@ class UnityCatalogAWSCredentialProviderTest
   private def oauthTokenResponse(token: String = "oauth-access-token", expiresIn: Long = 3600): String =
     s"""{"access_token":"$token","token_type":"Bearer","expires_in":$expiresIn}"""
 
+  /** Config map for workspace-level OIDC flow: omits OidcBaseUrlKey so oidcBaseUrl defaults,
+   *  triggering the workspace-level endpoint at {workspaceUrl}/oidc/v1/token with Basic Auth. */
+  private def workspaceOauthConfigMap(accountId: String = "acct-123"): Map[String, String] =
+    Map(
+      "spark.indextables.databricks.workspaceUrl"    -> s"http://localhost:$serverPort",
+      "spark.indextables.databricks.clientId"        -> "my-client-id",
+      "spark.indextables.databricks.clientSecret"    -> "my-client-secret",
+      "spark.indextables.databricks.accountId"       -> accountId
+    )
+
+  /** Register a handler for the workspace-level OIDC token endpoint (/oidc/v1/token). */
+  private def setupWorkspaceOidcHandler(responseCode: Int, responseBody: String): Unit = {
+    val path = "/oidc/v1/token"
+    try mockServer.removeContext(path)
+    catch { case _: IllegalArgumentException => }
+    mockServer.createContext(
+      path,
+      (exchange: com.sun.net.httpserver.HttpExchange) => {
+        val body = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters
+          .mapAsScalaMapConverter(exchange.getRequestHeaders)
+          .asScala
+          .map { case (k, v) => k -> v.get(0) }
+          .toMap
+        requestLog += MockRequest(exchange.getRequestMethod, exchange.getRequestURI.getPath, body, headers)
+        exchange.sendResponseHeaders(responseCode, responseBody.length)
+        val os = exchange.getResponseBody
+        os.write(responseBody.getBytes)
+        os.close()
+      }
+    )
+  }
+
+  test("OAuth: workspace-level endpoint used with Basic Auth when oidcBaseUrl is default") {
+    setupWorkspaceOidcHandler(200, oauthTokenResponse("tok-workspace"))
+    setupMockHandler(200, credentialResponse("KEY-WORKSPACE"))
+
+    val cfg = workspaceOauthConfigMap("acct-workspace")
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    val creds = provider.getCredentials()
+
+    creds.getAWSAccessKeyId shouldBe "KEY-WORKSPACE"
+
+    // Verify the workspace-level OIDC endpoint was called (not account-level)
+    val oidcRequest = requestLog.find(_.path == "/oidc/v1/token")
+    oidcRequest shouldBe defined
+
+    // Verify Basic Auth header: base64(clientId:clientSecret)
+    val expectedBasic = java.util.Base64.getEncoder.encodeToString("my-client-id:my-client-secret".getBytes("UTF-8"))
+    oidcRequest.get.headers.getOrElse("Authorization", "") shouldBe s"Basic $expectedBasic"
+
+    // Body should contain grant_type and scope but NOT client_id or client_secret
+    oidcRequest.get.body should include("grant_type=client_credentials")
+    oidcRequest.get.body should include("scope=all-apis")
+    oidcRequest.get.body should not include "client_id"
+    oidcRequest.get.body should not include "client_secret"
+
+    // No account-level OIDC calls should have been made
+    requestLog.count(_.path.contains("/oidc/accounts/")) shouldBe 0
+  }
+
+  test("OAuth: account-level endpoint used when oidcBaseUrl is explicitly set") {
+    val accountId = "acct-explicit"
+    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-account"))
+    setupMockHandler(200, credentialResponse("KEY-ACCOUNT"))
+
+    val cfg = oauthConfigMap(accountId)
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    val creds = provider.getCredentials()
+
+    creds.getAWSAccessKeyId shouldBe "KEY-ACCOUNT"
+
+    // Verify the account-level OIDC endpoint was called
+    val oidcRequest = requestLog.find(_.path.contains(s"/oidc/accounts/$accountId/v1/token"))
+    oidcRequest shouldBe defined
+
+    // No Authorization: Basic header should be present
+    oidcRequest.get.headers.getOrElse("Authorization", "") shouldBe ""
+
+    // Body should contain client_id and client_secret (account-level flow)
+    oidcRequest.get.body should include("client_id=my-client-id")
+    oidcRequest.get.body should include("client_secret=my-client-secret")
+    oidcRequest.get.body should include("grant_type=client_credentials")
+    oidcRequest.get.body should include("scope=all-apis")
+  }
+
   test("OAuth: token exchange happy path — access_token used as Bearer on credential request") {
     val accountId = "acct-123"
     setupOidcHandler(accountId, 200, oauthTokenResponse("tok-abc"))

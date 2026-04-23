@@ -59,8 +59,14 @@ import org.slf4j.LoggerFactory
  * When all three OAuth keys are present they take precedence. Partial OAuth config (only one or two
  * of the three keys) is an error. OAuth tokens are cached process-globally keyed by clientId and
  * refreshed automatically when within `spark.indextables.databricks.oauth.refreshBuffer.seconds`
- * (default: 60) of expiry. The AWS credential cache key is stable across token rotations (keyed by
+ * (default: 600) of expiry. The AWS credential cache key is stable across token rotations (keyed by
  * clientId, not the transient access token).
+ *
+ * '''OIDC endpoint selection:''' By default (when `oidc.baseUrl` is not explicitly set), the
+ * workspace-level endpoint `{workspaceUrl}/oidc/v1/token` is used with HTTP Basic Auth.
+ * This is required for private Databricks clusters where `accounts.cloud.databricks.com` is
+ * unreachable. When `oidc.baseUrl` is explicitly overridden, the account-level endpoint
+ * `{oidcBaseUrl}/oidc/accounts/{accountId}/v1/token` is used with credentials in the POST body.
  *
  * Configuration:
  *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
@@ -389,8 +395,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
         val oauthScope = ConfigurationResolver
           .resolveString(OAuthScopeKey, sources)
           .getOrElse(DefaultOAuthScope)
-        logger.info(s"Using OAuth client credentials auth (clientId=$id, oidcBaseUrl=$oidcBaseUrl, scope=$oauthScope)")
-        ClientCredentials(id, secret, acct, oidcBaseUrl, retryAttempts, oauthRefreshSec, oauthScope)
+        val endpointMode = if (oidcBaseUrl == DefaultOidcBaseUrl) "workspace-level" else "account-level"
+        logger.info(s"Using OAuth client credentials auth (clientId=$id, endpoint=$endpointMode, scope=$oauthScope)")
+        ClientCredentials(id, secret, acct, workspaceUrl, oidcBaseUrl, retryAttempts, oauthRefreshSec, oauthScope)
       case (Some(_), _, _) | (_, Some(_), _) | (_, _, Some(_)) =>
         // Partial OAuth config — give a clear error rather than falling back silently.
         // If you intended to use a static API token, remove all clientId/clientSecret/accountId
@@ -535,11 +542,25 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           return rechecked.accessToken
         }
 
+        // Workspace-level: {workspaceUrl}/oidc/v1/token + HTTP Basic Auth (credentials NOT in body).
+        // Account-level:   {oidcBaseUrl}/oidc/accounts/{accountId}/v1/token (credentials in body).
+        // Workspace-level is the default because accounts.cloud.databricks.com is not reachable
+        // from inside private Databricks clusters; the workspace URL is always reachable.
+        val useWorkspaceEndpoint = cc.oidcBaseUrl == DefaultOidcBaseUrl
+
+        val tokenUrl = if (useWorkspaceEndpoint)
+          s"${cc.workspaceUrl}/oidc/v1/token"
+        else
+          s"${cc.oidcBaseUrl}/oidc/accounts/${cc.accountId}/v1/token"
+
         logger.info(
-          s"Exchanging client credentials for OAuth token (clientId=${cc.clientId}, accountId=${cc.accountId})"
+          s"Exchanging client credentials for OAuth token (clientId=${cc.clientId}, " +
+            s"endpoint=${if (useWorkspaceEndpoint) "workspace-level" else "account-level"}, url=$tokenUrl)"
         )
-        val tokenUrl = s"${cc.oidcBaseUrl}/oidc/accounts/${cc.accountId}/v1/token"
-        val formBody =
+
+        val formBody = if (useWorkspaceEndpoint)
+          s"grant_type=client_credentials&scope=${java.net.URLEncoder.encode(cc.oauthScope, "UTF-8")}"
+        else
           s"grant_type=client_credentials" +
             s"&client_id=${java.net.URLEncoder.encode(cc.clientId, "UTF-8")}" +
             s"&client_secret=${java.net.URLEncoder.encode(cc.clientSecret, "UTF-8")}" +
@@ -554,13 +575,20 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           scala.util.Try {
             logger.debug(s"OIDC token exchange attempt $attempt/${cc.retryAttempts} for clientId=${cc.clientId}")
             val t0 = System.currentTimeMillis()
-            val request = HttpRequest
+            val builder = HttpRequest
               .newBuilder()
               .uri(URI.create(tokenUrl))
               .header("Content-Type", "application/x-www-form-urlencoded")
               .timeout(Duration.ofSeconds(30))
-              .POST(HttpRequest.BodyPublishers.ofString(formBody))
-              .build()
+
+            if (useWorkspaceEndpoint) {
+              val credentials = java.util.Base64.getEncoder.encodeToString(
+                s"${cc.clientId}:${cc.clientSecret}".getBytes("UTF-8")
+              )
+              builder.header("Authorization", s"Basic $credentials")
+            }
+
+            val request = builder.POST(HttpRequest.BodyPublishers.ofString(formBody)).build()
 
             val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
             val elapsedMs = System.currentTimeMillis() - t0
@@ -659,7 +687,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    */
   private def authIdentity(authMode: AuthMode): String = authMode match {
     case StaticToken(token)                => token
-    case ClientCredentials(clientId, _, _, _, _, _, _) => clientId
+    case ClientCredentials(clientId, _, _, _, _, _, _, _) => clientId
   }
 
   /**
@@ -1054,6 +1082,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     clientId: String,
     clientSecret: String,
     accountId: String,
+    workspaceUrl: String,
     oidcBaseUrl: String         = "https://accounts.cloud.databricks.com",
     retryAttempts: Int          = 3,
     oauthRefreshBufferSec: Long = 600L,
