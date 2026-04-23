@@ -296,7 +296,6 @@ class ConfigurationResolverTest extends AnyFunSuite with Matchers {
       "spark.indextables.databricks.workspaceUrl"   -> "https://example.databricks.com",
       "spark.indextables.databricks.clientId"       -> "my-client-id",
       "spark.indextables.databricks.clientSecret"   -> "my-client-secret",
-      "spark.indextables.databricks.accountId"      -> "my-account-id",
       "spark.indextables.databricks.oauth.scope"    -> "all-apis"
     )
 
@@ -308,15 +307,13 @@ class ConfigurationResolverTest extends AnyFunSuite with Matchers {
     // Bare-leaf resolution (source 1: prefix stripped)
     ConfigurationResolver.resolveString("clientId", sources)     shouldBe Some("my-client-id")
     ConfigurationResolver.resolveString("clientSecret", sources, logMask = true) shouldBe Some("my-client-secret")
-    ConfigurationResolver.resolveString("accountId", sources)    shouldBe Some("my-account-id")
     ConfigurationResolver.resolveString("oauth.scope", sources)  shouldBe Some("all-apis")
 
     // Bare-leaf keys supplied directly (source 2: no prefix)
     val bareConfig = Map(
       "workspaceUrl"  -> "https://example.databricks.com",
       "clientId"      -> "bare-client-id",
-      "clientSecret"  -> "bare-client-secret",
-      "accountId"     -> "bare-account-id"
+      "clientSecret"  -> "bare-client-secret"
     )
     val bareSources = Seq(
       MapConfigSource(bareConfig, "spark.indextables.databricks"),
@@ -324,7 +321,6 @@ class ConfigurationResolverTest extends AnyFunSuite with Matchers {
     )
     ConfigurationResolver.resolveString("clientId", bareSources)     shouldBe Some("bare-client-id")
     ConfigurationResolver.resolveString("clientSecret", bareSources, logMask = true) shouldBe Some("bare-client-secret")
-    ConfigurationResolver.resolveString("accountId", bareSources)    shouldBe Some("bare-account-id")
   }
 
   test("MapConfigSource should have descriptive name") {

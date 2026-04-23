@@ -353,38 +353,33 @@ class DatabricksConfigPropagationTest extends TestBase {
     // Set OAuth keys the way a user would (prefixed form)
     spark.conf.set("spark.indextables.databricks.clientId", "my-client-id")
     spark.conf.set("spark.indextables.databricks.clientSecret", "my-client-secret")
-    spark.conf.set("spark.indextables.databricks.accountId", "my-account-id")
 
     try {
       val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
 
       sparkConfigs should contain key "spark.indextables.databricks.clientId"
       sparkConfigs should contain key "spark.indextables.databricks.clientSecret"
-      sparkConfigs should contain key "spark.indextables.databricks.accountId"
 
       sparkConfigs("spark.indextables.databricks.clientId") shouldBe "my-client-id"
       sparkConfigs("spark.indextables.databricks.clientSecret") shouldBe "my-client-secret"
-      sparkConfigs("spark.indextables.databricks.accountId") shouldBe "my-account-id"
 
       logger.info("VERIFIED: OAuth client credential keys pass through ConfigNormalization")
     } finally {
       spark.conf.unset("spark.indextables.databricks.clientId")
       spark.conf.unset("spark.indextables.databricks.clientSecret")
-      spark.conf.unset("spark.indextables.databricks.accountId")
     }
   }
 
   test("ConfigurationResolver resolves OAuth keys from enriched Hadoop config (bare-leaf + prefixed)") {
     // This mirrors the apiToken resolution test above, but for OAuth credentials.
     // ConfigurationResolver uses two sources: prefixed (spark.indextables.databricks.*) and bare.
-    // OAuth keys are registered as bare-leaf (clientId, clientSecret, accountId) so they are found
+    // OAuth keys are registered as bare-leaf (clientId, clientSecret) so they are found
     // in source 1 (prefix-stripped) when the full key is present in the Hadoop config.
 
     val oauthConfigs = Map(
       "spark.indextables.databricks.workspaceUrl"   -> testWorkspaceUrl,
       "spark.indextables.databricks.clientId"       -> "my-client-id",
-      "spark.indextables.databricks.clientSecret"   -> "my-client-secret",
-      "spark.indextables.databricks.accountId"      -> "my-account-id"
+      "spark.indextables.databricks.clientSecret"   -> "my-client-secret"
     )
 
     val hadoopConf = new Configuration()
@@ -399,8 +394,6 @@ class DatabricksConfigPropagationTest extends TestBase {
       .resolveString("clientId", sources) shouldBe Some("my-client-id")
     io.indextables.spark.util.ConfigurationResolver
       .resolveString("clientSecret", sources, logMask = true) shouldBe Some("my-client-secret")
-    io.indextables.spark.util.ConfigurationResolver
-      .resolveString("accountId", sources) shouldBe Some("my-account-id")
 
     logger.info("VERIFIED: OAuth keys resolve correctly through ConfigurationResolver prefix-aware lookup")
   }
@@ -409,7 +402,6 @@ class DatabricksConfigPropagationTest extends TestBase {
     val oauthKeys = Seq(
       "spark.indextables.databricks.clientId",
       "spark.indextables.databricks.clientSecret",
-      "spark.indextables.databricks.accountId",
       "spark.indextables.databricks.oauth.refreshBuffer.seconds"
     )
 
