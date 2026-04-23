@@ -985,6 +985,48 @@ class UnityCatalogAWSCredentialProviderTest
     oidcCalls shouldBe 0 // Token still fresh — OIDC NOT called
   }
 
+  test("OAuth: short-lived token (300s) — 80s remaining is fresh (above quarter-life floor)") {
+    // expiresInSeconds=300 → quarterLife=75s. threshold = min(600s buffer, 75s) = 75s.
+    // 80s remaining > 75s threshold → token is FRESH; OIDC must NOT be called.
+    val accountId = "acct-short-fresh"
+    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-should-not-be-used", expiresIn = 300))
+    setupMockHandler(200, credentialResponse("KEY-SHORT-FRESH"))
+
+    val cfg = oauthConfigMap(accountId)
+    UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
+    val eightySecFromNow = System.currentTimeMillis() + 80 * 1000L
+    UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
+      "my-client-id",
+      UnityCatalogAWSCredentialProvider.CachedOAuthToken("tok-short-fresh", 300L, eightySecFromNow)
+    )
+
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    provider.getCredentials()
+
+    requestLog.count(_.path.contains("/v1/token")) shouldBe 0
+  }
+
+  test("OAuth: short-lived token (300s) — 70s remaining is stale (below quarter-life floor)") {
+    // expiresInSeconds=300 → quarterLife=75s. threshold = min(600s buffer, 75s) = 75s.
+    // 70s remaining < 75s threshold → token is STALE; OIDC must be called.
+    val accountId = "acct-short-stale"
+    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-refreshed", expiresIn = 300))
+    setupMockHandler(200, credentialResponse("KEY-SHORT-STALE"))
+
+    val cfg = oauthConfigMap(accountId)
+    UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
+    val seventySecFromNow = System.currentTimeMillis() + 70 * 1000L
+    UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
+      "my-client-id",
+      UnityCatalogAWSCredentialProvider.CachedOAuthToken("tok-short-stale", 300L, seventySecFromNow)
+    )
+
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    provider.getCredentials()
+
+    requestLog.count(_.path.contains("/v1/token")) shouldBe 1
+  }
+
   test("OAuth: custom scope is sent in OIDC POST body when oauth.scope is configured") {
     val accountId = "acct-scope"
     setupOidcHandler(accountId, 200, oauthTokenResponse("tok-custom-scope"))

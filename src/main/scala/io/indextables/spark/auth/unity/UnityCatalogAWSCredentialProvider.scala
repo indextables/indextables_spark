@@ -68,7 +68,7 @@ import org.slf4j.LoggerFactory
  *   - spark.indextables.databricks.clientId: OAuth2 client ID (OAuth auth mode)
  *   - spark.indextables.databricks.clientSecret: OAuth2 client secret (OAuth auth mode)
  *   - spark.indextables.databricks.accountId: Databricks account ID (OAuth auth mode)
- *   - spark.indextables.databricks.oauth.refreshBuffer.seconds: Seconds before OAuth token expiry to re-exchange (default: 600 = 10 min). Effective threshold is min(this, expires_in/2).
+ *   - spark.indextables.databricks.oauth.refreshBuffer.seconds: Seconds before OAuth token expiry to re-exchange (default: 600 = 10 min). Effective threshold is min(this, expires_in/4), guaranteeing at least 75% token reuse.
  *   - spark.indextables.databricks.oauth.scope: OAuth2 scope for client-credentials grant (default: "all-apis")
  *   - spark.indextables.databricks.credential.refreshBuffer.minutes: Minutes before AWS credential expiry to refresh (default: 40)
  *   - spark.indextables.databricks.cache.maxSize: Maximum cached entries (default: 100)
@@ -309,8 +309,8 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   private[unity] val OidcBaseUrlKey = "oidc.baseUrl"
   private val DefaultOidcBaseUrl    = "https://accounts.cloud.databricks.com"
   // Configurable refresh buffer for OAuth tokens (seconds before expiry to re-exchange)
-  // Default: 600s (10 minutes). For short-lived tokens the effective threshold is min(this, expires_in/2).
-  private val OAuthRefreshBufferKey        = "spark.indextables.databricks.oauth.refreshBuffer.seconds"
+  // Default: 600s (10 minutes). For short-lived tokens the effective threshold is min(this, expires_in/4).
+  private val OAuthRefreshBufferKey        = "oauth.refreshBuffer.seconds"
   private val DefaultOAuthRefreshBufferSec = 600
   // Configurable OAuth scope — Databricks currently only supports "all-apis" but may add finer-grained
   // scopes in the future. Bare-leaf key; resolved through ConfigurationResolver with the same
@@ -455,7 +455,12 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   // On executor fan-out (hundreds of tasks starting simultaneously after token expiry) this ensures
   // only one thread per clientId performs the OIDC exchange; all others block on the lock and then
   // hit the fast path on wake-up, avoiding Databricks OIDC rate-limiting (429) under load.
-  private val oauthExchangeLocks = new java.util.concurrent.ConcurrentHashMap[String, AnyRef]()
+  // Bounded to prevent accumulation on long-lived drivers cycling through many distinct identities.
+  private val oauthExchangeLocks: Cache[String, AnyRef] =
+    CacheBuilder.newBuilder()
+      .maximumSize(50)
+      .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+      .build[String, AnyRef]()
 
   private val initLock = new Object
 
@@ -521,7 +526,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
       }
 
       // Cache miss or near-expiry — acquire per-clientId lock to prevent thundering herd.
-      val lock = oauthExchangeLocks.computeIfAbsent(cc.clientId, _ => new AnyRef)
+      val lock = oauthExchangeLocks.get(cc.clientId, () => new AnyRef)
       lock.synchronized {
         // Double-check: a concurrent thread may have already refreshed the token while we waited.
         val rechecked = if (globalOAuthTokenCache != null) globalOAuthTokenCache.getIfPresent(cc.clientId) else null
@@ -629,15 +634,19 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   /**
    * Returns true if the cached OAuth token has sufficient remaining lifetime to be reused.
    *
-   * Threshold = min(cc.oauthRefreshBufferSec * 1000, cached.expiresInSeconds * 1000 / 2). The
-   * expires_in / 2 floor prevents the configured buffer from exceeding half the token lifetime for
-   * unusually short-lived tokens (e.g. a proxy that issues 5-minute tokens where the default 10-minute
-   * buffer would be larger than the entire lifetime, making every call trigger a re-exchange).
+   * Threshold = min(cc.oauthRefreshBufferSec * 1000, cached.expiresInSeconds * 1000 / 4).
+   * The quarter-life floor guarantees at least 75% of every token's advertised lifetime is used,
+   * regardless of operator configuration or unusually short-lived tokens from an OIDC proxy.
+   *
+   * Examples (default 600s buffer):
+   *   - 3600s token: threshold = min(600s, 900s) = 600s → 3000s reuse (83%)
+   *   - 1800s token: threshold = min(600s, 450s) = 450s → 1350s reuse (75%)
+   *   -  300s token: threshold = min(600s,  75s) =  75s →  225s reuse (75%)
    */
   private def isOAuthTokenFresh(cached: CachedOAuthToken, cc: ClientCredentials): Boolean = {
-    val configuredMs = cc.oauthRefreshBufferSec * 1000L
-    val halfLifeMs   = cached.expiresInSeconds * 1000L / 2
-    val thresholdMs  = math.min(configuredMs, halfLifeMs)
+    val configuredMs  = cc.oauthRefreshBufferSec * 1000L
+    val quarterLifeMs = cached.expiresInSeconds * 1000L / 4
+    val thresholdMs   = math.min(configuredMs, quarterLifeMs)
     System.currentTimeMillis() < cached.expirationTime - thresholdMs
   }
 
