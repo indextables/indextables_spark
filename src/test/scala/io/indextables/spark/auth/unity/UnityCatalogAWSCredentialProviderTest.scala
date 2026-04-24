@@ -790,9 +790,30 @@ class UnityCatalogAWSCredentialProviderTest
 
   // ==================== OAuth Client Credentials Tests ====================
 
-  /** Register a handler for the OIDC token endpoint on the mock server. */
-  private def setupOidcHandler(accountId: String, responseCode: Int, responseBody: String): Unit = {
-    val path = s"/oidc/accounts/$accountId/v1/token"
+  private def oauthConfigMap(): Map[String, String] =
+    Map(
+      "spark.indextables.databricks.workspaceUrl"    -> s"http://localhost:$serverPort",
+      "spark.indextables.databricks.clientId"        -> "my-client-id",
+      "spark.indextables.databricks.clientSecret"    -> "my-client-secret",
+      UnityCatalogAWSCredentialProvider.AllowInsecureOAuthKey -> "true"
+    )
+
+  private def credentialResponse(key: String = "OAUTH_KEY"): String =
+    s"""{
+       |  "aws_temp_credentials": {
+       |    "access_key_id": "$key",
+       |    "secret_access_key": "SECRET",
+       |    "session_token": "TOKEN"
+       |  },
+       |  "expiration_time": ${System.currentTimeMillis() + 3600000L}
+       |}""".stripMargin
+
+  private def oauthTokenResponse(token: String = "oauth-access-token", expiresIn: Long = 3600): String =
+    s"""{"access_token":"$token","token_type":"Bearer","expires_in":$expiresIn}"""
+
+  /** Register a handler for the workspace-level OIDC token endpoint (/oidc/v1/token). */
+  private def setupOidcHandler(responseCode: Int, responseBody: String): Unit = {
+    val path = "/oidc/v1/token"
     try mockServer.removeContext(path)
     catch { case _: IllegalArgumentException => }
     mockServer.createContext(
@@ -813,37 +834,51 @@ class UnityCatalogAWSCredentialProviderTest
     )
   }
 
-  private def oauthConfigMap(accountId: String = "acct-123"): Map[String, String] =
-    Map(
-      "spark.indextables.databricks.workspaceUrl"    -> s"http://localhost:$serverPort",
-      "spark.indextables.databricks.clientId"        -> "my-client-id",
-      "spark.indextables.databricks.clientSecret"    -> "my-client-secret",
-      "spark.indextables.databricks.accountId"       -> accountId,
-      // Point OIDC endpoint to the mock server so tests don't reach the real Databricks OIDC host
-      UnityCatalogAWSCredentialProvider.OidcBaseUrlKey -> s"http://localhost:$serverPort"
+  test("OAuth: fails fast when workspaceUrl is HTTP without allowInsecure") {
+    val cfg = Map(
+      "spark.indextables.databricks.workspaceUrl" -> "http://insecure-host",
+      "spark.indextables.databricks.clientId"     -> "id",
+      "spark.indextables.databricks.clientSecret" -> "secret"
     )
+    val ex = intercept[IllegalStateException] {
+      UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    }
+    ex.getMessage should include("HTTPS")
+    ex.getMessage should include("oauth.allowInsecure")
+  }
 
-  private def credentialResponse(key: String = "OAUTH_KEY"): String =
-    s"""{
-       |  "aws_temp_credentials": {
-       |    "access_key_id": "$key",
-       |    "secret_access_key": "SECRET",
-       |    "session_token": "TOKEN"
-       |  },
-       |  "expiration_time": ${System.currentTimeMillis() + 3600000L}
-       |}""".stripMargin
+  test("OAuth: workspace-level endpoint used with Basic Auth") {
+    setupOidcHandler(200, oauthTokenResponse("tok-workspace"))
+    setupMockHandler(200, credentialResponse("KEY-WORKSPACE"))
 
-  private def oauthTokenResponse(token: String = "oauth-access-token", expiresIn: Long = 3600): String =
-    s"""{"access_token":"$token","token_type":"Bearer","expires_in":$expiresIn}"""
+    val cfg = oauthConfigMap()
+    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
+    val creds = provider.getCredentials()
+
+    creds.getAWSAccessKeyId shouldBe "KEY-WORKSPACE"
+
+    // Verify the workspace-level OIDC endpoint was called
+    val oidcRequest = requestLog.find(_.path == "/oidc/v1/token")
+    oidcRequest shouldBe defined
+
+    // Verify Basic Auth header: base64(clientId:clientSecret)
+    val expectedBasic = java.util.Base64.getEncoder.encodeToString("my-client-id:my-client-secret".getBytes("UTF-8"))
+    oidcRequest.get.headers.getOrElse("Authorization", "") shouldBe s"Basic $expectedBasic"
+
+    // Body should contain grant_type and scope but NOT client_id or client_secret
+    oidcRequest.get.body should include("grant_type=client_credentials")
+    oidcRequest.get.body should include("scope=all-apis")
+    oidcRequest.get.body should not include "client_id"
+    oidcRequest.get.body should not include "client_secret"
+  }
 
   test("OAuth: token exchange happy path — access_token used as Bearer on credential request") {
-    val accountId = "acct-123"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-abc"))
+    setupOidcHandler(200, oauthTokenResponse("tok-abc"))
     setupMockHandler(200, credentialResponse("OAUTH_KEY_1"))
 
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       URI.create("s3://bucket/path"),
-      oauthConfigMap(accountId)
+      oauthConfigMap()
     )
     val creds = provider.getCredentials()
 
@@ -858,13 +893,11 @@ class UnityCatalogAWSCredentialProviderTest
     val oidcRequest = requestLog.find(_.path.contains("/v1/token"))
     oidcRequest shouldBe defined
     oidcRequest.get.body should include("grant_type=client_credentials")
-    oidcRequest.get.body should include("client_id=my-client-id")
     oidcRequest.get.body should include("scope=all-apis")
   }
 
   test("OAuth: token is cached — two credential fetches on the same provider only call OIDC once") {
-    val accountId = "acct-cache"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-cached", expiresIn = 3600))
+    setupOidcHandler(200, oauthTokenResponse("tok-cached", expiresIn = 3600))
     // Use a different S3 path for the second call so the AWS credential cache misses,
     // forcing a second HTTP call to the credential endpoint — but the OAuth token should be reused.
     var callCount = 0
@@ -889,7 +922,7 @@ class UnityCatalogAWSCredentialProviderTest
       }
     )
 
-    val cfg      = oauthConfigMap(accountId)
+    val cfg      = oauthConfigMap()
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path1"), cfg)
     val provider2 = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path2"), cfg)
     provider.getCredentials()
@@ -905,9 +938,8 @@ class UnityCatalogAWSCredentialProviderTest
   }
 
   test("OAuth: expired token triggers re-exchange") {
-    val accountId = "acct-refresh"
     val oidcCallCount = new AtomicInteger(0)
-    val path = s"/oidc/accounts/$accountId/v1/token"
+    val path = "/oidc/v1/token"
     try mockServer.removeContext(path)
     catch { case _: IllegalArgumentException => }
     mockServer.createContext(
@@ -927,7 +959,7 @@ class UnityCatalogAWSCredentialProviderTest
     )
     setupMockHandler(200, credentialResponse("OAUTH_KEY_3"))
 
-    val cfg = oauthConfigMap(accountId)
+    val cfg = oauthConfigMap()
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
     provider.getCredentials() // Fetches expired token, caches it
 
@@ -944,11 +976,10 @@ class UnityCatalogAWSCredentialProviderTest
   test("OAuth: token with 5 minutes remaining is treated as stale — re-exchange triggered") {
     // Default refresh buffer = 600s (10 min). expiresInSeconds=3600 → halfLife=1800s → threshold=min(600,1800)=600s (10 min).
     // A token expiring in 5 minutes has only 300s of freshness left — below the 600s threshold → stale.
-    val accountId = "acct-5min-stale"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-refreshed", expiresIn = 3600))
+    setupOidcHandler(200, oauthTokenResponse("tok-refreshed", expiresIn = 3600))
     setupMockHandler(200, credentialResponse("KEY-REFRESHED"))
 
-    val cfg = oauthConfigMap(accountId)
+    val cfg = oauthConfigMap()
     // fromConfig initialises the process-global caches; we then pre-seed a near-expiry token.
     UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
     val fiveMinFromNow = System.currentTimeMillis() + 5 * 60 * 1000L
@@ -966,11 +997,10 @@ class UnityCatalogAWSCredentialProviderTest
 
   test("OAuth: token with 30 minutes remaining is treated as fresh — no re-exchange") {
     // threshold = min(600s, 1800s) = 600s (10 min). A token expiring in 30 min has 1800s left → fresh.
-    val accountId = "acct-30min-fresh"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-should-not-be-used", expiresIn = 3600))
+    setupOidcHandler(200, oauthTokenResponse("tok-should-not-be-used", expiresIn = 3600))
     setupMockHandler(200, credentialResponse("KEY-CACHED"))
 
-    val cfg = oauthConfigMap(accountId)
+    val cfg = oauthConfigMap()
     UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
     val thirtyMinFromNow = System.currentTimeMillis() + 30 * 60 * 1000L
     UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
@@ -988,11 +1018,10 @@ class UnityCatalogAWSCredentialProviderTest
   test("OAuth: short-lived token (300s) — 80s remaining is fresh (above quarter-life floor)") {
     // expiresInSeconds=300 → quarterLife=75s. threshold = min(600s buffer, 75s) = 75s.
     // 80s remaining > 75s threshold → token is FRESH; OIDC must NOT be called.
-    val accountId = "acct-short-fresh"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-should-not-be-used", expiresIn = 300))
+    setupOidcHandler(200, oauthTokenResponse("tok-should-not-be-used", expiresIn = 300))
     setupMockHandler(200, credentialResponse("KEY-SHORT-FRESH"))
 
-    val cfg = oauthConfigMap(accountId)
+    val cfg = oauthConfigMap()
     UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
     val eightySecFromNow = System.currentTimeMillis() + 80 * 1000L
     UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
@@ -1009,11 +1038,10 @@ class UnityCatalogAWSCredentialProviderTest
   test("OAuth: short-lived token (300s) — 70s remaining is stale (below quarter-life floor)") {
     // expiresInSeconds=300 → quarterLife=75s. threshold = min(600s buffer, 75s) = 75s.
     // 70s remaining < 75s threshold → token is STALE; OIDC must be called.
-    val accountId = "acct-short-stale"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-refreshed", expiresIn = 300))
+    setupOidcHandler(200, oauthTokenResponse("tok-refreshed", expiresIn = 300))
     setupMockHandler(200, credentialResponse("KEY-SHORT-STALE"))
 
-    val cfg = oauthConfigMap(accountId)
+    val cfg = oauthConfigMap()
     UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/init"), cfg)
     val seventySecFromNow = System.currentTimeMillis() + 70 * 1000L
     UnityCatalogAWSCredentialProvider.globalOAuthTokenCache.put(
@@ -1028,11 +1056,10 @@ class UnityCatalogAWSCredentialProviderTest
   }
 
   test("OAuth: custom scope is sent in OIDC POST body when oauth.scope is configured") {
-    val accountId = "acct-scope"
-    setupOidcHandler(accountId, 200, oauthTokenResponse("tok-custom-scope"))
+    setupOidcHandler(200, oauthTokenResponse("tok-custom-scope"))
     setupMockHandler(200, credentialResponse("KEY-SCOPE"))
 
-    val cfg = oauthConfigMap(accountId) +
+    val cfg = oauthConfigMap() +
       (UnityCatalogAWSCredentialProvider.OAuthScopeKey -> "my-custom-scope")
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
     provider.getCredentials()
@@ -1044,10 +1071,9 @@ class UnityCatalogAWSCredentialProviderTest
   }
 
   test("OAuth: 429 with Retry-After header uses server-supplied delay instead of exponential backoff") {
-    val accountId     = "acct-429"
     val oidcCallCount = new AtomicInteger(0)
     val sleepTimes    = scala.collection.mutable.ArrayBuffer[Long]()
-    val path          = s"/oidc/accounts/$accountId/v1/token"
+    val path          = "/oidc/v1/token"
     try mockServer.removeContext(path)
     catch { case _: IllegalArgumentException => }
     mockServer.createContext(
@@ -1072,7 +1098,7 @@ class UnityCatalogAWSCredentialProviderTest
     )
     setupMockHandler(200, credentialResponse("KEY-429"))
 
-    val cfg = oauthConfigMap(accountId) +
+    val cfg = oauthConfigMap() +
       ("spark.indextables.databricks.retry.attempts" -> "3")
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
     val creds = provider.getCredentials()
@@ -1083,9 +1109,8 @@ class UnityCatalogAWSCredentialProviderTest
   }
 
   test("OAuth: 429 without Retry-After header falls back to exponential backoff") {
-    val accountId     = "acct-429-noheader"
     val oidcCallCount = new AtomicInteger(0)
-    val path          = s"/oidc/accounts/$accountId/v1/token"
+    val path          = "/oidc/v1/token"
     try mockServer.removeContext(path)
     catch { case _: IllegalArgumentException => }
     mockServer.createContext(
@@ -1108,7 +1133,7 @@ class UnityCatalogAWSCredentialProviderTest
     )
     setupMockHandler(200, credentialResponse("KEY-429-NOHEADER"))
 
-    val cfg = oauthConfigMap(accountId) +
+    val cfg = oauthConfigMap() +
       ("spark.indextables.databricks.retry.attempts" -> "3")
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
     val creds = provider.getCredentials()
@@ -1144,16 +1169,14 @@ class UnityCatalogAWSCredentialProviderTest
     ex.getMessage should include("Incomplete OAuth configuration")
     ex.getMessage should include("clientId")
     ex.getMessage should include("clientSecret")
-    ex.getMessage should include("accountId")
   }
 
   test("OAuth: AWS credential cache key is stable across token refreshes") {
     // Scenario: the OAuth access token changes (simulated by invalidating the OAuth cache directly),
     // but the AWS credential cache key is based on clientId (not the token), so the AWS creds
     // remain cached and are NOT re-fetched — only the OIDC endpoint is called again.
-    val accountId    = "acct-stable"
     val oidcCallCount = new AtomicInteger(0)
-    val oidcPath      = s"/oidc/accounts/$accountId/v1/token"
+    val oidcPath      = "/oidc/v1/token"
     try mockServer.removeContext(oidcPath)
     catch { case _: IllegalArgumentException => }
     mockServer.createContext(
@@ -1184,7 +1207,7 @@ class UnityCatalogAWSCredentialProviderTest
       }
     )
 
-    val cfg      = oauthConfigMap(accountId)
+    val cfg      = oauthConfigMap()
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
 
     // First call: fetches OIDC token + AWS creds

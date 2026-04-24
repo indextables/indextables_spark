@@ -98,7 +98,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * OAuth mirror: verify that OAuth client-credential keys (clientId / clientSecret / accountId) are visible to
+   * OAuth mirror: verify that OAuth client-credential keys (clientId / clientSecret) are visible to
    * MergeSplitsExecutor via ConfigNormalization, identical to the apiToken diagnostic test above.
    *
    * This confirms that the merge-time credential extraction path picks up OAuth keys set at session level,
@@ -109,7 +109,6 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     spark.conf.unset("spark.indextables.databricks.apiToken")
     spark.conf.set("spark.indextables.databricks.clientId",     "merge-client-id")
     spark.conf.set("spark.indextables.databricks.clientSecret", "merge-client-secret")
-    spark.conf.set("spark.indextables.databricks.accountId",    "merge-account-id")
 
     try {
       val hadoopConf    = spark.sparkContext.hadoopConfiguration
@@ -119,21 +118,17 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
       val clientId     = mergedConfigs.get("spark.indextables.databricks.clientId")
       val clientSecret = mergedConfigs.get("spark.indextables.databricks.clientSecret")
-      val accountId    = mergedConfigs.get("spark.indextables.databricks.accountId")
 
       logger.info(s"databricks.clientId:     ${clientId.getOrElse("None")}")
       logger.info(s"databricks.clientSecret: ${clientSecret.map(_ => "***").getOrElse("None")}")
-      logger.info(s"databricks.accountId:    ${accountId.getOrElse("None")}")
 
       clientId     shouldBe Some("merge-client-id")
       clientSecret shouldBe Some("merge-client-secret")
-      accountId    shouldBe Some("merge-account-id")
 
       logger.info("SUCCESS: OAuth client credential keys found in mergedConfigs for MergeSplitsExecutor")
     } finally {
       spark.conf.unset("spark.indextables.databricks.clientId")
       spark.conf.unset("spark.indextables.databricks.clientSecret")
-      spark.conf.unset("spark.indextables.databricks.accountId")
       spark.conf.set("spark.indextables.databricks.apiToken", fakeApiToken)
     }
   }

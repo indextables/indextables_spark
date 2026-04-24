@@ -54,20 +54,21 @@ import org.slf4j.LoggerFactory
  * '''OAuth2 Client Credentials''' (machine-to-machine, no personal token needed):
  *   - spark.indextables.databricks.clientId: OAuth2 client ID
  *   - spark.indextables.databricks.clientSecret: OAuth2 client secret
- *   - spark.indextables.databricks.accountId: Databricks account ID (for the OIDC token endpoint)
  *
- * When all three OAuth keys are present they take precedence. Partial OAuth config (only one or two
- * of the three keys) is an error. OAuth tokens are cached process-globally keyed by clientId and
- * refreshed automatically when within `spark.indextables.databricks.oauth.refreshBuffer.seconds`
- * (default: 60) of expiry. The AWS credential cache key is stable across token rotations (keyed by
- * clientId, not the transient access token).
+ * When both OAuth keys are present they take precedence. Partial OAuth config (only one of the
+ * two keys) is an error. OAuth tokens are exchanged via the workspace-level OIDC endpoint at
+ * `{workspaceUrl}/oidc/v1/token` using HTTP Basic Auth. The workspace URL is always reachable
+ * from within private Databricks clusters where `accounts.cloud.databricks.com` may be
+ * unreachable. Tokens are cached process-globally keyed by clientId and refreshed automatically
+ * when within `spark.indextables.databricks.oauth.refreshBuffer.seconds` (default: 600) of
+ * expiry. The AWS credential cache key is stable across token rotations (keyed by clientId,
+ * not the transient access token).
  *
  * Configuration:
- *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
+ *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required; must be HTTPS for OAuth)
  *   - spark.indextables.databricks.apiToken: Databricks API token (static auth mode)
  *   - spark.indextables.databricks.clientId: OAuth2 client ID (OAuth auth mode)
  *   - spark.indextables.databricks.clientSecret: OAuth2 client secret (OAuth auth mode)
- *   - spark.indextables.databricks.accountId: Databricks account ID (OAuth auth mode)
  *   - spark.indextables.databricks.oauth.refreshBuffer.seconds: Seconds before OAuth token expiry to re-exchange (default: 600 = 10 min). Effective threshold is min(this, expires_in/4), guaranteeing at least 75% token reuse.
  *   - spark.indextables.databricks.oauth.scope: OAuth2 scope for client-credentials grant (default: "all-apis")
  *   - spark.indextables.databricks.credential.refreshBuffer.minutes: Minutes before AWS credential expiry to refresh (default: 40)
@@ -304,10 +305,6 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   // with the same two-source prefix/bare-leaf/case-insensitive semantics as apiToken)
   private val ClientIdKey     = "clientId"
   private val ClientSecretKey = "clientSecret"
-  private val AccountIdKey    = "accountId"
-  // Override for testing — defaults to the Databricks accounts OIDC base URL
-  private[unity] val OidcBaseUrlKey = "oidc.baseUrl"
-  private val DefaultOidcBaseUrl    = "https://accounts.cloud.databricks.com"
   // Configurable refresh buffer for OAuth tokens (seconds before expiry to re-exchange)
   // Default: 600s (10 minutes). For short-lived tokens the effective threshold is min(this, expires_in/4).
   private val OAuthRefreshBufferKey        = "oauth.refreshBuffer.seconds"
@@ -317,6 +314,9 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   // prefix-aware, case-insensitive semantics as the other OAuth keys.
   private[unity] val OAuthScopeKey = "oauth.scope"
   private val DefaultOAuthScope    = "all-apis"
+  // Escape hatch for local dev/testing: allows OAuth over HTTP (Basic Auth over plaintext).
+  // Production deployments MUST use HTTPS workspace URLs.
+  private[unity] val AllowInsecureOAuthKey = "oauth.allowInsecure"
 
   // Default values
   private val DefaultRefreshBufferMinutes = 40
@@ -353,7 +353,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    * creation.
    *
    * Auth mode priority:
-   *   1. ClientCredentials — when clientId + clientSecret + accountId are all present
+   *   1. ClientCredentials — when clientId + clientSecret are both present
    *   2. StaticToken       — when apiToken is present
    *   3. Error             — neither is configured
    */
@@ -376,12 +376,21 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
     // and log-masked semantics as apiToken (bare-leaf keys + spark.indextables.databricks.* prefix).
     val clientId     = ConfigurationResolver.resolveString(ClientIdKey, sources)
     val clientSecret = ConfigurationResolver.resolveString(ClientSecretKey, sources, logMask = true)
-    val accountId    = ConfigurationResolver.resolveString(AccountIdKey, sources)
-    val oidcBaseUrl  = ConfigurationResolver.resolveString(OidcBaseUrlKey, sources)
-                         .getOrElse(DefaultOidcBaseUrl)
 
-    val authMode: AuthMode = (clientId, clientSecret, accountId) match {
-      case (Some(id), Some(secret), Some(acct)) if id.nonEmpty && secret.nonEmpty && acct.nonEmpty =>
+    val authMode: AuthMode = (clientId, clientSecret) match {
+      case (Some(id), Some(secret)) if id.nonEmpty && secret.nonEmpty =>
+        // HTTPS validation: Basic Auth sends base64-encoded credentials — must not go over plaintext.
+        if (!workspaceUrl.startsWith("https://")) {
+          val allowInsecure = ConfigurationResolver.resolveBoolean(AllowInsecureOAuthKey, sources, default = false)
+          if (!allowInsecure) {
+            throw new IllegalStateException(
+              s"OAuth client credentials require HTTPS workspace URL — got $workspaceUrl. " +
+                "Set a secure workspace URL or use apiToken auth. " +
+                "For local development/testing, set spark.indextables.databricks.oauth.allowInsecure=true."
+            )
+          }
+          logger.warn(s"OAuth over insecure HTTP workspace URL: $workspaceUrl — NOT suitable for production")
+        }
         val oauthRefreshSec = ConfigurationResolver
           .resolveInt(OAuthRefreshBufferKey, sources, DefaultOAuthRefreshBufferSec).toLong
         val retryAttempts = ConfigurationResolver
@@ -389,17 +398,14 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
         val oauthScope = ConfigurationResolver
           .resolveString(OAuthScopeKey, sources)
           .getOrElse(DefaultOAuthScope)
-        logger.info(s"Using OAuth client credentials auth (clientId=$id, oidcBaseUrl=$oidcBaseUrl, scope=$oauthScope)")
-        ClientCredentials(id, secret, acct, oidcBaseUrl, retryAttempts, oauthRefreshSec, oauthScope)
-      case (Some(_), _, _) | (_, Some(_), _) | (_, _, Some(_)) =>
+        logger.info(s"Using OAuth client credentials auth (clientId=$id, scope=$oauthScope)")
+        ClientCredentials(id, secret, workspaceUrl, retryAttempts, oauthRefreshSec, oauthScope)
+      case (Some(_), _) | (_, Some(_)) =>
         // Partial OAuth config — give a clear error rather than falling back silently.
-        // If you intended to use a static API token, remove all clientId/clientSecret/accountId
-        // entries. If you intended OAuth, set all three together.
         throw new IllegalStateException(
-          "Incomplete OAuth configuration: spark.indextables.databricks.clientId, " +
-            "spark.indextables.databricks.clientSecret, and " +
-            "spark.indextables.databricks.accountId must all be set together. " +
-            "To use a static API token instead, remove all three OAuth keys and set apiToken."
+          "Incomplete OAuth configuration: spark.indextables.databricks.clientId and " +
+            "spark.indextables.databricks.clientSecret must both be set together. " +
+            "To use a static API token instead, remove both OAuth keys and set apiToken."
         )
       case _ =>
         val token = ConfigurationResolver
@@ -407,7 +413,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           .getOrElse(
             throw new IllegalStateException(
               "Databricks auth not configured. Set spark.indextables.databricks.apiToken " +
-                "or spark.indextables.databricks.clientId/clientSecret/accountId."
+                "or spark.indextables.databricks.clientId/clientSecret."
             )
           )
         StaticToken(token)
@@ -505,12 +511,10 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    *
    *   - StaticToken: returns the configured API token as-is.
    *   - ClientCredentials: checks the process-global OAuth token cache; if missing or near expiry,
-   *     POSTs to the Databricks OIDC token endpoint and caches the result.
+   *     POSTs to `{workspaceUrl}/oidc/v1/token` with HTTP Basic Auth and caches the result.
    *
-   * Refresh threshold = min(cc.oauthRefreshBufferSec * 1000, expiresInSeconds * 1000 / 2).
-   * The `expires_in / 2` floor ensures we never use more than half the advertised token lifetime,
-   * which protects against unusually short-lived tokens (e.g. an OIDC proxy returning 5-minute
-   * tokens where a 10-minute fixed buffer would be larger than the token's entire lifetime).
+   * Refresh threshold = min(cc.oauthRefreshBufferSec * 1000, expiresInSeconds * 1000 / 4).
+   * The quarter-life floor guarantees at least 75% of every token's advertised lifetime is used.
    *
    * Singleflight: on cache miss a per-clientId lock prevents concurrent OIDC exchanges from the
    * same process. Only one thread executes the POST; all others block, then hit the cache on wake-up.
@@ -535,15 +539,20 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
           return rechecked.accessToken
         }
 
-        logger.info(
-          s"Exchanging client credentials for OAuth token (clientId=${cc.clientId}, accountId=${cc.accountId})"
-        )
-        val tokenUrl = s"${cc.oidcBaseUrl}/oidc/accounts/${cc.accountId}/v1/token"
-        val formBody =
-          s"grant_type=client_credentials" +
-            s"&client_id=${java.net.URLEncoder.encode(cc.clientId, "UTF-8")}" +
-            s"&client_secret=${java.net.URLEncoder.encode(cc.clientSecret, "UTF-8")}" +
-            s"&scope=${java.net.URLEncoder.encode(cc.oauthScope, "UTF-8")}"
+        val tokenUrl = s"${cc.workspaceUrl}/oidc/v1/token"
+        val formBody = s"grant_type=client_credentials&scope=${java.net.URLEncoder.encode(cc.oauthScope, "UTF-8")}"
+
+        // Build Basic Auth credentials without interpolating the secret into a heap String.
+        val credentialBytes = {
+          val baos = new java.io.ByteArrayOutputStream()
+          baos.write(cc.clientId.getBytes("UTF-8"))
+          baos.write(':'.toInt)
+          baos.write(cc.clientSecret.getBytes("UTF-8"))
+          baos.toByteArray
+        }
+        val basicAuth = s"Basic ${java.util.Base64.getEncoder.encodeToString(credentialBytes)}"
+
+        logger.debug(s"OIDC token endpoint: $tokenUrl")
 
         // Retry with exponential backoff — consistent with fetchCredentials and fetchTableInfoInternal.
         // On HTTP 429 the server-supplied Retry-After header is honoured when present (capped at
@@ -558,6 +567,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
               .newBuilder()
               .uri(URI.create(tokenUrl))
               .header("Content-Type", "application/x-www-form-urlencoded")
+              .header("Authorization", basicAuth)
               .timeout(Duration.ofSeconds(30))
               .POST(HttpRequest.BodyPublishers.ofString(formBody))
               .build()
@@ -659,7 +669,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
    */
   private def authIdentity(authMode: AuthMode): String = authMode match {
     case StaticToken(token)                => token
-    case ClientCredentials(clientId, _, _, _, _, _, _) => clientId
+    case ClientCredentials(clientId, _, _, _, _, _) => clientId
   }
 
   /**
@@ -1053,8 +1063,7 @@ object UnityCatalogAWSCredentialProvider extends io.indextables.spark.utils.Tabl
   private[unity] case class ClientCredentials(
     clientId: String,
     clientSecret: String,
-    accountId: String,
-    oidcBaseUrl: String         = "https://accounts.cloud.databricks.com",
+    workspaceUrl: String,
     retryAttempts: Int          = 3,
     oauthRefreshBufferSec: Long = 600L,
     oauthScope: String          = "all-apis"

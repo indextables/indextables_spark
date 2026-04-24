@@ -250,7 +250,7 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
    * resolution even when OAuth client-credential keys are present in the config.
    *
    * This mirrors the static-token isolation test above but uses a config that would activate OAuth auth mode
-   * (clientId + clientSecret + accountId present). The fix that strips uc.tableId before calling
+   * (clientId + clientSecret present). The fix that strips uc.tableId before calling
    * resolveCredentialsOnDriver must work regardless of the auth mode.
    *
    * Because the test environment does not have a live OIDC endpoint we use the mock provider class
@@ -272,8 +272,7 @@ class TransactionLogFactoryCredentialIsolationTest extends TestBase {
           "spark.indextables.aws.credentialsProviderClass"  -> mockProviderClass,
           "spark.indextables.iceberg.uc.tableId"            -> sourceTableId,
           "spark.indextables.databricks.clientId"           -> "my-client-id",
-          "spark.indextables.databricks.clientSecret"       -> "my-client-secret",
-          "spark.indextables.databricks.accountId"          -> "my-account-id"
+          "spark.indextables.databricks.clientSecret"       -> "my-client-secret"
         ).asJava
       )
 
