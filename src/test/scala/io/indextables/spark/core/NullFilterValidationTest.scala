@@ -465,4 +465,41 @@ class NullFilterValidationTest extends TestBase with BeforeAndAfterAll with Befo
       println(s"COUNT with IS NOT NULL on TEXT field: $count (expected 3)")
     }
   }
+
+  test("IS NULL with docMapping but no fast fields should not use read-time fastfields config") {
+    withTempPath { path =>
+      // Create test data with some null values
+      val data = spark
+        .createDataFrame(
+          Seq(
+            (1, "alice", 100),
+            (2, null: String, 200),
+            (3, "bob", 300)
+          )
+        )
+        .toDF("id", "name", "score")
+
+      // Write WITHOUT fastfields — docMapping will exist but have fastFields = Set.empty
+      data.write
+        .format(INDEXTABLES_FORMAT)
+        .mode("overwrite")
+        .save(path)
+
+      // Read WITH fastfields config specifying "name" as fast — this should be ignored
+      // because docMapping exists and says no fields are fast.
+      // Before the fix, computeActualFastFieldsFromSchema would fall through to config
+      // and incorrectly treat "name" as a fast field, enabling IS NULL pushdown to Tantivy.
+      val result = spark.read
+        .format(INDEXTABLES_FORMAT)
+        .option("spark.indextables.indexing.fastfields", "name")
+        .load(path)
+        .filter(col("name").isNull)
+        .collect()
+
+      // Spark handles the filter (not Tantivy), so we should get the 1 null row
+      result.length shouldBe 1
+      result(0).getInt(0) shouldBe 2
+      println(s"IS NULL with docMapping-no-fast-fields returned ${result.length} records (handled by Spark)")
+    }
+  }
 }

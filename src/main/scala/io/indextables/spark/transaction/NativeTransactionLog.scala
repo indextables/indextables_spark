@@ -119,7 +119,10 @@ class NativeTransactionLog(
   override def initialize(schema: StructType): Unit =
     initialize(schema, Seq.empty)
 
-  override def initialize(schema: StructType, partitionColumns: Seq[String]): Unit = {
+  override def initialize(schema: StructType, partitionColumns: Seq[String]): Unit =
+    initialize(schema, partitionColumns, Map.empty)
+
+  override def initialize(schema: StructType, partitionColumns: Seq[String], configuration: Map[String, String]): Unit = {
     // Validate partition columns exist in schema
     val schemaFieldNames = schema.fieldNames.toSet
     partitionColumns.foreach { col =>
@@ -145,7 +148,7 @@ class NativeTransactionLog(
       format = FileFormat("indextables", Map.empty),
       schemaString = schema.json,
       partitionColumns = partitionColumns,
-      configuration = Map.empty,
+      configuration = configuration,
       createdTime = Some(System.currentTimeMillis())
     )
 
@@ -155,6 +158,9 @@ class NativeTransactionLog(
     // refreshCredentials() already called inside getOrRefreshSnapshot() above
     TransactionLogWriter.initializeTable(nativeTablePath, nativeConfig, protocolJson, metadataJson)
     logger.info(s"Initialized table at $nativeTablePath with ${partitionColumns.size} partition columns")
+    if (configuration.nonEmpty) {
+      logger.info(s"Stored ${configuration.size} configuration entries in metadata")
+    }
   }
 
   // ------------------------------------------------------------------------------------

@@ -228,7 +228,9 @@ class IndexTables4SparkStandardWrite(
 
     logger.debug(s"SAVEMODE DEBUG: shouldOverwrite = $shouldOverwrite")
 
-    // Initialize transaction log with schema if this is the first commit
+    // Initialize transaction log with schema if this is the first commit.
+    // Field type info is captured in docMapping by the native layer — no separate
+    // typemap persistence needed.
     transactionLog.initialize(writeSchema, partitionColumns)
 
     // Convert serializedOptions Map to CaseInsensitiveStringMap

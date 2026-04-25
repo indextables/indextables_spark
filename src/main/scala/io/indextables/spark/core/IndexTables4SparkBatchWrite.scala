@@ -130,7 +130,9 @@ class IndexTables4SparkBatchWrite(
       case _: Exception                     => // Table may not exist yet, which is fine
     }
 
-    // Initialize transaction log with schema and partition columns
+    // Initialize transaction log with schema and partition columns.
+    // Field type info is captured in docMapping by the native layer — no separate
+    // typemap persistence needed.
     transactionLog.initialize(writeInfo.schema(), partitionColumns)
 
     val addActions: Seq[AddAction] = messages.flatMap {
