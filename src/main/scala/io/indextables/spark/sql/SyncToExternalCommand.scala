@@ -75,6 +75,7 @@ case class SyncToExternalCommand(
   writerHeapSize: Option[Long] = None,
   fromVersion: Option[Long] = None,
   fromSnapshot: Option[Long] = None,
+  lastSyncedVersion: Option[Long] = None,
   schemaSourcePath: Option[String] = None,
   catalogName: Option[String] = None,
   catalogType: Option[String] = None,
@@ -139,10 +140,8 @@ case class SyncToExternalCommand(
           lastSyncedVersion
         ) =>
           val cycleCommand = lastSyncedVersion match {
-            case Some(v) if sourceFormat == "delta" =>
-              copy(fromVersion = Some(v), streamingPollIntervalMs = None)
-            case Some(v) if sourceFormat == "iceberg" =>
-              copy(fromSnapshot = Some(v), streamingPollIntervalMs = None)
+            case Some(v) =>
+              copy(lastSyncedVersion = Some(v), fromVersion = None, fromSnapshot = None, streamingPollIntervalMs = None)
             case _ =>
               copy(streamingPollIntervalMs = None)
           }
@@ -156,7 +155,7 @@ case class SyncToExternalCommand(
     logger.info(
       s"Starting BUILD INDEXTABLES COMPANION FOR ${sourceFormat.toUpperCase}: " +
         s"source=$sourcePath, dest=$destPath, " +
-        s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, " +
+        s"fastFieldMode=$fastFieldMode, fromVersion=$fromVersion, fromSnapshot=$fromSnapshot, lastSyncedVersion=$lastSyncedVersion, " +
         s"wherePredicates=${wherePredicates.mkString(",")}, dryRun=$dryRun"
     )
 
@@ -326,6 +325,15 @@ case class SyncToExternalCommand(
       .get("spark.indextables.companion.sync.distributedLogRead.enabled")
       .forall(_.equalsIgnoreCase("true"))
 
+    // `lastSyncedVersion` is populated only by streaming cycles via copy() in the streaming
+    // loop. One-shot BUILDs deliberately leave it None and do NOT auto-read the companion's
+    // last synced version from the transaction log: that value reflects source-side state at
+    // last sync and does not account for local companion-side mutations (DROP PARTITIONS,
+    // manual invalidations) that leave the companion diverged from what the source snapshot
+    // ID alone would imply. Using it as `fromSnapshotId` would silently short-circuit re-sync
+    // to `no_action` even when the companion is missing dropped partitions that still exist
+    // in the source.
+
     // Attempt distributed scan if enabled.
     // WHERE predicates are passed to the scanner so it can build the PartitionFilter
     // using lightweight snapshot metadata (getSnapshotInfo) — avoids triggering the
@@ -341,7 +349,7 @@ case class SyncToExternalCommand(
               deltaPath,
               sourceCredentials,
               wherePredicates = wherePredicates,
-              fromVersion = fromVersion
+              fromVersion = lastSyncedVersion.orElse(fromVersion)
             )
           case "iceberg" =>
             val icebergConfig = buildIcebergConfig(mergedConfigs, resolveCredentials(mergedConfigs, sourcePath))
@@ -350,16 +358,14 @@ case class SyncToExternalCommand(
               if (parts.length == 2) (parts(0), parts(1))
               else throw new IllegalArgumentException(s"Invalid Iceberg table identifier: $sourcePath")
             }
-            // fromSnapshot means "return changes added after this snapshot" (incremental filter),
-            // not time travel. Always get the CURRENT snapshot; fromSnapshotId filters manifests.
             scanner.scanIcebergTable(
               effectiveCatalogName(earlyStoredConfig).getOrElse("default"),
               ns,
               tbl,
               icebergConfig,
-              snapshotId = None,
+              snapshotId = fromSnapshot,
               wherePredicates = wherePredicates,
-              fromSnapshotId = fromSnapshot
+              fromSnapshotId = lastSyncedVersion
             )
           case "parquet" =>
             val sourceCredentials = resolveCredentials(mergedConfigs, sourcePath)
@@ -1003,10 +1009,10 @@ case class SyncToExternalCommand(
 
       val (rawParquetFiles, splitsToInvalidate) = distributedResult match {
         case Some(dr) if dr.isIncremental =>
-          // Incremental changeset from getChangesBetween / getChangesSince.
+          // Incremental changeset from Delta getChangesBetween or Iceberg manifest set-difference.
           // New files are guaranteed additions — anti-join is skipped for those.
-          // Removed source paths (Delta only) require finding and invalidating the companion
-          // splits that indexed them, and re-indexing any sibling files from those splits.
+          // Removed source paths require finding and invalidating the companion splits that
+          // indexed them, and re-indexing any sibling files from those splits.
           val newFiles = dr.driverFiles.getOrElse(dr.filesRDD.collect().toSeq)
           if (newFiles.size > 10000)
             logger.warn(
@@ -1099,6 +1105,30 @@ case class SyncToExternalCommand(
           s"${parquetFilesToIndex.size} parquet files, " +
           s"${splitsToInvalidate.size} splits to invalidate"
       )
+
+      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
+      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
+      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
+
+      // 8b. Handle invalidation-only sync (splits to remove but no new files to index).
+      // Without this, the remove actions would never be committed because
+      // dispatchSyncTasksBatched only commits during batch processing.
+      if (groups.isEmpty && splitsToInvalidate.nonEmpty) {
+        logger.info(s"Invalidation-only sync: removing ${splitsToInvalidate.size} stale splits")
+        val removeActions = buildRemoveActions(splitsToInvalidate)
+        val metadataAction = buildCompanionMetadata(
+          transactionLog,
+          effectiveIndexingModes,
+          effectiveWherePredicates,
+          effectiveHfInclude,
+          effectiveHfExclude,
+          sourceVersion,
+          externalStorageRoot
+        )
+        transactionLog.commitSyncActions(removeActions, Seq.empty, Some(metadataAction))
+        transactionLog.invalidateCache()
+        return buildResultRow(Seq.empty, splitsToInvalidate.size, sourceVersion, startTime)
+      }
 
       // 9. Pass raw merged config to executors for JIT credential resolution.
       // Executors resolve credentials just-in-time before each download/upload via
@@ -1202,9 +1232,6 @@ case class SyncToExternalCommand(
       )
 
       // 10. Dispatch groups as concurrent batches (3 Spark jobs at a time by default)
-      // For Delta UC, resolvedStorageLocation provides the actual S3 path (sourcePath is a table name).
-      // For Iceberg, icebergStorageRoot provides the S3 path (sourcePath is a table identifier).
-      val externalStorageRoot = icebergStorageRoot.orElse(resolvedStorageLocation)
       dispatchSyncTasksBatched(
         sparkSession,
         groups,
@@ -1625,7 +1652,10 @@ case class SyncToExternalCommand(
         totalBytesDownloaded,
         totalBytesUploaded,
         durationMs,
-        s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
+        if (results.isEmpty && splitsInvalidated > 0)
+          s"Removed $splitsInvalidated invalidated splits (no new files)"
+        else
+          s"Synced $totalFilesIndexed parquet files into ${results.length} companion splits"
       )
     )
   }
