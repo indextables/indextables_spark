@@ -48,7 +48,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <scala.version>2.12.20</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
-        <spark.version>3.5.2</spark.version>
+        <spark.version>3.5.3</spark.version>
         <hadoop.version>3.5.0</hadoop.version>
         <aws.sdk.version>2.42.41</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
@@ -403,6 +403,8 @@
                     <execution>
                         <goals>
                             <goal>report</goal>
+                            <!-- scoverage-maven-plugin 2.x moved threshold enforcement out of `report` into `check`. -->
+                            <goal>check</goal>
                         </goals>
                     </execution>
                 </executions>
