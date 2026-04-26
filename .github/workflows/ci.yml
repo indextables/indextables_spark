@@ -31,7 +31,7 @@ jobs:
 
       - name: Upload test logs
         if: failure() && steps.test-macos.outputs.log_dir != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-test-logs
           path: ${{ steps.test-macos.outputs.log_dir }}/
@@ -61,7 +61,7 @@ jobs:
 
       - name: Upload test logs
         if: failure() && steps.test-linux.outputs.log_dir != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-test-logs
           path: ${{ steps.test-linux.outputs.log_dir }}/
