@@ -48,12 +48,12 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <scala.version>2.12.20</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
-        <spark.version>3.5.3</spark.version>
-        <hadoop.version>3.3.4</hadoop.version>
+        <spark.version>3.5.8</spark.version>
+        <hadoop.version>3.5.0</hadoop.version>
         <aws.sdk.version>2.34.8</aws.sdk.version>
-        <scalatest.version>3.2.15</scalatest.version>
+        <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
-        <antlr.version>4.9.3</antlr.version>
+        <antlr.version>4.13.2</antlr.version>
         <arrow.version>12.0.1</arrow.version>
     </properties>
 
@@ -283,7 +283,7 @@
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
-            <version>1.6.1</version>
+            <version>1.10.1</version>
             <scope>test</scope>
             <exclusions>
                 <!-- Let Spark's bundled Guava win on the test classpath -->
@@ -305,7 +305,7 @@
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
-                <version>4.8.1</version>
+                <version>4.9.10</version>
                 <executions>
                     <execution>
                         <goals>
@@ -347,7 +347,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0-M9</version>
+                <version>3.5.5</version>
                 <configuration>
                     <!-- Fork each test class in a separate JVM for better isolation -->
                     <forkCount>1</forkCount>
@@ -393,7 +393,7 @@
             <plugin>
                 <groupId>org.scoverage</groupId>
                 <artifactId>scoverage-maven-plugin</artifactId>
-                <version>1.4.11</version>
+                <version>2.1.5</version>
                 <configuration>
                     <scalaVersion>${scala.version}</scalaVersion>
                     <minimumCoverage>90</minimumCoverage>
@@ -412,7 +412,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>2.43.0</version>
+                <version>3.4.0</version>
                 <configuration>
                     <scala>
                         <includes>
@@ -439,7 +439,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>scalafix</id>
@@ -487,7 +487,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
+                <version>3.5.0</version>
                 <configuration>
                     <archive>
                         <manifest>
@@ -503,7 +503,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-install-plugin</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.4</version>
                 <configuration>
                     <skip>false</skip>
                 </configuration>
@@ -534,7 +534,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
-                <version>3.4.2</version>
+                <version>3.8.0</version>
                 <configuration>
                     <descriptorRefs>
                         <descriptorRef>jar-with-dependencies</descriptorRef>
@@ -557,7 +557,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.4.1</version>
+                <version>3.6.2</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -698,7 +698,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
-                        <version>3.3.0</version>
+                        <version>3.4.0</version>
                         <executions>
                             <execution>
                                 <id>attach-sources</id>
@@ -713,7 +713,7 @@
                     <plugin>
                         <groupId>net.alchim31.maven</groupId>
                         <artifactId>scala-maven-plugin</artifactId>
-                        <version>4.8.1</version>
+                        <version>4.9.10</version>
                         <executions>
                             <execution>
                                 <id>attach-scaladocs</id>
@@ -728,7 +728,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-gpg-plugin</artifactId>
-                        <version>3.1.0</version>
+                        <version>3.2.8</version>
                         <executions>
                             <execution>
                                 <id>sign-artifacts</id>
@@ -751,7 +751,7 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.4.0</version>
+                        <version>0.10.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
