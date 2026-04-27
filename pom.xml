@@ -49,9 +49,9 @@
         <scala.version>2.12.20</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
         <spark.version>3.5.3</spark.version>
-        <hadoop.version>3.3.4</hadoop.version>
-        <aws.sdk.version>2.34.8</aws.sdk.version>
-        <scalatest.version>3.2.15</scalatest.version>
+        <hadoop.version>3.5.0</hadoop.version>
+        <aws.sdk.version>2.42.41</aws.sdk.version>
+        <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>
         <arrow.version>12.0.1</arrow.version>
@@ -63,7 +63,7 @@
             <dependency>
                 <groupId>org.apache.yetus</groupId>
                 <artifactId>audience-annotations</artifactId>
-                <version>0.13.0</version>
+                <version>0.15.1</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -132,7 +132,7 @@
         <dependency>
             <groupId>org.apache.yetus</groupId>
             <artifactId>audience-annotations</artifactId>
-            <version>0.13.0</version>
+            <version>0.15.1</version>
             <scope>provided</scope>
         </dependency>
 
@@ -155,12 +155,12 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.15.2</version>
+            <version>2.21.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-scala_${scala.compat.version}</artifactId>
-            <version>2.15.2</version>
+            <version>2.21.2</version>
         </dependency>
 
 
@@ -212,7 +212,7 @@
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob</artifactId>
-            <version>12.25.0</version>
+            <version>12.33.3</version>
         </dependency>
 
         <!-- Azure Identity SDK for authentication -->
@@ -226,7 +226,7 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>1.7.36</version>
+            <version>2.0.17</version>
         </dependency>
 
         <!-- ANTLR for SQL parsing -->
@@ -283,6 +283,7 @@
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
+            <!-- 1.10.1 requires Avro 1.12 (LogicalTypes.timestampNanos), but Spark 3.5.x ships Avro 1.11.x. -->
             <version>1.6.1</version>
             <scope>test</scope>
             <exclusions>
@@ -305,7 +306,7 @@
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
-                <version>4.8.1</version>
+                <version>4.9.10</version>
                 <executions>
                     <execution>
                         <goals>
@@ -347,7 +348,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0-M9</version>
+                <version>3.5.5</version>
                 <configuration>
                     <!-- Fork each test class in a separate JVM for better isolation -->
                     <forkCount>1</forkCount>
@@ -393,7 +394,7 @@
             <plugin>
                 <groupId>org.scoverage</groupId>
                 <artifactId>scoverage-maven-plugin</artifactId>
-                <version>1.4.11</version>
+                <version>2.1.5</version>
                 <configuration>
                     <scalaVersion>${scala.version}</scalaVersion>
                     <minimumCoverage>90</minimumCoverage>
@@ -403,6 +404,8 @@
                     <execution>
                         <goals>
                             <goal>report</goal>
+                            <!-- scoverage-maven-plugin 2.x moved threshold enforcement out of `report` into `check`. -->
+                            <goal>check</goal>
                         </goals>
                     </execution>
                 </executions>
@@ -412,7 +415,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>2.43.0</version>
+                <version>3.4.0</version>
                 <configuration>
                     <scala>
                         <includes>
@@ -439,7 +442,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>scalafix</id>
@@ -487,7 +490,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
+                <version>3.5.0</version>
                 <configuration>
                     <archive>
                         <manifest>
@@ -503,7 +506,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-install-plugin</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.4</version>
                 <configuration>
                     <skip>false</skip>
                 </configuration>
@@ -534,7 +537,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
-                <version>3.4.2</version>
+                <version>3.8.0</version>
                 <configuration>
                     <descriptorRefs>
                         <descriptorRef>jar-with-dependencies</descriptorRef>
@@ -557,7 +560,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.4.1</version>
+                <version>3.6.2</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -698,7 +701,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
-                        <version>3.3.0</version>
+                        <version>3.4.0</version>
                         <executions>
                             <execution>
                                 <id>attach-sources</id>
@@ -713,7 +716,7 @@
                     <plugin>
                         <groupId>net.alchim31.maven</groupId>
                         <artifactId>scala-maven-plugin</artifactId>
-                        <version>4.8.1</version>
+                        <version>4.9.10</version>
                         <executions>
                             <execution>
                                 <id>attach-scaladocs</id>
@@ -728,7 +731,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-gpg-plugin</artifactId>
-                        <version>3.1.0</version>
+                        <version>3.2.8</version>
                         <executions>
                             <execution>
                                 <id>sign-artifacts</id>
@@ -751,7 +754,7 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.4.0</version>
+                        <version>0.10.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
