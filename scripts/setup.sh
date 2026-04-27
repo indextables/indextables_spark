@@ -13,7 +13,11 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+# Minimum supported Java major version. We target JDK 11 bytecode but tests
+# also run cleanly under JDK 17 (Spark 4 baseline) thanks to the --add-opens
+# argLine in pom.xml.
 REQUIRED_JAVA_MAJOR=11
+SUPPORTED_JAVA_MAJORS=(11 17)
 
 # Protoc version to install from GitHub releases (Linux only).
 # Must support --experimental_allow_proto3_optional (used by quickwit proto build).
@@ -156,13 +160,22 @@ get_java_major_version() {
     echo "$major"
 }
 
-# Check if Java 11 is already available
+# Returns 0 if $1 (a Java major version string) is in SUPPORTED_JAVA_MAJORS.
+is_supported_java_major() {
+    local major="$1"
+    for v in "${SUPPORTED_JAVA_MAJORS[@]}"; do
+        [[ "$major" == "$v" ]] && return 0
+    done
+    return 1
+}
+
+# Check if a supported Java is already available (currently 11 or 17).
 check_java() {
     # First check JAVA_HOME if set
     if [[ -n "${JAVA_HOME:-}" ]] && [[ -x "${JAVA_HOME}/bin/java" ]]; then
         local major
         major=$(get_java_major_version "${JAVA_HOME}/bin/java")
-        if [[ "$major" == "$REQUIRED_JAVA_MAJOR" ]]; then
+        if is_supported_java_major "$major"; then
             return 0
         fi
     fi
@@ -170,7 +183,7 @@ check_java() {
     if command -v java &>/dev/null; then
         local major
         major=$(get_java_major_version java)
-        if [[ "$major" == "$REQUIRED_JAVA_MAJOR" ]]; then
+        if is_supported_java_major "$major"; then
             return 0
         fi
     fi
@@ -615,17 +628,18 @@ echo "=================================================================="
 
 ERRORS=0
 
-# Validate Java 11
-# On macOS with Homebrew, set JAVA_HOME hint if not already pointing to Java 11
-if [[ "$PLATFORM" == "macos" ]]; then
-    BREW_JAVA_HOME="/opt/homebrew/opt/openjdk@11"
-    # Fall back to Intel Homebrew path
-    if [[ ! -d "$BREW_JAVA_HOME" ]]; then
-        BREW_JAVA_HOME="/usr/local/opt/openjdk@11"
-    fi
-    if [[ -d "$BREW_JAVA_HOME" ]]; then
-        export JAVA_HOME="$BREW_JAVA_HOME"
-    fi
+# Validate Java
+# On macOS with Homebrew, set JAVA_HOME hint if not already pointing to a
+# supported JDK. Prefer 11 (default build target), fall back to 17.
+if [[ "$PLATFORM" == "macos" ]] && [[ -z "${JAVA_HOME:-}" ]]; then
+    for keg in openjdk@11 openjdk@17; do
+        for brew_prefix in /opt/homebrew /usr/local; do
+            if [[ -d "${brew_prefix}/opt/${keg}" ]]; then
+                export JAVA_HOME="${brew_prefix}/opt/${keg}"
+                break 2
+            fi
+        done
+    done
 fi
 
 if check_java; then
@@ -635,9 +649,9 @@ if check_java; then
     else
         JAVA_VERSION_OUTPUT=$(java -version 2>&1 | head -1)
     fi
-    ok "Java $REQUIRED_JAVA_MAJOR: $JAVA_VERSION_OUTPUT"
+    ok "Java: $JAVA_VERSION_OUTPUT"
 else
-    error "Java $REQUIRED_JAVA_MAJOR not found or wrong version"
+    error "Supported Java not found (need ${SUPPORTED_JAVA_MAJORS[*]})"
     if command -v java &>/dev/null; then
         error "  Found: $(java -version 2>&1 | head -1)"
     fi
