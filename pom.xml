@@ -48,12 +48,12 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <scala.version>2.12.20</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
-        <spark.version>3.5.3</spark.version>
+        <spark.version>3.5.8</spark.version>
         <hadoop.version>3.5.0</hadoop.version>
         <aws.sdk.version>2.42.41</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
-        <antlr.version>4.9.3</antlr.version>
+        <antlr.version>4.13.2</antlr.version>
         <arrow.version>12.0.1</arrow.version>
     </properties>
 
@@ -284,7 +284,7 @@
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
             <!-- 1.10.1 requires Avro 1.12 (LogicalTypes.timestampNanos), but Spark 3.5.x ships Avro 1.11.x. -->
-            <version>1.6.1</version>
+            <version>1.10.1</version>
             <scope>test</scope>
             <exclusions>
                 <!-- Let Spark's bundled Guava win on the test classpath -->
