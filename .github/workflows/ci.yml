@@ -38,32 +38,38 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  build-and-test-linux:
-    name: Build & Test (Linux X64)
-    runs-on: [self-hosted, Linux, X64]
-    environment: test-runners
-    env:
-      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup dependencies
-        run: ./scripts/setup.sh
-
-      - name: Build
-        run: make compile
-
-      - name: Test
-        id: test-linux
-        run: make test
-
-      - name: Upload test logs
-        if: failure() && steps.test-linux.outputs.log_dir != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-test-logs
-          path: ${{ steps.test-linux.outputs.log_dir }}/
-          if-no-files-found: warn
-          retention-days: 7
+  # Linux X64 CI is disabled pending a host-OS upgrade on the self-hosted
+  # runner (bluegill, currently Ubuntu 16.04 / runner v2.321.0). The current
+  # runner cannot load actions/checkout@v6 because that action requires
+  # node24, which the runner does not support. Re-enable by uncommenting
+  # the job below once the runner host has been upgraded.
+  #
+  # build-and-test-linux:
+  #   name: Build & Test (Linux X64)
+  #   runs-on: [self-hosted, Linux, X64]
+  #   environment: test-runners
+  #   env:
+  #     JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+  #
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v6
+  #
+  #     - name: Setup dependencies
+  #       run: ./scripts/setup.sh
+  #
+  #     - name: Build
+  #       run: make compile
+  #
+  #     - name: Test
+  #       id: test-linux
+  #       run: make test
+  #
+  #     - name: Upload test logs
+  #       if: failure() && steps.test-linux.outputs.log_dir != ''
+  #       uses: actions/upload-artifact@v7
+  #       with:
+  #         name: linux-test-logs
+  #         path: ${{ steps.test-linux.outputs.log_dir }}/
+  #         if-no-files-found: warn
+  #         retention-days: 7
