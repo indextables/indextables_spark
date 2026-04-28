@@ -46,10 +46,26 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!--
+            JVM module-access flags required to run on JDK 17+ (Spark 4 baseline).
+            Safe under JDK 11: every flag is recognized there, and
+            -XX:+IgnoreUnrecognizedVMOptions guards against any future additions
+            that 11 might not know about. Mirrors Spark's own `extraJavaTestArgs`.
+        -->
+        <extraJavaTestArgs>-XX:+IgnoreUnrecognizedVMOptions --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false</extraJavaTestArgs>
         <scala.version>2.12.20</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
         <spark.version>3.5.3</spark.version>
-        <hadoop.version>3.5.0</hadoop.version>
+        <!--
+            Pin Hadoop to 3.3.4 to match Spark 3.5.x's bundled
+            hadoop-client-api / hadoop-client-runtime (shaded). PR317 bumped
+            this to 3.5.0, which causes hadoop-aws / hadoop-azure to call
+            Configuration.getEnumSet (added in Hadoop 3.4) against Spark's
+            3.3.4 shaded Configuration -> NoSuchMethodError at runtime in
+            S3AFileSystem.initialize.
+        -->
+        <hadoop.version>3.3.4</hadoop.version>
         <aws.sdk.version>2.42.41</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
@@ -355,7 +371,7 @@
                     <reuseForks>false</reuseForks>
                     <parallel>none</parallel>
                     <!-- JVM settings for forked processes -->
-                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m</argLine>
+                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m ${extraJavaTestArgs}</argLine>
                     <!-- Environment variables for forked processes -->
                     <environmentVariables>
                         <SPARK_LOCAL_DIRS>/tmp</SPARK_LOCAL_DIRS>
@@ -378,7 +394,7 @@
                     <junitxml>.</junitxml>
                     <filereports>TestSuiteReport.txt</filereports>
                     <!-- Run tests with increased memory; disable SparkUI to avoid port exhaustion under parallel test execution -->
-                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m -Dspark.ui.enabled=false</argLine>
+                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m -Dspark.ui.enabled=false ${extraJavaTestArgs}</argLine>
                 </configuration>
                 <executions>
                     <execution>

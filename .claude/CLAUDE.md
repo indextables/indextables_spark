@@ -11,7 +11,9 @@
 
 ### Build & Test
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # Set Java 11
+# JDK 11 is the default build target. JDK 17 is also supported — tests run
+# with the standard Spark `--add-opens` set wired into pom.xml.
+export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # or openjdk@17
 mvn clean compile                              # Build
 
 # Run local tests (excludes cloud tests, uses all CPU cores):
