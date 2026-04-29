@@ -80,9 +80,10 @@ private[sql] class StreamingCompanionManager(
         val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
         val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
         val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+        val merged = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
         Some(
-          ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
-            ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+          if (merged.contains("spark.indextables.databricks.credential.operation")) merged
+          else merged + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
         )
       } catch { case _: Exception => None }
 

@@ -104,10 +104,12 @@ case class RepairIndexFilesTransactionLogCommand(
 
       // Create transaction log instance for source
       logger.info(s"Reading source transaction log from: $sourcePath")
+      val credOp = sparkSession.conf.getOption("spark.indextables.databricks.credential.operation")
+        .getOrElse("PATH_READ_WRITE")
       val sourceOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         Map(
           "spark.indextables.transaction.allowDirectUsage"    -> "true",
-          "spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE"
+          "spark.indextables.databricks.credential.operation" -> credOp
         ).asJava
       )
 

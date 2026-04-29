@@ -1389,7 +1389,8 @@ class PurgeOrphanedSplitsExecutor(
         sparkConfigs
     }
     // Purge operations delete split files, so ensure PATH_READ_WRITE credentials
-    base + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+    if (base.contains("spark.indextables.databricks.credential.operation")) base
+    else base + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
   }
 
   /**

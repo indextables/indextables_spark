@@ -85,8 +85,10 @@ case class TruncateTimeTravelCommand(
       val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
       val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
-        ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+      val merged = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+      val mergedConfigs =
+        if (merged.contains("spark.indextables.databricks.credential.operation")) merged
+        else merged + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
       // Create transaction log with PATH_READ_WRITE credentials since truncate
       // deletes old version files and creates checkpoints

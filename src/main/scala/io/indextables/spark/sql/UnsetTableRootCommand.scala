@@ -53,7 +53,8 @@ case class UnsetTableRootCommand(
       val resolvedPath = TableRootUtils.resolveTablePath(tablePath, sparkSession)
       logger.info(s"UNSET TABLE ROOT '$rootName' at $resolvedPath")
 
-      val options = TableRootUtils.buildOptions(sparkSession, Some("PATH_READ_WRITE"))
+      val configuredOp = sparkSession.conf.getOption("spark.indextables.databricks.credential.operation")
+      val options = TableRootUtils.buildOptions(sparkSession, configuredOp.orElse(Some("PATH_READ_WRITE")))
 
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
       try {

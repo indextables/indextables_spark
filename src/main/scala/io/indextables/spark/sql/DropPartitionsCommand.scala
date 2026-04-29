@@ -108,7 +108,9 @@ case class DropPartitionsCommand(
     // Create transaction log with PATH_READ_WRITE credentials since drop partitions
     // performs write operations (removing split files and updating transaction log)
     import scala.jdk.CollectionConverters._
-    val writeConfigs = mergedConfigs + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+    val writeConfigs =
+      if (mergedConfigs.contains("spark.indextables.databricks.credential.operation")) mergedConfigs
+      else mergedConfigs + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
     val transactionLog =
       TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(writeConfigs.asJava))
 

@@ -138,13 +138,9 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
       return cached.toAWSCredentials
     }
 
-    // Fetch fresh credentials:
-    // - If explicitly PATH_READ, fetch directly (no fallback needed)
-    // - Otherwise, try PATH_READ_WRITE with automatic fallback to PATH_READ
+    // Fetch fresh credentials using the configured credential operation.
     try {
-      val freshCredentials =
-        if (credentialOperation == "PATH_READ") fetchCredentials(path, "PATH_READ")
-        else fetchCredentialsWithFallback(path)
+      val freshCredentials = fetchCredentials(path, credentialOperation)
       globalCredentialsCache.put(cacheKey, freshCredentials)
       logCacheStats()
       freshCredentials.toAWSCredentials
@@ -167,9 +163,7 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
 
     // Fetch new credentials and update cache
     Try {
-      val freshCredentials =
-        if (credentialOperation == "PATH_READ") fetchCredentials(path, "PATH_READ")
-        else fetchCredentialsWithFallback(path)
+      val freshCredentials = fetchCredentials(path, credentialOperation)
       globalCredentialsCache.put(cacheKey, freshCredentials)
       logger.info(s"Successfully refreshed and cached credentials for path: $path")
     } match {
@@ -194,35 +188,6 @@ class UnityCatalogAWSCredentialProvider private[unity] (uri: URI, config: Map[St
       false
     }
   }
-
-  /** Fetch credentials with automatic fallback from PATH_READ_WRITE to PATH_READ. */
-  private def fetchCredentialsWithFallback(path: String): CachedCredentials =
-    Try {
-      logger.debug(s"Attempting to fetch PATH_READ_WRITE credentials for path: $path")
-      val creds = fetchCredentials(path, "PATH_READ_WRITE")
-      logger.info(s"Successfully obtained PATH_READ_WRITE credentials for path: $path")
-      creds
-    } match {
-      case Success(creds) => creds
-      case Failure(e) =>
-        logger.info(s"PATH_READ_WRITE credentials unavailable for path: $path, falling back to PATH_READ")
-        logger.debug(s"PATH_READ_WRITE failure reason: ${e.getMessage}")
-
-        Try {
-          val creds = fetchCredentials(path, "PATH_READ")
-          logger.info(s"Successfully obtained PATH_READ credentials for path: $path")
-          creds
-        } match {
-          case Success(creds) => creds
-          case Failure(readException) =>
-            logger.error(s"Failed to obtain both PATH_READ_WRITE and PATH_READ credentials for path: $path")
-            throw new RuntimeException(
-              s"Unable to obtain any credentials from Unity Catalog for path: $path. " +
-                s"PATH_READ_WRITE error: ${e.getMessage}, PATH_READ error: ${readException.getMessage}",
-              readException
-            )
-        }
-    }
 
   /** Fetch credentials from Unity Catalog API via HTTP. */
   private def fetchCredentials(path: String, operation: String): CachedCredentials = {

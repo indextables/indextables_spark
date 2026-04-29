@@ -498,8 +498,8 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
       // 1. overrideOptions are merged with baseConfigs
       content should include("baseConfigs ++ overrides")
 
-      // 2. SerializableAwsConfig receives the merged configs
-      content should include("configs = mergedConfigs")
+      // 2. SerializableAwsConfig receives the merged configs (with conditional credential.operation default)
+      content should include("configs = if (mergedConfigs.contains")
 
       // 3. Credential resolution uses centralized CredentialProviderFactory
       content should include("CredentialProviderFactory.resolveAWSCredentialsFromConfig")

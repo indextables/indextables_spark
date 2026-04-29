@@ -314,31 +314,25 @@ class UnityCatalogAWSCredentialProviderTest
 
   // ==================== Credential Operation & Fallback Tests ====================
 
-  test("default operation is PATH_READ_WRITE with fallback to PATH_READ on 403") {
-    // Disable retries for this test to focus on fallback behavior
+  test("default operation is PATH_READ_WRITE — no fallback, 403 is an error") {
+    // With direct operation mode, the configured operation is sent as-is.
+    // A 403 is a hard failure, not a trigger for fallback.
     val testConfig = configMap + ("spark.indextables.databricks.retry.attempts" -> "1")
 
-    setupMockHandlerWithCallback { request =>
-      if (request.body.contains("PATH_READ_WRITE")) {
-        (403, """{"error": "Permission denied for READ_WRITE"}""")
-      } else if (request.body.contains("PATH_READ")) {
-        (200, successResponse(accessKeyId = "READ_ONLY_KEY"))
-      } else {
-        (400, """{"error": "Unknown operation"}""")
-      }
-    }
+    setupMockHandler(403, """{"error": "Permission denied for READ_WRITE"}""")
 
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(
       new URI("s3://test-bucket/path"),
       testConfig
     )
 
-    val credentials = provider.getCredentials()
+    val exception = intercept[RuntimeException] {
+      provider.getCredentials()
+    }
 
-    assert(credentials.getAWSAccessKeyId == "READ_ONLY_KEY")
-    assert(requestLog.size == 2) // First PATH_READ_WRITE (403), then PATH_READ (200)
-    assert(requestLog(0).body.contains("PATH_READ_WRITE"))
-    assert(requestLog(1).body.contains("PATH_READ"))
+    assert(exception.getMessage.contains("Failed to obtain Unity Catalog credentials"))
+    assert(requestLog.size == 1)
+    assert(requestLog.head.body.contains("PATH_READ_WRITE"))
   }
 
   test("default operation succeeds with PATH_READ_WRITE when write access is available") {
@@ -373,7 +367,7 @@ class UnityCatalogAWSCredentialProviderTest
     assert(!requestLog.head.body.contains("PATH_READ_WRITE"))
   }
 
-  test("throws exception when both PATH_READ_WRITE and PATH_READ fail") {
+  test("throws exception when configured operation fails") {
     setupMockHandler(403, """{"error": "Permission denied"}""")
 
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(
@@ -386,9 +380,9 @@ class UnityCatalogAWSCredentialProviderTest
     }
 
     assert(exception.getMessage.contains("Failed to obtain Unity Catalog credentials"))
-    // Should have tried both PATH_READ_WRITE and PATH_READ
+    // Only the configured operation (PATH_READ_WRITE default) should have been tried
     assert(requestLog.exists(_.body.contains("PATH_READ_WRITE")))
-    assert(requestLog.exists(r => r.body.contains("PATH_READ") && !r.body.contains("PATH_READ_WRITE")))
+    assert(requestLog.size == 3) // 3 retry attempts (default)
   }
 
   test("explicit PATH_READ throws on failure without fallback") {
