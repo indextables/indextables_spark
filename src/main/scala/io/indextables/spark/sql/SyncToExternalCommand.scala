@@ -189,8 +189,10 @@ case class SyncToExternalCommand(
     val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
     val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val baseMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
-      ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+    val merged = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val baseMergedConfigs =
+      if (merged.contains("spark.indextables.databricks.credential.operation")) merged
+      else merged + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
 
     // Load stored companion metadata early so CATALOG/TYPE/WAREHOUSE can be
     // restored from a prior sync before the source reader is created. Skipped
@@ -1922,8 +1924,9 @@ case class SyncToExternalCommand(
         val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
         val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
         val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-        ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
-          ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
+        val merged = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+        if (merged.contains("spark.indextables.databricks.credential.operation")) merged
+        else merged + ("spark.indextables.databricks.credential.operation" -> "PATH_READ_WRITE")
       }
       // Load stored companion metadata once so the cheap path can also honor
       // the SQL > stored > SparkConf catalog config fallback chain.
