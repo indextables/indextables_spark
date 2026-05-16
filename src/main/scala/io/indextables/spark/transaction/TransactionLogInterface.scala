@@ -66,6 +66,19 @@ trait TransactionLogInterface extends AutoCloseable {
   def initialize(schema: StructType, partitionColumns: Seq[String]): Unit
 
   /**
+   * Initializes the transaction log with a schema, partition columns, and additional configuration.
+   *
+   * @param schema
+   *   The table schema to initialize with
+   * @param partitionColumns
+   *   The partition column names (must exist in schema)
+   * @param configuration
+   *   Additional configuration entries to persist in metadata
+   */
+  def initialize(schema: StructType, partitionColumns: Seq[String], configuration: Map[String, String]): Unit =
+    initialize(schema, partitionColumns) // Default: delegates to 2-param version for backwards compat
+
+  /**
    * Adds a single file to the transaction log.
    *
    * @param addAction

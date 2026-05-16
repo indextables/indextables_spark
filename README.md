@@ -12,7 +12,7 @@ IndexTables runs entirely within your existing Spark cluster with no additional 
 
 - **Embedded Search** - Runs directly within Spark executors, no additional infrastructure
 - **Multi-Cloud Storage** - AWS S3 and Azure Blob Storage fully supported
-- **Full-Text Search** - Native `indexquery` operator with complete Tantivy search syntax
+- **Full-Text Search** - Type-safe `TEXTSEARCH` and `FIELDMATCH` operators with complete Tantivy search syntax
 - **Predicate Pushdown** - WHERE clause filters convert to native search operations
 - **Aggregate Pushdown** - COUNT, SUM, AVG, MIN, MAX execute directly in the search engine
 - **Bucket Aggregations** - DateHistogram, Histogram, and Range for time-series analysis
@@ -56,16 +56,22 @@ df = spark.read \
 
 df.createOrReplaceTempView("my_table")
 
-# Full-text search with SQL
+# Full-text search (for text fields)
 spark.sql("""
     SELECT * FROM my_table
     WHERE category = 'technology'
-      AND message indexquery 'critical AND infrastructure'
+      AND message TEXTSEARCH 'critical AND infrastructure'
     LIMIT 100
 """).show()
 
 # Cross-field search
-spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'error'").show()
+spark.sql("SELECT * FROM my_table WHERE * TEXTSEARCH 'error'").show()
+
+# Exact match on non-tokenized fields
+spark.sql("SELECT * FROM my_table WHERE status FIELDMATCH 'active'").show()
+
+# General-purpose syntax (works on any field, no type validation)
+# spark.sql("SELECT * FROM my_table WHERE message indexquery 'error'").show()
 ```
 
 ## Documentation

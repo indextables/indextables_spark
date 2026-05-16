@@ -33,9 +33,15 @@ import org.apache.spark.unsafe.types.UTF8String
  */
 case class IndexQueryExpression(
   left: Expression, // Column reference
-  right: Expression // Query string literal
+  right: Expression, // Query string literal
+  searchType: String = SearchType.IndexQuery // "indexquery", "textsearch", or "fieldmatch"
 ) extends BinaryExpression
     with Predicate {
+
+  require(
+    SearchType.validSingleField.contains(searchType),
+    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validSingleField.mkString(", ")}"
+  )
 
   override def dataType: DataType = BooleanType
 
@@ -45,11 +51,21 @@ case class IndexQueryExpression(
   // This ensures the V2IndexQueryExpressionRule gets a chance to process it
   override lazy val deterministic: Boolean = false
 
-  override def prettyName: String = "indexquery"
+  override def prettyName: String = searchType match {
+    case SearchType.TextSearch => "textsearch"
+    case SearchType.FieldMatch => "fieldmatch"
+    case _                     => "indexquery"
+  }
 
-  override def sql: String = s"(${left.sql} indexquery ${right.sql})"
+  private def displayKeyword: String = searchType match {
+    case SearchType.TextSearch => "TEXTSEARCH"
+    case SearchType.FieldMatch => "FIELDMATCH"
+    case _                     => "indexquery"
+  }
 
-  override def toString: String = s"($left indexquery $right)"
+  override def sql: String = s"(${left.sql} $displayKeyword ${right.sql})"
+
+  override def toString: String = s"($left $displayKeyword $right)"
 
   // For pushdown, we primarily care about the structure, not evaluation
   override def nullSafeEval(leftValue: Any, rightValue: Any): Any =
@@ -90,7 +106,7 @@ case class IndexQueryExpression(
     val rightCheck = right.dataType match {
       case StringType => TypeCheckResult.TypeCheckSuccess
       case _ =>
-        TypeCheckResult.TypeCheckFailure(s"Right side of indexquery must be a string literal, got ${right.dataType}")
+        TypeCheckResult.TypeCheckFailure(s"Right side of $displayKeyword must be a string literal, got ${right.dataType}")
     }
 
     rightCheck

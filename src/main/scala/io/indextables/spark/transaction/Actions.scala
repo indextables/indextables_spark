@@ -44,14 +44,33 @@ case class DocMappingMetadata(
   fastFields: Set[String],
   fieldTypes: Map[String, String],
   indexedFields: Set[String] = Set.empty,
-  storedFields: Set[String] = Set.empty)
+  storedFields: Set[String] = Set.empty,
+  fieldTokenizers: Map[String, String] = Map.empty) {
+
+  /**
+   * Determine whether a field is tokenized based on its docMapping type and tokenizer.
+   *
+   * A field is tokenized if its type is "text" AND its tokenizer is not "raw".
+   * When the tokenizer key is absent from docMapping, `forall(_ != "raw")` returns true,
+   * treating the field as tokenized. This is correct: Tantivy's default tokenizer for
+   * text fields is "default" (tokenized). The only way a text field is non-tokenized is
+   * with an explicit `"tokenizer": "raw"` entry.
+   *
+   * @return Some(true) if tokenized, Some(false) if not tokenized, None if field unknown
+   */
+  def isTokenizedField(fieldName: String): Option[Boolean] = {
+    fieldTypes.get(fieldName).map { fieldType =>
+      fieldType == "text" && fieldTokenizers.get(fieldName).forall(_ != "raw")
+    }
+  }
+}
 
 object DocMappingMetadata {
   private val mapper = JsonUtil.mapper
   private val logger = org.slf4j.LoggerFactory.getLogger(DocMappingMetadata.getClass)
 
   /** Empty metadata for when no docMappingJson is available */
-  val empty: DocMappingMetadata = DocMappingMetadata(Set.empty, Set.empty, Map.empty, Set.empty, Set.empty)
+  val empty: DocMappingMetadata = DocMappingMetadata(Set.empty, Set.empty, Map.empty, Set.empty, Set.empty, Map.empty)
 
   /** Parse docMappingJson into structured metadata. Handles both array format and field_mappings wrapper format. */
   def parse(docMappingJson: String): DocMappingMetadata = {
@@ -74,11 +93,12 @@ object DocMappingMetadata {
         return empty
       }
 
-      val fieldNames    = scala.collection.mutable.Set[String]()
-      val fastFields    = scala.collection.mutable.Set[String]()
-      val fieldTypes    = scala.collection.mutable.Map[String, String]()
-      val indexedFields = scala.collection.mutable.Set[String]()
-      val storedFields  = scala.collection.mutable.Set[String]()
+      val fieldNames      = scala.collection.mutable.Set[String]()
+      val fastFields      = scala.collection.mutable.Set[String]()
+      val fieldTypes      = scala.collection.mutable.Map[String, String]()
+      val indexedFields   = scala.collection.mutable.Set[String]()
+      val storedFields    = scala.collection.mutable.Set[String]()
+      val fieldTokenizers = scala.collection.mutable.Map[String, String]()
 
       fieldsArray.elements().asScala.foreach { fieldNode =>
         val name = Option(fieldNode.get("name")).map(_.asText()).getOrElse("")
@@ -102,10 +122,14 @@ object DocMappingMetadata {
 
           val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
           fieldTypes += (name -> fieldType)
+
+          Option(fieldNode.get("tokenizer")).foreach { tok =>
+            fieldTokenizers += (name -> tok.asText())
+          }
         }
       }
 
-      DocMappingMetadata(fieldNames.toSet, fastFields.toSet, fieldTypes.toMap, indexedFields.toSet, storedFields.toSet)
+      DocMappingMetadata(fieldNames.toSet, fastFields.toSet, fieldTypes.toMap, indexedFields.toSet, storedFields.toSet, fieldTokenizers.toMap)
     } catch {
       case e: Exception =>
         logger.warn(s"Failed to parse docMappingJson, returning empty metadata: ${e.getMessage}")

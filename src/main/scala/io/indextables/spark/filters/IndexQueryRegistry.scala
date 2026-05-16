@@ -47,6 +47,8 @@ object IndexQueryRegistry {
   def getCurrentQueryId(): Option[String] =
     Option(currentQueryId.get())
 
+  // Note: Registry is only used for the legacy indexquery/indexqueryall path, so default searchType is correct.
+  // New-style TEXTSEARCH/FIELDMATCH queries flow through V2IndexQueryExpressionRule and carry searchType directly.
   def registerIndexQuery(columnName: String, queryString: String): Unit =
     getCurrentQueryId() match {
       case Some(queryId) =>

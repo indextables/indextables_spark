@@ -153,7 +153,9 @@ class IndexTables4SparkArrowDataWriter(
           case Some("bool")                => ("bool", "")
           case Some("datetime")            => ("datetime", "")
           case Some("bytes")               => ("bytes", "")
-          case Some(other)                 => (other, "")
+          case Some(mode) if io.indextables.spark.util.IndexingModes.isCompactStringMode(mode) =>
+            ("text", io.indextables.spark.util.IndexingModes.normalizeForNative(mode))
+          case Some(other) => (other, "")
           case None =>
             field.dataType match {
               case StringType                                => ("text", "raw")

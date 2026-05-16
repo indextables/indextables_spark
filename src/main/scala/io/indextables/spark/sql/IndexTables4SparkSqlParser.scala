@@ -24,7 +24,7 @@ import org.apache.spark.sql.catalyst.parser.ParseErrorListener
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
 
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression, SearchType}
 import io.indextables.spark.sql.parser.{
   IndexTables4SparkSqlAstBuilder,
   IndexTables4SparkSqlBaseLexer,
@@ -45,8 +45,13 @@ import org.slf4j.LoggerFactory
  *   - INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE [FOR <path_or_table>]
  *
  * Supported operators:
- *   - indexquery: column indexquery 'query_string'
- *   - indexqueryall: indexqueryall('query_string')
+ *   - TEXTSEARCH: column TEXTSEARCH 'query_string' (tokenized text fields, type-safe)
+ *   - FIELDMATCH: column FIELDMATCH 'query_string' (non-tokenized fields, type-safe)
+ *   - * TEXTSEARCH: * TEXTSEARCH 'query_string' (all-fields text search)
+ *   - * FIELDMATCH: * FIELDMATCH 'query_string' (all-fields field match)
+ *   - indexquery: column indexquery 'query_string' (general-purpose, no type validation)
+ *   - * indexquery: * indexquery 'query_string' (all-fields, equivalent to indexqueryall)
+ *   - indexqueryall: indexqueryall('query_string') (all-fields, no type validation)
  */
 class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
 
@@ -138,21 +143,38 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
   }
 
   override def parseExpression(sqlText: String): Expression = {
-    // Check for indexquery operator pattern
-    val indexQueryPattern = """(.+?)\s+indexquery\s+(.+)""".r
+    // Combined pattern: column/star KEYWORD 'query' (case-insensitive)
+    // Matches: textsearch, fieldmatch, indexquery
+    val operatorPattern = """(?i)(.+?)\s+(textsearch|fieldmatch|indexquery)\s+(.+)""".r
 
     // Check for indexqueryall function pattern
     val indexQueryAllPattern = """indexqueryall\s*\(\s*(.+)\s*\)""".r
 
     sqlText.trim match {
-      case indexQueryPattern(leftExpr, rightExpr) =>
+      case operatorPattern(leftExpr, keyword, rightExpr) =>
         try {
-          val left  = delegate.parseExpression(leftExpr.trim)
-          val right = delegate.parseExpression(rightExpr.trim)
-          IndexQueryExpression(left, right)
+          val trimmedLeft  = leftExpr.trim
+          val lowerKeyword = keyword.toLowerCase
+          val searchType = lowerKeyword match {
+            case "textsearch" => SearchType.TextSearch
+            case "fieldmatch" => SearchType.FieldMatch
+            case _            => SearchType.IndexQuery
+          }
+          if (trimmedLeft == "*") {
+            val right = delegate.parseExpression(rightExpr.trim)
+            IndexQueryAllExpression(right, searchType)
+          } else {
+            val left  = delegate.parseExpression(trimmedLeft)
+            val right = delegate.parseExpression(rightExpr.trim)
+            IndexQueryExpression(left, right, searchType)
+          }
         } catch {
           case e: ParseException =>
-            // If parsing individual parts fails, delegate to default parser
+            // The regex can false-positive match non-operator SQL (e.g., a column named
+            // "textsearch"), so we fall back to Spark's parser. Known limitation: this also
+            // swallows parse errors from genuine TEXTSEARCH/FIELDMATCH usage with malformed
+            // sub-expressions (e.g., "@#$ TEXTSEARCH 'q'"), producing a confusing Spark
+            // parse error instead of an operator-specific message.
             delegate.parseExpression(sqlText)
         }
 
@@ -162,7 +184,7 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
           IndexQueryAllExpression(query)
         } catch {
           case e: ParseException =>
-            // If parsing query fails, delegate to default parser
+            // Same false-positive fallback as above
             delegate.parseExpression(sqlText)
         }
 
@@ -206,23 +228,28 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
     }
 
   /**
-   * Preprocess SQL text to convert indexquery operators and indexqueryall functions to function calls that Spark can
-   * parse. This allows us to inject our custom expressions into the logical plan.
+   * Preprocess SQL text to convert search operators to function calls that Spark can parse.
+   * Uses a single combined regex pass for all operator variants:
+   *   - TEXTSEARCH / FIELDMATCH / indexquery (column and * forms)
+   *   - indexqueryall() function
+   *   - _indexall indexquery form
    */
   private def preprocessIndexQueryOperators(sqlText: String): String = {
     logger.debug(s"Preprocessing SQL: $sqlText")
 
-    // Pattern to match: column_name indexquery 'query_string'
-    // Enhanced pattern to handle column names with backticks, dots, and complex expressions
-    val indexQueryPattern = """([`]?[\w.]+[`]?)\s+indexquery\s+'([^']*)'""".r
+    // Combined pattern handles all operator forms in one pass:
+    // Group 1: star or column name, Group 2: keyword (textsearch|fieldmatch|indexquery), Group 3: query string
+    // TODO: [^']* doesn't handle escaped quotes (e.g., O\'Brien). Pre-existing limitation.
+    val operatorPattern = """(?i)(\*|[`]?[\w.]+[`]?)\s+(textsearch|fieldmatch|indexquery)\s+'([^']*)'""".r
 
-    // Pattern to match: _indexall indexquery 'query_string' (special case for cross-field search)
-    val indexAllQueryPattern = """_indexall\s+indexquery\s+'([^']*)'""".r
-
-    // Pattern to match: indexqueryall('query_string') but NOT tantivy4spark_indexqueryall
+    // indexqueryall('query') but NOT tantivy4spark_indexqueryall
     val indexQueryAllPattern = """(?<!tantivy4spark_)indexqueryall\s*\(\s*'([^']*)'\s*\)""".r
 
-    // First handle _indexall special case
+    // _indexall indexquery 'query'
+    val indexAllQueryPattern = """_indexall\s+indexquery\s+'([^']*)'""".r
+
+    // Pass 1: Handle _indexall before combined pattern (since _indexall matches [\w.]+ in the Pass 2 regex).
+    // IMPORTANT: This ordering is required — swapping passes would silently break _indexall handling.
     val afterIndexAll = indexAllQueryPattern.replaceAllIn(
       sqlText,
       m => {
@@ -232,21 +259,40 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
       }
     )
 
-    // Then replace regular indexquery operators
-    val afterIndexQuery = indexQueryPattern.replaceAllIn(
+    // Pass 2: Combined operator pattern (handles *, column textsearch/fieldmatch/indexquery)
+    val afterOperators = operatorPattern.replaceAllIn(
       afterIndexAll,
       m => {
-        val columnName  = m.group(1).replace("`", "") // Remove backticks for function call
-        val queryString = m.group(2)
-        logger.debug(s"Converting $columnName indexquery '$queryString' to function call")
-        s"tantivy4spark_indexquery('$columnName', '$queryString')"
+        val target      = m.group(1)
+        val keyword     = m.group(2).toLowerCase
+        val queryString = m.group(3)
+
+        if (target == "*") {
+          // * KEYWORD 'query' -> all-fields function
+          val funcName = keyword match {
+            case "textsearch" => "tantivy4spark_textsearchall"
+            case "fieldmatch" => "tantivy4spark_fieldmatchall"
+            case _            => "tantivy4spark_indexqueryall"
+          }
+          logger.debug(s"Converting * $keyword '$queryString' to $funcName")
+          s"$funcName('$queryString')"
+        } else {
+          // column KEYWORD 'query' -> column-specific function
+          val columnName = target.replace("`", "")
+          val funcName = keyword match {
+            case "textsearch" => "tantivy4spark_textsearch"
+            case "fieldmatch" => "tantivy4spark_fieldmatch"
+            case _            => "tantivy4spark_indexquery"
+          }
+          logger.debug(s"Converting $columnName $keyword '$queryString' to $funcName")
+          s"$funcName('$columnName', '$queryString')"
+        }
       }
     )
 
-    // Finally replace remaining indexqueryall functions (but not ones we already converted)
-    // The negative lookbehind (?<!tantivy4spark_) prevents double conversion
+    // Pass 3: indexqueryall() function (not already converted)
     val result = indexQueryAllPattern.replaceAllIn(
-      afterIndexQuery,
+      afterOperators,
       m => {
         val queryString = m.group(1)
         logger.debug(s"Converting indexqueryall('$queryString') to function call")

@@ -41,11 +41,11 @@ object ExpressionUtils {
    */
   def expressionToIndexQueryFilter(expr: org.apache.spark.sql.catalyst.expressions.Expression): Option[IndexQueryFilter] =
     expr match {
-      case IndexQueryExpression(left, right) =>
+      case iq @ IndexQueryExpression(left, right, searchType) =>
         for {
           columnName  <- extractColumnName(left)
           queryString <- extractStringLiteral(right)
-        } yield IndexQueryFilter(columnName, queryString)
+        } yield IndexQueryFilter(columnName, queryString, searchType)
       case _ => None
     }
 
@@ -55,7 +55,7 @@ object ExpressionUtils {
   def filterToExpression(filter: IndexQueryFilter): IndexQueryExpression = {
     val leftExpr  = UnresolvedAttribute(Seq(filter.columnName))
     val rightExpr = Literal(UTF8String.fromString(filter.queryString), StringType)
-    IndexQueryExpression(leftExpr, rightExpr)
+    IndexQueryExpression(leftExpr, rightExpr, filter.searchType)
   }
 
   /**
@@ -65,8 +65,8 @@ object ExpressionUtils {
   def expressionToIndexQueryAllFilter(expr: org.apache.spark.sql.catalyst.expressions.Expression)
     : Option[IndexQueryAllFilter] =
     expr match {
-      case IndexQueryAllExpression(child) =>
-        extractStringLiteral(child).map(IndexQueryAllFilter.apply)
+      case iq @ IndexQueryAllExpression(child, searchType) =>
+        extractStringLiteral(child).map(qs => IndexQueryAllFilter(qs, searchType))
       case _ => None
     }
 
@@ -76,7 +76,7 @@ object ExpressionUtils {
    */
   def filterToIndexQueryAllExpression(filter: IndexQueryAllFilter): IndexQueryAllExpression = {
     val queryExpr = Literal(UTF8String.fromString(filter.queryString), StringType)
-    IndexQueryAllExpression(queryExpr)
+    IndexQueryAllExpression(queryExpr, filter.searchType)
   }
 
   /** Extract column name from various expression types. */
@@ -146,7 +146,7 @@ object ExpressionUtils {
   def validateIndexQueryExpression(expr: IndexQueryExpression): Either[String, Unit] = {
     val columnCheck = expr.getColumnName match {
       case Some(_) => scala.util.Right(())
-      case None    => scala.util.Left(s"Invalid column reference in indexquery: ${expr.left}")
+      case None    => scala.util.Left(s"Invalid column reference in IndexQuery expression: ${expr.left}")
     }
 
     if (columnCheck.isLeft) return columnCheck
@@ -154,7 +154,7 @@ object ExpressionUtils {
     val queryCheck = expr.getQueryString match {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_)                       => scala.util.Left("Query string cannot be empty")
-      case None                          => scala.util.Left(s"Invalid query string in indexquery: ${expr.right}")
+      case None                          => scala.util.Left(s"Invalid query string in IndexQuery expression: ${expr.right}")
     }
 
     queryCheck
@@ -165,7 +165,7 @@ object ExpressionUtils {
     val queryCheck = expr.getQueryString match {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_)                       => scala.util.Left("Query string cannot be empty")
-      case None                          => scala.util.Left(s"Invalid query string in indexqueryall: ${expr.child}")
+      case None                          => scala.util.Left(s"Invalid query string in IndexQuery expression: ${expr.child}")
     }
 
     queryCheck
