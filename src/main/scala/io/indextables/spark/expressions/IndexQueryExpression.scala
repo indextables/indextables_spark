@@ -34,14 +34,9 @@ import org.apache.spark.unsafe.types.UTF8String
 case class IndexQueryExpression(
   left: Expression, // Column reference
   right: Expression, // Query string literal
-  searchType: String = SearchType.IndexQuery // "indexquery", "textsearch", or "fieldmatch"
+  searchType: SearchType = SearchType.IndexQuery
 ) extends BinaryExpression
     with Predicate {
-
-  require(
-    SearchType.validSingleField.contains(searchType),
-    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validSingleField.mkString(", ")}"
-  )
 
   override def dataType: DataType = BooleanType
 
@@ -52,15 +47,15 @@ case class IndexQueryExpression(
   override lazy val deterministic: Boolean = false
 
   override def prettyName: String = searchType match {
-    case SearchType.TextSearch => "textsearch"
-    case SearchType.FieldMatch => "fieldmatch"
-    case _                     => "indexquery"
+    case SearchType.TextSearch                            => "textsearch"
+    case SearchType.FieldMatch                            => "fieldmatch"
+    case SearchType.IndexQuery | SearchType.IndexQueryAll => "indexquery"
   }
 
   private def displayKeyword: String = searchType match {
-    case SearchType.TextSearch => "TEXTSEARCH"
-    case SearchType.FieldMatch => "FIELDMATCH"
-    case _                     => "indexquery"
+    case SearchType.TextSearch                            => "TEXTSEARCH"
+    case SearchType.FieldMatch                            => "FIELDMATCH"
+    case SearchType.IndexQuery | SearchType.IndexQueryAll => "indexquery"
   }
 
   override def sql: String = s"(${left.sql} $displayKeyword ${right.sql})"

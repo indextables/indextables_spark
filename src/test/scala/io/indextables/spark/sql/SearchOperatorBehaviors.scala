@@ -20,7 +20,7 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 
 import io.indextables.spark.TestBase
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression, SearchType}
 
 // --- Valid condition keys (closed sets for excludes validation) ---
 
@@ -82,7 +82,7 @@ object ConditionKeys {
 case class SingleFieldSpec(
     name: String,
     keyword: String,
-    searchType: String,
+    searchType: SearchType,
     requiresTokenized: Option[Boolean],
     matchingColumn: String,
     wrongColumn: String,
@@ -112,7 +112,7 @@ case class AllFieldsSpec(
     name: String,
     keyword: Option[String],
     sqlTemplate: String => String,
-    searchType: String,
+    searchType: SearchType,
     requiresTokenized: Option[Boolean],
     isFunctionSyntax: Boolean = false,
     excludes: Set[String] = Set.empty

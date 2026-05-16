@@ -18,24 +18,40 @@
 package io.indextables.spark.expressions
 
 /**
- * Constants for search type identifiers used by IndexQuery expressions and filters.
+ * Type identifier for search expressions and filters.
  *
- * These constants eliminate magic strings and enable `require()` validation in constructors to catch
- * typos at construction time rather than silently bypassing type validation.
+ * Implemented as a sealed trait with case objects so that:
+ *   - Pattern matches on search types can be proven exhaustive at compile time — adding a new search type causes the
+ *     compiler to flag every non-exhaustive match site.
+ *   - Construction sites are type-checked, eliminating the runtime `require()` guards that previously validated raw
+ *     string inputs.
+ *   - IDE "find all usages" works per case object instead of conflating literal string occurrences.
+ *
+ * The `value` field preserves the wire-format string for serialization, SQL display, and external integrations.
  */
+sealed trait SearchType {
+  def value: String
+}
+
 object SearchType {
-  val IndexQuery    = "indexquery"
-  val IndexQueryAll = "indexqueryall"
-  val TextSearch    = "textsearch"
-  val FieldMatch    = "fieldmatch"
+  case object IndexQuery extends SearchType { val value = "indexquery" }
+  case object IndexQueryAll extends SearchType { val value = "indexqueryall" }
+  case object TextSearch extends SearchType { val value = "textsearch" }
+  case object FieldMatch extends SearchType { val value = "fieldmatch" }
 
-  /** Valid search types for single-field expressions (IndexQueryExpression, IndexQueryFilter). */
-  val validSingleField: Set[String] = Set(IndexQuery, TextSearch, FieldMatch)
-
-  /** Valid search types for all-fields expressions (IndexQueryAllExpression, IndexQueryAllFilter).
-    * Both IndexQuery and IndexQueryAll are needed because two code paths produce IndexQueryAllExpression:
-    * - parseExpression: `* indexquery 'q'` → IndexQueryAllExpression(_, SearchType.IndexQuery)
-    * - preprocessor: `indexqueryall('q')` → IndexQueryAllExpression(_, SearchType.IndexQueryAll)
-    * Both are semantically identical but arrive via different parser paths. */
-  val validAllFields: Set[String] = Set(IndexQuery, IndexQueryAll, TextSearch, FieldMatch)
+  /**
+   * Parse a raw string (typically from the SQL parser or external input) into a typed [[SearchType]].
+   *
+   * @throws IllegalArgumentException if the input does not match any known search type
+   */
+  def fromString(s: String): SearchType = s.toLowerCase match {
+    case "indexquery"    => IndexQuery
+    case "indexqueryall" => IndexQueryAll
+    case "textsearch"    => TextSearch
+    case "fieldmatch"    => FieldMatch
+    case other =>
+      throw new IllegalArgumentException(
+        s"Unknown search type '$other'. Must be one of: indexquery, indexqueryall, textsearch, fieldmatch"
+      )
+  }
 }

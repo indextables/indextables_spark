@@ -62,9 +62,9 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     val query = Literal(UTF8String.fromString("test"), StringType)
 
     assert(IndexQueryAllExpression(query).prettyName == "indexqueryall")
-    assert(IndexQueryAllExpression(query, "textsearch").prettyName == "textsearch_all")
-    assert(IndexQueryAllExpression(query, "fieldmatch").prettyName == "fieldmatch_all")
-    assert(IndexQueryAllExpression(query, "indexqueryall").prettyName == "indexqueryall")
+    assert(IndexQueryAllExpression(query, SearchType.TextSearch).prettyName == "textsearch_all")
+    assert(IndexQueryAllExpression(query, SearchType.FieldMatch).prettyName == "fieldmatch_all")
+    assert(IndexQueryAllExpression(query, SearchType.IndexQueryAll).prettyName == "indexqueryall")
   }
 
   test("IndexQueryAllExpression should generate correct SQL representation for each searchType") {
@@ -73,10 +73,10 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     val defaultExpr = IndexQueryAllExpression(query)
     assert(defaultExpr.sql.contains("indexqueryall"))
 
-    val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
+    val textsearchExpr = IndexQueryAllExpression(query, SearchType.TextSearch)
     assert(textsearchExpr.sql.contains("TEXTSEARCH"))
 
-    val fieldmatchExpr = IndexQueryAllExpression(query, "fieldmatch")
+    val fieldmatchExpr = IndexQueryAllExpression(query, SearchType.FieldMatch)
     assert(fieldmatchExpr.sql.contains("FIELDMATCH"))
   }
 
@@ -84,10 +84,10 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     val query    = Literal(UTF8String.fromString("test"), StringType)
     val newQuery = Literal(UTF8String.fromString("updated"), StringType)
 
-    val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
+    val textsearchExpr = IndexQueryAllExpression(query, SearchType.TextSearch)
     val updated        = textsearchExpr.copy(child = newQuery)
 
-    assert(updated.searchType == "textsearch")
+    assert(updated.searchType == SearchType.TextSearch)
     assert(updated.getQueryString.contains("updated"))
   }
 
@@ -146,10 +146,10 @@ class IndexQueryAllExpressionTest extends AnyFunSuite {
     assert(defaultExpr.toString.contains("indexqueryall"))
     assert(defaultExpr.toString.contains("test query"))
 
-    val textsearchExpr = IndexQueryAllExpression(query, "textsearch")
+    val textsearchExpr = IndexQueryAllExpression(query, SearchType.TextSearch)
     assert(textsearchExpr.toString.contains("TEXTSEARCH"))
 
-    val fieldmatchExpr = IndexQueryAllExpression(query, "fieldmatch")
+    val fieldmatchExpr = IndexQueryAllExpression(query, SearchType.FieldMatch)
     assert(fieldmatchExpr.toString.contains("FIELDMATCH"))
   }
 

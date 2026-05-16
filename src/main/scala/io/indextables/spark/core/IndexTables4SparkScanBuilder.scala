@@ -2183,7 +2183,7 @@ class IndexTables4SparkScanBuilder(
                 )
               case None =>
                 logger.warn(
-                  s"Cannot validate ${filter.searchType.toUpperCase} on field '${filter.columnName}': " +
+                  s"Cannot validate ${filter.searchType.value.toUpperCase} on field '${filter.columnName}': " +
                     s"field not found in docMapping. This may occur with tables created before docMapping was available."
                 )
             }
@@ -2212,7 +2212,7 @@ class IndexTables4SparkScanBuilder(
       // No text-type fields at all — TEXTSEARCH/FIELDMATCH on * is meaningless
       allQueryAllFilters.foreach { filter =>
         if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
-          val searchOp = filter.searchType.toUpperCase
+          val searchOp = filter.searchType.value.toUpperCase
           val nonTextTypes = docMapping.fieldTypes.values.toSet - "text"
           throw new IllegalArgumentException(
             s"Cannot use * $searchOp: table has no text-type fields in docMapping. " +
@@ -2224,7 +2224,7 @@ class IndexTables4SparkScanBuilder(
     } else {
       allQueryAllFilters.foreach { filter =>
         if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
-          val searchOp = filter.searchType.toUpperCase
+          val searchOp = filter.searchType.value.toUpperCase
 
           // Classify text fields by tokenization status
           val (tokenizedFields, nonTokenizedFields) = textFields.keys.toSeq.sorted.partition { field =>

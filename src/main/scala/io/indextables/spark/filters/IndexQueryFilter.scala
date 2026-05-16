@@ -41,16 +41,11 @@ import io.indextables.spark.expressions.SearchType
 case class IndexQueryFilter(
   columnName: String,
   queryString: String,
-  searchType: String = SearchType.IndexQuery) {
-
-  require(
-    SearchType.validSingleField.contains(searchType),
-    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validSingleField.mkString(", ")}"
-  )
+  searchType: SearchType = SearchType.IndexQuery) {
 
   override def toString: String =
     if (searchType == SearchType.IndexQuery) s"IndexQuery($columnName, '$queryString')"
-    else s"IndexQuery[$searchType]($columnName, '$queryString')"
+    else s"IndexQuery[${searchType.value}]($columnName, '$queryString')"
 
   /** References returns the set of column names that this filter references. */
   def references: Array[String] = Array(columnName)

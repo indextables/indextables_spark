@@ -455,23 +455,16 @@ class SearchOperatorTest
   // Restored tests from old file — distinct code paths not in the matrix
   // ========================================================================
 
-  // --- Invalid searchType constructor validation ---
+  // --- SearchType parser validation ---
+  // Constructor-level validation is now enforced by the type system (searchType: SearchType
+  // cannot accept arbitrary strings). Invalid raw-string input is rejected at the boundary
+  // where strings cross into the typed domain — SearchType.fromString.
 
-  test("invalid searchType should throw IllegalArgumentException on IndexQueryExpression") {
-    val column = org.apache.spark.sql.catalyst.expressions.AttributeReference("title", StringType, nullable = true)()
-    val query = Literal(UTF8String.fromString("test"), StringType)
+  test("SearchType.fromString should reject unknown values with IllegalArgumentException") {
     val ex = intercept[IllegalArgumentException] {
-      IndexQueryExpression(column, query, "invalid_type")
+      SearchType.fromString("invalid_type")
     }
-    assert(ex.getMessage.contains("invalid_type") || ex.getMessage.contains("requirement failed"))
-  }
-
-  test("invalid searchType should throw IllegalArgumentException on IndexQueryAllExpression") {
-    val query = Literal(UTF8String.fromString("test"), StringType)
-    val ex = intercept[IllegalArgumentException] {
-      IndexQueryAllExpression(query, "invalid_type")
-    }
-    assert(ex.getMessage.contains("invalid_type") || ex.getMessage.contains("requirement failed"))
+    assert(ex.getMessage.contains("invalid_type"))
   }
 
   // --- DocMapping-based validation (read without typemap options) ---
