@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.5.5_spark_3.5.3</version>
+    <version>0.5.5_spark_3.5.8</version>
     <packaging>jar</packaging>
 
     <name>IndexTables4Spark</name>
@@ -54,9 +54,9 @@
             that 11 might not know about. Mirrors Spark's own `extraJavaTestArgs`.
         -->
         <extraJavaTestArgs>-XX:+IgnoreUnrecognizedVMOptions --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false</extraJavaTestArgs>
-        <scala.version>2.12.20</scala.version>
+        <scala.version>2.12.21</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
-        <spark.version>3.5.3</spark.version>
+        <spark.version>3.5.8</spark.version>
         <!--
             Pin Hadoop to 3.3.4 to match Spark 3.5.x's bundled
             hadoop-client-api / hadoop-client-runtime (shaded). PR317 bumped
@@ -66,7 +66,7 @@
             S3AFileSystem.initialize.
         -->
         <hadoop.version>3.3.4</hadoop.version>
-        <aws.sdk.version>2.42.41</aws.sdk.version>
+        <aws.sdk.version>2.44.4</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>
@@ -171,12 +171,12 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.21.2</version>
+            <version>2.21.3</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-scala_${scala.compat.version}</artifactId>
-            <version>2.21.2</version>
+            <version>2.21.3</version>
         </dependency>
 
 
@@ -228,14 +228,14 @@
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob</artifactId>
-            <version>12.33.3</version>
+            <version>12.33.4</version>
         </dependency>
 
         <!-- Azure Identity SDK for authentication -->
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-identity</artifactId>
-            <version>1.11.0</version>
+            <version>1.18.3</version>
         </dependency>
 
         <!-- Logging -->
@@ -291,7 +291,7 @@
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-core</artifactId>
-            <version>1.12.565</version>
+            <version>1.12.797</version>
             <scope>provided</scope>
         </dependency>
 
