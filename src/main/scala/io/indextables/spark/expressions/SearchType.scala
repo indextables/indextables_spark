@@ -20,11 +20,14 @@ package io.indextables.spark.expressions
 /**
  * Type identifier for search expressions and filters.
  *
- * Implemented as a sealed trait with case objects so that:
- *   - Pattern matches on search types can be proven exhaustive at compile time — adding a new search type causes the
+ * Implemented as a sealed trait hierarchy with case objects so that:
+ *   - Pattern matches on search types can be proven exhaustive at compile time. Adding a new search type causes the
  *     compiler to flag every non-exhaustive match site.
  *   - Construction sites are type-checked, eliminating the runtime `require()` guards that previously validated raw
  *     string inputs.
+ *   - The subset invariant (single-field expressions accept only single-field types; all-fields expressions accept
+ *     all-fields types) is encoded in the type system via [[SingleFieldSearchType]] and [[AllFieldSearchType]]
+ *     sub-traits. No runtime check needed; no nonsensical case branches in pattern matches.
  *   - IDE "find all usages" works per case object instead of conflating literal string occurrences.
  *
  * The `value` field preserves the wire-format string for serialization, SQL display, and external integrations.
@@ -33,16 +36,31 @@ sealed trait SearchType {
   def value: String
 }
 
+/** Search types valid for single-field expressions and filters (`IndexQueryExpression`, `IndexQueryFilter`). */
+sealed trait SingleFieldSearchType extends SearchType
+
+/** Search types valid for all-fields expressions and filters (`IndexQueryAllExpression`, `IndexQueryAllFilter`). */
+sealed trait AllFieldSearchType extends SearchType
+
 object SearchType {
-  case object IndexQuery extends SearchType { val value = "indexquery" }
-  case object IndexQueryAll extends SearchType { val value = "indexqueryall" }
-  case object TextSearch extends SearchType { val value = "textsearch" }
-  case object FieldMatch extends SearchType { val value = "fieldmatch" }
+  case object IndexQuery extends SingleFieldSearchType with AllFieldSearchType {
+    override val value: String = "indexquery"
+  }
+  case object IndexQueryAll extends AllFieldSearchType {
+    override val value: String = "indexqueryall"
+  }
+  case object TextSearch extends SingleFieldSearchType with AllFieldSearchType {
+    override val value: String = "textsearch"
+  }
+  case object FieldMatch extends SingleFieldSearchType with AllFieldSearchType {
+    override val value: String = "fieldmatch"
+  }
 
   /**
    * Parse a raw string (typically from the SQL parser or external input) into a typed [[SearchType]].
    *
-   * @throws IllegalArgumentException if the input does not match any known search type
+   * @throws IllegalArgumentException
+   *   if the input does not match any known search type
    */
   def fromString(s: String): SearchType = s.toLowerCase match {
     case "indexquery"    => IndexQuery

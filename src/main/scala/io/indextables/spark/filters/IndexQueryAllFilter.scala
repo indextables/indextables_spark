@@ -17,7 +17,7 @@
 
 package io.indextables.spark.filters
 
-import io.indextables.spark.expressions.SearchType
+import io.indextables.spark.expressions.{AllFieldSearchType, SearchType}
 
 /**
  * Custom filter for IndexQueryAll pushdown operations.
@@ -31,7 +31,7 @@ import io.indextables.spark.expressions.SearchType
  * @param queryString
  *   The Tantivy query string to search across all fields
  */
-case class IndexQueryAllFilter(queryString: String, searchType: SearchType = SearchType.IndexQueryAll) {
+case class IndexQueryAllFilter(queryString: String, searchType: AllFieldSearchType = SearchType.IndexQueryAll) {
 
   /**
    * Returns an empty array since this filter doesn't reference specific columns. The search operates across all

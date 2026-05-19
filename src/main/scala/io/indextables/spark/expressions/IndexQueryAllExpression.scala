@@ -34,8 +34,9 @@ import org.apache.spark.unsafe.types.UTF8String
  */
 case class IndexQueryAllExpression(
   child: Expression,
-  searchType: SearchType = SearchType.IndexQueryAll
-) extends UnaryExpression with Predicate {
+  searchType: AllFieldSearchType = SearchType.IndexQueryAll)
+    extends UnaryExpression
+    with Predicate {
 
   override def dataType: DataType = BooleanType
 
