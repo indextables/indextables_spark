@@ -19,8 +19,14 @@ package io.indextables.spark.sql
 
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 
+import io.indextables.spark.expressions.{
+  AllFieldSearchType,
+  IndexQueryAllExpression,
+  IndexQueryExpression,
+  SearchType,
+  SingleFieldSearchType
+}
 import io.indextables.spark.TestBase
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
 
 // --- Valid condition keys (closed sets for excludes validation) ---
 
@@ -63,66 +69,86 @@ object ConditionKeys {
 /**
  * Spec for a single-field search operator (e.g., `title TEXTSEARCH 'query'`).
  *
- * @param name              Display name for test output (e.g., "TEXTSEARCH")
- * @param keyword           SQL keyword used in queries (e.g., "TEXTSEARCH")
- * @param searchType        Expected SearchType constant value (e.g., "textsearch")
- * @param requiresTokenized Some(true) for TEXTSEARCH, Some(false) for FIELDMATCH, None for indexquery
- * @param matchingColumn    Column in the shared table that matches this operator's type requirement
- * @param wrongColumn       Column in the shared table that mismatches (for type-wrong-throws tests)
- * @param sampleQuery       Query string that returns results on the matching column
- * @param sampleQuery2      Second query string for OR tests
- * @param expectedCount     Expected row count for sampleQuery on the shared table
- * @param expectedIds       Expected row IDs for sampleQuery on the shared table (sorted)
- * @param expectedAndIds    Expected row IDs for sampleQuery AND category='technology' (sorted)
- * @param expectedOrIds     Expected row IDs for sampleQuery OR sampleQuery2 (sorted)
- * @param errorSubstrings   Expected substrings in type validation error messages
- * @param scaleExpectedCount Expected row count for sampleQuery on the 100k-row scale table
- * @param excludes          Condition keys to skip for this operator
+ * @param name
+ *   Display name for test output (e.g., "TEXTSEARCH")
+ * @param keyword
+ *   SQL keyword used in queries (e.g., "TEXTSEARCH")
+ * @param searchType
+ *   Expected SearchType constant value (e.g., "textsearch")
+ * @param requiresTokenized
+ *   Some(true) for TEXTSEARCH, Some(false) for FIELDMATCH, None for indexquery
+ * @param matchingColumn
+ *   Column in the shared table that matches this operator's type requirement
+ * @param wrongColumn
+ *   Column in the shared table that mismatches (for type-wrong-throws tests)
+ * @param sampleQuery
+ *   Query string that returns results on the matching column
+ * @param sampleQuery2
+ *   Second query string for OR tests
+ * @param expectedCount
+ *   Expected row count for sampleQuery on the shared table
+ * @param expectedIds
+ *   Expected row IDs for sampleQuery on the shared table (sorted)
+ * @param expectedAndIds
+ *   Expected row IDs for sampleQuery AND category='technology' (sorted)
+ * @param expectedOrIds
+ *   Expected row IDs for sampleQuery OR sampleQuery2 (sorted)
+ * @param errorSubstrings
+ *   Expected substrings in type validation error messages
+ * @param scaleExpectedCount
+ *   Expected row count for sampleQuery on the 100k-row scale table
+ * @param excludes
+ *   Condition keys to skip for this operator
  */
 case class SingleFieldSpec(
-    name: String,
-    keyword: String,
-    searchType: String,
-    requiresTokenized: Option[Boolean],
-    matchingColumn: String,
-    wrongColumn: String,
-    sampleQuery: String,
-    sampleQuery2: String,
-    expectedCount: Int,
-    expectedIds: Seq[Int],
-    expectedAndIds: Seq[Int],
-    expectedOrIds: Seq[Int],
-    errorSubstrings: Seq[String] = Seq.empty,
-    scaleExpectedCount: Int = 0,
-    excludes: Set[String] = Set.empty
-)
+  name: String,
+  keyword: String,
+  searchType: SingleFieldSearchType,
+  requiresTokenized: Option[Boolean],
+  matchingColumn: String,
+  wrongColumn: String,
+  sampleQuery: String,
+  sampleQuery2: String,
+  expectedCount: Int,
+  expectedIds: Seq[Int],
+  expectedAndIds: Seq[Int],
+  expectedOrIds: Seq[Int],
+  errorSubstrings: Seq[String] = Seq.empty,
+  scaleExpectedCount: Int = 0,
+  excludes: Set[String] = Set.empty)
 
 /**
  * Spec for an all-fields search operator (e.g., `* TEXTSEARCH 'query'` or `indexqueryall('query')`).
  *
- * @param name             Display name for test output (e.g., "* TEXTSEARCH")
- * @param keyword          The infix keyword (e.g., "TEXTSEARCH"); None for function syntax
- * @param sqlTemplate      Function from query string to SQL WHERE fragment
- * @param searchType       Expected SearchType constant value
- * @param requiresTokenized Type validation requirement (same as SingleFieldSpec)
- * @param isFunctionSyntax true for indexqueryall('q') which has no keyword to vary case on
- * @param excludes         Condition keys to skip
+ * @param name
+ *   Display name for test output (e.g., "* TEXTSEARCH")
+ * @param keyword
+ *   The infix keyword (e.g., "TEXTSEARCH"); None for function syntax
+ * @param sqlTemplate
+ *   Function from query string to SQL WHERE fragment
+ * @param searchType
+ *   Expected SearchType constant value
+ * @param requiresTokenized
+ *   Type validation requirement (same as SingleFieldSpec)
+ * @param isFunctionSyntax
+ *   true for indexqueryall('q') which has no keyword to vary case on
+ * @param excludes
+ *   Condition keys to skip
  */
 case class AllFieldsSpec(
-    name: String,
-    keyword: Option[String],
-    sqlTemplate: String => String,
-    searchType: String,
-    requiresTokenized: Option[Boolean],
-    isFunctionSyntax: Boolean = false,
-    excludes: Set[String] = Set.empty
-)
+  name: String,
+  keyword: Option[String],
+  sqlTemplate: String => String,
+  searchType: AllFieldSearchType,
+  requiresTokenized: Option[Boolean],
+  isFunctionSyntax: Boolean = false,
+  excludes: Set[String] = Set.empty)
 
 // --- Behavior traits ---
 
 /**
- * Parameterized test conditions for single-field search operators.
- * Mix into a concrete test class and call `registerSingleFieldTests`.
+ * Parameterized test conditions for single-field search operators. Mix into a concrete test class and call
+ * `registerSingleFieldTests`.
  */
 trait SingleFieldSearchBehaviors { self: TestBase =>
 
@@ -141,8 +167,8 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     spark.read.format(INDEXTABLES_FORMAT).load(path).createOrReplaceTempView(name)
     name
   }
-  private def freshSharedView(): String = freshSfView("shared", sharedTablePath)
-  private def freshEdgeCaseView(): String = freshSfView("edge", edgeCasePath)
+  private def freshSharedView(): String     = freshSfView("shared", sharedTablePath)
+  private def freshEdgeCaseView(): String   = freshSfView("edge", edgeCasePath)
   private def freshColKeywordView(): String = freshSfView("colkw", colKeywordPath)
 
   protected def registerSingleFieldTests(specs: Seq[SingleFieldSpec]): Unit =
@@ -182,7 +208,7 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("basic-parsing")) return
     test(s"${spec.name}: parse simple expression") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val expr = parser.parseExpression(s"title ${spec.keyword} 'spark AND sql'")
+      val expr   = parser.parseExpression(s"title ${spec.keyword} 'spark AND sql'")
       assert(expr.isInstanceOf[IndexQueryExpression])
       val iqe = expr.asInstanceOf[IndexQueryExpression]
       assert(iqe.getColumnName.contains("title"))
@@ -215,7 +241,7 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("backtick-columns")) return
     test(s"${spec.name}: backtick-quoted column") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val expr = parser.parseExpression(s"`my column` ${spec.keyword} 'test'")
+      val expr   = parser.parseExpression(s"`my column` ${spec.keyword} 'test'")
       assert(expr.isInstanceOf[IndexQueryExpression])
       val iqe = expr.asInstanceOf[IndexQueryExpression]
       assert(iqe.getQueryString.contains("test"))
@@ -227,7 +253,7 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("qualified-columns")) return
     test(s"${spec.name}: qualified column name") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val expr = parser.parseExpression(s"table.columnName ${spec.keyword} 'search term'")
+      val expr   = parser.parseExpression(s"table.columnName ${spec.keyword} 'search term'")
       assert(expr.isInstanceOf[IndexQueryExpression])
       val iqe = expr.asInstanceOf[IndexQueryExpression]
       assert(iqe.getQueryString.contains("search term"))
@@ -239,8 +265,8 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("complex-tantivy-syntax")) return
     test(s"${spec.name}: complex Tantivy syntax preserved") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val query = "(apache AND spark) OR (hadoop AND mapreduce)"
-      val expr = parser.parseExpression(s"content ${spec.keyword} '$query'")
+      val query  = "(apache AND spark) OR (hadoop AND mapreduce)"
+      val expr   = parser.parseExpression(s"content ${spec.keyword} '$query'")
       assert(expr.isInstanceOf[IndexQueryExpression])
       assert(expr.asInstanceOf[IndexQueryExpression].getQueryString.contains(query))
     }
@@ -250,7 +276,7 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("phrase-queries")) return
     test(s"${spec.name}: phrase query preserved") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val expr = parser.parseExpression(s"""content ${spec.keyword} '"exact phrase match"'""")
+      val expr   = parser.parseExpression(s"""content ${spec.keyword} '"exact phrase match"'""")
       assert(expr.isInstanceOf[IndexQueryExpression])
       assert(expr.asInstanceOf[IndexQueryExpression].getQueryString.contains("\"exact phrase match\""))
     }
@@ -260,7 +286,7 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("wildcard-queries")) return
     test(s"${spec.name}: wildcard query preserved") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val expr = parser.parseExpression(s"title ${spec.keyword} 'prefix* AND *suffix'")
+      val expr   = parser.parseExpression(s"title ${spec.keyword} 'prefix* AND *suffix'")
       assert(expr.isInstanceOf[IndexQueryExpression])
       assert(expr.asInstanceOf[IndexQueryExpression].getQueryString.contains("prefix* AND *suffix"))
     }
@@ -272,9 +298,11 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("e2e-sql")) return
     test(s"${spec.name}: e2e SQL query returns exact expected results") {
       val view = freshSharedView()
-      val results = spark.sql(
-        s"SELECT id FROM $view WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}' ORDER BY id"
-      ).collect()
+      val results = spark
+        .sql(
+          s"SELECT id FROM $view WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}' ORDER BY id"
+        )
+        .collect()
       val resultIds = results.map(_.getInt(0)).toSeq
       assert(
         resultIds == spec.expectedIds,
@@ -287,12 +315,14 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("e2e-compound-and")) return
     test(s"${spec.name}: compound AND with standard filter") {
       val view = freshSharedView()
-      val results = spark.sql(
-        s"""SELECT id, category FROM $view
-           |WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}'
-           |AND category = 'technology'
-           |ORDER BY id""".stripMargin
-      ).collect()
+      val results = spark
+        .sql(
+          s"""SELECT id, category FROM $view
+             |WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}'
+             |AND category = 'technology'
+             |ORDER BY id""".stripMargin
+        )
+        .collect()
       val resultIds = results.map(_.getInt(0)).toSeq
       assert(
         resultIds == spec.expectedAndIds,
@@ -306,12 +336,14 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("e2e-compound-or")) return
     test(s"${spec.name}: compound OR returns union of both queries") {
       val view = freshSharedView()
-      val orResults = spark.sql(
-        s"""SELECT id FROM $view
-           |WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}'
-           |OR ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery2}'
-           |ORDER BY id""".stripMargin
-      ).collect()
+      val orResults = spark
+        .sql(
+          s"""SELECT id FROM $view
+             |WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}'
+             |OR ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery2}'
+             |ORDER BY id""".stripMargin
+        )
+        .collect()
       val resultIds = orResults.map(_.getInt(0)).toSeq
       assert(
         resultIds == spec.expectedOrIds,
@@ -324,9 +356,11 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("type-correct")) return
     test(s"${spec.name}: correct field type succeeds with exact count") {
       val view = freshSharedView()
-      val results = spark.sql(
-        s"SELECT id FROM $view WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}'"
-      ).collect()
+      val results = spark
+        .sql(
+          s"SELECT id FROM $view WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}'"
+        )
+        .collect()
       assert(
         results.length == spec.expectedCount,
         s"${spec.name} expected ${spec.expectedCount} rows, got ${results.length}"
@@ -345,18 +379,19 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     test(s"${spec.name}: wrong field type throws IllegalArgumentException") {
       val view = freshSharedView()
       val ex = intercept[IllegalArgumentException] {
-        spark.sql(
-          s"SELECT id FROM $view WHERE ${spec.wrongColumn} ${spec.keyword} '${spec.sampleQuery}'"
-        ).collect()
+        spark
+          .sql(
+            s"SELECT id FROM $view WHERE ${spec.wrongColumn} ${spec.keyword} '${spec.sampleQuery}'"
+          )
+          .collect()
       }
       assert(
         ex.getMessage.contains(s"Cannot use ${spec.keyword.toUpperCase}"),
         s"Expected 'Cannot use ${spec.keyword.toUpperCase}' in error, got: ${ex.getMessage}"
       )
       assert(ex.getMessage.contains(spec.wrongColumn), s"Expected column name in error, got: ${ex.getMessage}")
-      for (substring <- spec.errorSubstrings) {
+      for (substring <- spec.errorSubstrings)
         assert(ex.getMessage.contains(substring), s"Expected '$substring' in error, got: ${ex.getMessage}")
-      }
     }
   }
 
@@ -371,9 +406,11 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     test(s"${spec.name}: wrong field type in compound WHERE still throws") {
       val view = freshSharedView()
       val ex = intercept[IllegalArgumentException] {
-        spark.sql(
-          s"SELECT id FROM $view WHERE ${spec.wrongColumn} ${spec.keyword} '${spec.sampleQuery}' AND id > 0"
-        ).collect()
+        spark
+          .sql(
+            s"SELECT id FROM $view WHERE ${spec.wrongColumn} ${spec.keyword} '${spec.sampleQuery}' AND id > 0"
+          )
+          .collect()
       }
       assert(
         ex.getMessage.contains(s"Cannot use ${spec.keyword.toUpperCase}"),
@@ -391,16 +428,18 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
   private def testColumnNamedAsKeyword(spec: SingleFieldSpec): Unit = {
     if (spec.excludes.contains("column-named-as-keyword")) return
     test(s"${spec.name}: column named '${spec.keyword.toLowerCase}' with ${spec.name} operator") {
-      val view = freshColKeywordView()
-      val colName = spec.keyword.toLowerCase
-      val query = if (spec.requiresTokenized.contains(false)) "active" else "spark"
+      val view          = freshColKeywordView()
+      val colName       = spec.keyword.toLowerCase
+      val query         = if (spec.requiresTokenized.contains(false)) "active" else "spark"
       val expectedCount = if (spec.requiresTokenized.contains(false)) 2 else 1
-      val results = spark.sql(
-        s"SELECT id FROM $view WHERE $colName ${spec.keyword} '$query' ORDER BY id"
-      ).collect()
+      val results = spark
+        .sql(
+          s"SELECT id FROM $view WHERE $colName ${spec.keyword} '$query' ORDER BY id"
+        )
+        .collect()
       assert(
         results.length == expectedCount,
-        s"Column named '${colName}' with ${spec.name} operator: expected $expectedCount rows, got ${results.length}"
+        s"Column named '$colName' with ${spec.name} operator: expected $expectedCount rows, got ${results.length}"
       )
     }
   }
@@ -421,12 +460,14 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
   private def testEmptyQuery(spec: SingleFieldSpec): Unit = {
     if (spec.excludes.contains("empty-query")) return
     test(s"${spec.name}: empty query string should not crash") {
-      val view = freshEdgeCaseView()
-      val col = edgeCaseColumn(spec)
+      val view    = freshEdgeCaseView()
+      val col     = edgeCaseColumn(spec)
       val results = spark.sql(s"SELECT id FROM $view WHERE $col ${spec.keyword} ''").collect()
       // Empty query should not crash. Tantivy may return all rows (match-all) or zero.
-      assert(results.length >= 0 && results.length <= 5,
-        s"${spec.name} with empty query returned unexpected count: ${results.length}")
+      assert(
+        results.length >= 0 && results.length <= 5,
+        s"${spec.name} with empty query returned unexpected count: ${results.length}"
+      )
     }
   }
 
@@ -434,10 +475,12 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("unicode-query")) return
     test(s"${spec.name}: unicode characters return correct results") {
       val view = freshEdgeCaseView()
-      val col = edgeCaseColumn(spec)
-      val results = spark.sql(
-        s"SELECT id FROM $view WHERE $col ${spec.keyword} '日本語' ORDER BY id"
-      ).collect()
+      val col  = edgeCaseColumn(spec)
+      val results = spark
+        .sql(
+          s"SELECT id FROM $view WHERE $col ${spec.keyword} '日本語' ORDER BY id"
+        )
+        .collect()
       if (spec.requiresTokenized.contains(false)) {
         // FIELDMATCH exact match on label: "日本語" matches id=1
         assert(results.length == 1, s"${spec.name} exact match on unicode should return 1 row, got ${results.length}")
@@ -453,19 +496,23 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("special-chars-query")) return
     test(s"${spec.name}: special characters return correct results") {
       val view = freshEdgeCaseView()
-      val col = edgeCaseColumn(spec)
+      val col  = edgeCaseColumn(spec)
       if (spec.requiresTokenized.contains(false)) {
         // FIELDMATCH exact match on label: "user@example.com" matches ids 3, 5
-        val results = spark.sql(
-          s"SELECT id FROM $view WHERE $col ${spec.keyword} 'user@example.com' ORDER BY id"
-        ).collect()
+        val results = spark
+          .sql(
+            s"SELECT id FROM $view WHERE $col ${spec.keyword} 'user@example.com' ORDER BY id"
+          )
+          .collect()
         assert(results.length == 2, s"${spec.name} on 'user@example.com' should return 2 rows, got ${results.length}")
         assert(results.map(_.getInt(0)).toSeq == Seq(3, 5), s"Expected ids Seq(3, 5)")
       } else {
         // TEXTSEARCH/indexquery: "user" tokenized from email content — depends on tokenizer
-        val results = spark.sql(
-          s"SELECT id FROM $view WHERE $col ${spec.keyword} 'user' ORDER BY id"
-        ).collect()
+        val results = spark
+          .sql(
+            s"SELECT id FROM $view WHERE $col ${spec.keyword} 'user' ORDER BY id"
+          )
+          .collect()
         assert(results.length > 0, s"${spec.name} on 'user' should return results")
         assert(results.length < 5, s"${spec.name} on 'user' should not return all rows (got ${results.length})")
       }
@@ -483,31 +530,34 @@ trait SingleFieldSearchBehaviors { self: TestBase =>
       spark.conf.set("spark.indextables.read.defaultLimit", "200000")
       try {
         val view = freshSfView("scale", scalePath)
-        val results = spark.sql(
-          s"SELECT id FROM $view WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}' ORDER BY id"
-        ).collect()
+        val results = spark
+          .sql(
+            s"SELECT id FROM $view WHERE ${spec.matchingColumn} ${spec.keyword} '${spec.sampleQuery}' ORDER BY id"
+          )
+          .collect()
         assert(
           results.length == spec.scaleExpectedCount,
           s"${spec.name} at 100k scale: expected ${spec.scaleExpectedCount} rows, got ${results.length}"
         )
         assert(results.length < 100000, s"${spec.name} returned all rows — operator not filtering")
-      } finally {
+      } finally
         spark.conf.set("spark.indextables.read.defaultLimit", "250")
-      }
     }
   }
 }
 
 /**
- * Parameterized test conditions for all-fields search operators.
- * Mix into a concrete test class and call `registerAllFieldsTests`.
+ * Parameterized test conditions for all-fields search operators. Mix into a concrete test class and call
+ * `registerAllFieldsTests`.
  */
 trait AllFieldsSearchBehaviors { self: TestBase =>
 
   /** Path to the shared mixed-type table. */
   protected def sharedTablePath: String
 
-  /** Paths to shared tables (written once in beforeAll). Each test registers a unique view to avoid ThreadLocal leakage. */
+  /**
+   * Paths to shared tables (written once in beforeAll). Each test registers a unique view to avoid ThreadLocal leakage.
+   */
   protected def allTextPath: String
   protected def allStringPath: String
   protected def intOnlyPath: String
@@ -542,9 +592,9 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
   private def testAllFieldsBasicParsing(spec: AllFieldsSpec): Unit = {
     if (spec.excludes.contains("basic-parsing")) return
     test(s"${spec.name}: parse expression") {
-      val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
+      val parser      = new IndexTables4SparkSqlParser(CatalystSqlParser)
       val sqlFragment = spec.sqlTemplate("spark AND sql")
-      val expr = parser.parseExpression(sqlFragment)
+      val expr        = parser.parseExpression(sqlFragment)
       assert(expr.isInstanceOf[IndexQueryAllExpression], s"Expected IndexQueryAllExpression, got ${expr.getClass}")
       val allExpr = expr.asInstanceOf[IndexQueryAllExpression]
       assert(allExpr.getQueryString.contains("spark AND sql"))
@@ -562,7 +612,7 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("case-insensitivity")) return
     test(s"${spec.name}: case-insensitive keyword") {
       val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
-      val kw = spec.keyword.get
+      val kw     = spec.keyword.get
       val variants = Seq(
         s"* ${kw.toUpperCase} 'query'",
         s"* ${kw.toLowerCase} 'query'",
@@ -595,25 +645,23 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     if (spec.excludes.contains("e2e-sql")) return
     test(s"${spec.name}: e2e SQL query returns correct results") {
       if (spec.requiresTokenized.isDefined) {
-        val view = uniformView(spec)
+        val view  = uniformView(spec)
         val query = if (spec.requiresTokenized.contains(true)) "spark" else "active"
         // text: "spark" matches row 1 only (content col); string: "active" matches rows 1, 3 (status col)
         val expectedIds = if (spec.requiresTokenized.contains(true)) Seq(1) else Seq(1, 3)
         val whereClause = spec.sqlTemplate(query)
-        val results = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()
-        val resultIds = results.map(_.getInt(0)).toSeq
-        assert(resultIds == expectedIds,
-          s"${spec.name} on uniform table: expected $expectedIds, got $resultIds")
+        val results     = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()
+        val resultIds   = results.map(_.getInt(0)).toSeq
+        assert(resultIds == expectedIds, s"${spec.name} on uniform table: expected $expectedIds, got $resultIds")
       } else {
         // indexquery/indexqueryall with no type validation: searches all fields on the mixed table.
         // "spark" matches tokenized content in rows 1, 3. No false positives from exact-match
         // fields (status="active"/"inactive") because "spark" doesn't match those values.
-        val view = freshView("mixed", sharedTablePath)
+        val view        = freshView("mixed", sharedTablePath)
         val whereClause = spec.sqlTemplate("spark")
-        val results = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()
-        val resultIds = results.map(_.getInt(0)).toSeq
-        assert(resultIds == Seq(1, 3),
-          s"${spec.name} on shared mixed table: expected Seq(1, 3), got $resultIds")
+        val results     = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()
+        val resultIds   = results.map(_.getInt(0)).toSeq
+        assert(resultIds == Seq(1, 3), s"${spec.name} on shared mixed table: expected Seq(1, 3), got $resultIds")
       }
     }
   }
@@ -623,25 +671,28 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     test(s"${spec.name}: compound AND with standard filter") {
       if (spec.requiresTokenized.isDefined) {
         // Use shared uniform table + integer filter (id < 3) so * operator doesn't hit the filter column
-        val view = uniformView(spec)
-        val query = if (spec.requiresTokenized.contains(true)) "spark" else "active"
+        val view        = uniformView(spec)
+        val query       = if (spec.requiresTokenized.contains(true)) "spark" else "active"
         val whereClause = spec.sqlTemplate(query)
         // text: "spark" matches id=1 only, AND id < 3 → Seq(1)
         // string: "active" matches ids 1, 3, AND id < 3 → Seq(1)
         val expectedIds = Seq(1)
-        val results = spark.sql(
-          s"SELECT id FROM $view WHERE $whereClause AND id < 3 ORDER BY id"
-        ).collect()
+        val results = spark
+          .sql(
+            s"SELECT id FROM $view WHERE $whereClause AND id < 3 ORDER BY id"
+          )
+          .collect()
         val resultIds = results.map(_.getInt(0)).toSeq
-        assert(resultIds == expectedIds,
-          s"${spec.name} AND: expected $expectedIds, got $resultIds")
+        assert(resultIds == expectedIds, s"${spec.name} AND: expected $expectedIds, got $resultIds")
       } else {
         // "spark" matches content in rows 1, 3; AND category='technology' → ids 1, 3
-        val view = freshView("mixed", sharedTablePath)
+        val view        = freshView("mixed", sharedTablePath)
         val whereClause = spec.sqlTemplate("spark")
-        val results = spark.sql(
-          s"SELECT id FROM $view WHERE $whereClause AND category = 'technology' ORDER BY id"
-        ).collect()
+        val results = spark
+          .sql(
+            s"SELECT id FROM $view WHERE $whereClause AND category = 'technology' ORDER BY id"
+          )
+          .collect()
         val resultIds = results.map(_.getInt(0)).toSeq
         assert(resultIds == Seq(1, 3), s"${spec.name} AND on mixed table: expected Seq(1, 3), got $resultIds")
       }
@@ -659,13 +710,13 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     }
     if (spec.excludes.contains("type-correct-uniform")) return
     test(s"${spec.name}: all fields correct type succeeds") {
-      val view = uniformView(spec)
+      val view  = uniformView(spec)
       val query = if (spec.requiresTokenized.contains(true)) "spark" else "active"
       // text: "spark" matches row 1 only; string: "active" matches rows 1, 3
       val expectedIds = if (spec.requiresTokenized.contains(true)) Seq(1) else Seq(1, 3)
       val whereClause = spec.sqlTemplate(query)
-      val results = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()
-      val resultIds = results.map(_.getInt(0)).toSeq
+      val results     = spark.sql(s"SELECT id FROM $view WHERE $whereClause ORDER BY id").collect()
+      val resultIds   = results.map(_.getInt(0)).toSeq
       assert(resultIds == expectedIds, s"${spec.name} on uniform table: expected $expectedIds, got $resultIds")
     }
   }
@@ -679,7 +730,7 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     }
     if (spec.excludes.contains("type-mixed-throws")) return
     test(s"${spec.name}: mixed field types throws") {
-      val view = freshView("mixed", sharedTablePath)
+      val view        = freshView("mixed", sharedTablePath)
       val whereClause = spec.sqlTemplate("spark")
       val ex = intercept[IllegalArgumentException] {
         spark.sql(s"SELECT id FROM $view WHERE $whereClause").collect()
@@ -703,9 +754,10 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     test(s"${spec.name}: all fields wrong type throws") {
       // * TEXTSEARCH on all-string = wrong; * FIELDMATCH on all-text = wrong
       val (prefix, path) =
-        if (spec.requiresTokenized.contains(true)) ("allstring_wrong", allStringPath) else ("alltext_wrong", allTextPath)
-      val view = freshView(prefix, path)
-      val query = if (spec.requiresTokenized.contains(true)) "active" else "spark"
+        if (spec.requiresTokenized.contains(true)) ("allstring_wrong", allStringPath)
+        else ("alltext_wrong", allTextPath)
+      val view        = freshView(prefix, path)
+      val query       = if (spec.requiresTokenized.contains(true)) "active" else "spark"
       val whereClause = spec.sqlTemplate(query)
       val ex = intercept[IllegalArgumentException] {
         spark.sql(s"SELECT id FROM $view WHERE $whereClause").collect()
@@ -727,7 +779,7 @@ trait AllFieldsSearchBehaviors { self: TestBase =>
     }
     if (spec.excludes.contains("type-no-text-fields-throws")) return
     test(s"${spec.name}: integer-only table (no text/string fields) throws") {
-      val view = freshView("intonly", intOnlyPath)
+      val view        = freshView("intonly", intOnlyPath)
       val whereClause = spec.sqlTemplate("something")
       val ex = intercept[IllegalArgumentException] {
         spark.sql(s"SELECT id FROM $view WHERE $whereClause").collect()

@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, Subquer
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.expressions.{AllFieldSearchType, IndexQueryAllExpression, IndexQueryExpression, SearchType}
 import io.indextables.spark.filters._
 import org.slf4j.LoggerFactory
 
@@ -306,7 +306,16 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
               case (Some(columnName), Some(queryString)) =>
                 if (columnName == "_indexall") {
                   logger.debug(s"V2IndexQueryExpressionRule: Storing _indexall IndexQuery")
-                  indexQueries += IndexQueryAllFilter(queryString, indexQuery.searchType)
+                  // Widen the single-field searchType to its all-field counterpart. The conversion is
+                  // total today because every SingleFieldSearchType case object also extends
+                  // AllFieldSearchType; the compiler will flag this match if a single-field-only case
+                  // is added.
+                  val asAllField: AllFieldSearchType = indexQuery.searchType match {
+                    case SearchType.IndexQuery => SearchType.IndexQuery
+                    case SearchType.TextSearch => SearchType.TextSearch
+                    case SearchType.FieldMatch => SearchType.FieldMatch
+                  }
+                  indexQueries += IndexQueryAllFilter(queryString, asAllField)
                 } else {
                   logger.debug(s"V2IndexQueryExpressionRule: Storing IndexQuery")
                   indexQueries += IndexQueryFilter(columnName, queryString, indexQuery.searchType)
@@ -361,7 +370,14 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
           case (Some(columnName), Some(queryString)) =>
             if (columnName == "_indexall") {
-              Some(MixedIndexQueryAll(IndexQueryAllFilter(queryString, indexQuery.searchType)))
+              // Widen the single-field searchType to its all-field counterpart. See the matching
+              // conversion in transformExpression for the rationale (total today; compiler-checked).
+              val asAllField: AllFieldSearchType = indexQuery.searchType match {
+                case SearchType.IndexQuery => SearchType.IndexQuery
+                case SearchType.TextSearch => SearchType.TextSearch
+                case SearchType.FieldMatch => SearchType.FieldMatch
+              }
+              Some(MixedIndexQueryAll(IndexQueryAllFilter(queryString, asAllField)))
             } else {
               Some(MixedIndexQuery(IndexQueryFilter(columnName, queryString, indexQuery.searchType)))
             }

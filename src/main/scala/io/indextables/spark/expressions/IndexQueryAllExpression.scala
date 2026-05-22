@@ -34,13 +34,9 @@ import org.apache.spark.unsafe.types.UTF8String
  */
 case class IndexQueryAllExpression(
   child: Expression,
-  searchType: String = SearchType.IndexQueryAll // "indexqueryall", "textsearch", or "fieldmatch"
-) extends UnaryExpression with Predicate {
-
-  require(
-    SearchType.validAllFields.contains(searchType),
-    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validAllFields.mkString(", ")}"
-  )
+  searchType: AllFieldSearchType = SearchType.IndexQueryAll)
+    extends UnaryExpression
+    with Predicate {
 
   override def dataType: DataType = BooleanType
 

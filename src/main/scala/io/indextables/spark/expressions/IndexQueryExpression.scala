@@ -32,16 +32,11 @@ import org.apache.spark.unsafe.types.UTF8String
  * returns true for all rows since the actual filtering should happen at the data source level.
  */
 case class IndexQueryExpression(
-  left: Expression, // Column reference
+  left: Expression,  // Column reference
   right: Expression, // Query string literal
-  searchType: String = SearchType.IndexQuery // "indexquery", "textsearch", or "fieldmatch"
-) extends BinaryExpression
+  searchType: SingleFieldSearchType = SearchType.IndexQuery)
+    extends BinaryExpression
     with Predicate {
-
-  require(
-    SearchType.validSingleField.contains(searchType),
-    s"Invalid searchType '$searchType'. Must be one of: ${SearchType.validSingleField.mkString(", ")}"
-  )
 
   override def dataType: DataType = BooleanType
 
@@ -54,13 +49,13 @@ case class IndexQueryExpression(
   override def prettyName: String = searchType match {
     case SearchType.TextSearch => "textsearch"
     case SearchType.FieldMatch => "fieldmatch"
-    case _                     => "indexquery"
+    case SearchType.IndexQuery => "indexquery"
   }
 
   private def displayKeyword: String = searchType match {
     case SearchType.TextSearch => "TEXTSEARCH"
     case SearchType.FieldMatch => "FIELDMATCH"
-    case _                     => "indexquery"
+    case SearchType.IndexQuery => "indexquery"
   }
 
   override def sql: String = s"(${left.sql} $displayKeyword ${right.sql})"
@@ -106,7 +101,9 @@ case class IndexQueryExpression(
     val rightCheck = right.dataType match {
       case StringType => TypeCheckResult.TypeCheckSuccess
       case _ =>
-        TypeCheckResult.TypeCheckFailure(s"Right side of $displayKeyword must be a string literal, got ${right.dataType}")
+        TypeCheckResult.TypeCheckFailure(
+          s"Right side of $displayKeyword must be a string literal, got ${right.dataType}"
+        )
     }
 
     rightCheck

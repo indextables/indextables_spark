@@ -24,7 +24,13 @@ import org.apache.spark.sql.catalyst.parser.ParseErrorListener
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
 
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression, SearchType}
+import io.indextables.spark.expressions.{
+  AllFieldSearchType,
+  IndexQueryAllExpression,
+  IndexQueryExpression,
+  SearchType,
+  SingleFieldSearchType
+}
 import io.indextables.spark.sql.parser.{
   IndexTables4SparkSqlAstBuilder,
   IndexTables4SparkSqlBaseLexer,
@@ -155,7 +161,10 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
         try {
           val trimmedLeft  = leftExpr.trim
           val lowerKeyword = keyword.toLowerCase
-          val searchType = lowerKeyword match {
+          // Explicit type annotation: the result is used in BOTH a single-field expression
+          // (IndexQueryExpression) and an all-fields expression (IndexQueryAllExpression), so the
+          // value must satisfy both sub-traits. Each of the three case objects below extends both.
+          val searchType: SingleFieldSearchType with AllFieldSearchType = lowerKeyword match {
             case "textsearch" => SearchType.TextSearch
             case "fieldmatch" => SearchType.FieldMatch
             case _            => SearchType.IndexQuery
@@ -228,8 +237,8 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
     }
 
   /**
-   * Preprocess SQL text to convert search operators to function calls that Spark can parse.
-   * Uses a single combined regex pass for all operator variants:
+   * Preprocess SQL text to convert search operators to function calls that Spark can parse. Uses a single combined
+   * regex pass for all operator variants:
    *   - TEXTSEARCH / FIELDMATCH / indexquery (column and * forms)
    *   - indexqueryall() function
    *   - _indexall indexquery form
