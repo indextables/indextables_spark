@@ -549,9 +549,7 @@ class CountingTableCatalog(
     counter.incrementAndGet()
     val props = tables.getOrElse(
       ident.name(),
-      throw new org.apache.spark.sql.catalyst.analysis.NoSuchTableException(
-        s"Table '${ident.name()}' not found"
-      )
+      throw new org.apache.spark.sql.catalyst.analysis.NoSuchTableException(ident)
     )
     new PropertiesOnlyTable(props)
   }

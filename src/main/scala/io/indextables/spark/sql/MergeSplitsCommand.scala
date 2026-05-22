@@ -18,6 +18,7 @@
 package io.indextables.spark.sql
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.parallel.CollectionConverters._
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.{Row, SparkSession}
@@ -1151,7 +1152,7 @@ class MergeSplitsExecutor(
                     val txnStartTime = System.currentTimeMillis()
                     logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
 
-                    val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
+                    val version = transactionLog.commitMergeSplits(batchRemoveActions.toSeq, batchAddActions.toSeq)
                     transactionLog.invalidateCache() // Ensure cache is updated
 
                     val txnElapsed = System.currentTimeMillis() - txnStartTime

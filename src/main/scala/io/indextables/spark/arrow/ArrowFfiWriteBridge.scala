@@ -19,7 +19,7 @@ package io.indextables.spark.arrow
 
 import java.nio.charset.StandardCharsets
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.catalyst.InternalRow

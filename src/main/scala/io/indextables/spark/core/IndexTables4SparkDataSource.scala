@@ -19,7 +19,7 @@ package io.indextables.spark.core
 
 import java.util
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.expressions.Transform

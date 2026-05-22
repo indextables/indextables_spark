@@ -626,8 +626,8 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
           override def accept(path: Path): Boolean = path.getName.endsWith(".split")
         }
       )
-      .toSeq ++ fs.listStatus(tableDir).filter(_.isDirectory).flatMap { partition =>
-      fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split"))
+      .toSeq ++ fs.listStatus(tableDir).filter(_.isDirectory).toSeq.flatMap { partition =>
+      fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split")).toSeq
     }
 
     println(s"\nTotal split files BEFORE drop: ${splitsBefore.length}")
@@ -704,9 +704,9 @@ class CloudS3PurgeBugReproTest extends CloudS3TestBase {
           override def accept(path: Path): Boolean = path.getName.endsWith(".split")
         }
       )
-      .toSeq ++ fs.listStatus(tableDir).filter(s => s.isDirectory && s.getPath.getName.startsWith("date=")).flatMap {
+      .toSeq ++ fs.listStatus(tableDir).filter(s => s.isDirectory && s.getPath.getName.startsWith("date=")).toSeq.flatMap {
       partition =>
-        if (fs.exists(partition.getPath)) fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split"))
+        if (fs.exists(partition.getPath)) fs.listStatus(partition.getPath).filter(_.getPath.getName.endsWith(".split")).toSeq
         else Seq.empty
     }
     println(s"Total split files AFTER purge: ${splitsAfterPurge.length}")

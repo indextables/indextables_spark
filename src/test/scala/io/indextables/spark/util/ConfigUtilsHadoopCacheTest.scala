@@ -17,6 +17,8 @@
 
 package io.indextables.spark.util
 
+import scala.collection.parallel.CollectionConverters._
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach

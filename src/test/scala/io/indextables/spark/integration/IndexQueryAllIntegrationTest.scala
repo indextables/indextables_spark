@@ -76,7 +76,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     assert(!indexQueryAllExpr.nullable)
 
     // Test with Column wrapper
-    val columnExpr = new org.apache.spark.sql.Column(indexQueryAllExpr)
+    val columnExpr = org.apache.spark.sql.IndexTablesColumnBridge.column(indexQueryAllExpr)
 
     // Since IndexQueryAll returns true in fallback mode, we can test the expression is created
     val filteredDf = df.filter(columnExpr)
@@ -370,7 +370,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
           assert(indexQueryAllExpr.dataType.typeName == "boolean")
 
           // Test programmatic usage with Column wrapper
-          val column = new org.apache.spark.sql.Column(indexQueryAllExpr)
+          val column = org.apache.spark.sql.IndexTablesColumnBridge.column(indexQueryAllExpr)
 
           // Read the IndexTables4Spark data and apply the IndexQueryAll filter
           val tantivyDF =
@@ -432,8 +432,8 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     assert(query2.canPushDown)
 
     // Test combining expressions
-    val column1 = new org.apache.spark.sql.Column(query1)
-    val column2 = new org.apache.spark.sql.Column(query2)
+    val column1 = org.apache.spark.sql.IndexTablesColumnBridge.column(query1)
+    val column2 = org.apache.spark.sql.IndexTablesColumnBridge.column(query2)
 
     // Since IndexQueryAll returns true in fallback, we combine with real filters
     val combinedDf = df.filter(column1 && column2 && col("category") === "tech")

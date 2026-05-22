@@ -1986,7 +1986,7 @@ object FiltersToQueryConverter {
 
         // Parse the custom IndexQueryAll using the split searcher with ALL fields
         // Note: Driver-side validation should have already caught syntax errors
-        import scala.collection.JavaConverters._
+        import scala.jdk.CollectionConverters._
         val allFieldNames = schema.getFieldNames
         queryLog(s"Converting IndexQueryAllFilter to search across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {
@@ -2106,7 +2106,7 @@ object FiltersToQueryConverter {
         validateIndexQueryAllSafety(indexQueryAllFilter.queryString, schema, options)
 
         // Delegate to existing IndexQueryAllFilter handling - search across ALL fields
-        import scala.collection.JavaConverters._
+        import scala.jdk.CollectionConverters._
         val allFieldNames = schema.getFieldNames
         queryLog(s"MixedBooleanFilter: Converting MixedIndexQueryAll: '${indexQueryAllFilter.queryString}' across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         try {

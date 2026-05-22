@@ -217,6 +217,9 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
   override def parseDataType(sqlText: String): DataType =
     delegate.parseDataType(sqlText)
 
+  override def parseRoutineParam(sqlText: String): StructType =
+    delegate.parseRoutineParam(sqlText)
+
   override def parseQuery(sqlText: String): LogicalPlan =
     try
       parse(sqlText) { parser =>

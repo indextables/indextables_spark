@@ -17,6 +17,7 @@
 
 package io.indextables.spark.sql
 
+import scala.collection.parallel.CollectionConverters._
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.{Row, SparkSession}

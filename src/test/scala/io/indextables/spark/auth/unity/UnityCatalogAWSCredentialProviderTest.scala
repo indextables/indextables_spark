@@ -21,6 +21,7 @@ import java.net.{InetSocketAddress, URI}
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
 
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
@@ -98,9 +99,7 @@ class UnityCatalogAWSCredentialProviderTest
         val method = exchange.getRequestMethod
         val path   = exchange.getRequestURI.getPath
         val body   = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters
-          .mapAsScalaMapConverter(exchange.getRequestHeaders)
-          .asScala
+        val headers = exchange.getRequestHeaders.asScala
           .map { case (k, v) => k -> v.get(0) }
           .toMap
 
@@ -128,9 +127,7 @@ class UnityCatalogAWSCredentialProviderTest
         val method = exchange.getRequestMethod
         val path   = exchange.getRequestURI.getPath
         val body   = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters
-          .mapAsScalaMapConverter(exchange.getRequestHeaders)
-          .asScala
+        val headers = exchange.getRequestHeaders.asScala
           .map { case (k, v) => k -> v.get(0) }
           .toMap
 
@@ -545,9 +542,7 @@ class UnityCatalogAWSCredentialProviderTest
         val method = exchange.getRequestMethod
         val path   = exchange.getRequestURI.getPath
         val body   = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters
-          .mapAsScalaMapConverter(exchange.getRequestHeaders)
-          .asScala
+        val headers = exchange.getRequestHeaders.asScala
           .map { case (k, v) => k -> v.get(0) }
           .toMap
         requestLog += MockRequest(method, path, body, headers)
@@ -681,9 +676,7 @@ class UnityCatalogAWSCredentialProviderTest
         val method = exchange.getRequestMethod
         val path   = exchange.getRequestURI.getPath
         val body   = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters
-          .mapAsScalaMapConverter(exchange.getRequestHeaders)
-          .asScala
+        val headers = exchange.getRequestHeaders.asScala
           .map { case (k, v) => k -> v.get(0) }
           .toMap
         requestLog += MockRequest(method, path, body, headers)
@@ -820,9 +813,7 @@ class UnityCatalogAWSCredentialProviderTest
       path,
       (exchange: com.sun.net.httpserver.HttpExchange) => {
         val body = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters
-          .mapAsScalaMapConverter(exchange.getRequestHeaders)
-          .asScala
+        val headers = exchange.getRequestHeaders.asScala
           .map { case (k, v) => k -> v.get(0) }
           .toMap
         requestLog += MockRequest(exchange.getRequestMethod, exchange.getRequestURI.getPath, body, headers)
@@ -908,9 +899,7 @@ class UnityCatalogAWSCredentialProviderTest
       (exchange: com.sun.net.httpserver.HttpExchange) => {
         callCount += 1
         val body = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters
-          .mapAsScalaMapConverter(exchange.getRequestHeaders)
-          .asScala
+        val headers = exchange.getRequestHeaders.asScala
           .map { case (k, v) => k -> v.get(0) }
           .toMap
         requestLog += MockRequest(exchange.getRequestMethod, exchange.getRequestURI.getPath, body, headers)

@@ -102,7 +102,7 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
     logger.debug(s"V2BucketExpressionRule: Processing plan: ${plan.getClass.getSimpleName}")
 
     plan.transformUp {
-      case agg @ Aggregate(groupingExpressions, aggregateExpressions, child) =>
+      case agg @ Aggregate(groupingExpressions, aggregateExpressions, child, _) =>
         logger.debug(s"V2BucketExpressionRule: Found Aggregate node")
         logger.debug(
           s"V2BucketExpressionRule: Grouping expressions: ${groupingExpressions.map(_.toString).mkString(", ")}"

@@ -885,7 +885,7 @@ class IndexTables4SparkGroupByAggregateReader(
         val splitFieldNames = {
           var schema: io.indextables.tantivy4java.core.Schema = null
           try {
-            import scala.collection.JavaConverters._
+            import scala.jdk.CollectionConverters._
             schema = splitSearchEngine.getSchema()
             if (schema != null) {
               Some(schema.getFieldNames().asScala.toSet)
@@ -1429,7 +1429,7 @@ class IndexTables4SparkGroupByAggregateReader(
     : Option[Set[String]] = {
     var schema: io.indextables.tantivy4java.core.Schema = null
     try {
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       schema = splitSearchEngine.getSchema()
       if (schema != null) Some(schema.getFieldNames().asScala.toSet) else None
     } catch {
