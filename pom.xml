@@ -66,7 +66,7 @@
             S3AFileSystem.initialize.
         -->
         <hadoop.version>3.3.4</hadoop.version>
-        <aws.sdk.version>2.46.5</aws.sdk.version>
+        <aws.sdk.version>2.46.10</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>
