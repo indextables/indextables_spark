@@ -14,6 +14,24 @@ updates:
           - "org.apache.iceberg:*"
       test-dependencies:
         dependency-type: development
+    # These dependencies are pinned in pom.xml to match what Spark 3.5.x bundles.
+    # Bumping them independently breaks at runtime/build time, so they must move
+    # only as part of a deliberate Spark upgrade — not via dependabot. See the
+    # property comments in pom.xml for the specific failure modes.
+    ignore:
+      # Pin 3.3.4: Spark 3.5.x ships shaded hadoop-client 3.3.4; 3.4+ triggers
+      # NoSuchMethodError (Configuration.getEnumSet) in S3AFileSystem.initialize.
+      - dependency-name: "org.apache.hadoop:*"
+      # Pin 4.9.3: Spark 3.5.x's catalyst parser ATN is incompatible with 4.10+ runtimes.
+      - dependency-name: "org.antlr:antlr4-runtime"
+      - dependency-name: "org.antlr:antlr4-maven-plugin"
+      # Pin 1.6.x: iceberg-core 1.10.1+ requires Avro 1.12, but Spark 3.5.x ships Avro 1.11.x.
+      - dependency-name: "org.apache.iceberg:*"
+      # Pin 12.0.1 to match Spark 3.5.x's bundled Arrow.
+      - dependency-name: "org.apache.arrow:*"
+      # Stay on Scala 2.12.x for Spark 3.5.8 (Spark 3.5 supports 2.12/2.13 only, not 3.x).
+      - dependency-name: "org.scala-lang:scala-library"
+        versions: [">=2.13.0"]
     labels:
       - "type: chore"
 
