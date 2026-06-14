@@ -157,6 +157,25 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
             <version>${aws.sdk.version}</version>
+            <!--
+                AWS SDK 2.46.x switched the default transitive sync HTTP client from
+                apache-client (Apache HttpClient 4) to apache5-client (HttpClient 5).
+                apache5-client requires httpclient5 >= 5.4 (TlsSocketStrategy), but version
+                mediation pulls httpclient5 5.3.1, causing NoClassDefFoundError at client
+                init. Stay on the HttpClient 4 stack (what <= 2.44.4 used) by excluding
+                apache5-client and depending on apache-client explicitly.
+            -->
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache5-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
+            <version>${aws.sdk.version}</version>
         </dependency>
 
         <!-- S3A filesystem for S3 operations -->
