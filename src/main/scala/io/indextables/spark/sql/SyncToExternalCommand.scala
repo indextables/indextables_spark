@@ -64,6 +64,40 @@ import org.slf4j.LoggerFactory
  *   - BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta_table' AT LOCATION 's3://bucket/index'
  *   - BUILD INDEXTABLES COMPANION FOR PARQUET 's3://bucket/data' AT LOCATION 's3://bucket/index'
  *   - BUILD INDEXTABLES COMPANION FOR ICEBERG 'db.events' CATALOG 'glue' AT LOCATION 's3://bucket/index'
+ *
+ * ==Destination metadata is read up to 3× per sync — and that is fine (do not "fix" it)==
+ *
+ * This command opens the destination companion's transaction log to read its metadata at three
+ * separate sites, and this pattern has been flagged in multiple PR reviews as a suspected 3×
+ * cold-cache S3 cost. It is not. All three reads hit a single, process-wide cache entry, so only
+ * the first read pays for the checkpoint; the other two are effectively free. See issue #301 for
+ * the full investigation. The three sites are:
+ *
+ *   1. `earlyStoredConfig` (in `run`, iceberg/delta only) — restores CATALOG/TYPE/WAREHOUSE before
+ *      the source reader is built.
+ *   2. `storedConfig` (in `executeSyncWithReader`, via the long-lived `transactionLog`) — restores
+ *      INCLUDE/EXCLUDE COLUMNS, INDEXING MODES, HASHED FASTFIELDS, and WHERE from existing metadata.
+ *   3. `cheapStoredConfig` (in `cheapSourceVersion`) — honors the SQL > stored > SparkConf catalog
+ *      fallback chain on each streaming poll cycle.
+ *
+ * Why the cache covers all three:
+ *   - The transaction-log cache (tantivy4java `txlog/cache.rs`) is a JVM-wide registry keyed by
+ *     `RegistryKey { table_path, ttl_ms, version/snapshot/file_list capacity }` — NOT by the
+ *     `CaseInsensitiveStringMap` options. Credentials and the injected `iceberg.uc.tableId` differ
+ *     between these sites but are excluded from the key, so all three (same `destPath`, default
+ *     TTL/capacities) resolve to the same `Arc<TxLogCache>`. The "different options → different
+ *     cache key" concern is therefore unfounded.
+ *   - Cold start pays 1×, not 3×: read 1 is the only miss and populates metadata, last-checkpoint,
+ *     state-manifest, and version-list caches; reads 2 and 3 hit them and issue zero checkpoint
+ *     GETs (residual cost is a Guava-cached credential refresh and, at most, one cheap HEAD probe
+ *     for new commits). Nothing invalidates the destination cache between reads 1 and 2 — the only
+ *     `commitSyncActions`/`invalidateCache` happens after both, at the end of the sync.
+ *   - `NativeTransactionLog` sets `cache.ttl.ms=300000`, which overrides all cache tiers (including
+ *     metadata) to 5 min. Streaming polls under that interval hit the cache; a longer interval
+ *     re-reads metadata once per interval, which is negligible.
+ *
+ * Bottom line: do not thread a single `TransactionLog` through these sites to "save" reads — the
+ * cache already does that, and the plumbing would add complexity for no measurable benefit.
  */
 case class SyncToExternalCommand(
   sourceFormat: String,
