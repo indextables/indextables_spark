@@ -21,12 +21,17 @@ updates:
     ignore:
       # Pin 3.3.4: Spark 3.5.x ships shaded hadoop-client 3.3.4; 3.4+ triggers
       # NoSuchMethodError (Configuration.getEnumSet) in S3AFileSystem.initialize.
+      # Range-scoped so in-minor 3.3.x security patches still surface.
       - dependency-name: "org.apache.hadoop:*"
+        versions: [">=3.4.0"]
       # Pin 4.9.3: Spark 3.5.x's catalyst parser ATN is incompatible with 4.10+ runtimes.
       - dependency-name: "org.antlr:antlr4-runtime"
       - dependency-name: "org.antlr:antlr4-maven-plugin"
       # Pin 1.6.x: iceberg-core 1.10.1+ requires Avro 1.12, but Spark 3.5.x ships Avro 1.11.x.
+      # Range-scoped so in-minor 1.6.x security patches still surface (and 1.6.x bumps
+      # group correctly under spark-ecosystem rather than being fully ignored).
       - dependency-name: "org.apache.iceberg:*"
+        versions: [">=1.7.0"]
       # Pin 12.0.1 to match Spark 3.5.x's bundled Arrow.
       - dependency-name: "org.apache.arrow:*"
       # Stay on Scala 2.12.x for Spark 3.5.8 (Spark 3.5 supports 2.12/2.13 only, not 3.x).
