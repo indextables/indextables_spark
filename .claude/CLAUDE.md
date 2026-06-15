@@ -11,9 +11,10 @@
 
 ### Build & Test
 ```bash
-# JDK 11 is the default build target. JDK 17 is also supported — tests run
+# JDK 17 is the CI-validated build target (the macOS CI job provisions
+# Temurin 17 via actions/setup-java). JDK 11 is also supported — tests run
 # with the standard Spark `--add-opens` set wired into pom.xml.
-export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # or openjdk@17
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17  # or openjdk@11
 mvn clean compile                              # Build
 
 # Run local tests (excludes cloud tests, uses all CPU cores):
