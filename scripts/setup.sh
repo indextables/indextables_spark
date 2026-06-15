@@ -13,10 +13,13 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-# Minimum supported Java major version. We target JDK 11 bytecode but tests
-# also run cleanly under JDK 17 (Spark 4 baseline) thanks to the --add-opens
-# argLine in pom.xml.
-REQUIRED_JAVA_MAJOR=11
+# Java major version that setup installs and pins the tantivy4java build to.
+# We provision and build against JDK 17 (the version CI uses via
+# actions/setup-java); the project still targets JDK 11 bytecode via the pom
+# release flag, and tests run cleanly under 17 (Spark 4 baseline) thanks to the
+# --add-opens argLine in pom.xml. SUPPORTED_JAVA_MAJORS lists versions the
+# project can run under; REQUIRED_JAVA_MAJOR is the specific one we install.
+REQUIRED_JAVA_MAJOR=17
 SUPPORTED_JAVA_MAJORS=(11 17)
 
 # Protoc version to install from GitHub releases (Linux only).
@@ -79,7 +82,7 @@ while [[ $# -gt 0 ]]; do
             echo "Install and verify development dependencies for IndexTables4Spark."
             echo ""
             echo "Dependencies installed:"
-            echo "  - Java 11 (OpenJDK 11)"
+            echo "  - Java ${REQUIRED_JAVA_MAJOR} (OpenJDK ${REQUIRED_JAVA_MAJOR})"
             echo "  - Maven"
             echo "  - Rust toolchain (rustc, cargo via rustup)"
             echo "  - Protobuf compiler (protoc)"
@@ -251,29 +254,37 @@ install_macos() {
     fi
     ok "Homebrew found: $(brew --prefix)"
 
-    # On macOS, openjdk@11 is keg-only and may not be on PATH.
-    # Check the Homebrew keg path directly before deciding to install.
-    if [[ -z "${JAVA_HOME:-}" ]]; then
-        for brew_prefix in /opt/homebrew /usr/local; do
-            local keg_java="${brew_prefix}/opt/openjdk@11/bin/java"
-            if [[ -x "$keg_java" ]]; then
-                local keg_major
-                keg_major=$(get_java_major_version "$keg_java")
-                if [[ "$keg_major" == "$REQUIRED_JAVA_MAJOR" ]]; then
-                    export JAVA_HOME="${brew_prefix}/opt/openjdk@11"
-                    break
-                fi
-            fi
-        done
-    fi
-
-    # --- Java 11 ---
-    if check_java; then
-        ok "Java $REQUIRED_JAVA_MAJOR already installed"
+    # --- Java (pinned build JDK: openjdk@${REQUIRED_JAVA_MAJOR}) ---
+    # The tantivy4java native build is pinned to this exact JDK, so ensure the
+    # specific keg is installed rather than accepting "any supported JDK".
+    # Homebrew JDKs are keg-only and may not be on PATH, so probe the keg path.
+    local required_home=""
+    for brew_prefix in /opt/homebrew /usr/local; do
+        if [[ -x "${brew_prefix}/opt/openjdk@${REQUIRED_JAVA_MAJOR}/bin/java" ]]; then
+            required_home="${brew_prefix}/opt/openjdk@${REQUIRED_JAVA_MAJOR}"
+            break
+        fi
+    done
+    if [[ -n "$required_home" ]]; then
+        ok "OpenJDK $REQUIRED_JAVA_MAJOR already installed"
     else
         info "Installing OpenJDK $REQUIRED_JAVA_MAJOR via Homebrew..."
-        brew install openjdk@11
+        brew install "openjdk@${REQUIRED_JAVA_MAJOR}"
+        for brew_prefix in /opt/homebrew /usr/local; do
+            if [[ -x "${brew_prefix}/opt/openjdk@${REQUIRED_JAVA_MAJOR}/bin/java" ]]; then
+                required_home="${brew_prefix}/opt/openjdk@${REQUIRED_JAVA_MAJOR}"
+                break
+            fi
+        done
+        if [[ -z "$required_home" ]]; then
+            error "openjdk@${REQUIRED_JAVA_MAJOR} not found after 'brew install' (unexpected Homebrew prefix?)."
+            exit 1
+        fi
         ok "OpenJDK $REQUIRED_JAVA_MAJOR installed"
+    fi
+    # Default JAVA_HOME to the pinned JDK when the caller hasn't set one.
+    if [[ -z "${JAVA_HOME:-}" && -n "$required_home" ]]; then
+        export JAVA_HOME="$required_home"
     fi
 
     # --- Maven ---
@@ -334,7 +345,7 @@ install_linux() {
         fi
     }
 
-    # --- Java 11 ---
+    # --- Java (OpenJDK ${REQUIRED_JAVA_MAJOR}) ---
     if check_java; then
         ok "Java $REQUIRED_JAVA_MAJOR already installed"
     else
@@ -342,13 +353,13 @@ install_linux() {
         case "$pkg_mgr" in
             apt-get)
                 ensure_apt_updated
-                $sudo_cmd apt-get install -y openjdk-11-jdk
+                $sudo_cmd apt-get install -y "openjdk-${REQUIRED_JAVA_MAJOR}-jdk"
                 ;;
             dnf)
-                $sudo_cmd dnf install -y java-11-openjdk-devel
+                $sudo_cmd dnf install -y "java-${REQUIRED_JAVA_MAJOR}-openjdk-devel"
                 ;;
             yum)
-                $sudo_cmd yum install -y java-11-openjdk-devel
+                $sudo_cmd yum install -y "java-${REQUIRED_JAVA_MAJOR}-openjdk-devel"
                 ;;
         esac
         ok "OpenJDK $REQUIRED_JAVA_MAJOR installed"
@@ -505,7 +516,7 @@ install_tantivy4java() {
     fi
 
     info "Building tantivy4java ${TANTIVY4JAVA_VERSION} from source..."
-    info "This requires Rust, protoc, Java 11, and Maven (already verified above)."
+    info "This requires Rust, protoc, JDK ${REQUIRED_JAVA_MAJOR}, and Maven (already verified above)."
 
     # Create temp build directory
     local build_dir
@@ -550,15 +561,24 @@ install_tantivy4java() {
         fi
     fi
 
-    # Set JAVA_HOME for the Maven build
+    # Pin the tantivy4java native build to the JDK that setup installs
+    # (openjdk@${REQUIRED_JAVA_MAJOR}), rather than whatever JAVA_HOME happens to
+    # point at, so the JNI JAR is always built against a known, fixed JDK. On
+    # macOS the keg is keg-only, so resolve its path directly (it was ensured
+    # installed above); elsewhere use the validated JAVA_HOME.
     local build_java_home="${JAVA_HOME:-}"
     if [[ "$PLATFORM" == "macos" ]]; then
+        build_java_home=""
         for brew_prefix in /opt/homebrew /usr/local; do
-            if [[ -d "${brew_prefix}/opt/openjdk@11" ]]; then
-                build_java_home="${brew_prefix}/opt/openjdk@11"
+            if [[ -x "${brew_prefix}/opt/openjdk@${REQUIRED_JAVA_MAJOR}/bin/java" ]]; then
+                build_java_home="${brew_prefix}/opt/openjdk@${REQUIRED_JAVA_MAJOR}"
                 break
             fi
         done
+        if [[ -z "$build_java_home" ]]; then
+            error "openjdk@${REQUIRED_JAVA_MAJOR} not found; expected setup to have installed it above."
+            exit 1
+        fi
     fi
 
     # Ensure cargo is on PATH for the Maven subprocess
@@ -571,7 +591,7 @@ install_tantivy4java() {
     info "Running Maven build (this may take several minutes on first build)..."
     (
         cd "$build_dir/tantivy4java"
-        export JAVA_HOME="$build_java_home"
+        [[ -n "$build_java_home" ]] && export JAVA_HOME="$build_java_home"
         export PATH="$build_path"
         mvn clean install -DskipTests
     )
@@ -630,9 +650,9 @@ ERRORS=0
 
 # Validate Java
 # On macOS with Homebrew, set JAVA_HOME hint if not already pointing to a
-# supported JDK. Prefer 11 (default build target), fall back to 17.
+# supported JDK. Prefer the pinned build JDK (openjdk@17), fall back to 11.
 if [[ "$PLATFORM" == "macos" ]] && [[ -z "${JAVA_HOME:-}" ]]; then
-    for keg in openjdk@11 openjdk@17; do
+    for keg in openjdk@17 openjdk@11; do
         for brew_prefix in /opt/homebrew /usr/local; do
             if [[ -d "${brew_prefix}/opt/${keg}" ]]; then
                 export JAVA_HOME="${brew_prefix}/opt/${keg}"

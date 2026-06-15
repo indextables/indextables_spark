@@ -11,13 +11,28 @@ jobs:
     name: Build & Test (macOS ARM64)
     runs-on: [self-hosted, macOS, ARM64]
     environment: test-runners
-    env:
-      JAVA_HOME: /opt/homebrew/opt/openjdk@11
-      PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # setup-java only adds the JDK to PATH; it does not restore Homebrew.
+      # Ensure brew/mvn/protoc are discoverable for the run: steps below,
+      # even when the runner's service environment omits Homebrew from PATH.
+      - name: Ensure Homebrew on PATH
+        run: |
+          for prefix in /opt/homebrew /usr/local; do
+            if [[ -x "$prefix/bin/brew" ]]; then
+              echo "$prefix/bin" >> "$GITHUB_PATH"
+              echo "$prefix/sbin" >> "$GITHUB_PATH"
+            fi
+          done
 
       - name: Setup dependencies
         run: ./scripts/setup.sh
@@ -48,12 +63,16 @@ jobs:
   #   name: Build & Test (Linux X64)
   #   runs-on: [self-hosted, Linux, X64]
   #   environment: test-runners
-  #   env:
-  #     JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
   #
   #   steps:
   #     - name: Checkout
   #       uses: actions/checkout@v6
+  #
+  #     - name: Set up Java 17
+  #       uses: actions/setup-java@v5
+  #       with:
+  #         distribution: 'temurin'
+  #         java-version: '17'
   #
   #     - name: Setup dependencies
   #       run: ./scripts/setup.sh

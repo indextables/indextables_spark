@@ -91,7 +91,7 @@ spark.sql("SELECT * FROM my_table WHERE status FIELDMATCH 'active'").show()
 ## Development
 
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # Java 11 required
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17  # Java 17 (setup.sh installs this)
 mvn clean compile                              # Build
 mvn test                                       # Run tests
 
