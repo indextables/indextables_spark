@@ -276,6 +276,10 @@ install_macos() {
                 break
             fi
         done
+        if [[ -z "$required_home" ]]; then
+            error "openjdk@${REQUIRED_JAVA_MAJOR} not found after 'brew install' (unexpected Homebrew prefix?)."
+            exit 1
+        fi
         ok "OpenJDK $REQUIRED_JAVA_MAJOR installed"
     fi
     # Default JAVA_HOME to the pinned JDK when the caller hasn't set one.
