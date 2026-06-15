@@ -6,7 +6,7 @@
 
 ### First-Time Setup
 ```bash
-./scripts/setup.sh  # Installs Java 11, Maven, Rust, protoc, builds tantivy4java
+./scripts/setup.sh  # Installs Java 17, Maven, Rust, protoc, builds tantivy4java
 ```
 
 ### Build & Test
