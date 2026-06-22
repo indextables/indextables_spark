@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -55,7 +55,7 @@ jobs:
 
   # Linux X64 CI is disabled pending a host-OS upgrade on the self-hosted
   # runner (bluegill, currently Ubuntu 16.04 / runner v2.321.0). The current
-  # runner cannot load actions/checkout@v6 because that action requires
+  # runner cannot load actions/checkout@v7 because that action requires
   # node24, which the runner does not support. Re-enable by uncommenting
   # the job below once the runner host has been upgraded.
   #
@@ -66,7 +66,7 @@ jobs:
   #
   #   steps:
   #     - name: Checkout
-  #       uses: actions/checkout@v6
+  #       uses: actions/checkout@v7
   #
   #     - name: Set up Java 17
   #       uses: actions/setup-java@v5
