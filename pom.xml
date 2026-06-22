@@ -65,7 +65,7 @@
             3.3.4 shaded Configuration -> NoSuchMethodError at runtime in
             S3AFileSystem.initialize.
         -->
-        <hadoop.version>3.3.4</hadoop.version>
+        <hadoop.version>3.3.6</hadoop.version>
         <aws.sdk.version>2.46.10</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
@@ -450,7 +450,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.7.0</version>
                 <configuration>
                     <scala>
                         <includes>
@@ -789,7 +789,7 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.10.0</version>
+                        <version>0.11.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
