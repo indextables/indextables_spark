@@ -61,7 +61,9 @@ property-only Maven profiles. Released artifacts encode the Spark version in the
   4.13.1 runtime ("Could not deserialize ATN with version 3").
 - **Release**: pushing a `v*` tag runs `.github/workflows/release.yml` — builds tantivy4java
   (linux-x86_64) once, then publishes each Spark leg to Maven Central and attaches shaded jars
-  to a GitHub Release.
+  to a GitHub Release. For local builds of all three legs:
+  `dev/build-release.sh <base-version>` (shaded jars land in `dist/`, platform classifier
+  auto-detected for the current machine).
 
 > **Note:** `mvn test` may OOM on laptops due to 360+ test classes. Use `make test` which compiles once and runs each test class in a separate JVM with auto-detected parallelism. Cloud tests (42 classes prefixed with `Cloud*`) are separated into `make test-cloud` and require live S3/Azure credentials. Per-test logs are saved to a temp directory; failed test log paths are printed in the summary.
 
