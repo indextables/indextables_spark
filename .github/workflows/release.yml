@@ -37,7 +37,7 @@ jobs:
       t4j-version: ${{ steps.t4j.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
 
@@ -87,7 +87,7 @@ jobs:
           - { profile: spark-4.1, version: 4.1.2 }
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
 
