@@ -45,6 +45,12 @@
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
+        <!--
+            JDK API level passed to scalac/javac as \-release. Project-specific
+            name (not maven.compiler.release) so a user-level settings.xml
+            profile can't override it; the spark-4.x profiles bump it to 17.
+        -->
+        <java.release>11</java.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!--
@@ -71,6 +77,15 @@
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>
         <arrow.version>12.0.1</arrow.version>
+        <delta.version>3.3.2</delta.version>
+        <!--
+            Spark-version shim source root, added by build-helper-maven-plugin.
+            Top-level property defaults ARE the spark-3.5 configuration; the
+            spark-4.0/spark-4.1 profiles below override them. (Deliberately not
+            using activeByDefault: the OS-activated platform profiles would
+            silently deactivate it.)
+        -->
+        <shims.majorVerSrc>spark-3.5</shims.majorVerSrc>
     </properties>
 
     <dependencyManagement>
@@ -80,6 +95,17 @@
                 <groupId>org.apache.yetus</groupId>
                 <artifactId>audience-annotations</artifactId>
                 <version>0.15.1</version>
+            </dependency>
+            <!--
+                Keep jackson-annotations in lockstep with our jackson-databind
+                2.22.0 pin. Without this, Spark 4.x's transitive
+                jackson-annotations (2.18.x) wins nearest-resolution and
+                databind 2.22 fails at class-init (JsonSerializeAs).
+            -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+                <version>2.22</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -221,7 +247,7 @@
         <dependency>
             <groupId>io.delta</groupId>
             <artifactId>delta-spark_${scala.compat.version}</artifactId>
-            <version>3.3.2</version>
+            <version>${delta.version}</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
@@ -301,7 +327,7 @@
         <!-- Findify S3Mock for testing S3 functionality - stable, no logging conflicts -->
         <dependency>
             <groupId>io.findify</groupId>
-            <artifactId>s3mock_2.12</artifactId>
+            <artifactId>s3mock_${scala.compat.version}</artifactId>
             <version>0.2.6</version>
             <scope>test</scope>
         </dependency>
@@ -337,6 +363,39 @@
         <testSourceDirectory>src/test/scala</testSourceDirectory>
 
         <plugins>
+            <!-- Spark-version shim sources (selected by shims.majorVerSrc property) -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-shim-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/${shims.majorVerSrc}/scala</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>add-shim-test-sources</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/test/${shims.majorVerSrc}/scala</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Scala compiler -->
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
@@ -352,6 +411,7 @@
                 </executions>
                 <configuration>
                     <scalaVersion>${scala.version}</scalaVersion>
+                    <release>${java.release}</release>
                     <args>
                         <arg>-deprecation</arg>
                         <arg>-feature</arg>
@@ -394,6 +454,11 @@
                     <!-- Environment variables for forked processes -->
                     <environmentVariables>
                         <SPARK_LOCAL_DIRS>/tmp</SPARK_LOCAL_DIRS>
+                        <!-- Spark 4 probes this exec to discover Python Data Sources on first
+                             DataSource lookup; with a real python3 (but no pyspark) the probe
+                             worker can hang forever. Nonexistent exec => lookup skipped. -->
+                        <PYSPARK_PYTHON>python3-nonexistent-disable-pyds</PYSPARK_PYTHON>
+                        <PYSPARK_DRIVER_PYTHON>python3-nonexistent-disable-pyds</PYSPARK_DRIVER_PYTHON>
                     </environmentVariables>
                     <!-- Include ScalaTest tests -->
                     <includes>
@@ -414,6 +479,11 @@
                     <filereports>TestSuiteReport.txt</filereports>
                     <!-- Run tests with increased memory; disable SparkUI to avoid port exhaustion under parallel test execution -->
                     <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m -Dspark.ui.enabled=false ${extraJavaTestArgs}</argLine>
+                    <!-- See surefire config: keep Spark 4's Python Data Source probe disabled -->
+                    <environmentVariables>
+                        <PYSPARK_PYTHON>python3-nonexistent-disable-pyds</PYSPARK_PYTHON>
+                        <PYSPARK_DRIVER_PYTHON>python3-nonexistent-disable-pyds</PYSPARK_DRIVER_PYTHON>
+                    </environmentVariables>
                 </configuration>
                 <executions>
                     <execution>
@@ -455,6 +525,7 @@
                     <scala>
                         <includes>
                             <include>src/main/scala/**/*.scala</include>
+                            <include>src/main/spark-*/scala/**/*.scala</include>
                             <include>src/test/scala/**/*.scala</include>
                         </includes>
                         <scalafmt>
@@ -493,7 +564,7 @@
                                     cs launch scalafix:0.11.1 --main scalafix.cli.Cli -- \
                                     --config=${project.basedir}/.scalafix.conf \
                                     --rules=OrganizeImports \
-                                    src/main/scala src/test/scala
+                                    src/main/scala src/main/${shims.majorVerSrc}/scala src/test/scala
                                 </argument>
                             </arguments>
                         </configuration>
@@ -513,7 +584,7 @@
                                     --check \
                                     --config=${project.basedir}/.scalafix.conf \
                                     --rules=OrganizeImports \
-                                    src/main/scala src/test/scala
+                                    src/main/scala src/main/${shims.majorVerSrc}/scala src/test/scala
                                 </argument>
                             </arguments>
                         </configuration>
@@ -640,6 +711,55 @@
 
     <!-- Platform detection profiles - auto-activate based on OS -->
     <profiles>
+        <!--
+            Spark version profiles. Property-only (no build changes): the
+            top-level property defaults ARE the spark-3.5 configuration, so
+            the spark-3.5 profile is an empty marker that makes -Pspark-3.5
+            a valid no-op in CI matrices. Scala patch versions must match the
+            version each Spark release was built with, and hadoop/arrow/antlr
+            must match what that Spark line bundles.
+        -->
+        <profile>
+            <id>spark-3.5</id>
+        </profile>
+
+        <profile>
+            <id>spark-4.0</id>
+            <properties>
+                <!-- Spark 4 requires JDK 17; -release 11 can't read its JDK17 classfiles (java.lang.Record) -->
+                <java.release>17</java.release>
+                <maven.compiler.source>17</maven.compiler.source>
+                <maven.compiler.target>17</maven.compiler.target>
+                <scala.version>2.13.16</scala.version>
+                <scala.compat.version>2.13</scala.compat.version>
+                <spark.version>4.0.3</spark.version>
+                <hadoop.version>3.4.1</hadoop.version>
+                <arrow.version>18.1.0</arrow.version>
+                <antlr.version>4.13.1</antlr.version>
+                <delta.version>4.0.0</delta.version>
+                <shims.majorVerSrc>spark-4.x</shims.majorVerSrc>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>spark-4.1</id>
+            <properties>
+                <!-- Spark 4 requires JDK 17; -release 11 can't read its JDK17 classfiles (java.lang.Record) -->
+                <java.release>17</java.release>
+                <maven.compiler.source>17</maven.compiler.source>
+                <maven.compiler.target>17</maven.compiler.target>
+                <scala.version>2.13.17</scala.version>
+                <scala.compat.version>2.13</scala.compat.version>
+                <spark.version>4.1.2</spark.version>
+                <hadoop.version>3.4.2</hadoop.version>
+                <arrow.version>18.3.0</arrow.version>
+                <antlr.version>4.13.1</antlr.version>
+                <!-- delta-spark 4.3.0 targets Spark 4.1.x -->
+                <delta.version>4.3.0</delta.version>
+                <shims.majorVerSrc>spark-4.x</shims.majorVerSrc>
+            </properties>
+        </profile>
+
         <!-- macOS ARM64 (Apple Silicon) -->
         <profile>
             <id>platform-darwin-aarch64</id>

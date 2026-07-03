@@ -59,7 +59,9 @@ import org.slf4j.LoggerFactory
  *   - * indexquery: * indexquery 'query_string' (all-fields, equivalent to indexqueryall)
  *   - indexqueryall: indexqueryall('query_string') (all-fields, no type validation)
  */
-class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
+class IndexTables4SparkSqlParser(protected val delegate: ParserInterface)
+    extends ParserInterface
+    with IndexTables4SparkParserShims {
 
   private val astBuilder = new IndexTables4SparkSqlAstBuilder()
   private val logger     = LoggerFactory.getLogger(getClass)

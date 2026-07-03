@@ -26,9 +26,24 @@ IndexTables runs entirely within your existing Spark cluster with no additional 
 
 ### Installation
 
-1. Add the [IndexTables JAR](https://repo1.maven.org/maven2/io/indextables/indextables_spark/0.5.5_spark_3.5.3/indextables_spark-0.5.5_spark_3.5.3-linux-x86_64-shaded.jar) to your Spark classpath
+1. Add the [IndexTables JAR](https://repo1.maven.org/maven2/io/indextables/indextables_spark/0.5.5_spark_3.5.3/indextables_spark-0.5.5_spark_3.5.3-linux-x86_64-shaded.jar) to your Spark classpath (pick the artifact version matching your Spark version — see below)
 2. Set `spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`
-3. Requires Java 11+
+3. Requires Java 11+ (Java 17+ for Spark 4.x)
+
+#### Supported Spark versions
+
+Each release is published once per supported Spark line; the Spark version is
+encoded in the artifact version string (`<release>_spark_<sparkversion>`):
+
+| Spark | Scala | Java | Maven coordinate (example for release 0.6.0) |
+|-------|-------|------|----------------------------------------------|
+| 3.5.x | 2.12 | 11+ | `io.indextables:indextables_spark:0.6.0_spark_3.5.8` |
+| 4.0.x | 2.13 | 17+ | `io.indextables:indextables_spark:0.6.0_spark_4.0.3` |
+| 4.1.x | 2.13 | 17+ | `io.indextables:indextables_spark:0.6.0_spark_4.1.2` |
+
+Shaded jars (classifier `linux-x86_64-shaded`) bundle the Tantivy native
+library and all shaded dependencies; they are also attached to each
+[GitHub Release](https://github.com/indextables/indextables_spark/releases).
 
 See the [Installation Guide](https://www.indextables.io/docs/getting-started/installation) for detailed instructions including Databricks setup.
 
@@ -92,8 +107,12 @@ spark.sql("SELECT * FROM my_table WHERE status FIELDMATCH 'active'").show()
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17  # Java 17 (setup.sh installs this)
-mvn clean compile                              # Build
+mvn clean compile                              # Build (defaults to Spark 3.5)
 mvn test                                       # Run tests
+
+# Build/test against another Spark line (profiles: spark-3.5, spark-4.0, spark-4.1)
+mvn clean compile -Pspark-4.0
+make test SPARK_PROFILE=spark-4.0
 
 # Run single test
 mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.YourTest'

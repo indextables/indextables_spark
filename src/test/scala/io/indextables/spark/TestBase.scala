@@ -54,6 +54,10 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
       .config("spark.indextables.s3.pathStyleAccess", "true")
       .config("spark.indextables.aws.region", "us-east-1")
       .config("spark.indextables.s3.endpoint", "http://localhost:10101")
+      // Spark 4.x defaults ANSI mode on; pin it off so test behavior matches
+      // the Spark 3.5 baseline across all build profiles. TODO: burn down
+      // ANSI-mode failures and remove this pin.
+      .config("spark.sql.ansi.enabled", "false")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")

@@ -222,8 +222,22 @@ object PartitionPredicateUtils {
    *   Resolved expression ready for evaluation
    */
   def resolveExpression(expression: Expression, schema: StructType): Expression = {
-    // First pass: resolve UnresolvedAttributes to BoundReferences with correct types
+    // First pass: resolve UnresolvedAttributes to BoundReferences with correct types.
+    // BETWEEN needs desugaring first: Spark 4's parser produces
+    // UnresolvedFunction("between", input, lower, upper) (resolved to a Between node only
+    // by the analyzer, which this manual-resolution path bypasses), while Spark 3.5
+    // desugars at parse time into And(GTE, LTE). Without this, evaluation of the
+    // unresolved function fails and partitions are silently excluded. RuntimeReplaceable
+    // covers any already-analyzed runtime-replaceable nodes the same way.
     val withBoundRefs = expression.transform {
+      case f: org.apache.spark.sql.catalyst.analysis.UnresolvedFunction
+          if f.nameParts.map(_.toLowerCase) == Seq("between") && f.arguments.length == 3 =>
+        CatalystAnd(
+          CatalystGreaterThanOrEqual(f.arguments(0), f.arguments(1)),
+          CatalystLessThanOrEqual(f.arguments(0), f.arguments(2))
+        )
+      case rr: org.apache.spark.sql.catalyst.expressions.RuntimeReplaceable =>
+        rr.replacement
       case unresolvedAttr: org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute =>
         val fieldName  = unresolvedAttr.name
         val fieldIndex = schema.fieldIndex(fieldName)

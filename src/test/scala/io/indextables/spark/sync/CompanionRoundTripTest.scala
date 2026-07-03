@@ -403,7 +403,7 @@ class CompanionRoundTripTest
       for ((id, src) <- sourceById) {
         val comp = companionById(id)
         comp.getAs[String]("name") shouldBe src.getAs[String]("name")
-        comp.getAs[Seq[String]]("tags") shouldBe src.getAs[Seq[String]]("tags")
+        comp.getAs[scala.collection.Seq[String]]("tags") shouldBe src.getAs[scala.collection.Seq[String]]("tags")
       }
     }
   }

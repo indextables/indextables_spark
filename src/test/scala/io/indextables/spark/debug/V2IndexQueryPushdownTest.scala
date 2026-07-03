@@ -71,14 +71,14 @@ class V2IndexQueryPushdownTest extends AnyFunSuite with TestBase with BeforeAndA
 
     // Test 1: Programmatic IndexQueryExpression with V2
     println("\n=== Test 1: V2 Programmatic IndexQueryExpression ===")
-    val columnRef      = col("review_text").expr
+    val columnRef      = org.apache.spark.sql.indextables.ColumnCompat.expr(col("review_text"))
     val queryLiteral   = Literal(UTF8String.fromString("engine"), StringType)
     val indexQueryExpr = IndexQueryExpression(columnRef, queryLiteral)
     println(s"IndexQueryExpression: $indexQueryExpr")
     println(s"Before filter - logical plan:")
     println(tantivyDF.queryExecution.logical.toString)
 
-    val filtered = tantivyDF.filter(new Column(indexQueryExpr))
+    val filtered = tantivyDF.filter(org.apache.spark.sql.indextables.ColumnCompat.column(indexQueryExpr))
 
     println(s"After filter - logical plan:")
     println(filtered.queryExecution.logical.toString)
@@ -132,7 +132,7 @@ class V2IndexQueryPushdownTest extends AnyFunSuite with TestBase with BeforeAndA
     println(s"IndexQueryAllExpression: $indexQueryAllExpr")
 
     println("Results with V2 programmatic IndexQueryAllExpression:")
-    val indexQueryAllResult = tantivyDF.filter(new Column(indexQueryAllExpr))
+    val indexQueryAllResult = tantivyDF.filter(org.apache.spark.sql.indextables.ColumnCompat.column(indexQueryAllExpr))
     val indexQueryAllCount  = indexQueryAllResult.collect().length
     indexQueryAllResult.show(truncate = false)
     println(s"IndexQueryAll row count: $indexQueryAllCount")

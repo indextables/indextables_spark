@@ -801,7 +801,9 @@ class MergeSplitsExecutor(
         import java.util.concurrent.ForkJoinPool
         import scala.util.{Try, Success, Failure}
 
-        val batchResults      = batches.zipWithIndex.par
+        // ParallelCompat instead of .par: the implicit conversion needs a
+        // different import on Scala 2.13, handled by the version shim dirs.
+        val batchResults      = io.indextables.spark.util.ParallelCompat.parallelize(batches.zipWithIndex)
         val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
         batchResults.tasksupport = customTaskSupport
 
@@ -1151,7 +1153,8 @@ class MergeSplitsExecutor(
                     val txnStartTime = System.currentTimeMillis()
                     logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
 
-                    val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
+                    // .toSeq: scala.Seq is immutable on 2.13, so ArrayBuffer no longer conforms
+                    val version = transactionLog.commitMergeSplits(batchRemoveActions.toSeq, batchAddActions.toSeq)
                     transactionLog.invalidateCache() // Ensure cache is updated
 
                     val txnElapsed = System.currentTimeMillis() - txnStartTime

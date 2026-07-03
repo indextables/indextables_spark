@@ -79,7 +79,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
 
     // Test 1: Create IndexQueryExpression manually (programmatic way)
     println("\n=== Test 1: Programmatic IndexQueryExpression ===")
-    val columnRef      = col("review_text").expr
+    val columnRef      = org.apache.spark.sql.indextables.ColumnCompat.expr(col("review_text"))
     val queryLiteral   = Literal(UTF8String.fromString("engine"), StringType)
     val indexQueryExpr = IndexQueryExpression(columnRef, queryLiteral)
 
@@ -88,7 +88,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     println(s"Query string: ${indexQueryExpr.getQueryString}")
 
     // Apply the filter
-    val programmaticResult = tantivyDF.filter(new Column(indexQueryExpr))
+    val programmaticResult = tantivyDF.filter(org.apache.spark.sql.indextables.ColumnCompat.column(indexQueryExpr))
     println("Results with programmatic IndexQueryExpression:")
     programmaticResult.show(false)
 
@@ -145,7 +145,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
 
     // Create IndexQueryExpression
     val expr = IndexQueryExpression(
-      col("content").expr,
+      org.apache.spark.sql.indextables.ColumnCompat.expr(col("content")),
       Literal(UTF8String.fromString("engine"), StringType)
     )
 
@@ -157,7 +157,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     println(s"Filter references: ${filter.get.references.mkString(", ")}")
 
     // Apply and see what happens
-    val result = tantivyDF.filter(new Column(expr))
+    val result = tantivyDF.filter(org.apache.spark.sql.indextables.ColumnCompat.column(expr))
     println(s"Filtered result count: ${result.count()}")
     result.show(false)
   }

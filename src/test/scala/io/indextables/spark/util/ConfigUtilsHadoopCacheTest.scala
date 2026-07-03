@@ -116,7 +116,10 @@ class ConfigUtilsHadoopCacheTest extends AnyFunSuite with Matchers with BeforeAn
     val config = Map("spark.indextables.aws.accessKey" -> "AKIATEST")
 
     // Run concurrent accesses
-    val results = (1 to 100).par.map(_ => ConfigUtils.getOrCreateHadoopConfiguration(config)).toList
+    val results = io.indextables.spark.util.ParallelCompat
+      .parallelize(1 to 100)
+      .map(_ => ConfigUtils.getOrCreateHadoopConfiguration(config))
+      .toList
 
     // All results should be the same instance
     results.foreach(conf => conf shouldBe theSameInstanceAs(results.head))

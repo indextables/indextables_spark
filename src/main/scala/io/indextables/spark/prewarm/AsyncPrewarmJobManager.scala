@@ -118,8 +118,12 @@ object AsyncPrewarmJobManager {
       return Left(s"Job $jobId already exists")
     }
 
-    // Try to acquire semaphore (non-blocking)
-    if (!semaphore.tryAcquire()) {
+    // Try to acquire semaphore (non-blocking). Pin the instance whose permit we acquired:
+    // if reset()/configure() swaps in a new semaphore while this job runs, the release in
+    // the finally block below must go to THIS semaphore, not the replacement — otherwise
+    // the new semaphore gains phantom permits and capacity limiting silently breaks.
+    val acquiredSemaphore = semaphore
+    if (!acquiredSemaphore.tryAcquire()) {
       val activeCount = activeJobs.size()
       logger.info(s"Async prewarm job rejected: at capacity ($activeCount active, max=$maxConcurrent)")
       return Left(s"At capacity: $activeCount jobs running (max=$maxConcurrent)")
@@ -177,7 +181,7 @@ object AsyncPrewarmJobManager {
               )
             )
         } finally
-          semaphore.release()
+          acquiredSemaphore.release()
     })
 
     Right(job)

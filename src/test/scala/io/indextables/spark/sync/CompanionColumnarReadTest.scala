@@ -306,7 +306,7 @@ class CompanionColumnarReadTest
       for ((id, src) <- sourceById) {
         val comp = companionById(id)
         comp.getAs[String]("name") shouldBe src.getAs[String]("name")
-        comp.getAs[Seq[String]]("tags") shouldBe src.getAs[Seq[String]]("tags")
+        comp.getAs[scala.collection.Seq[String]]("tags") shouldBe src.getAs[scala.collection.Seq[String]]("tags")
       }
     }
   }
@@ -410,7 +410,7 @@ class CompanionColumnarReadTest
 
       for ((id, src) <- sourceById) {
         val comp = companionById(id)
-        comp.getAs[Seq[Int]]("scores") shouldBe src.getAs[Seq[Int]]("scores")
+        comp.getAs[scala.collection.Seq[Int]]("scores") shouldBe src.getAs[scala.collection.Seq[Int]]("scores")
       }
     }
   }
@@ -516,8 +516,8 @@ class CompanionColumnarReadTest
 
       for ((id, src) <- sourceById) {
         val comp         = companionById(id)
-        val srcContacts  = src.getAs[Seq[Row]]("contacts")
-        val compContacts = comp.getAs[Seq[Row]]("contacts")
+        val srcContacts  = src.getAs[scala.collection.Seq[Row]]("contacts")
+        val compContacts = comp.getAs[scala.collection.Seq[Row]]("contacts")
         srcContacts.length shouldBe compContacts.length
         srcContacts.zip(compContacts).foreach {
           case (s, c) =>

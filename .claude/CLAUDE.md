@@ -29,7 +29,39 @@ make test-all
 
 # Run single test:
 mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.DateStringFilterValidationTest'
+
+# Build/test against another Spark line (default is Spark 3.5):
+mvn clean compile -Pspark-4.0            # profiles: spark-3.5, spark-4.0, spark-4.1
+make test SPARK_PROFILE=spark-4.1        # flows -P via MAVEN_ARGS to every mvn call
 ```
+
+### Multi-Spark-version support
+
+One codebase builds against Spark 3.5 (Scala 2.12, default), 4.0, and 4.1 (Scala 2.13) via
+property-only Maven profiles. Released artifacts encode the Spark version in the version string
+(`<release>_spark_<sparkversion>`, stamped by the release workflow via `mvn versions:set`).
+
+- **Shim dirs**: version-specific code lives in `src/main/spark-3.5/scala` and
+  `src/main/spark-4.x/scala` (selected by the `shims.majorVerSrc` property, wired through
+  build-helper-maven-plugin). Current shims: `IndexTables4SparkParserShims` (Spark 4 added
+  `parseRoutineParam` to `ParserInterface`) and `ParallelCompat` (`.par` needs a different
+  import on Scala 2.13). Keep shims to a minimum; everything in `src/main/scala` must compile
+  under BOTH Scala 2.12+2.13 and Spark 3.5+4.x.
+- **Cross-version pitfalls**: don't pattern-match catalyst case classes with fixed-arity
+  extractors that changed between versions (e.g. `Aggregate(a, b, c)` — use `case agg: Aggregate`
+  and field access; construct via `makeCopy`); don't use `.mapValues`/`.filterKeys` as a Map
+  (2.13 returns MapView); use `scala.jdk.CollectionConverters` (never
+  `scala.collection.JavaConverters`); don't call `.par` directly (use `ParallelCompat.parallelize`).
+- **Tests**: `TestBase` pins `spark.sql.ansi.enabled=false` so behavior matches the 3.5 baseline
+  on Spark 4.x (ANSI is on by default there). The test plugins set `PYSPARK_PYTHON` to a
+  nonexistent binary — Spark 4's Python Data Source probe otherwise hangs forever on machines
+  with python3 but no pyspark.
+- **Always `mvn clean` when switching Spark profiles**: the ANTLR-generated parser sources are
+  not regenerated on profile switch, and 4.9.3-generated code fails at runtime against the
+  4.13.1 runtime ("Could not deserialize ATN with version 3").
+- **Release**: pushing a `v*` tag runs `.github/workflows/release.yml` — builds tantivy4java
+  (linux-x86_64) once, then publishes each Spark leg to Maven Central and attaches shaded jars
+  to a GitHub Release.
 
 > **Note:** `mvn test` may OOM on laptops due to 360+ test classes. Use `make test` which compiles once and runs each test class in a separate JVM with auto-detected parallelism. Cloud tests (42 classes prefixed with `Cloud*`) are separated into `make test-cloud` and require live S3/Azure credentials. Per-test logs are saved to a temp directory; failed test log paths are printed in the summary.
 

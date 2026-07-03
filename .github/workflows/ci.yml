@@ -8,9 +8,16 @@ on:
 
 jobs:
   build-and-test-macos:
-    name: Build & Test (macOS ARM64)
+    name: Build & Test (macOS ARM64, ${{ matrix.spark-profile }})
     runs-on: [self-hosted, macOS, ARM64]
     environment: test-runners
+    strategy:
+      fail-fast: false
+      matrix:
+        spark-profile: [spark-3.5, spark-4.0, spark-4.1]
+    env:
+      # Honored by Maven >= 3.9 for every mvn invocation (make + run-tests.sh)
+      MAVEN_ARGS: -P${{ matrix.spark-profile }}
 
     steps:
       - name: Checkout
@@ -48,7 +55,7 @@ jobs:
         if: failure() && steps.test-macos.outputs.log_dir != ''
         uses: actions/upload-artifact@v7
         with:
-          name: macos-test-logs
+          name: macos-test-logs-${{ matrix.spark-profile }}
           path: ${{ steps.test-macos.outputs.log_dir }}/
           if-no-files-found: warn
           retention-days: 7

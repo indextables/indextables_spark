@@ -615,12 +615,12 @@ class PurgeIndexTableIntegrationTest
     val partFilesByVersion = allCheckpointFiles
       .flatMap(f => partFilePattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))
       .groupBy(_._1)
-      .mapValues(_.map(_._2).toSet)
+      .map { case (version, files) => version -> files.map(_._2).toSet }
 
     val manifestsByVersion = allCheckpointFiles
       .flatMap(f => manifestPattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))
       .groupBy(_._1)
-      .mapValues(_.map(_._2).toSet)
+      .map { case (version, files) => version -> files.map(_._2).toSet }
 
     // Also detect Avro state directories (state-v{N}/)
     val avroStateDirs = secondBatchEntries

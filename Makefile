@@ -6,10 +6,17 @@
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-export JAVA_HOME ?= /opt/homebrew/opt/openjdk@11
+export JAVA_HOME ?= /opt/homebrew/opt/openjdk@17
 
 SUITE          ?=
 MVN            := mvn
+
+# Spark version profile: make test SPARK_PROFILE=spark-4.0
+# Exported via MAVEN_ARGS (honored by Maven >= 3.9) so it reaches every mvn
+# invocation, including those inside scripts/run-tests.sh.
+ifdef SPARK_PROFILE
+  export MAVEN_ARGS += -P$(SPARK_PROFILE)
+endif
 
 # If JOBS is overridden, pass it through; otherwise let the script auto-detect
 ifdef JOBS

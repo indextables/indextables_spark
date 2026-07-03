@@ -468,7 +468,8 @@ object PreWarmManager {
         sc.clearJobGroup()
 
     // Aggregate results by hostname
-    val assignments = taskResults.groupBy(_.hostname).mapValues(_.length).toMap
+    // .map (not .mapValues) so the same code compiles on Scala 2.12 and 2.13
+    val assignments = taskResults.groupBy(_.hostname).map { case (host, results) => host -> results.length }
     logger.info(
       s"🔥 Pre-warm task distribution completed: ${assignments.map { case (h, c) => s"$h: $c tasks" }.mkString(", ")}"
     )

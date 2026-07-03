@@ -102,7 +102,12 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
     logger.debug(s"V2BucketExpressionRule: Processing plan: ${plan.getClass.getSimpleName}")
 
     plan.transformUp {
-      case agg @ Aggregate(groupingExpressions, aggregateExpressions, child) =>
+      // Typed match (not the Aggregate(...) extractor): Spark 4.x added a 4th
+      // constructor param (hint), so the 3-arg unapply doesn't compile there.
+      case agg: Aggregate =>
+        val groupingExpressions  = agg.groupingExpressions
+        val aggregateExpressions = agg.aggregateExpressions
+        val child                = agg.child
         logger.debug(s"V2BucketExpressionRule: Found Aggregate node")
         logger.debug(
           s"V2BucketExpressionRule: Grouping expressions: ${groupingExpressions.map(_.toString).mkString(", ")}"

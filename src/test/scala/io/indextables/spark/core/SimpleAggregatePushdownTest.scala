@@ -343,7 +343,7 @@ class SimpleAggregatePushdownTest extends TestBase with io.indextables.spark.tes
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
     import io.indextables.spark.transaction.TransactionLogFactory
     import org.apache.hadoop.fs.Path
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
 
     val schema = StructType(
       Seq(

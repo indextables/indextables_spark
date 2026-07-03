@@ -56,8 +56,10 @@ class StatisticsIntegrationTest extends TestBase {
         .format(INDEXTABLES_FORMAT)
         .load(tablePath)
 
-      // Force the query plan to be created, which should trigger statistics estimation
-      val logicalPlan = readDf.queryExecution.logical
+      // Force the query plan to be created, which should trigger statistics estimation.
+      // Use the analyzed plan: on Spark 4 the unanalyzed logical plan is just
+      // "UnresolvedDataSource" and doesn't name the table implementation yet.
+      val logicalPlan = readDf.queryExecution.analyzed
 
       // Collect the data to ensure the scan builder and statistics are used
       val result = readDf.collect()

@@ -667,8 +667,10 @@ class IndexTables4SparkScanBuilder(
             //
             // Explain-path build (consumed=false on entry) must NOT clear — its queries must
             // remain available for the subsequent body-path build, which is the one visible to
-            // the user.
-            if (queriesWereConsumedOnEntry) {
+            // the user. On Spark 4 there is no explain-path build (build() runs once per
+            // query), so the failure must clear immediately or the stale queries poison the
+            // next query on this relation (see SparkBuildSemantics shims).
+            if (queriesWereConsumedOnEntry || io.indextables.spark.util.SparkBuildSemantics.singleBuildPerQuery) {
               relationForIndexQuery.foreach(IndexTables4SparkScanBuilder.clearIndexQueries)
             }
             throw e

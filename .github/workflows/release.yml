@@ -1,0 +1,136 @@
+name: Release
+
+# Tag-triggered release: pushing v<BASE> (e.g. v0.6.0) builds and publishes
+# one artifact per supported Spark version, versioned <BASE>_spark_<SPARKVER>
+# (e.g. 0.6.0_spark_4.0.3), each containing the linux-x86_64 tantivy4java
+# native library:
+#   - Maven Central via the `release` profile (GPG + central-publishing plugin)
+#   - shaded jars attached to a GitHub Release for the tag
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing v* tag to release (e.g. v0.6.0)'
+        required: true
+      skip-central:
+        description: 'Skip Maven Central publish (GitHub Release only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  # tantivy4java is Spark-independent: build the native (Rust) jar once and
+  # share it across all Spark publish legs. The cache makes re-releases with
+  # an unchanged tantivy4java version skip the Rust build entirely
+  # (setup.sh no-ops when the jar is already in ~/.m2).
+  native:
+    name: tantivy4java (linux-x86_64)
+    runs-on: ubuntu-latest
+    outputs:
+      t4j-version: ${{ steps.t4j.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Extract tantivy4java version from pom.xml
+        id: t4j
+        run: |
+          version=$(grep -A2 '<artifactId>tantivy4java</artifactId>' pom.xml \
+            | grep '<version>' | sed -E 's/.*<version>([^<]+)<\/version>.*/\1/' | head -1)
+          [[ -n "$version" ]] || { echo "could not extract tantivy4java version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache tantivy4java build
+        id: t4j-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/io/indextables/tantivy4java
+          key: tantivy4java-${{ steps.t4j.outputs.version }}-linux-x86_64
+
+      - name: Build tantivy4java (setup.sh)
+        if: steps.t4j-cache.outputs.cache-hit != 'true'
+        run: ./scripts/setup.sh
+
+      - name: Upload tantivy4java jars
+        uses: actions/upload-artifact@v7
+        with:
+          name: tantivy4java-linux-x86_64
+          path: ~/.m2/repository/io/indextables/tantivy4java/${{ steps.t4j.outputs.version }}/
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ matrix.spark.profile }}
+    needs: native
+    runs-on: ubuntu-latest
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        spark:
+          - { profile: spark-3.5, version: 3.5.8 }
+          - { profile: spark-4.0, version: 4.0.3 }
+          - { profile: spark-4.1, version: 4.1.2 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Java 17 (with Central credentials + GPG key)
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Download tantivy4java jars
+        uses: actions/download-artifact@v6
+        with:
+          name: tantivy4java-linux-x86_64
+          path: ~/.m2/repository/io/indextables/tantivy4java/${{ needs.native.outputs.t4j-version }}/
+
+      - name: Stamp release version
+        run: |
+          BASE="${RELEASE_TAG#v}"
+          VERSION="${BASE}_spark_${{ matrix.spark.version }}"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          mvn -B versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+
+      - name: Build shaded jar
+        run: mvn -B package -P${{ matrix.spark.profile }} -DskipTests
+
+      - name: Publish to Maven Central
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip-central) }}
+        run: mvn -B deploy -P${{ matrix.spark.profile }},release -DskipTests
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Attach shaded jar to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # First finishing leg creates the release; the rest just upload.
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes 2>/dev/null || true
+          gh release upload "$RELEASE_TAG" --clobber \
+            target/indextables_spark-${RELEASE_VERSION}-linux-x86_64-shaded.jar

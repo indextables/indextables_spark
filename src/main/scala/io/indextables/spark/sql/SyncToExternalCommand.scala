@@ -1352,7 +1352,9 @@ case class SyncToExternalCommand(
 
     // Process batches with controlled concurrency using Scala parallel collections
     // (same pattern as MergeSplitsCommand)
-    val parBatches        = batches.zipWithIndex.par
+    // ParallelCompat instead of .par: the implicit conversion needs a
+    // different import on Scala 2.13, handled by the version shim dirs.
+    val parBatches        = io.indextables.spark.util.ParallelCompat.parallelize(batches.zipWithIndex)
     val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
     parBatches.tasksupport = customTaskSupport
 

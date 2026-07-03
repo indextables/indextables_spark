@@ -327,7 +327,7 @@ class CompanionSplitTypeComprehensiveTest
 
       // Verify arrays are not null and contain expected elements
       results.foreach { row =>
-        val tags = row.getAs[Seq[String]]("tags")
+        val tags = row.getAs[scala.collection.Seq[String]]("tags")
         assert(tags != null, s"Array field should not be null for row: $row")
         assert(tags.nonEmpty, s"Array should not be empty for row: $row")
       }
@@ -725,7 +725,7 @@ class CompanionSplitTypeComprehensiveTest
 
       // Verify complex types
       results.foreach { row =>
-        assert(row.getAs[Seq[String]]("tags") != null, "tags should not be null")
+        assert(row.getAs[scala.collection.Seq[String]]("tags") != null, "tags should not be null")
         assert(row.getAs[Row]("info") != null, "info should not be null")
         assert(row.getAs[Map[String, String]]("attrs") != null, "attrs should not be null")
       }
@@ -815,7 +815,7 @@ class CompanionSplitTypeComprehensiveTest
       dates.map(_.toString).toSet shouldBe Set("2024-01-15", "2024-06-15", "2024-12-25")
 
       // Verify array values deserialized
-      results.foreach(row => assert(row.getAs[Seq[String]]("tags") != null, "tags should not be null"))
+      results.foreach(row => assert(row.getAs[scala.collection.Seq[String]]("tags") != null, "tags should not be null"))
 
       // Filter on name (non-partition) — tests Bug #3 fix with complex types present
       val nameResult = df.filter(col("name") === "Bob").collect()

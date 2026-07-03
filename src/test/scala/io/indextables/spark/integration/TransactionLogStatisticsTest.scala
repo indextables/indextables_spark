@@ -362,7 +362,8 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
     val data = ArrayBuffer[(Long, String, Int, String)]()
     for (id <- idStart.to(idEnd))
       data += ((id, s"User$id", (20 + id % 30).toInt, batchName))
-    data.toDF("id", "name", "age", "batch")
+    // .toSeq: 2.13's toDF implicits require an immutable Seq, not ArrayBuffer
+    data.toSeq.toDF("id", "name", "age", "batch")
   }
 
   private def verifyBatchStatistics(
