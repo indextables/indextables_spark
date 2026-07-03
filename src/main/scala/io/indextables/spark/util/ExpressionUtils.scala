@@ -154,7 +154,7 @@ object ExpressionUtils {
     val queryCheck = expr.getQueryString match {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_)                       => scala.util.Left("Query string cannot be empty")
-      case None                          => scala.util.Left(s"Invalid query string in IndexQuery expression: ${expr.right}")
+      case None => scala.util.Left(s"Invalid query string in IndexQuery expression: ${expr.right}")
     }
 
     queryCheck
@@ -165,7 +165,7 @@ object ExpressionUtils {
     val queryCheck = expr.getQueryString match {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_)                       => scala.util.Left("Query string cannot be empty")
-      case None                          => scala.util.Left(s"Invalid query string in IndexQuery expression: ${expr.child}")
+      case None => scala.util.Left(s"Invalid query string in IndexQuery expression: ${expr.child}")
     }
 
     queryCheck

@@ -24,9 +24,7 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 
-/**
- * Parquet-format implementation of the companion INCLUDE/EXCLUDE COLUMNS test suite.
- */
+/** Parquet-format implementation of the companion INCLUDE/EXCLUDE COLUMNS test suite. */
 class ParquetCompanionColumnsTest extends CompanionColumnsTestBase {
 
   override def formatName: String = "parquet"
@@ -82,23 +80,48 @@ class ParquetCompanionColumnsTest extends CompanionColumnsTestBase {
       (3, "charlie", 300.75, "region_a")
     ).toDF("id", "name", "score", "region")
       .repartition(1, col("region"))
-      .write.partitionBy("region").parquet(tableId)
+      .write
+      .partitionBy("region")
+      .parquet(tableId)
   }
 
-  override def createSimpleTable(tableId: String, schema: StructType, data: Seq[Row]): Unit =
-    spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-      .coalesce(1).write.parquet(tableId)
+  override def createSimpleTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit =
+    spark
+      .createDataFrame(spark.sparkContext.parallelize(data), schema)
+      .coalesce(1)
+      .write
+      .parquet(tableId)
 
-  override def recreateTable(tableId: String, schema: StructType, data: Seq[Row]): Unit = {
+  override def recreateTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit = {
     deleteRecursively(new File(tableId))
     createSimpleTable(tableId, schema, data)
   }
 
-  override def appendData(tableId: String, schema: StructType, data: Seq[Row]): Unit =
-    spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-      .coalesce(1).write.mode("append").parquet(tableId)
+  override def appendData(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit =
+    spark
+      .createDataFrame(spark.sparkContext.parallelize(data), schema)
+      .coalesce(1)
+      .write
+      .mode("append")
+      .parquet(tableId)
 
-  override def buildCompanionSql(tableId: String, clauses: String, indexPath: String): String = {
+  override def buildCompanionSql(
+    tableId: String,
+    clauses: String,
+    indexPath: String
+  ): String = {
     val c = if (clauses.nonEmpty) s" $clauses" else ""
     s"BUILD INDEXTABLES COMPANION FOR PARQUET '$tableId'$c AT LOCATION '$indexPath'"
   }

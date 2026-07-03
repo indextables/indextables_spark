@@ -20,9 +20,8 @@ package io.indextables.spark.util
 /**
  * Spark-version build-call semantics (spark-4.x variant).
  *
- * Spark 4 calls ScanBuilder.build() once per query, so a validation failure must clear stored IndexQueries
- * immediately — there is no second build() call to do it, and leftover entries would poison the next query on the
- * same relation.
+ * Spark 4 calls ScanBuilder.build() once per query, so a validation failure must clear stored IndexQueries immediately
+ * — there is no second build() call to do it, and leftover entries would poison the next query on the same relation.
  */
 object SparkBuildSemantics {
   val singleBuildPerQuery: Boolean = true

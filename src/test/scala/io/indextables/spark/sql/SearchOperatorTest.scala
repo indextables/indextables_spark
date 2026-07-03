@@ -24,21 +24,18 @@ import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression, SearchType}
+import io.indextables.spark.TestBase
 
 /**
- * Parameterized test suite for all search operator variants: TEXTSEARCH, FIELDMATCH, indexquery,
- * `*` TEXTSEARCH, `*` FIELDMATCH, `*` indexquery, and indexqueryall.
+ * Parameterized test suite for all search operator variants: TEXTSEARCH, FIELDMATCH, indexquery, `*` TEXTSEARCH, `*`
+ * FIELDMATCH, `*` indexquery, and indexqueryall.
  *
- * Test conditions are defined once in [[SingleFieldSearchBehaviors]] and [[AllFieldsSearchBehaviors]],
- * then executed for every operator via specs. Adding a new condition to the traits automatically
- * covers all operators — no per-operator test duplication.
+ * Test conditions are defined once in [[SingleFieldSearchBehaviors]] and [[AllFieldsSearchBehaviors]], then executed
+ * for every operator via specs. Adding a new condition to the traits automatically covers all operators — no
+ * per-operator test duplication.
  */
-class SearchOperatorTest
-    extends TestBase
-    with SingleFieldSearchBehaviors
-    with AllFieldsSearchBehaviors {
+class SearchOperatorTest extends TestBase with SingleFieldSearchBehaviors with AllFieldsSearchBehaviors {
 
   // --- Shared mixed-type fixture table ---
 
@@ -51,21 +48,21 @@ class SearchOperatorTest
   //   (3, "spark streaming tutorial",    "active",   "technology")  -- content matches "spark"; status matches "active"
   //   (4, "deep learning neural networks","pending", "ai")         -- content matches "learning"
   //   (5, "big data processing",         "active",   "data")       -- status matches "active"
-  private var sharedTablePathVar: String = _
-  private var scaleTablePathVar: String = _
-  private var edgeCaseTablePathVar: String = _
+  private var sharedTablePathVar: String     = _
+  private var scaleTablePathVar: String      = _
+  private var edgeCaseTablePathVar: String   = _
   private var colKeywordTablePathVar: String = _
-  private var allTextTablePathVar: String = _
-  private var allStringTablePathVar: String = _
-  private var intOnlyTablePathVar: String = _
+  private var allTextTablePathVar: String    = _
+  private var allStringTablePathVar: String  = _
+  private var intOnlyTablePathVar: String    = _
 
   override protected lazy val sharedTablePath: String = sharedTablePathVar
-  override protected lazy val scalePath: String = scaleTablePathVar
-  override protected lazy val edgeCasePath: String = edgeCaseTablePathVar
-  override protected lazy val colKeywordPath: String = colKeywordTablePathVar
-  override protected lazy val allTextPath: String = allTextTablePathVar
-  override protected lazy val allStringPath: String = allStringTablePathVar
-  override protected lazy val intOnlyPath: String = intOnlyTablePathVar
+  override protected lazy val scalePath: String       = scaleTablePathVar
+  override protected lazy val edgeCasePath: String    = edgeCaseTablePathVar
+  override protected lazy val colKeywordPath: String  = colKeywordTablePathVar
+  override protected lazy val allTextPath: String     = allTextTablePathVar
+  override protected lazy val allStringPath: String   = allStringTablePathVar
+  override protected lazy val intOnlyPath: String     = intOnlyTablePathVar
 
   private def flushCaches(): Unit =
     try {
@@ -90,7 +87,8 @@ class SearchOperatorTest
       (3, "spark streaming tutorial", "active", "technology"),
       (4, "deep learning neural networks", "pending", "ai"),
       (5, "big data processing", "active", "data")
-    ).toDF("id", "content", "status", "category").write
+    ).toDF("id", "content", "status", "category")
+      .write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.typemap.status", "string")
@@ -110,7 +108,8 @@ class SearchOperatorTest
       (3, "user@example.com sent a message", "user@example.com"),
       (4, "admin@test.org replied", "admin@test.org"),
       (5, "user@example.com sent another message", "user@example.com")
-    ).toDF("id", "content", "label").write
+    ).toDF("id", "content", "label")
+      .write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.typemap.label", "string")
@@ -126,7 +125,8 @@ class SearchOperatorTest
       (1, "apache spark documentation", "active", "apache spark documentation"),
       (2, "machine learning algorithms", "inactive", "machine learning algorithms"),
       (3, "big data processing", "active", "big data processing")
-    ).toDF("id", "textsearch", "fieldmatch", "indexquery").write
+    ).toDF("id", "textsearch", "fieldmatch", "indexquery")
+      .write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.textsearch", "text")
       .option("spark.indextables.indexing.typemap.fieldmatch", "string")
@@ -142,7 +142,8 @@ class SearchOperatorTest
       (1, "apache spark documentation", "full text search engine"),
       (2, "machine learning algorithms", "distributed processing framework"),
       (3, "big data processing", "cloud infrastructure automation")
-    ).toDF("id", "content", "description").write
+    ).toDF("id", "content", "description")
+      .write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.typemap.description", "text")
@@ -159,7 +160,8 @@ class SearchOperatorTest
       (1, "active", "technology"),
       (2, "inactive", "science"),
       (3, "active", "engineering")
-    ).toDF("id", "status", "category").write
+    ).toDF("id", "status", "category")
+      .write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.status", "string")
       .option("spark.indextables.indexing.typemap.category", "string")
@@ -172,7 +174,9 @@ class SearchOperatorTest
     val intOnlyPath = Files.createTempDirectory("search-op-intonly").toString
     intOnlyTablePathVar = intOnlyPath
 
-    Seq((1, 100, 200), (2, 300, 400)).toDF("id", "score", "rating").write
+    Seq((1, 100, 200), (2, 300, 400))
+      .toDF("id", "score", "rating")
+      .write
       .format(INDEXTABLES_FORMAT)
       .mode("overwrite")
       .save(intOnlyPath)
@@ -199,10 +203,11 @@ class SearchOperatorTest
     )
     val statuses = Array("active", "inactive", "pending", "archived", "disabled")
 
-    val scaleRows = (1 to 100000).map { i =>
-      (i, titles(i % titles.length), statuses(i % statuses.length))
-    }
-    scaleRows.toDF("id", "content", "status").repartition(1).write
+    val scaleRows = (1 to 100000).map(i => (i, titles(i % titles.length), statuses(i % statuses.length)))
+    scaleRows
+      .toDF("id", "content", "status")
+      .repartition(1)
+      .write
       .format(INDEXTABLES_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.typemap.status", "string")
@@ -212,9 +217,17 @@ class SearchOperatorTest
   }
 
   override def afterAll(): Unit = {
-    Seq(sharedTablePathVar, edgeCaseTablePathVar, colKeywordTablePathVar,
-      allTextTablePathVar, allStringTablePathVar, intOnlyTablePathVar, scaleTablePathVar)
-      .filter(_ != null).foreach(p => deleteRecursively(new File(p)))
+    Seq(
+      sharedTablePathVar,
+      edgeCaseTablePathVar,
+      colKeywordTablePathVar,
+      allTextTablePathVar,
+      allStringTablePathVar,
+      intOnlyTablePathVar,
+      scaleTablePathVar
+    )
+      .filter(_ != null)
+      .foreach(p => deleteRecursively(new File(p)))
     super.afterAll()
   }
 
@@ -328,13 +341,21 @@ class SearchOperatorTest
 
   test("cross-check: TEXTSEARCH and indexquery return identical rows") {
     val view = freshView("standalone", sharedTablePath)
-    val textsearchIds = spark.sql(
-      s"SELECT id FROM $view WHERE content TEXTSEARCH 'spark' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val textsearchIds = spark
+      .sql(
+        s"SELECT id FROM $view WHERE content TEXTSEARCH 'spark' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
-    val indexqueryIds = spark.sql(
-      s"SELECT id FROM $view WHERE content indexquery 'spark' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val indexqueryIds = spark
+      .sql(
+        s"SELECT id FROM $view WHERE content indexquery 'spark' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
     assert(textsearchIds == indexqueryIds, "TEXTSEARCH and indexquery must return identical rows")
     assert(textsearchIds == Seq(1, 3), s"Expected Seq(1, 3), got $textsearchIds")
@@ -342,13 +363,21 @@ class SearchOperatorTest
 
   test("cross-check: * indexquery and indexqueryall return identical rows") {
     val view = freshView("standalone", sharedTablePath)
-    val starIds = spark.sql(
-      s"SELECT id FROM $view WHERE * indexquery 'spark' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val starIds = spark
+      .sql(
+        s"SELECT id FROM $view WHERE * indexquery 'spark' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
-    val allIds = spark.sql(
-      s"SELECT id FROM $view WHERE indexqueryall('spark') ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val allIds = spark
+      .sql(
+        s"SELECT id FROM $view WHERE indexqueryall('spark') ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
     assert(starIds == allIds, "* indexquery and indexqueryall must return identical rows")
     assert(starIds.nonEmpty, "Cross-check queries should return results")
@@ -359,28 +388,44 @@ class SearchOperatorTest
 
   test("cross-check: * TEXTSEARCH and indexqueryall return identical rows on all-text table") {
     val view1 = freshView("xcheck_ts", allTextPath)
-    val textsearchIds = spark.sql(
-      s"SELECT id FROM $view1 WHERE * TEXTSEARCH 'spark' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val textsearchIds = spark
+      .sql(
+        s"SELECT id FROM $view1 WHERE * TEXTSEARCH 'spark' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
     val view2 = freshView("xcheck_iqa", allTextPath)
-    val indexqueryallIds = spark.sql(
-      s"SELECT id FROM $view2 WHERE indexqueryall('spark') ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val indexqueryallIds = spark
+      .sql(
+        s"SELECT id FROM $view2 WHERE indexqueryall('spark') ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
     assert(textsearchIds == indexqueryallIds, "* TEXTSEARCH and indexqueryall must match on all-text table")
   }
 
   test("cross-check: * FIELDMATCH and indexqueryall return identical rows on all-string table") {
     val view1 = freshView("xcheck_fm", allStringPath)
-    val fieldmatchIds = spark.sql(
-      s"SELECT id FROM $view1 WHERE * FIELDMATCH 'active' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val fieldmatchIds = spark
+      .sql(
+        s"SELECT id FROM $view1 WHERE * FIELDMATCH 'active' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
     val view2 = freshView("xcheck_iqa2", allStringPath)
-    val indexqueryallIds = spark.sql(
-      s"SELECT id FROM $view2 WHERE indexqueryall('active') ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val indexqueryallIds = spark
+      .sql(
+        s"SELECT id FROM $view2 WHERE indexqueryall('active') ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
     assert(fieldmatchIds == indexqueryallIds, "* FIELDMATCH and indexqueryall must match on all-string table")
   }
@@ -389,17 +434,23 @@ class SearchOperatorTest
 
   test("preprocessor: already-converted function calls are not double-processed") {
     val view1 = freshView("idem_ts", allTextPath)
-    val textsearchResults = spark.sql(
-      s"SELECT id FROM $view1 WHERE tantivy4spark_textsearch('content', 'spark') ORDER BY id"
-    ).collect()
+    val textsearchResults = spark
+      .sql(
+        s"SELECT id FROM $view1 WHERE tantivy4spark_textsearch('content', 'spark') ORDER BY id"
+      )
+      .collect()
     val view2 = freshView("idem_iq", allTextPath)
-    val indexqueryResults = spark.sql(
-      s"SELECT id FROM $view2 WHERE tantivy4spark_indexquery('content', 'spark') ORDER BY id"
-    ).collect()
+    val indexqueryResults = spark
+      .sql(
+        s"SELECT id FROM $view2 WHERE tantivy4spark_indexquery('content', 'spark') ORDER BY id"
+      )
+      .collect()
     val view3 = freshView("idem_iqa", allTextPath)
-    val indexqueryallResults = spark.sql(
-      s"SELECT id FROM $view3 WHERE tantivy4spark_indexqueryall('spark') ORDER BY id"
-    ).collect()
+    val indexqueryallResults = spark
+      .sql(
+        s"SELECT id FROM $view3 WHERE tantivy4spark_indexqueryall('spark') ORDER BY id"
+      )
+      .collect()
 
     val ids1 = textsearchResults.map(_.getInt(0)).toSeq
     val ids2 = indexqueryResults.map(_.getInt(0)).toSeq
@@ -413,11 +464,13 @@ class SearchOperatorTest
 
   test("mixed operators: TEXTSEARCH AND FIELDMATCH in same WHERE") {
     val view = freshView("standalone", sharedTablePath)
-    val results = spark.sql(
-      s"""SELECT id, content, status FROM $view
-         |WHERE content TEXTSEARCH 'spark' AND status FIELDMATCH 'active'
-         |ORDER BY id""".stripMargin
-    ).collect()
+    val results = spark
+      .sql(
+        s"""SELECT id, content, status FROM $view
+           |WHERE content TEXTSEARCH 'spark' AND status FIELDMATCH 'active'
+           |ORDER BY id""".stripMargin
+      )
+      .collect()
     val resultIds = results.map(_.getInt(0)).toSeq
     assert(resultIds == Seq(1, 3), s"Expected Seq(1, 3), got $resultIds")
     assert(results.forall(r => r.getString(2) == "active"), "All results should have status=active")
@@ -435,9 +488,11 @@ class SearchOperatorTest
     // Note: this will throw type validation since textsearch column is text, not string
     // Use the fieldmatch column (which is string) with TEXTSEARCH operator instead for cross-test
     val view = freshView("colkw_standalone", colKeywordPath)
-    val results = spark.sql(
-      s"SELECT id FROM $view WHERE fieldmatch FIELDMATCH 'active' ORDER BY id"
-    ).collect()
+    val results = spark
+      .sql(
+        s"SELECT id FROM $view WHERE fieldmatch FIELDMATCH 'active' ORDER BY id"
+      )
+      .collect()
     assert(results.length == 2, s"Expected 2 rows, got ${results.length}")
   }
 
@@ -477,7 +532,8 @@ class SearchOperatorTest
       Seq(
         (1, "apache spark documentation", "active"),
         (2, "machine learning algorithms", "inactive")
-      ).toDF("id", "content", "status").write
+      ).toDF("id", "content", "status")
+        .write
         .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.typemap.status", "string")
@@ -489,15 +545,19 @@ class SearchOperatorTest
       df.createOrReplaceTempView("docmapping_validation_test")
 
       // TEXTSEARCH on text field should succeed
-      val results = spark.sql(
-        "SELECT id FROM docmapping_validation_test WHERE content TEXTSEARCH 'spark'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT id FROM docmapping_validation_test WHERE content TEXTSEARCH 'spark'"
+        )
+        .collect()
       assert(results.length == 1, s"Expected 1 row, got ${results.length}")
 
       // FIELDMATCH on string field should succeed
-      val fmResults = spark.sql(
-        "SELECT id FROM docmapping_validation_test WHERE status FIELDMATCH 'active'"
-      ).collect()
+      val fmResults = spark
+        .sql(
+          "SELECT id FROM docmapping_validation_test WHERE status FIELDMATCH 'active'"
+        )
+        .collect()
       assert(fmResults.length == 1, s"Expected 1 row, got ${fmResults.length}")
 
       // TEXTSEARCH on string field should throw
@@ -536,7 +596,8 @@ class SearchOperatorTest
       Seq(
         (1, "550e8400-e29b-41d4-a716-446655440000"),
         (2, "6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-      ).toDF("id", "uuid_field").write
+      ).toDF("id", "uuid_field")
+        .write
         .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.uuid_field", "text_uuid_exactonly")
         .mode("overwrite")
@@ -545,9 +606,11 @@ class SearchOperatorTest
       val df = spark.read.format(INDEXTABLES_FORMAT).load(tempPath)
       df.createOrReplaceTempView("text_uuid_exactonly_test")
 
-      val results = spark.sql(
-        "SELECT id FROM text_uuid_exactonly_test WHERE uuid_field TEXTSEARCH '550e8400-e29b-41d4-a716-446655440000'"
-      ).collect()
+      val results = spark
+        .sql(
+          "SELECT id FROM text_uuid_exactonly_test WHERE uuid_field TEXTSEARCH '550e8400-e29b-41d4-a716-446655440000'"
+        )
+        .collect()
       assert(results.length == 1, s"Expected 1 row, got ${results.length}")
     }
   }
@@ -560,7 +623,8 @@ class SearchOperatorTest
       Seq(
         (1, "550e8400-e29b-41d4-a716-446655440000"),
         (2, "6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-      ).toDF("id", "uuid_field").write
+      ).toDF("id", "uuid_field")
+        .write
         .format(INDEXTABLES_FORMAT)
         .option("spark.indextables.indexing.typemap.uuid_field", "text_uuid_exactonly")
         .mode("overwrite")
@@ -570,9 +634,11 @@ class SearchOperatorTest
       df.createOrReplaceTempView("text_uuid_exactonly_fm_test")
 
       val ex = intercept[IllegalArgumentException] {
-        spark.sql(
-          "SELECT id FROM text_uuid_exactonly_fm_test WHERE uuid_field FIELDMATCH '550e8400-e29b-41d4-a716-446655440000'"
-        ).collect()
+        spark
+          .sql(
+            "SELECT id FROM text_uuid_exactonly_fm_test WHERE uuid_field FIELDMATCH '550e8400-e29b-41d4-a716-446655440000'"
+          )
+          .collect()
       }
       assert(ex.getMessage.contains("Cannot use FIELDMATCH"), s"Expected FIELDMATCH rejection, got: ${ex.getMessage}")
     }
@@ -582,16 +648,26 @@ class SearchOperatorTest
 
   test("* indexquery returns same results as _indexall indexquery") {
     val view = freshView("standalone", sharedTablePath)
-    val starResults = spark.sql(
-      s"SELECT id FROM $view WHERE * indexquery 'spark' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val starResults = spark
+      .sql(
+        s"SELECT id FROM $view WHERE * indexquery 'spark' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
-    val indexallResults = spark.sql(
-      s"SELECT id FROM $view WHERE _indexall indexquery 'spark' ORDER BY id"
-    ).collect().map(_.getInt(0)).toSeq
+    val indexallResults = spark
+      .sql(
+        s"SELECT id FROM $view WHERE _indexall indexquery 'spark' ORDER BY id"
+      )
+      .collect()
+      .map(_.getInt(0))
+      .toSeq
 
-    assert(starResults == indexallResults,
-      s"* indexquery $starResults and _indexall indexquery $indexallResults should return identical results")
+    assert(
+      starResults == indexallResults,
+      s"* indexquery $starResults and _indexall indexquery $indexallResults should return identical results"
+    )
     assert(starResults.nonEmpty, "Both should return results")
   }
 }

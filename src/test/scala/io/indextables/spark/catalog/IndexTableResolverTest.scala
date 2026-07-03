@@ -25,16 +25,15 @@ import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.catalog.IndexTableResolver._
 import io.indextables.spark.storage.SplitConversionThrottle
-
-import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Unit and integration tests for IndexTableResolver.
  *
- * Most resolveIndexPath tests do not require a SparkSession.
- * detectRegion tests that need Spark config use a minimal session created per suite.
+ * Most resolveIndexPath tests do not require a SparkSession. detectRegion tests that need Spark config use a minimal
+ * session created per suite.
  */
 class IndexTableResolverTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -278,11 +277,11 @@ class IndexTableResolverTest extends AnyFunSuite with Matchers with BeforeAndAft
 
     // Cannot control AWS_REGION / AWS_DEFAULT_REGION env vars at runtime, but we can verify
     // detectRegion doesn't throw and returns a sensible result.
-    try {
+    try
       // If running in an AWS environment, env vars may set a region — that's fine.
       // We only assert no exception is thrown.
       noException should be thrownBy detectRegion(spark)
-    } finally {
+    finally {
       savedSparkRegion.foreach(v => spark.conf.set("spark.indextables.aws.region", v))
       savedHadoop match {
         case Some(v) => spark.sparkContext.hadoopConfiguration.set("fs.s3a.endpoint.region", v)

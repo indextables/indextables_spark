@@ -22,8 +22,8 @@ import io.indextables.spark.catalog.IndexTables4SparkCatalog
 /**
  * Public alias for IndexTables4SparkCatalog.
  *
- * Provides a stable, user-facing class name following the same two-tier pattern as
- * IndexTablesProvider / IndexTables4SparkTableProvider.
+ * Provides a stable, user-facing class name following the same two-tier pattern as IndexTablesProvider /
+ * IndexTables4SparkTableProvider.
  *
  * Register via Spark configuration:
  * {{{

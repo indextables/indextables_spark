@@ -20,12 +20,12 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.TransactionLogFactory
-
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -219,7 +219,7 @@ class StreamingCompanionEndToEndTest
   private def readCompanionConfig(indexPath: String): Map[String, String] = {
     flushCaches()
     val options = new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
-    val txLog = TransactionLogFactory.create(new Path(indexPath), spark, options)
+    val txLog   = TransactionLogFactory.create(new Path(indexPath), spark, options)
     try {
       txLog.invalidateCache()
       txLog.getMetadata().configuration
@@ -234,12 +234,14 @@ class StreamingCompanionEndToEndTest
       // Step 1: Write initial Delta table with 4 columns.
       Seq((1, "alice", 100.0, "secret_a"), (2, "bob", 200.0, "secret_b"))
         .toDF("id", "name", "score", "secret")
-        .write.format("delta").save(deltaPath)
+        .write
+        .format("delta")
+        .save(deltaPath)
 
       // Step 2: Launch streaming sync with INCLUDE COLUMNS — only id, name should be indexed.
       val command = makeDeltaCommand(deltaPath, indexPath)
         .copy(includeColumns = Seq("id", "name"), streamingPollIntervalMs = Some(2000L))
-      val thread  = new Thread(() => command.run(spark))
+      val thread = new Thread(() => command.run(spark))
       thread.setDaemon(true)
       thread.start()
 
@@ -261,7 +263,10 @@ class StreamingCompanionEndToEndTest
         // Step 5: Append more data and wait for the second cycle.
         Seq((3, "charlie", 300.0, "secret_c"))
           .toDF("id", "name", "score", "secret")
-          .write.format("delta").mode("append").save(deltaPath)
+          .write
+          .format("delta")
+          .mode("append")
+          .save(deltaPath)
 
         val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 3)
         withClue("second cycle should index the appended row within 30 s") {

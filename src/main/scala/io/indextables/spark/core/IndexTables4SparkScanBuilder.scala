@@ -366,9 +366,10 @@ class IndexTables4SparkScanBuilder(
   }
 
   private lazy val companionSkipFields: Set[String] =
-    effectiveConfig.get("spark.indextables.companion.skipFields").map { json =>
-      io.indextables.spark.util.JsonUtil.parseStringArray(json).map(_.toLowerCase).toSet
-    }.getOrElse(Set.empty)
+    effectiveConfig
+      .get("spark.indextables.companion.skipFields")
+      .map(json => io.indextables.spark.util.JsonUtil.parseStringArray(json).map(_.toLowerCase).toSet)
+      .getOrElse(Set.empty)
 
   /**
    * For Iceberg companions: try to resolve table credentials at read time by reconstructing the full table name from
@@ -1347,7 +1348,7 @@ class IndexTables4SparkScanBuilder(
       case GreaterThanOrEqual(attribute, _) => isFieldSuitableForRangeQuery(attribute)
       case LessThan(attribute, _)           => isFieldSuitableForRangeQuery(attribute)
       case LessThanOrEqual(attribute, _)    => isFieldSuitableForRangeQuery(attribute)
-      case In(attribute, _)                  => isFieldSuitableForExactMatching(attribute)
+      case In(attribute, _)                 => isFieldSuitableForExactMatching(attribute)
       // IsNull/IsNotNull supported when field is fast (ExistsQuery requires FAST field)
       // or when field is a partition column (partition values are never null, so
       // IsNotNull is a tautology and IsNull always returns empty - both are safe).
@@ -1388,7 +1389,7 @@ class IndexTables4SparkScanBuilder(
     val fieldTypeKey = s"spark.indextables.indexing.typemap.${attribute.toLowerCase}"
     effectiveConfig.get(fieldTypeKey) match {
       case Some(mode) => io.indextables.spark.util.IndexingModes.supportsRangeQuery(mode)
-      case None =>
+      case None       =>
         // Fall back to docMapping: tokenized text fields don't support range queries
         cachedDocMappingMetadata.isTokenizedField(attribute.toLowerCase) match {
           case Some(true) =>
@@ -2113,11 +2114,11 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Validate that IndexQuery filter field types match the search type using the docMapping
-   * document from the transaction log (cached via EnhancedTransactionLogCache).
-   * - textsearch requires a tokenized field (type="text" with non-raw tokenizer in docMapping)
-   * - fieldmatch requires a non-tokenized field (type!="text" or tokenizer="raw" in docMapping)
-   * - indexquery skips validation (backwards compat)
+   * Validate that IndexQuery filter field types match the search type using the docMapping document from the
+   * transaction log (cached via EnhancedTransactionLogCache).
+   *   - textsearch requires a tokenized field (type="text" with non-raw tokenizer in docMapping)
+   *   - fieldmatch requires a non-tokenized field (type!="text" or tokenizer="raw" in docMapping)
+   *   - indexquery skips validation (backwards compat)
    */
   private def validateIndexQueryFieldTypes(
     indexQueryFilters: Array[Any] = extractIndexQueriesFromCurrentPlan()
@@ -2214,7 +2215,7 @@ class IndexTables4SparkScanBuilder(
       // No text-type fields at all — TEXTSEARCH/FIELDMATCH on * is meaningless
       allQueryAllFilters.foreach { filter =>
         if (filter.searchType == SearchType.TextSearch || filter.searchType == SearchType.FieldMatch) {
-          val searchOp = filter.searchType.value.toUpperCase
+          val searchOp     = filter.searchType.value.toUpperCase
           val nonTextTypes = docMapping.fieldTypes.values.toSet - "text"
           throw new IllegalArgumentException(
             s"Cannot use * $searchOp: table has no text-type fields in docMapping. " +
@@ -2373,9 +2374,8 @@ class IndexTables4SparkScanBuilder(
     }
 
   /**
-   * Cached DocMappingMetadata from the transaction log. Used for field type validation
-   * (TEXTSEARCH/FIELDMATCH, exact match pushdown, range queries). Returns DocMappingMetadata.empty
-   * for new tables without splits.
+   * Cached DocMappingMetadata from the transaction log. Used for field type validation (TEXTSEARCH/FIELDMATCH, exact
+   * match pushdown, range queries). Returns DocMappingMetadata.empty for new tables without splits.
    */
   private lazy val cachedDocMappingMetadata: DocMappingMetadata = computeDocMappingMetadata()
 
@@ -2392,9 +2392,11 @@ class IndexTables4SparkScanBuilder(
       }
     } catch {
       case scala.util.control.NonFatal(e) =>
-        logger.warn(s"Failed to read doc mapping from transaction log: ${e.getMessage}" +
-          " — type validation (TEXTSEARCH/FIELDMATCH), exact match pushdown, and range query " +
-          "behaviour will use defaults")
+        logger.warn(
+          s"Failed to read doc mapping from transaction log: ${e.getMessage}" +
+            " — type validation (TEXTSEARCH/FIELDMATCH), exact match pushdown, and range query " +
+            "behaviour will use defaults"
+        )
         DocMappingMetadata.empty
     }
 

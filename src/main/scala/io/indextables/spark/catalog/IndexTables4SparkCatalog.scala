@@ -22,9 +22,6 @@ import java.util.concurrent.TimeUnit
 
 import scala.jdk.CollectionConverters._
 
-import com.google.common.cache.{Cache, CacheBuilder}
-
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.catalog.{
   Identifier,
   NamespaceChange,
@@ -34,21 +31,21 @@ import org.apache.spark.sql.connector.catalog.{
   TableCatalog,
   TableChange
 }
-
-import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
+import com.google.common.cache.{Cache, CacheBuilder}
 import io.indextables.spark.core.IndexTables4SparkTable
 import io.indextables.spark.transaction.TransactionLogFactory
-
 import org.slf4j.LoggerFactory
 
 /**
- * A read-only Spark V2 named catalog that resolves companion IndexTables indexes by source table
- * name rather than raw storage paths.
+ * A read-only Spark V2 named catalog that resolves companion IndexTables indexes by source table name rather than raw
+ * storage paths.
  *
  * Register via Spark configuration:
  * {{{
@@ -61,20 +58,19 @@ import org.slf4j.LoggerFactory
  * }}}
  *
  * The identifier `indextables.unity_catalog.production.users` is resolved as:
- *   - Source catalog:    `unity_catalog`
- *   - Source namespace:  `["production"]`
- *   - Source table:      `users`
+ *   - Source catalog: `unity_catalog`
+ *   - Source namespace: `["production"]`
+ *   - Source table: `users`
  *
  * The catalog reads TBLPROPERTIES from the source table to find the index storage path:
  *   - `indextables.companion.indexroot.{region}` — region-specific index storage root
- *   - `indextables.companion.indexroot`           — fallback index storage root
+ *   - `indextables.companion.indexroot` — fallback index storage root
  *   - `indextables.companion.tableroot.relativepath` — relative path within the index root
  *
- * Resolved paths are cached (default: 1 hour TTL, 1000 entries max) to avoid repeated catalog
- * lookups during query planning.
+ * Resolved paths are cached (default: 1 hour TTL, 1000 entries max) to avoid repeated catalog lookups during query
+ * planning.
  *
- * Write operations are intentionally unsupported — use IndexTablesProvider or
- * BUILD INDEXTABLES COMPANION for writes.
+ * Write operations are intentionally unsupported — use IndexTablesProvider or BUILD INDEXTABLES COMPANION for writes.
  */
 class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
 
@@ -122,9 +118,9 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
       // the same message to the user and is the correct behaviour for an invalid identifier.
       throw new IllegalArgumentException(
         s"Invalid identifier '${ident.name()}' for IndexTablesCatalog '$catalogName': " +
-        s"expected at least <source_catalog>.<table_name> " +
-        s"(e.g., '$catalogName.spark_catalog.default.my_table'). " +
-        s"The first namespace segment must be the source catalog name."
+          s"expected at least <source_catalog>.<table_name> " +
+          s"(e.g., '$catalogName.spark_catalog.default.my_table'). " +
+          s"The first namespace segment must be the source catalog name."
       )
     }
 
@@ -136,12 +132,18 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
     logger.debug(s"loadTable: catalog='$catalogName', key='$cacheKey'")
 
     val resolvedPath =
-      try {
+      try
         pathCache.get(
           cacheKey,
-          () => IndexTableResolver.resolveFromCatalog(sourceCatalogName, sourceNamespace, sourceTableName, SparkSession.active)
+          () =>
+            IndexTableResolver.resolveFromCatalog(
+              sourceCatalogName,
+              sourceNamespace,
+              sourceTableName,
+              SparkSession.active
+            )
         )
-      } catch {
+      catch {
         // Guava wraps Callable exceptions — unwrap to surface the original cause.
         // UncheckedExecutionException wraps RuntimeExceptions; ExecutionException wraps checked ones
         // (e.g. NoSuchTableException). Both must be handled to avoid opaque wrapper exceptions.
@@ -151,27 +153,27 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
           throw e.getCause
       }
 
-    val spark  = SparkSession.active
-    val txLog  = TransactionLogFactory.create(new Path(resolvedPath), spark)
-    val schema = try {
-      txLog.getSchema().getOrElse {
-        // Path resolved from TBLPROPERTIES but the index doesn't exist yet (or was deleted).
-        // Evict the cache entry so a retry won't use a stale path.
-        pathCache.invalidate(cacheKey)
-        throw new IllegalArgumentException(
-          s"No transaction log found at resolved index path '$resolvedPath' " +
-          s"for source table '$cacheKey' in catalog '$catalogName'. " +
-          s"Ensure the companion index has been built and the source table has the " +
-          s"required TBLPROPERTIES set:\n" +
-          s"  ALTER TABLE $cacheKey SET TBLPROPERTIES (\n" +
-          s"    '${IndexTableResolver.PROP_INDEX_ROOT_PREFIX}' = 's3://my-index-bucket/indexes',\n" +
-          s"    '${IndexTableResolver.PROP_RELATIVE_PATH}' = 'my/table'\n" +
-          s"  )"
-        )
-      }
-    } finally {
-      txLog.close()
-    }
+    val spark = SparkSession.active
+    val txLog = TransactionLogFactory.create(new Path(resolvedPath), spark)
+    val schema =
+      try
+        txLog.getSchema().getOrElse {
+          // Path resolved from TBLPROPERTIES but the index doesn't exist yet (or was deleted).
+          // Evict the cache entry so a retry won't use a stale path.
+          pathCache.invalidate(cacheKey)
+          throw new IllegalArgumentException(
+            s"No transaction log found at resolved index path '$resolvedPath' " +
+              s"for source table '$cacheKey' in catalog '$catalogName'. " +
+              s"Ensure the companion index has been built and the source table has the " +
+              s"required TBLPROPERTIES set:\n" +
+              s"  ALTER TABLE $cacheKey SET TBLPROPERTIES (\n" +
+              s"    '${IndexTableResolver.PROP_INDEX_ROOT_PREFIX}' = 's3://my-index-bucket/indexes',\n" +
+              s"    '${IndexTableResolver.PROP_RELATIVE_PATH}' = 'my/table'\n" +
+              s"  )"
+          )
+        }
+      finally
+        txLog.close()
 
     val tableOptions = new CaseInsensitiveStringMap(
       Map("path" -> resolvedPath).asJava
@@ -192,7 +194,7 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
   override def listTables(namespace: Array[String]): Array[Identifier] = {
     logger.warn(
       s"IndexTablesCatalog '$catalogName': listTables() is not supported — " +
-      s"catalog does not enumerate source tables. Returning empty result."
+        s"catalog does not enumerate source tables. Returning empty result."
     )
     Array.empty
   }
@@ -209,20 +211,20 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
   ): Table =
     throw new UnsupportedOperationException(
       s"IndexTablesCatalog '$catalogName' does not support CREATE TABLE. " +
-      s"Use IndexTablesProvider for direct writes, or BUILD INDEXTABLES COMPANION " +
-      s"to create a companion index for an existing source table."
+        s"Use IndexTablesProvider for direct writes, or BUILD INDEXTABLES COMPANION " +
+        s"to create a companion index for an existing source table."
     )
 
   override def alterTable(ident: Identifier, changes: TableChange*): Table =
     throw new UnsupportedOperationException(
       s"IndexTablesCatalog '$catalogName' does not support ALTER TABLE. " +
-      s"Modify the source table TBLPROPERTIES directly."
+        s"Modify the source table TBLPROPERTIES directly."
     )
 
   override def dropTable(ident: Identifier): Boolean = {
     logger.warn(
       s"IndexTablesCatalog '$catalogName': dropTable() is not supported — returning false. " +
-      s"Use IndexTablesProvider or PURGE INDEXTABLE for index deletion."
+        s"Use IndexTablesProvider or PURGE INDEXTABLE for index deletion."
     )
     false
   }
@@ -239,7 +241,7 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
   override def listNamespaces(): Array[Array[String]] = {
     logger.warn(
       s"IndexTablesCatalog '$catalogName': listNamespaces() is not supported — " +
-      s"catalog does not enumerate source namespaces. Returning empty result."
+        s"catalog does not enumerate source namespaces. Returning empty result."
     )
     Array.empty
   }
@@ -247,7 +249,7 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
   override def listNamespaces(namespace: Array[String]): Array[Array[String]] = {
     logger.warn(
       s"IndexTablesCatalog '$catalogName': listNamespaces(${namespace.mkString(".")}) is not supported. " +
-      s"Returning empty result."
+        s"Returning empty result."
     )
     Array.empty
   }
@@ -255,7 +257,7 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
   override def loadNamespaceMetadata(namespace: Array[String]): util.Map[String, String] = {
     logger.warn(
       s"IndexTablesCatalog '$catalogName': loadNamespaceMetadata(${namespace.mkString(".")}) " +
-      s"is not supported. Returning empty metadata."
+        s"is not supported. Returning empty metadata."
     )
     java.util.Collections.emptyMap()
   }
@@ -263,7 +265,7 @@ class IndexTables4SparkCatalog extends TableCatalog with SupportsNamespaces {
   override def namespaceExists(namespace: Array[String]): Boolean = {
     logger.warn(
       s"IndexTablesCatalog '$catalogName': namespaceExists(${namespace.mkString(".")}) " +
-      s"always returns false — catalog does not track namespaces."
+        s"always returns false — catalog does not track namespaces."
     )
     false
   }

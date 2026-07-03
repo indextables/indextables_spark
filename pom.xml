@@ -527,6 +527,7 @@
                             <include>src/main/scala/**/*.scala</include>
                             <include>src/main/spark-*/scala/**/*.scala</include>
                             <include>src/test/scala/**/*.scala</include>
+                            <include>src/test/spark-*/scala/**/*.scala</include>
                         </includes>
                         <scalafmt>
                             <version>3.7.17</version>

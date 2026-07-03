@@ -101,9 +101,7 @@ class UnityCatalogAWSCredentialProviderTest
         val headers = {
           import scala.jdk.CollectionConverters._
           exchange.getRequestHeaders.asScala
-        }
-          .map { case (k, v) => k -> v.get(0) }
-          .toMap
+        }.map { case (k, v) => k -> v.get(0) }.toMap
 
         requestLog += MockRequest(method, path, body, headers)
 
@@ -132,9 +130,7 @@ class UnityCatalogAWSCredentialProviderTest
         val headers = {
           import scala.jdk.CollectionConverters._
           exchange.getRequestHeaders.asScala
-        }
-          .map { case (k, v) => k -> v.get(0) }
-          .toMap
+        }.map { case (k, v) => k -> v.get(0) }.toMap
 
         val request = MockRequest(method, path, body, headers)
         requestLog += request
@@ -550,9 +546,7 @@ class UnityCatalogAWSCredentialProviderTest
         val headers = {
           import scala.jdk.CollectionConverters._
           exchange.getRequestHeaders.asScala
-        }
-          .map { case (k, v) => k -> v.get(0) }
-          .toMap
+        }.map { case (k, v) => k -> v.get(0) }.toMap
         requestLog += MockRequest(method, path, body, headers)
 
         exchange.sendResponseHeaders(responseCode, responseBody.length)
@@ -687,9 +681,7 @@ class UnityCatalogAWSCredentialProviderTest
         val headers = {
           import scala.jdk.CollectionConverters._
           exchange.getRequestHeaders.asScala
-        }
-          .map { case (k, v) => k -> v.get(0) }
-          .toMap
+        }.map { case (k, v) => k -> v.get(0) }.toMap
         requestLog += MockRequest(method, path, body, headers)
 
         val responseBody = if (callCount.getAndIncrement() == 0) tableResponse1 else tableResponse2
@@ -796,9 +788,9 @@ class UnityCatalogAWSCredentialProviderTest
 
   private def oauthConfigMap(): Map[String, String] =
     Map(
-      "spark.indextables.databricks.workspaceUrl"    -> s"http://localhost:$serverPort",
-      "spark.indextables.databricks.clientId"        -> "my-client-id",
-      "spark.indextables.databricks.clientSecret"    -> "my-client-secret",
+      "spark.indextables.databricks.workspaceUrl"             -> s"http://localhost:$serverPort",
+      "spark.indextables.databricks.clientId"                 -> "my-client-id",
+      "spark.indextables.databricks.clientSecret"             -> "my-client-secret",
       UnityCatalogAWSCredentialProvider.AllowInsecureOAuthKey -> "true"
     )
 
@@ -827,9 +819,7 @@ class UnityCatalogAWSCredentialProviderTest
         val headers = {
           import scala.jdk.CollectionConverters._
           exchange.getRequestHeaders.asScala
-        }
-          .map { case (k, v) => k -> v.get(0) }
-          .toMap
+        }.map { case (k, v) => k -> v.get(0) }.toMap
         requestLog += MockRequest(exchange.getRequestMethod, exchange.getRequestURI.getPath, body, headers)
         exchange.sendResponseHeaders(responseCode, responseBody.length)
         val os = exchange.getResponseBody
@@ -856,9 +846,9 @@ class UnityCatalogAWSCredentialProviderTest
     setupOidcHandler(200, oauthTokenResponse("tok-workspace"))
     setupMockHandler(200, credentialResponse("KEY-WORKSPACE"))
 
-    val cfg = oauthConfigMap()
+    val cfg      = oauthConfigMap()
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
-    val creds = provider.getCredentials()
+    val creds    = provider.getCredentials()
 
     creds.getAWSAccessKeyId shouldBe "KEY-WORKSPACE"
 
@@ -916,9 +906,7 @@ class UnityCatalogAWSCredentialProviderTest
         val headers = {
           import scala.jdk.CollectionConverters._
           exchange.getRequestHeaders.asScala
-        }
-          .map { case (k, v) => k -> v.get(0) }
-          .toMap
+        }.map { case (k, v) => k -> v.get(0) }.toMap
         requestLog += MockRequest(exchange.getRequestMethod, exchange.getRequestURI.getPath, body, headers)
         val resp = credentialResponse(s"KEY-$callCount")
         exchange.sendResponseHeaders(200, resp.length)
@@ -928,8 +916,8 @@ class UnityCatalogAWSCredentialProviderTest
       }
     )
 
-    val cfg      = oauthConfigMap()
-    val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path1"), cfg)
+    val cfg       = oauthConfigMap()
+    val provider  = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path1"), cfg)
     val provider2 = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path2"), cfg)
     provider.getCredentials()
     provider2.getCredentials() // Different path → AWS cache miss → second credential HTTP call
@@ -945,7 +933,7 @@ class UnityCatalogAWSCredentialProviderTest
 
   test("OAuth: expired token triggers re-exchange") {
     val oidcCallCount = new AtomicInteger(0)
-    val path = "/oidc/v1/token"
+    val path          = "/oidc/v1/token"
     try mockServer.removeContext(path)
     catch { case _: IllegalArgumentException => }
     mockServer.createContext(
@@ -955,8 +943,9 @@ class UnityCatalogAWSCredentialProviderTest
         val body  = new String(exchange.getRequestBody.readAllBytes())
         requestLog += MockRequest(exchange.getRequestMethod, exchange.getRequestURI.getPath, body, Map.empty)
         // Second call returns a normal token; first returns an already-expired one (expiresIn=0)
-        val resp = if (count == 1) oauthTokenResponse("tok-expired", expiresIn = 0)
-                   else oauthTokenResponse("tok-fresh")
+        val resp =
+          if (count == 1) oauthTokenResponse("tok-expired", expiresIn = 0)
+          else oauthTokenResponse("tok-fresh")
         exchange.sendResponseHeaders(200, resp.length)
         val os = exchange.getResponseBody
         os.write(resp.getBytes)
@@ -965,7 +954,7 @@ class UnityCatalogAWSCredentialProviderTest
     )
     setupMockHandler(200, credentialResponse("OAUTH_KEY_3"))
 
-    val cfg = oauthConfigMap()
+    val cfg      = oauthConfigMap()
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
     provider.getCredentials() // Fetches expired token, caches it
 
@@ -1107,7 +1096,7 @@ class UnityCatalogAWSCredentialProviderTest
     val cfg = oauthConfigMap() +
       ("spark.indextables.databricks.retry.attempts" -> "3")
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
-    val creds = provider.getCredentials()
+    val creds    = provider.getCredentials()
 
     // Provider must have retried after the 429 and succeeded on the second attempt
     oidcCallCount.get() shouldBe 2
@@ -1142,7 +1131,7 @@ class UnityCatalogAWSCredentialProviderTest
     val cfg = oauthConfigMap() +
       ("spark.indextables.databricks.retry.attempts" -> "3")
     val provider = UnityCatalogAWSCredentialProvider.fromConfig(URI.create("s3://bucket/path"), cfg)
-    val creds = provider.getCredentials()
+    val creds    = provider.getCredentials()
 
     // Must have retried and succeeded without a Retry-After header
     oidcCallCount.get() shouldBe 2
@@ -1230,8 +1219,8 @@ class UnityCatalogAWSCredentialProviderTest
     // and returns without re-calling OIDC at all.  This is the "stability" guarantee: rotating
     // the OAuth token does not bust the AWS credential cache.
     val creds2 = provider.getCredentials()
-    oidcCallCount.get() shouldBe 1    // OIDC NOT called again — AWS cred cache hit (key is clientId-stable)
-    credCallCount.get() shouldBe 1    // AWS creds NOT re-fetched
+    oidcCallCount.get() shouldBe 1 // OIDC NOT called again — AWS cred cache hit (key is clientId-stable)
+    credCallCount.get() shouldBe 1 // AWS creds NOT re-fetched
     creds1.getAWSAccessKeyId shouldBe creds2.getAWSAccessKeyId
   }
 

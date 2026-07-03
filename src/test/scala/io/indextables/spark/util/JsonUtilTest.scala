@@ -26,26 +26,26 @@ class JsonUtilTest extends AnyFunSuite with Matchers {
     // BUG5: the legacy CSV serializer split column names on ',', corrupting
     // names like 'revenue,usd'. The JSON path must preserve them verbatim.
     val original = Seq("revenue,usd", "name", "tags,csv,style")
-    val json = JsonUtil.toJson(original)
-    val parsed = JsonUtil.parseStringArray(json)
+    val json     = JsonUtil.toJson(original)
+    val parsed   = JsonUtil.parseStringArray(json)
     parsed should contain theSameElementsInOrderAs original
   }
 
   test("string array round-trip preserves single-element with comma") {
     val original = Seq("a,b")
-    val json = JsonUtil.toJson(original)
+    val json     = JsonUtil.toJson(original)
     JsonUtil.parseStringArray(json) should contain theSameElementsInOrderAs original
   }
 
   test("string array round-trip preserves empty list") {
     val original = Seq.empty[String]
-    val json = JsonUtil.toJson(original)
+    val json     = JsonUtil.toJson(original)
     JsonUtil.parseStringArray(json) shouldBe empty
   }
 
   test("string array round-trip preserves names with quotes and special chars") {
     val original = Seq("col\"with\"quotes", "col with spaces", "col\\with\\backslash")
-    val json = JsonUtil.toJson(original)
+    val json     = JsonUtil.toJson(original)
     JsonUtil.parseStringArray(json) should contain theSameElementsInOrderAs original
   }
 }

@@ -98,16 +98,16 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * OAuth mirror: verify that OAuth client-credential keys (clientId / clientSecret) are visible to
-   * MergeSplitsExecutor via ConfigNormalization, identical to the apiToken diagnostic test above.
+   * OAuth mirror: verify that OAuth client-credential keys (clientId / clientSecret) are visible to MergeSplitsExecutor
+   * via ConfigNormalization, identical to the apiToken diagnostic test above.
    *
-   * This confirms that the merge-time credential extraction path picks up OAuth keys set at session level,
-   * so a cluster configured with OAuth rather than a static apiToken can still run MERGE SPLITS operations.
+   * This confirms that the merge-time credential extraction path picks up OAuth keys set at session level, so a cluster
+   * configured with OAuth rather than a static apiToken can still run MERGE SPLITS operations.
    */
   test("DIAGNOSTIC OAuth: OAuth client credential keys visible to MergeSplitsExecutor via ConfigNormalization") {
     // Replace apiToken with OAuth keys at session level
     spark.conf.unset("spark.indextables.databricks.apiToken")
-    spark.conf.set("spark.indextables.databricks.clientId",     "merge-client-id")
+    spark.conf.set("spark.indextables.databricks.clientId", "merge-client-id")
     spark.conf.set("spark.indextables.databricks.clientSecret", "merge-client-secret")
 
     try {
@@ -122,7 +122,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
       logger.info(s"databricks.clientId:     ${clientId.getOrElse("None")}")
       logger.info(s"databricks.clientSecret: ${clientSecret.map(_ => "***").getOrElse("None")}")
 
-      clientId     shouldBe Some("merge-client-id")
+      clientId shouldBe Some("merge-client-id")
       clientSecret shouldBe Some("merge-client-secret")
 
       logger.info("SUCCESS: OAuth client credential keys found in mergedConfigs for MergeSplitsExecutor")

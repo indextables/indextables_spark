@@ -21,14 +21,14 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import io.indextables.spark.transaction.TransactionLogFactory
+import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.apache.iceberg.{DataFiles, FileFormat, PartitionSpec, Schema => IcebergSchema}
 import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
@@ -36,9 +36,8 @@ import org.apache.iceberg.types.Types
 /**
  * Iceberg-format implementation of the companion INCLUDE/EXCLUDE COLUMNS test suite.
  *
- * <p>Uses {@link EmbeddedIcebergRestServer} for Docker-free testing. All table creation and data
- * ingestion happen via the Iceberg Java API against an in-process REST catalog backed by the local
- * filesystem.
+ * <p>Uses {@link EmbeddedIcebergRestServer} for Docker-free testing. All table creation and data ingestion happen via
+ * the Iceberg Java API against an in-process REST catalog backed by the local filesystem.
  */
 class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
 
@@ -48,8 +47,8 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
   override def spark: SparkSession = _spark
 
   private var server: EmbeddedIcebergRestServer = _
-  private var warehouseDir: String = _
-  private var batchCounter: AtomicInteger = _
+  private var warehouseDir: String              = _
+  private var batchCounter: AtomicInteger       = _
 
   // ─────────────────────────────────────────────────────────────────────
   //  Lifecycle
@@ -132,23 +131,39 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
     appendPartitionedData(tableId, schema, regionBData, "region=region_b")
   }
 
-  override def createSimpleTable(tableId: String, schema: StructType, data: Seq[Row]): Unit = {
-    val icebergSchema = sparkToIcebergSchema(schema)
+  override def createSimpleTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit = {
+    val icebergSchema  = sparkToIcebergSchema(schema)
     val icebergTableId = parseTableId(tableId)
     server.catalog.buildTable(icebergTableId, icebergSchema).create()
     appendIcebergData(tableId, schema, data)
   }
 
-  override def recreateTable(tableId: String, schema: StructType, data: Seq[Row]): Unit = {
+  override def recreateTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit = {
     val icebergTableId = parseTableId(tableId)
     server.catalog.dropTable(icebergTableId, true)
     createSimpleTable(tableId, schema, data)
   }
 
-  override def appendData(tableId: String, schema: StructType, data: Seq[Row]): Unit =
+  override def appendData(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit =
     appendIcebergData(tableId, schema, data)
 
-  override def buildCompanionSql(tableId: String, clauses: String, indexPath: String): String = {
+  override def buildCompanionSql(
+    tableId: String,
+    clauses: String,
+    indexPath: String
+  ): String = {
     val c = if (clauses.nonEmpty) s" $clauses" else ""
     s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableId'$c AT LOCATION '$indexPath'"
   }
@@ -162,50 +177,64 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
     TableIdentifier.of(Namespace.of(parts(0)), parts(1))
   }
 
-  private val partitionedSparkSchema: StructType = StructType(Seq(
-    StructField("id", IntegerType), StructField("name", StringType),
-    StructField("score", DoubleType), StructField("region", StringType)
-  ))
+  private val partitionedSparkSchema: StructType = StructType(
+    Seq(
+      StructField("id", IntegerType),
+      StructField("name", StringType),
+      StructField("score", DoubleType),
+      StructField("region", StringType)
+    )
+  )
 
   private def sparkToIcebergSchema(sparkSchema: StructType): IcebergSchema = {
-    val fields = sparkSchema.fields.zipWithIndex.map { case (f, idx) =>
-      val icebergType = f.dataType match {
-        case IntegerType  => Types.IntegerType.get()
-        case LongType     => Types.LongType.get()
-        case DoubleType   => Types.DoubleType.get()
-        case FloatType    => Types.FloatType.get()
-        case StringType   => Types.StringType.get()
-        case BooleanType  => Types.BooleanType.get()
-        case BinaryType   => Types.BinaryType.get()
-        case dt: DecimalType => Types.DecimalType.of(dt.precision, dt.scale)
-        case other => throw new UnsupportedOperationException(s"Unsupported Spark type: $other")
-      }
-      Types.NestedField.optional(idx + 1, f.name, icebergType)
+    val fields = sparkSchema.fields.zipWithIndex.map {
+      case (f, idx) =>
+        val icebergType = f.dataType match {
+          case IntegerType     => Types.IntegerType.get()
+          case LongType        => Types.LongType.get()
+          case DoubleType      => Types.DoubleType.get()
+          case FloatType       => Types.FloatType.get()
+          case StringType      => Types.StringType.get()
+          case BooleanType     => Types.BooleanType.get()
+          case BinaryType      => Types.BinaryType.get()
+          case dt: DecimalType => Types.DecimalType.of(dt.precision, dt.scale)
+          case other           => throw new UnsupportedOperationException(s"Unsupported Spark type: $other")
+        }
+        Types.NestedField.optional(idx + 1, f.name, icebergType)
     }
     new IcebergSchema(fields: _*)
   }
 
   /**
-   * Write rows as Parquet via Spark, then register the resulting files as a new Iceberg snapshot.
-   * Follows the same pattern as [[StreamingCompanionIcebergEndToEndTest.appendIcebergSnapshot]].
+   * Write rows as Parquet via Spark, then register the resulting files as a new Iceberg snapshot. Follows the same
+   * pattern as [[StreamingCompanionIcebergEndToEndTest.appendIcebergSnapshot]].
    */
-  private def appendIcebergData(tableId: String, schema: StructType, data: Seq[Row]): Unit = {
-    val batchId = batchCounter.incrementAndGet()
+  private def appendIcebergData(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit = {
+    val batchId  = batchCounter.incrementAndGet()
     val batchDir = s"$warehouseDir/parquet-data/batch-$batchId"
 
-    spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-      .coalesce(1).write.parquet(s"file://$batchDir")
+    spark
+      .createDataFrame(spark.sparkContext.parallelize(data), schema)
+      .coalesce(1)
+      .write
+      .parquet(s"file://$batchDir")
 
-    val parquetFiles = new File(batchDir).listFiles()
+    val parquetFiles = new File(batchDir)
+      .listFiles()
       .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
     require(parquetFiles.nonEmpty, s"No Parquet files written to $batchDir")
 
     val icebergTableId = parseTableId(tableId)
-    val table = server.catalog.loadTable(icebergTableId)
-    val appendOp = table.newAppend()
+    val table          = server.catalog.loadTable(icebergTableId)
+    val appendOp       = table.newAppend()
     parquetFiles.foreach { f =>
       appendOp.appendFile(
-        DataFiles.builder(table.spec())
+        DataFiles
+          .builder(table.spec())
           .withPath(s"file://${f.getAbsolutePath}")
           .withFileSizeInBytes(f.length())
           .withRecordCount(data.size.toLong)
@@ -229,7 +258,7 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
     // the persisted companion metadata.
     withTempPath { tempDir =>
       val indexPath = new File(tempDir, "explicit_catalog_idx").getAbsolutePath
-      val tableId = newTableId(tempDir, "explicit_catalog")
+      val tableId   = newTableId(tempDir, "explicit_catalog")
       createSimpleTable(tableId, sharedTableSchema, sharedTableData)
 
       // The SparkConf provides URI + catalogType=rest already, but the
@@ -252,7 +281,8 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
       // Verify the catalog name from the SQL clause was persisted in the
       // companion metadata (not the default "default" fallback).
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
+        new Path(indexPath),
+        spark,
         new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
       )
       try {
@@ -278,7 +308,7 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
     // stored value survives and the sync succeeds using the restored config.
     withTempPath { tempDir =>
       val indexPath = new File(tempDir, "catalog_restore_idx").getAbsolutePath
-      val tableId = newTableId(tempDir, "catalog_restore")
+      val tableId   = newTableId(tempDir, "catalog_restore")
       createSimpleTable(tableId, sharedTableSchema, sharedTableData)
 
       // Initial sync with explicit CATALOG/WAREHOUSE and an unusual catalog
@@ -295,15 +325,32 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
       }
 
       // Append more data so the incremental sync has something to do.
-      appendData(tableId, sharedTableSchema, Seq(
-        Row(4, "dave", 400.0, 4000L, true, "more data", "10.0.0.4", "cat_c",
-          new java.math.BigDecimal("400.50"), new java.math.BigDecimal("400.50"),
-          new java.math.BigDecimal("400.50000"), 400, 4, "drop_d")
-      ))
+      appendData(
+        tableId,
+        sharedTableSchema,
+        Seq(
+          Row(
+            4,
+            "dave",
+            400.0,
+            4000L,
+            true,
+            "more data",
+            "10.0.0.4",
+            "cat_c",
+            new java.math.BigDecimal("400.50"),
+            new java.math.BigDecimal("400.50"),
+            new java.math.BigDecimal("400.50000"),
+            400,
+            4,
+            "drop_d"
+          )
+        )
+      )
 
       // Incremental sync WITHOUT re-specifying CATALOG/TYPE/WAREHOUSE —
       // these must be restored from companion metadata.
-      val incrementalSql = s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableId' AT LOCATION '$indexPath'"
+      val incrementalSql    = s"BUILD INDEXTABLES COMPANION FOR ICEBERG '$tableId' AT LOCATION '$indexPath'"
       val incrementalResult = spark.sql(incrementalSql).collect()
       withClue(s"incremental build: ${incrementalResult(0).getString(2)}, ${incrementalResult(0).getString(10)}") {
         incrementalResult(0).getString(2) shouldBe "success"
@@ -311,7 +358,8 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
 
       // Verify the stored catalog name was NOT clobbered with "default".
       val txLog = TransactionLogFactory.create(
-        new Path(indexPath), spark,
+        new Path(indexPath),
+        spark,
         new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
       )
       try {
@@ -329,9 +377,8 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
   }
 
   /**
-   * Write rows as Parquet via Spark, then register them as an Iceberg snapshot with a specific
-   * partition path. Used for identity-partitioned tables where each DataFile must declare its
-   * partition value.
+   * Write rows as Parquet via Spark, then register them as an Iceberg snapshot with a specific partition path. Used for
+   * identity-partitioned tables where each DataFile must declare its partition value.
    */
   private def appendPartitionedData(
     tableId: String,
@@ -339,22 +386,27 @@ class IcebergCompanionColumnsTest extends CompanionColumnsTestBase {
     data: Seq[Row],
     partitionPath: String
   ): Unit = {
-    val batchId = batchCounter.incrementAndGet()
+    val batchId  = batchCounter.incrementAndGet()
     val batchDir = s"$warehouseDir/parquet-data/batch-$batchId"
 
-    spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-      .coalesce(1).write.parquet(s"file://$batchDir")
+    spark
+      .createDataFrame(spark.sparkContext.parallelize(data), schema)
+      .coalesce(1)
+      .write
+      .parquet(s"file://$batchDir")
 
-    val parquetFiles = new File(batchDir).listFiles()
+    val parquetFiles = new File(batchDir)
+      .listFiles()
       .filter(f => f.getName.endsWith(".parquet") && f.length() > 0)
     require(parquetFiles.nonEmpty, s"No Parquet files written to $batchDir")
 
     val icebergTableId = parseTableId(tableId)
-    val table = server.catalog.loadTable(icebergTableId)
-    val appendOp = table.newAppend()
+    val table          = server.catalog.loadTable(icebergTableId)
+    val appendOp       = table.newAppend()
     parquetFiles.foreach { f =>
       appendOp.appendFile(
-        DataFiles.builder(table.spec())
+        DataFiles
+          .builder(table.spec())
           .withPath(s"file://${f.getAbsolutePath}")
           .withFileSizeInBytes(f.length())
           .withRecordCount(data.size.toLong)

@@ -17,17 +17,17 @@
 
 package org.apache.spark.sql.indextables
 
-import org.apache.spark.sql.Column
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.classic.{ColumnNodeToExpressionConverter, ExpressionUtils}
+import org.apache.spark.sql.Column
 
 /**
- * Test-only Column <-> catalyst Expression conversions (spark-4.x variant). In Spark 4, Column wraps a ColumnNode;
- * the converter (private[sql], hence this package) eagerly produces the catalyst Expression.
- * (ExpressionUtils.expression is NOT used for expr: it returns a lazy ColumnNodeExpression wrapper that our
- * pattern-matching helpers wouldn't recognize.)
+ * Test-only Column <-> catalyst Expression conversions (spark-4.x variant). In Spark 4, Column wraps a ColumnNode; the
+ * converter (private[sql], hence this package) eagerly produces the catalyst Expression. (ExpressionUtils.expression is
+ * NOT used for expr: it returns a lazy ColumnNodeExpression wrapper that our pattern-matching helpers wouldn't
+ * recognize.)
  */
 object ColumnCompat {
-  def expr(c: Column): Expression      = ColumnNodeToExpressionConverter(c.node)
-  def column(e: Expression): Column    = ExpressionUtils.column(e)
+  def expr(c: Column): Expression   = ColumnNodeToExpressionConverter(c.node)
+  def column(e: Expression): Column = ExpressionUtils.column(e)
 }

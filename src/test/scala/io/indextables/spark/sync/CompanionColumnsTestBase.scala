@@ -30,21 +30,22 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Shared trait for INCLUDE COLUMNS / EXCLUDE COLUMNS companion tests.
  *
- * <p>Subclasses implement the abstract members for a specific table format (Delta, Iceberg, etc.)
- * and automatically inherit all shared tests.
+ * <p>Subclasses implement the abstract members for a specific table format (Delta, Iceberg, etc.) and automatically
+ * inherit all shared tests.
  *
- * <p>All tests share two tables: a 14-column table (core + evolution columns) and a 4-column
- * partitioned table. Tests are organized in three phases against the shared table:
- * <ol>
- *   <li><b>Read-only</b> — build companion indexes and query them (table is not mutated)</li>
- *   <li><b>Append</b> — append rows and verify incremental sync</li>
- *   <li><b>Evolution</b> — recreate the table with a mutated schema and verify schema checks</li>
- * </ol>
+ * <p>All tests share two tables: a 14-column table (core + evolution columns) and a 4-column partitioned table. Tests
+ * are organized in three phases against the shared table: <ol> <li><b>Read-only</b> — build companion indexes and query
+ * them (table is not mutated)</li> <li><b>Append</b> — append rows and verify incremental sync</li>
+ * <li><b>Evolution</b> — recreate the table with a mutated schema and verify schema checks</li> </ol>
  *
- * <p>This ordering is load-bearing: tests run in registration order (ScalaTest AnyFunSuite),
- * and later phases depend on cumulative table state from earlier phases.
+ * <p>This ordering is load-bearing: tests run in registration order (ScalaTest AnyFunSuite), and later phases depend on
+ * cumulative table state from earlier phases.
  */
-trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with io.indextables.spark.testutils.FileCleanupHelper {
+trait CompanionColumnsTestBase
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with io.indextables.spark.testutils.FileCleanupHelper {
 
   // ───────────────────────────────────────────────────────────────────
   //  Abstract interface — subclasses must implement
@@ -53,11 +54,27 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
   def formatName: String
   def spark: SparkSession
 
-  def createSimpleTable(tableId: String, schema: StructType, data: Seq[Row]): Unit
+  def createSimpleTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit
   def createPartitionedTable(tableId: String): Unit
-  def recreateTable(tableId: String, schema: StructType, data: Seq[Row]): Unit
-  def appendData(tableId: String, schema: StructType, data: Seq[Row]): Unit
-  def buildCompanionSql(tableId: String, clauses: String, indexPath: String): String
+  def recreateTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit
+  def appendData(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit
+  def buildCompanionSql(
+    tableId: String,
+    clauses: String,
+    indexPath: String
+  ): String
   def newTableId(tempDir: String, name: String): String
 
   // ───────────────────────────────────────────────────────────────────
@@ -66,40 +83,112 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   private def bd(s: String): java.math.BigDecimal = new java.math.BigDecimal(s)
 
-  protected val sharedTableSchema: StructType = StructType(Seq(
-    StructField("id", IntegerType),
-    StructField("name", StringType),
-    StructField("score", DoubleType),
-    StructField("timestamp", LongType),
-    StructField("active", BooleanType),
-    StructField("message", StringType),
-    StructField("ip_addr", StringType),
-    StructField("category", StringType),
-    StructField("evo_decimal_wide", DecimalType(10, 2)),
-    StructField("evo_decimal_narrow", DecimalType(10, 2)),
-    StructField("evo_decimal_mixed", DecimalType(10, 5)),
-    StructField("evo_type_nonindexed", IntegerType),
-    StructField("evo_type_breaking", IntegerType),
-    StructField("evo_drop", StringType)
-  ))
+  protected val sharedTableSchema: StructType = StructType(
+    Seq(
+      StructField("id", IntegerType),
+      StructField("name", StringType),
+      StructField("score", DoubleType),
+      StructField("timestamp", LongType),
+      StructField("active", BooleanType),
+      StructField("message", StringType),
+      StructField("ip_addr", StringType),
+      StructField("category", StringType),
+      StructField("evo_decimal_wide", DecimalType(10, 2)),
+      StructField("evo_decimal_narrow", DecimalType(10, 2)),
+      StructField("evo_decimal_mixed", DecimalType(10, 5)),
+      StructField("evo_type_nonindexed", IntegerType),
+      StructField("evo_type_breaking", IntegerType),
+      StructField("evo_drop", StringType)
+    )
+  )
 
   protected val sharedTableData: Seq[Row] = Seq(
-    Row(1, "alice", 100.0, 1000L, true, "hello world", "192.168.1.1", "cat_a",
-      bd("100.50"), bd("100.50"), bd("100.50000"), 100, 1, "drop_a"),
-    Row(2, "bob", 200.5, 2000L, false, "foo bar baz", "10.0.0.1", "cat_b",
-      bd("200.75"), bd("200.75"), bd("200.75000"), 200, 2, "drop_b"),
-    Row(3, "charlie", 300.75, 3000L, true, "search query text", "172.16.0.1", "cat_a",
-      bd("300.25"), bd("300.25"), bd("300.25000"), 300, 3, "drop_c")
+    Row(
+      1,
+      "alice",
+      100.0,
+      1000L,
+      true,
+      "hello world",
+      "192.168.1.1",
+      "cat_a",
+      bd("100.50"),
+      bd("100.50"),
+      bd("100.50000"),
+      100,
+      1,
+      "drop_a"
+    ),
+    Row(
+      2,
+      "bob",
+      200.5,
+      2000L,
+      false,
+      "foo bar baz",
+      "10.0.0.1",
+      "cat_b",
+      bd("200.75"),
+      bd("200.75"),
+      bd("200.75000"),
+      200,
+      2,
+      "drop_b"
+    ),
+    Row(
+      3,
+      "charlie",
+      300.75,
+      3000L,
+      true,
+      "search query text",
+      "172.16.0.1",
+      "cat_a",
+      bd("300.25"),
+      bd("300.25"),
+      bd("300.25000"),
+      300,
+      3,
+      "drop_c"
+    )
   )
 
   private val appendRow4: Seq[Row] = Seq(
-    Row(4, "dave", 400.0, 4000L, true, "new data", "10.0.0.2", "cat_c",
-      bd("400.50"), bd("400.50"), bd("400.50000"), 400, 4, "drop_d")
+    Row(
+      4,
+      "dave",
+      400.0,
+      4000L,
+      true,
+      "new data",
+      "10.0.0.2",
+      "cat_c",
+      bd("400.50"),
+      bd("400.50"),
+      bd("400.50000"),
+      400,
+      4,
+      "drop_d"
+    )
   )
 
   private val appendRow5: Seq[Row] = Seq(
-    Row(5, "eve", 500.0, 5000L, false, "another row", "10.0.0.5", "cat_e",
-      bd("500.50"), bd("500.50"), bd("500.50000"), 500, 5, "drop_e")
+    Row(
+      5,
+      "eve",
+      500.0,
+      5000L,
+      false,
+      "another row",
+      "10.0.0.5",
+      "cat_e",
+      bd("500.50"),
+      bd("500.50"),
+      bd("500.50000"),
+      500,
+      5,
+      "drop_e"
+    )
   )
 
   // ───────────────────────────────────────────────────────────────────
@@ -107,31 +196,50 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
   // ───────────────────────────────────────────────────────────────────
 
   /** Combined success mutation: widening + non-indexed type change + drop 2 cols + add col. */
-  private val successMutationSchema: StructType = StructType(Seq(
-    StructField("id", IntegerType),
-    StructField("name", StringType),
-    StructField("score", DoubleType),
-    StructField("timestamp", LongType),
-    StructField("active", BooleanType),
-    StructField("message", StringType),
-    StructField("ip_addr", StringType),
-    StructField("category", StringType),
-    StructField("evo_decimal_wide", DecimalType(18, 4)),     // widened
-    StructField("evo_decimal_narrow", DecimalType(10, 2)),   // unchanged
-    StructField("evo_decimal_mixed", DecimalType(10, 5)),    // unchanged
-    StructField("evo_type_nonindexed", StringType),          // INT → STRING
-    // evo_type_breaking: removed
-    // evo_drop: removed
-    StructField("new_col", StringType)                        // added
-  ))
+  private val successMutationSchema: StructType = StructType(
+    Seq(
+      StructField("id", IntegerType),
+      StructField("name", StringType),
+      StructField("score", DoubleType),
+      StructField("timestamp", LongType),
+      StructField("active", BooleanType),
+      StructField("message", StringType),
+      StructField("ip_addr", StringType),
+      StructField("category", StringType),
+      StructField("evo_decimal_wide", DecimalType(18, 4)),   // widened
+      StructField("evo_decimal_narrow", DecimalType(10, 2)), // unchanged
+      StructField("evo_decimal_mixed", DecimalType(10, 5)),  // unchanged
+      StructField("evo_type_nonindexed", StringType),        // INT → STRING
+      // evo_type_breaking: removed
+      // evo_drop: removed
+      StructField("new_col", StringType) // added
+    )
+  )
 
   private val successMutationData: Seq[Row] = Seq(
-    Row(6, "frank", 600.0, 6000L, true, "mutated", "10.0.0.6", "cat_f",
-      bd("600.5000"), bd("100.50"), bd("100.50000"), "six", "hello")
+    Row(
+      6,
+      "frank",
+      600.0,
+      6000L,
+      true,
+      "mutated",
+      "10.0.0.6",
+      "cat_f",
+      bd("600.5000"),
+      bd("100.50"),
+      bd("100.50000"),
+      "six",
+      "hello"
+    )
   )
 
   /** Returns (schema, data) with one column's type changed from original. */
-  private def withColumnTypeChanged(col: String, newType: DataType, newValue: Any): (StructType, Seq[Row]) = {
+  private def withColumnTypeChanged(
+    col: String,
+    newType: DataType,
+    newValue: Any
+  ): (StructType, Seq[Row]) = {
     val colIdx = sharedTableSchema.fieldIndex(col)
     val newSchema = StructType(sharedTableSchema.fields.map { f =>
       if (f.name == col) StructField(f.name, newType) else f
@@ -173,16 +281,22 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
   //  Evolution companions — built before mutation, used after
   // ───────────────────────────────────────────────────────────────────
 
-  private val evoCols = Seq("evo_decimal_wide", "evo_decimal_narrow", "evo_decimal_mixed",
-    "evo_type_nonindexed", "evo_type_breaking", "evo_drop")
+  private val evoCols = Seq(
+    "evo_decimal_wide",
+    "evo_decimal_narrow",
+    "evo_decimal_mixed",
+    "evo_type_nonindexed",
+    "evo_type_breaking",
+    "evo_drop"
+  )
 
   /**
-   * Lazy val that builds companion indexes against the shared table (pre-mutation).
-   * Each evolution test mutates the table independently with a single targeted change.
+   * Lazy val that builds companion indexes against the shared table (pre-mutation). Each evolution test mutates the
+   * table independently with a single targeted change.
    */
   protected lazy val evolutionCompanions: Map[String, String] = {
     val tableId = sharedTableId
-    val evoDir = new File(sharedTempDir, "evo-indexes")
+    val evoDir  = new File(sharedTempDir, "evo-indexes")
     evoDir.mkdirs()
 
     // Clear transaction log cache to avoid stale state from earlier phases
@@ -191,9 +305,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     def buildEvo(key: String, clauses: String): (String, String) = {
       flushCaches()
       val indexPath = new File(evoDir, key).getAbsolutePath
-      val result = spark.sql(buildCompanionSql(tableId, clauses, indexPath)).collect()
-      require(result(0).getString(2) == "success",
-        s"Evolution companion '$key' build failed: ${result(0).getString(10)}")
+      val result    = spark.sql(buildCompanionSql(tableId, clauses, indexPath)).collect()
+      require(
+        result(0).getString(2) == "success",
+        s"Evolution companion '$key' build failed: ${result(0).getString(10)}"
+      )
       key -> indexPath
     }
 
@@ -267,9 +383,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INCLUDE COLUMNS indexes only specified columns") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'score', 'active')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'score', 'active')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -280,9 +398,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INCLUDE COLUMNS with INDEXING MODES") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'score', 'message') INDEXING MODES ('message': 'text')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'name', 'score', 'message') INDEXING MODES ('message': 'text')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -298,9 +422,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("EXCLUDE COLUMNS skips specified columns") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('timestamp', 'message', 'ip_addr', 'category')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('timestamp', 'message', 'ip_addr', 'category')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -311,9 +437,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("EXCLUDE COLUMNS excluded column is absent from index") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('message')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('message')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -328,9 +456,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("predicate on excluded column returns zero results") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('ip_addr')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('ip_addr')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -359,13 +489,18 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     // "foo bar baz", "search query text". The In filter targets the first
     // two. Pre-fix: 0 results (wrong). Post-fix: 2 results (correct).
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId,
-          "INCLUDE COLUMNS ('id', 'name', 'message') INDEXING MODES ('message':'text')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'name', 'message') INDEXING MODES ('message':'text')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
-      val df = readCompanion(indexPath)
+      val df      = readCompanion(indexPath)
       val matched = df.filter(col("message").isin("hello world", "foo bar baz")).collect()
       matched.length shouldBe 2
     }
@@ -373,9 +508,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INCLUDE COLUMNS with nonexistent column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'nonexistent_column')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'nonexistent_column')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("nonexistent_column")
     }
@@ -383,9 +520,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("EXCLUDE COLUMNS with nonexistent column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('nonexistent_column')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('nonexistent_column')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("nonexistent_column")
     }
@@ -393,9 +532,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INDEXING MODES field not in INCLUDE COLUMNS returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name') INDEXING MODES ('message': 'text')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'name') INDEXING MODES ('message': 'text')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("message")
     }
@@ -403,12 +548,14 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INCLUDE COLUMNS with SUM aggregation on numeric fast field") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'score')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'score')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
-      val df = readCompanion(indexPath)
+      val df        = readCompanion(indexPath)
       val sumResult = df.agg(sum("score")).collect()
       sumResult(0).getDouble(0) shouldBe (100.0 + 200.5 + 300.75)
     }
@@ -420,9 +567,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R1: duplicate column in INCLUDE COLUMNS returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'id')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'id')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("Duplicate column")
       result(0).getString(10) should include("id")
@@ -431,9 +580,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R1: duplicate column in EXCLUDE COLUMNS returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('category', 'category')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('category', 'category')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("Duplicate column")
     }
@@ -441,9 +592,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R1: case-insensitive column matching works") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('ID', 'Name', 'Score')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('ID', 'Name', 'Score')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
     }
   }
@@ -454,9 +607,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R2: text mode on INT column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'score') INDEXING MODES ('id': 'text')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'score') INDEXING MODES ('id': 'text')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("not compatible")
       result(0).getString(10) should include("text")
@@ -466,9 +621,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R2: string mode on DOUBLE column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'score') INDEXING MODES ('score': 'string')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'score') INDEXING MODES ('score': 'string')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("not compatible")
     }
@@ -476,9 +637,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R2: ipaddress mode on BOOLEAN column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'active') INDEXING MODES ('active': 'ipaddress')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'active') INDEXING MODES ('active': 'ipaddress')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("not compatible")
     }
@@ -486,9 +653,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R2: valid text mode on STRING column succeeds") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'message') INDEXING MODES ('message': 'text')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'message') INDEXING MODES ('message': 'text')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
     }
   }
@@ -499,9 +672,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R3: HASHED FASTFIELDS field not in INCLUDE COLUMNS returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name') HASHED FASTFIELDS INCLUDE ('category')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'name') HASHED FASTFIELDS INCLUDE ('category')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("HASHED FASTFIELDS")
       result(0).getString(10) should include("INCLUDE COLUMNS")
@@ -510,9 +689,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R3: HASHED FASTFIELDS on non-string column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'score', 'name') HASHED FASTFIELDS INCLUDE ('score')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'score', 'name') HASHED FASTFIELDS INCLUDE ('score')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("HASHED FASTFIELDS")
       result(0).getString(10) should include("string type")
@@ -522,9 +707,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
   test("R3: zero indexed columns returns error") {
     withTempIndex { indexPath =>
       val allCols = sharedTableSchema.fieldNames.map(c => s"'$c'").mkString(", ")
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, s"EXCLUDE COLUMNS ($allCols)", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, s"EXCLUDE COLUMNS ($allCols)", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("zero indexed columns")
     }
@@ -532,9 +719,15 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("R3: HASHED FASTFIELDS on text mode field returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'message') INDEXING MODES ('message': 'text') HASHED FASTFIELDS INCLUDE ('message')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(
+            sharedTableId,
+            "INCLUDE COLUMNS ('id', 'name', 'message') INDEXING MODES ('message': 'text') HASHED FASTFIELDS INCLUDE ('message')",
+            indexPath
+          )
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("HASHED FASTFIELDS")
       result(0).getString(10) should include("text")
@@ -547,9 +740,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("BUG3: INDEXING MODES on EXCLUDE'd column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('message') INDEXING MODES ('message': 'text')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('message') INDEXING MODES ('message': 'text')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("INDEXING MODES")
       result(0).getString(10) should include("EXCLUDE COLUMNS")
@@ -558,9 +753,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("BUG3: HASHED FASTFIELDS on EXCLUDE'd column returns error") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS INCLUDE ('name')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS INCLUDE ('name')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("HASHED FASTFIELDS")
       result(0).getString(10) should include("EXCLUDE COLUMNS")
@@ -571,9 +768,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     // EXCLUDE COLUMNS removes 'name' from the index; HASHED FASTFIELDS EXCLUDE
     // also references 'name' — contradictory because the field is already gone.
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS EXCLUDE ('name')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS EXCLUDE ('name')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("HASHED FASTFIELDS")
       result(0).getString(10) should include("EXCLUDE COLUMNS")
@@ -585,9 +784,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     // EXCLUDE keeps 'ip_addr' as a regular (non-hashed) string column. Both
     // are string fields, neither overlaps — should build successfully.
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS EXCLUDE ('ip_addr')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('name') HASHED FASTFIELDS EXCLUDE ('ip_addr')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       // Sanity: non-excluded column is queryable, excluded column is absent
@@ -604,9 +805,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INCLUDE COLUMNS with only partition columns errors instead of silently indexing everything") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedPartitionedTableId, "INCLUDE COLUMNS ('region')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedPartitionedTableId, "INCLUDE COLUMNS ('region')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("only partition columns")
     }
@@ -614,9 +817,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("INCLUDE COLUMNS with mix of partition and non-partition columns succeeds") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedPartitionedTableId, "INCLUDE COLUMNS ('region', 'name')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedPartitionedTableId, "INCLUDE COLUMNS ('region', 'name')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -626,12 +831,14 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
 
   test("nonexistent column error does not show partition columns in Available columns hint") {
     withTempIndex { indexPath =>
-      val result = spark.sql(
-        buildCompanionSql(sharedPartitionedTableId, "INCLUDE COLUMNS ('nonexistent_col')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedPartitionedTableId, "INCLUDE COLUMNS ('nonexistent_col')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "error"
       result(0).getString(10) should include("nonexistent_col")
-      result(0).getString(10) should not include("region")
+      result(0).getString(10) should not include "region"
     }
   }
 
@@ -645,9 +852,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
   test("BUG1: EXCLUDE COLUMNS with wrong casing normalizes skip fields to schema casing") {
     withTempIndex { indexPath =>
       // Table has 3 rows (1 snapshot)
-      val result = spark.sql(
-        buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('NAME', 'Score', 'MESSAGE')", indexPath)
-      ).collect()
+      val result = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "EXCLUDE COLUMNS ('NAME', 'Score', 'MESSAGE')", indexPath)
+        )
+        .collect()
       result(0).getString(2) shouldBe "success"
 
       val df = readCompanion(indexPath)
@@ -658,9 +867,11 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
       appendData(sharedTableId, sharedTableSchema, appendRow4)
 
       // Incremental sync — proves skip fields were stored with correct casing
-      val result2 = spark.sql(
-        buildCompanionSql(sharedTableId, "", indexPath)
-      ).collect()
+      val result2 = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "", indexPath)
+        )
+        .collect()
       result2(0).getString(2) shouldBe "success"
 
       readCompanion(indexPath).count() shouldBe 4
@@ -670,17 +881,21 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
   test("R5: incremental sync reuses INCLUDE COLUMNS from metadata") {
     withTempIndex { indexPath =>
       // Table now has 4 rows (BUG1 appended row 4)
-      val result1 = spark.sql(
-        buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'score')", indexPath)
-      ).collect()
+      val result1 = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "INCLUDE COLUMNS ('id', 'name', 'score')", indexPath)
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
 
       // Append row 5
       appendData(sharedTableId, sharedTableSchema, appendRow5)
 
-      val result2 = spark.sql(
-        buildCompanionSql(sharedTableId, "", indexPath)
-      ).collect()
+      val result2 = spark
+        .sql(
+          buildCompanionSql(sharedTableId, "", indexPath)
+        )
+        .collect()
       result2(0).getString(2) shouldBe "success"
 
       readCompanion(indexPath).count() shouldBe 5
@@ -697,41 +912,50 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     // serializer round-trip is also covered format-independently by
     // JsonUtilTest.
     withTempPath { tempDir =>
-      val schema = StructType(Seq(
-        StructField("id", IntegerType),
-        StructField("revenue,usd", DoubleType),
-        StructField("name", StringType)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType),
+          StructField("revenue,usd", DoubleType),
+          StructField("name", StringType)
+        )
+      )
       val data = Seq(
         Row(1, 100.50, "alice"),
         Row(2, 250.00, "bob")
       )
       val tableId = newTableId(tempDir, "bug5_comma")
-      try {
+      try
         createSimpleTable(tableId, schema, data)
-      } catch {
-        case e: Exception if e.getMessage != null &&
-            (e.getMessage.contains("INVALID_CHARACTERS") ||
-             e.getMessage.contains("invalid character") ||
-             e.getMessage.contains("revenue,usd")) =>
-          cancel(s"$formatName format rejects comma in column names " +
-            s"at write time — JsonUtil round-trip covered by JsonUtilTest. (${e.getMessage.take(120)})")
+      catch {
+        case e: Exception
+            if e.getMessage != null &&
+              (e.getMessage.contains("INVALID_CHARACTERS") ||
+                e.getMessage.contains("invalid character") ||
+                e.getMessage.contains("revenue,usd")) =>
+          cancel(
+            s"$formatName format rejects comma in column names " +
+              s"at write time — JsonUtil round-trip covered by JsonUtilTest. (${e.getMessage.take(120)})"
+          )
       }
 
       val indexPath = new File(tempDir, "bug5_index").getAbsolutePath
 
       // Initial sync with INCLUDE COLUMNS containing the comma-bearing column
-      val result1 = spark.sql(
-        buildCompanionSql(tableId, "INCLUDE COLUMNS ('id', 'revenue,usd')", indexPath)
-      ).collect()
+      val result1 = spark
+        .sql(
+          buildCompanionSql(tableId, "INCLUDE COLUMNS ('id', 'revenue,usd')", indexPath)
+        )
+        .collect()
       result1(0).getString(2) shouldBe "success"
 
       // Append a row and run incremental sync — the stored INCLUDE list must
       // round-trip through the JSON serializer with the comma intact.
       appendData(tableId, schema, Seq(Row(3, 50.00, "charlie")))
-      val result2 = spark.sql(
-        buildCompanionSql(tableId, "", indexPath)
-      ).collect()
+      val result2 = spark
+        .sql(
+          buildCompanionSql(tableId, "", indexPath)
+        )
+        .collect()
       result2(0).getString(2) shouldBe "success"
 
       readCompanion(indexPath).count() shouldBe 3
@@ -818,7 +1042,7 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     val row = syncEvolution("mixed")
     row.getString(2) shouldBe "error"
     row.getString(10) should include("scale decreased from 5 to 3")
-    row.getString(10) should not include("precision decreased")
+    row.getString(10) should not include "precision decreased"
   }
 
   test("R6: breaking type change (INT to STRING) returns error on incremental sync") {
@@ -837,7 +1061,7 @@ trait CompanionColumnsTestBase extends AnyFunSuite with Matchers with BeforeAndA
     // changes that would trigger downstream R6 validation errors.
     val droppedFields = sharedTableSchema.fields.filterNot(_.name == "category")
     val droppedSchema = StructType(droppedFields)
-    val categoryIdx = sharedTableSchema.fieldIndex("category")
+    val categoryIdx   = sharedTableSchema.fieldIndex("category")
     val droppedData = sharedTableData.map { row =>
       Row.fromSeq(row.toSeq.zipWithIndex.filterNot(_._2 == categoryIdx).map(_._1))
     }

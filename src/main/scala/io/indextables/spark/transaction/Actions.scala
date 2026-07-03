@@ -50,19 +50,18 @@ case class DocMappingMetadata(
   /**
    * Determine whether a field is tokenized based on its docMapping type and tokenizer.
    *
-   * A field is tokenized if its type is "text" AND its tokenizer is not "raw".
-   * When the tokenizer key is absent from docMapping, `forall(_ != "raw")` returns true,
-   * treating the field as tokenized. This is correct: Tantivy's default tokenizer for
-   * text fields is "default" (tokenized). The only way a text field is non-tokenized is
-   * with an explicit `"tokenizer": "raw"` entry.
+   * A field is tokenized if its type is "text" AND its tokenizer is not "raw". When the tokenizer key is absent from
+   * docMapping, `forall(_ != "raw")` returns true, treating the field as tokenized. This is correct: Tantivy's default
+   * tokenizer for text fields is "default" (tokenized). The only way a text field is non-tokenized is with an explicit
+   * `"tokenizer": "raw"` entry.
    *
-   * @return Some(true) if tokenized, Some(false) if not tokenized, None if field unknown
+   * @return
+   *   Some(true) if tokenized, Some(false) if not tokenized, None if field unknown
    */
-  def isTokenizedField(fieldName: String): Option[Boolean] = {
+  def isTokenizedField(fieldName: String): Option[Boolean] =
     fieldTypes.get(fieldName).map { fieldType =>
       fieldType == "text" && fieldTokenizers.get(fieldName).forall(_ != "raw")
     }
-  }
 }
 
 object DocMappingMetadata {
@@ -123,13 +122,18 @@ object DocMappingMetadata {
           val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
           fieldTypes += (name -> fieldType)
 
-          Option(fieldNode.get("tokenizer")).foreach { tok =>
-            fieldTokenizers += (name -> tok.asText())
-          }
+          Option(fieldNode.get("tokenizer")).foreach(tok => fieldTokenizers += (name -> tok.asText()))
         }
       }
 
-      DocMappingMetadata(fieldNames.toSet, fastFields.toSet, fieldTypes.toMap, indexedFields.toSet, storedFields.toSet, fieldTokenizers.toMap)
+      DocMappingMetadata(
+        fieldNames.toSet,
+        fastFields.toSet,
+        fieldTypes.toMap,
+        indexedFields.toSet,
+        storedFields.toSet,
+        fieldTokenizers.toMap
+      )
     } catch {
       case e: Exception =>
         logger.warn(s"Failed to parse docMappingJson, returning empty metadata: ${e.getMessage}")

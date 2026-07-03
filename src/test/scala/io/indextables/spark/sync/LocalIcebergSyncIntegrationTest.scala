@@ -50,10 +50,10 @@ class LocalIcebergSyncIntegrationTest
     with IcebergTestSupport
     with io.indextables.spark.testutils.FileCleanupHelper {
 
-  private val REST_URI         = "http://localhost:8181"
-  private val MINIO_ENDPOINT   = "http://localhost:9000"
-  private val MINIO_ACCESS_KEY = "admin"
-  private val MINIO_SECRET_KEY = "password"
+  private val REST_URI            = "http://localhost:8181"
+  private val MINIO_ENDPOINT      = "http://localhost:9000"
+  private val MINIO_ACCESS_KEY    = "admin"
+  private val MINIO_SECRET_KEY    = "password"
   private val TABLE_IDENTIFIER    = "default.test_events"
   private val TABLE_IDENTIFIER_V2 = "default.test_events_v2"
 

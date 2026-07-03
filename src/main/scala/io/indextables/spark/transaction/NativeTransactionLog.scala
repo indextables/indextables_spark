@@ -122,7 +122,11 @@ class NativeTransactionLog(
   override def initialize(schema: StructType, partitionColumns: Seq[String]): Unit =
     initialize(schema, partitionColumns, Map.empty)
 
-  override def initialize(schema: StructType, partitionColumns: Seq[String], configuration: Map[String, String]): Unit = {
+  override def initialize(
+    schema: StructType,
+    partitionColumns: Seq[String],
+    configuration: Map[String, String]
+  ): Unit = {
     // Validate partition columns exist in schema
     val schemaFieldNames = schema.fieldNames.toSet
     partitionColumns.foreach { col =>

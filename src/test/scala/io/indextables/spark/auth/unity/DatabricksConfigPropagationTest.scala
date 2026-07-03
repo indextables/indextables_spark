@@ -377,9 +377,9 @@ class DatabricksConfigPropagationTest extends TestBase {
     // in source 1 (prefix-stripped) when the full key is present in the Hadoop config.
 
     val oauthConfigs = Map(
-      "spark.indextables.databricks.workspaceUrl"   -> testWorkspaceUrl,
-      "spark.indextables.databricks.clientId"       -> "my-client-id",
-      "spark.indextables.databricks.clientSecret"   -> "my-client-secret"
+      "spark.indextables.databricks.workspaceUrl" -> testWorkspaceUrl,
+      "spark.indextables.databricks.clientId"     -> "my-client-id",
+      "spark.indextables.databricks.clientSecret" -> "my-client-secret"
     )
 
     val hadoopConf = new Configuration()

@@ -23,9 +23,7 @@ import java.nio.file.Files
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types.StructType
 
-/**
- * Delta-format implementation of the companion INCLUDE/EXCLUDE COLUMNS test suite.
- */
+/** Delta-format implementation of the companion INCLUDE/EXCLUDE COLUMNS test suite. */
 class DeltaCompanionColumnsTest extends CompanionColumnsTestBase {
 
   override def formatName: String = "delta"
@@ -84,24 +82,47 @@ class DeltaCompanionColumnsTest extends CompanionColumnsTestBase {
       (1, "alice", 100.0, "region_a"),
       (2, "bob", 200.5, "region_b"),
       (3, "charlie", 300.75, "region_a")
-    ).toDF("id", "name", "score", "region")
-      .write.format("delta").partitionBy("region").mode("overwrite").save(tableId)
+    ).toDF("id", "name", "score", "region").write.format("delta").partitionBy("region").mode("overwrite").save(tableId)
   }
 
-  override def createSimpleTable(tableId: String, schema: StructType, data: Seq[Row]): Unit =
-    spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-      .write.format("delta").mode("overwrite").save(tableId)
+  override def createSimpleTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit =
+    spark
+      .createDataFrame(spark.sparkContext.parallelize(data), schema)
+      .write
+      .format("delta")
+      .mode("overwrite")
+      .save(tableId)
 
-  override def recreateTable(tableId: String, schema: StructType, data: Seq[Row]): Unit = {
+  override def recreateTable(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit = {
     deleteRecursively(new File(tableId))
     createSimpleTable(tableId, schema, data)
   }
 
-  override def appendData(tableId: String, schema: StructType, data: Seq[Row]): Unit =
-    spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
-      .write.format("delta").mode("append").save(tableId)
+  override def appendData(
+    tableId: String,
+    schema: StructType,
+    data: Seq[Row]
+  ): Unit =
+    spark
+      .createDataFrame(spark.sparkContext.parallelize(data), schema)
+      .write
+      .format("delta")
+      .mode("append")
+      .save(tableId)
 
-  override def buildCompanionSql(tableId: String, clauses: String, indexPath: String): String = {
+  override def buildCompanionSql(
+    tableId: String,
+    clauses: String,
+    indexPath: String
+  ): String = {
     val c = if (clauses.nonEmpty) s" $clauses" else ""
     s"BUILD INDEXTABLES COMPANION FOR DELTA '$tableId'$c AT LOCATION '$indexPath'"
   }

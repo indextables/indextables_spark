@@ -20,8 +20,8 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 
 /**
- * Spark-version parser shim (spark-3.5 variant). Spark 3.5's ParserInterface has no methods beyond those implemented
- * in the shared IndexTables4SparkSqlParser, so this trait only declares the delegate.
+ * Spark-version parser shim (spark-3.5 variant). Spark 3.5's ParserInterface has no methods beyond those implemented in
+ * the shared IndexTables4SparkSqlParser, so this trait only declares the delegate.
  */
 trait IndexTables4SparkParserShims {
   protected def delegate: ParserInterface

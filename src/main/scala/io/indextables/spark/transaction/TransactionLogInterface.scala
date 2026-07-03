@@ -75,7 +75,11 @@ trait TransactionLogInterface extends AutoCloseable {
    * @param configuration
    *   Additional configuration entries to persist in metadata
    */
-  def initialize(schema: StructType, partitionColumns: Seq[String], configuration: Map[String, String]): Unit =
+  def initialize(
+    schema: StructType,
+    partitionColumns: Seq[String],
+    configuration: Map[String, String]
+  ): Unit =
     initialize(schema, partitionColumns) // Default: delegates to 2-param version for backwards compat
 
   /**

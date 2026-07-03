@@ -24,41 +24,29 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.catalog.{
-  Identifier,
-  NamespaceChange,
-  Table,
-  TableCatalog,
-  TableChange
-}
+import org.apache.spark.sql.connector.catalog.{Identifier, NamespaceChange, Table, TableCatalog, TableChange}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.catalog.IndexTablesCatalog
 import io.indextables.spark.storage.SplitConversionThrottle
 import io.indextables.spark.testutils.FileCleanupHelper
-
-import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Integration tests for IndexTablesCatalog / IndexTables4SparkCatalog.
  *
- * Uses a Delta source catalog (spark_catalog → DeltaCatalog) and the IndexTablesCatalog as
- * the "indextables" named catalog. Tests write IndexTables data locally, set TBLPROPERTIES on
- * the Delta source, then read via the catalog.
+ * Uses a Delta source catalog (spark_catalog → DeltaCatalog) and the IndexTablesCatalog as the "indextables" named
+ * catalog. Tests write IndexTables data locally, set TBLPROPERTIES on the Delta source, then read via the catalog.
  */
-class IndexTablesCatalogTest
-    extends AnyFunSuite
-    with Matchers
-    with BeforeAndAfterAll
-    with FileCleanupHelper {
+class IndexTablesCatalogTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with FileCleanupHelper {
 
-  protected var spark: SparkSession  = _
-  protected var tempDir: String      = _
+  protected var spark: SparkSession = _
+  protected var tempDir: String     = _
 
   private val IT_FORMAT = "io.indextables.provider.IndexTablesProvider"
 
@@ -110,10 +98,10 @@ class IndexTablesCatalogTest
   // ---------------------------------------------------------------------------
   private def writeIndexTable(subdir: String): String = {
     val path = s"$tempDir/$subdir"
-    val ss = spark; import ss.implicits._
+    val ss   = spark; import ss.implicits._
     val df = Seq(
       ("alice", "alice@example.com"),
-      ("bob",   "bob@example.com")
+      ("bob", "bob@example.com")
     ).toDF("name", "email")
 
     df.write
@@ -127,9 +115,9 @@ class IndexTablesCatalogTest
   // Helper: create a Delta source table in "default" namespace, set TBLPROPERTIES
   // ---------------------------------------------------------------------------
   private def createDeltaSourceTable(tableName: String, indexPath: String): Unit = {
-    val ss = spark; import ss.implicits._
+    val ss        = spark; import ss.implicits._
     val deltaPath = s"$tempDir/delta_$tableName"
-    val df = Seq(("alice", "alice@example.com")).toDF("name", "email")
+    val df        = Seq(("alice", "alice@example.com")).toDF("name", "email")
     df.write.format("delta").mode("overwrite").save(deltaPath)
 
     // Register as managed table via SQL
@@ -166,13 +154,13 @@ class IndexTablesCatalogTest
     val indexPath = writeIndexTable("test_3seg")
     createDeltaSourceTable("t3seg", indexPath)
 
-    val ident = Identifier.of(Array("spark_catalog", "default"), "t3seg")
+    val ident   = Identifier.of(Array("spark_catalog", "default"), "t3seg")
     val catalog = spark.sessionState.catalogManager.catalog("indextables").asInstanceOf[TableCatalog]
 
     // Override relative path to '.' so the resolved path == indexPath exactly
     val table = catalog.loadTable(ident)
     table should not be null
-    table.schema().fieldNames should contain allOf("name", "email")
+    table.schema().fieldNames should contain allOf ("name", "email")
   }
 
   // ---------------------------------------------------------------------------
@@ -181,10 +169,9 @@ class IndexTablesCatalogTest
 
   test("loadTable resolves 4-segment identifier (multi-level namespace)") {
     val indexPath = writeIndexTable("test_4seg")
-    val ss = spark; import ss.implicits._
+    val ss        = spark; import ss.implicits._
     val deltaPath = s"$tempDir/delta_4seg"
-    Seq(("alice", "alice@example.com")).toDF("name", "email")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    Seq(("alice", "alice@example.com")).toDF("name", "email").write.format("delta").mode("overwrite").save(deltaPath)
 
     // Create a two-level namespace by saving to a path-based location
     spark.sql("DROP TABLE IF EXISTS default.t4seg")
@@ -227,10 +214,9 @@ class IndexTablesCatalogTest
   // ---------------------------------------------------------------------------
 
   test("loadTable throws IllegalArgumentException with ALTER TABLE hint when properties missing") {
-    val ss = spark; import ss.implicits._
+    val ss        = spark; import ss.implicits._
     val deltaPath = s"$tempDir/delta_noprops"
-    Seq(("alice", "alice@example.com")).toDF("name", "email")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    Seq(("alice", "alice@example.com")).toDF("name", "email").write.format("delta").mode("overwrite").save(deltaPath)
 
     spark.sql("DROP TABLE IF EXISTS default.noprops")
     spark.sql(s"""
@@ -274,10 +260,9 @@ class IndexTablesCatalogTest
 
   test("loadTable throws IllegalArgumentException when resolved path has no transaction log") {
     val nonExistentPath = s"$tempDir/does_not_exist"
-    val ss = spark; import ss.implicits._
-    val deltaPath = s"$tempDir/delta_notxlog"
-    Seq(("alice", "alice@example.com")).toDF("name", "email")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    val ss              = spark; import ss.implicits._
+    val deltaPath       = s"$tempDir/delta_notxlog"
+    Seq(("alice", "alice@example.com")).toDF("name", "email").write.format("delta").mode("overwrite").save(deltaPath)
 
     spark.sql("DROP TABLE IF EXISTS default.notxlog")
     spark.sql(s"""
@@ -374,7 +359,7 @@ class IndexTablesCatalogTest
 
     val df = spark.read.table("indextables.spark_catalog.default.te2e")
     df.count() shouldBe 2L
-    df.columns should contain allOf("name", "email")
+    df.columns should contain allOf ("name", "email")
 
     val names = df.select("name").collect().map(_.getString(0)).toSet
     names should contain("alice")
@@ -387,10 +372,9 @@ class IndexTablesCatalogTest
 
   test("region-specific indexroot property used when it matches detected region") {
     val indexPath = writeIndexTable("test_regionkey")
-    val ss = spark; import ss.implicits._
+    val ss        = spark; import ss.implicits._
     val deltaPath = s"$tempDir/delta_regionkey"
-    Seq(("alice", "alice@example.com")).toDF("name", "email")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    Seq(("alice", "alice@example.com")).toDF("name", "email").write.format("delta").mode("overwrite").save(deltaPath)
 
     spark.sql("DROP TABLE IF EXISTS default.regionkey")
     spark.sql(s"""
@@ -417,10 +401,9 @@ class IndexTablesCatalogTest
 
   test("fallback indexroot used when no region-specific key matches") {
     val indexPath = writeIndexTable("test_fallback")
-    val ss = spark; import ss.implicits._
+    val ss        = spark; import ss.implicits._
     val deltaPath = s"$tempDir/delta_fallback"
-    Seq(("alice", "alice@example.com")).toDF("name", "email")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    Seq(("alice", "alice@example.com")).toDF("name", "email").write.format("delta").mode("overwrite").save(deltaPath)
 
     spark.sql("DROP TABLE IF EXISTS default.fallbacktest")
     spark.sql(s"""
@@ -462,19 +445,24 @@ class IndexTablesCatalogTest
 
   test("indexquery via catalog returns matching rows") {
     val path = s"$tempDir/tiq"
-    val ss = spark; import ss.implicits._
+    val ss   = spark; import ss.implicits._
     Seq(
       ("hello world", "doc1"),
       ("goodbye world", "doc2")
     ).toDF("content", "id")
-      .write.mode("overwrite")
+      .write
+      .mode("overwrite")
       .format(IT_FORMAT)
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(path)
 
     val deltaPath = s"$tempDir/delta_tiq"
-    Seq(("hello world", "doc1"), ("goodbye world", "doc2")).toDF("content", "id")
-      .write.format("delta").mode("overwrite").save(deltaPath)
+    Seq(("hello world", "doc1"), ("goodbye world", "doc2"))
+      .toDF("content", "id")
+      .write
+      .format("delta")
+      .mode("overwrite")
+      .save(deltaPath)
 
     spark.sql("DROP TABLE IF EXISTS default.tiq")
     spark.sql(s"""
@@ -492,9 +480,11 @@ class IndexTablesCatalogTest
     // Use collect() on a fresh query each time to avoid Spark's analyzed-plan cache:
     // calling df.count() first would cache the plan with Literal(true) in place of the
     // IndexQueryExpression, so a subsequent df.collect() would see no IndexQuery to push down.
-    val rows = spark.sql(
-      "SELECT * FROM indextables.spark_catalog.default.tiq WHERE content indexquery 'hello'"
-    ).collect()
+    val rows = spark
+      .sql(
+        "SELECT * FROM indextables.spark_catalog.default.tiq WHERE content indexquery 'hello'"
+      )
+      .collect()
     rows should have length 1
     rows.head.getAs[String]("id") shouldBe "doc1"
   }
@@ -505,12 +495,12 @@ class IndexTablesCatalogTest
 // ---------------------------------------------------------------------------
 
 /**
- * A minimal CatalogPlugin that does NOT implement TableCatalog, used to test the
- * "source catalog is not a TableCatalog" error path.
+ * A minimal CatalogPlugin that does NOT implement TableCatalog, used to test the "source catalog is not a TableCatalog"
+ * error path.
  */
 class NonTableCatalogPlugin extends org.apache.spark.sql.connector.catalog.CatalogPlugin {
   override def initialize(name: String, options: CaseInsensitiveStringMap): Unit = {}
-  override def name(): String = "nocatalog"
+  override def name(): String                                                    = "nocatalog"
 }
 
 /** Companion object to pass test state into CountingTableCatalog instances. */
@@ -520,13 +510,11 @@ object CountingTableCatalog {
   val sharedCounter: AtomicInteger = new AtomicInteger(0)
 }
 
-/**
- * A minimal TableCatalog backed by an in-memory map, with a call counter for cache validation.
- */
+/** A minimal TableCatalog backed by an in-memory map, with a call counter for cache validation. */
 class CountingTableCatalog(
   tables: Map[String, Map[String, String]],
-  counter: AtomicInteger
-) extends TableCatalog {
+  counter: AtomicInteger)
+    extends TableCatalog {
 
   // No-arg constructor needed for Spark's reflective instantiation.
   // Uses the companion-object sharedCounter so the test can observe increments.
@@ -537,9 +525,8 @@ class CountingTableCatalog(
 
   private var catalogNameInternal: String = _
 
-  override def initialize(name: String, options: CaseInsensitiveStringMap): Unit = {
+  override def initialize(name: String, options: CaseInsensitiveStringMap): Unit =
     catalogNameInternal = name
-  }
 
   override def name(): String = catalogNameInternal
 
@@ -573,8 +560,8 @@ class CountingTableCatalog(
 }
 
 /**
- * A minimal Table implementation that exposes a fixed properties map, used to simulate
- * a source table with TBLPROPERTIES in unit tests.
+ * A minimal Table implementation that exposes a fixed properties map, used to simulate a source table with
+ * TBLPROPERTIES in unit tests.
  */
 class PropertiesOnlyTable(props: Map[String, String]) extends Table {
   override def name(): String = "mock-table"

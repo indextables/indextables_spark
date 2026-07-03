@@ -67,37 +67,34 @@ import org.slf4j.LoggerFactory
  *
  * ==Destination metadata is read up to 3× per sync — and that is fine (do not "fix" it)==
  *
- * This command opens the destination companion's transaction log to read its metadata at three
- * separate sites, and this pattern has been flagged in multiple PR reviews as a suspected 3×
- * cold-cache S3 cost. It is not. All three reads hit a single, process-wide cache entry, so only
- * the first read pays for the checkpoint; the other two are effectively free. See issue #301 for
- * the full investigation. The three sites are:
+ * This command opens the destination companion's transaction log to read its metadata at three separate sites, and this
+ * pattern has been flagged in multiple PR reviews as a suspected 3× cold-cache S3 cost. It is not. All three reads hit
+ * a single, process-wide cache entry, so only the first read pays for the checkpoint; the other two are effectively
+ * free. See issue #301 for the full investigation. The three sites are:
  *
- *   1. `earlyStoredConfig` (in `run`, iceberg/delta only) — restores CATALOG/TYPE/WAREHOUSE before
- *      the source reader is built.
- *   2. `storedConfig` (in `executeSyncWithReader`, via the long-lived `transactionLog`) — restores
- *      INCLUDE/EXCLUDE COLUMNS, INDEXING MODES, HASHED FASTFIELDS, and WHERE from existing metadata.
- *   3. `cheapStoredConfig` (in `cheapSourceVersion`) — honors the SQL > stored > SparkConf catalog
- *      fallback chain on each streaming poll cycle.
+ *   1. `earlyStoredConfig` (in `run`, iceberg/delta only) — restores CATALOG/TYPE/WAREHOUSE before the source reader is
+ *      built. 2. `storedConfig` (in `executeSyncWithReader`, via the long-lived `transactionLog`) — restores
+ *      INCLUDE/EXCLUDE COLUMNS, INDEXING MODES, HASHED FASTFIELDS, and WHERE from existing metadata. 3.
+ *      `cheapStoredConfig` (in `cheapSourceVersion`) — honors the SQL > stored > SparkConf catalog fallback chain on
+ *      each streaming poll cycle.
  *
  * Why the cache covers all three:
- *   - The transaction-log cache (tantivy4java `txlog/cache.rs`) is a JVM-wide registry keyed by
- *     `RegistryKey { table_path, ttl_ms, version/snapshot/file_list capacity }` — NOT by the
- *     `CaseInsensitiveStringMap` options. Credentials and the injected `iceberg.uc.tableId` differ
- *     between these sites but are excluded from the key, so all three (same `destPath`, default
- *     TTL/capacities) resolve to the same `Arc<TxLogCache>`. The "different options → different
- *     cache key" concern is therefore unfounded.
- *   - Cold start pays 1×, not 3×: read 1 is the only miss and populates metadata, last-checkpoint,
- *     state-manifest, and version-list caches; reads 2 and 3 hit them and issue zero checkpoint
- *     GETs (residual cost is a Guava-cached credential refresh and, at most, one cheap HEAD probe
- *     for new commits). Nothing invalidates the destination cache between reads 1 and 2 — the only
- *     `commitSyncActions`/`invalidateCache` happens after both, at the end of the sync.
- *   - `NativeTransactionLog` sets `cache.ttl.ms=300000`, which overrides all cache tiers (including
- *     metadata) to 5 min. Streaming polls under that interval hit the cache; a longer interval
- *     re-reads metadata once per interval, which is negligible.
+ *   - The transaction-log cache (tantivy4java `txlog/cache.rs`) is a JVM-wide registry keyed by `RegistryKey {
+ *     table_path, ttl_ms, version/snapshot/file_list capacity }` — NOT by the `CaseInsensitiveStringMap` options.
+ *     Credentials and the injected `iceberg.uc.tableId` differ between these sites but are excluded from the key, so
+ *     all three (same `destPath`, default TTL/capacities) resolve to the same `Arc<TxLogCache>`. The "different options
+ *     → different cache key" concern is therefore unfounded.
+ *   - Cold start pays 1×, not 3×: read 1 is the only miss and populates metadata, last-checkpoint, state-manifest, and
+ *     version-list caches; reads 2 and 3 hit them and issue zero checkpoint GETs (residual cost is a Guava-cached
+ *     credential refresh and, at most, one cheap HEAD probe for new commits). Nothing invalidates the destination cache
+ *     between reads 1 and 2 — the only `commitSyncActions`/`invalidateCache` happens after both, at the end of the
+ *     sync.
+ *   - `NativeTransactionLog` sets `cache.ttl.ms=300000`, which overrides all cache tiers (including metadata) to 5 min.
+ *     Streaming polls under that interval hit the cache; a longer interval re-reads metadata once per interval, which
+ *     is negligible.
  *
- * Bottom line: do not thread a single `TransactionLog` through these sites to "save" reads — the
- * cache already does that, and the plumbing would add complexity for no measurable benefit.
+ * Bottom line: do not thread a single `TransactionLog` through these sites to "save" reads — the cache already does
+ * that, and the plumbing would add complexity for no measurable benefit.
  */
 case class SyncToExternalCommand(
   sourceFormat: String,
@@ -537,44 +534,60 @@ case class SyncToExternalCommand(
 
       // Read stored companion metadata once for incremental sync
       val storedConfig: Map[String, String] = if (!isInitialSync) {
-        try { transactionLog.getMetadata().configuration } catch { case _: Exception => Map.empty }
+        try transactionLog.getMetadata().configuration
+        catch { case _: Exception => Map.empty }
       } else Map.empty
 
       def storedCsv(key: String): Seq[String] =
-        storedConfig.get(key).filter(_.nonEmpty).map { value =>
-          if (value.startsWith("[")) {
-            // JSON array format (new)
-            io.indextables.spark.util.JsonUtil.parseStringArray(value)
-          } else {
-            // CSV format (legacy)
-            value.split(",").map(_.trim).toSeq
+        storedConfig
+          .get(key)
+          .filter(_.nonEmpty)
+          .map { value =>
+            if (value.startsWith("[")) {
+              // JSON array format (new)
+              io.indextables.spark.util.JsonUtil.parseStringArray(value)
+            } else {
+              // CSV format (legacy)
+              value.split(",").map(_.trim).toSeq
+            }
           }
-        }.getOrElse(Seq.empty)
+          .getOrElse(Seq.empty)
 
       def storedJsonMap(key: String): Map[String, String] =
-        storedConfig.get(key).map { json =>
-          import com.fasterxml.jackson.core.`type`.TypeReference
-          io.indextables.spark.util.JsonUtil.mapper
-            .readValue(json, new TypeReference[java.util.Map[String, String]]() {}).asScala.toMap
-        }.getOrElse(Map.empty)
+        storedConfig
+          .get(key)
+          .map { json =>
+            import com.fasterxml.jackson.core.`type`.TypeReference
+            io.indextables.spark.util.JsonUtil.mapper
+              .readValue(json, new TypeReference[java.util.Map[String, String]]() {})
+              .asScala
+              .toMap
+          }
+          .getOrElse(Map.empty)
 
       // 6a. Resolve effective include/exclude columns
       val (effectiveIncludeColumns, effectiveExcludeColumns) = {
         val storedInclude = storedCsv("indextables.companion.includeColumns")
         val storedExclude = storedCsv("indextables.companion.excludeColumns")
 
-        val effInclude = if (includeColumns.nonEmpty) includeColumns
+        val effInclude =
+          if (includeColumns.nonEmpty) includeColumns
           else storedInclude
-        val effExclude = if (excludeColumns.nonEmpty) excludeColumns
+        val effExclude =
+          if (excludeColumns.nonEmpty) excludeColumns
           else storedExclude
 
         // R5: Warn if column selection changed between syncs
-        if (!isInitialSync && includeColumns.nonEmpty && storedInclude.nonEmpty &&
-            includeColumns.map(_.toLowerCase).toSet != storedInclude.map(_.toLowerCase).toSet) {
+        if (
+          !isInitialSync && includeColumns.nonEmpty && storedInclude.nonEmpty &&
+          includeColumns.map(_.toLowerCase).toSet != storedInclude.map(_.toLowerCase).toSet
+        ) {
           logger.warn("INCLUDE COLUMNS changed since last sync. Old splits may have different indexed columns.")
         }
-        if (!isInitialSync && excludeColumns.nonEmpty && storedExclude.nonEmpty &&
-            excludeColumns.map(_.toLowerCase).toSet != storedExclude.map(_.toLowerCase).toSet) {
+        if (
+          !isInitialSync && excludeColumns.nonEmpty && storedExclude.nonEmpty &&
+          excludeColumns.map(_.toLowerCase).toSet != storedExclude.map(_.toLowerCase).toSet
+        ) {
           logger.warn("EXCLUDE COLUMNS changed since last sync. Old splits may have different indexed columns.")
         }
 
@@ -635,8 +648,10 @@ case class SyncToExternalCommand(
               val excludedLower = effExclude.map(_.toLowerCase).toSet
               sourceSchema.fields.foreach { field =>
                 val colLower = field.name.toLowerCase
-                if (!excludedLower.contains(colLower) && !partitionColumnsLower.contains(colLower) &&
-                    !storedColumnTypes.contains(colLower)) {
+                if (
+                  !excludedLower.contains(colLower) && !partitionColumnsLower.contains(colLower) &&
+                  !storedColumnTypes.contains(colLower)
+                ) {
                   logger.warn(
                     s"New column '${field.name}' detected in source schema, not in EXCLUDE COLUMNS, will be indexed."
                   )
@@ -665,13 +680,13 @@ case class SyncToExternalCommand(
                     val isWidening = (storedType, currentType) match {
                       case ("tinyint", "smallint") | ("tinyint", "int") | ("tinyint", "bigint") => true
                       case ("smallint", "int") | ("smallint", "bigint")                         => true
-                      case ("int", "bigint")                                                     => true
-                      case ("float", "double")                                                   => true
+                      case ("int", "bigint")                                                    => true
+                      case ("float", "double")                                                  => true
                       case _ if storedType.startsWith("decimal") && currentType.startsWith("decimal") =>
                         (storedType, currentType) match {
                           case (decPattern(sp, ss), decPattern(cp, cs)) =>
                             val precisionOk = cp.toInt >= sp.toInt
-                            val scaleOk = cs.toInt >= ss.toInt
+                            val scaleOk     = cs.toInt >= ss.toInt
                             if (precisionOk && scaleOk) {
                               true
                             } else {
@@ -686,7 +701,7 @@ case class SyncToExternalCommand(
                             }
                           case _ => false
                         }
-                      case _                                                                     => false
+                      case _ => false
                     }
                     if (isWidening) {
                       logger.warn(
@@ -710,8 +725,10 @@ case class SyncToExternalCommand(
 
       // Defensive guard: mutual exclusivity should be enforced at parse time, but verify
       // after metadata restore in case stored metadata is corrupted
-      require(!(effectiveIncludeColumns.nonEmpty && effectiveExcludeColumns.nonEmpty),
-        "Cannot have both INCLUDE COLUMNS and EXCLUDE COLUMNS — check stored companion metadata for corruption.")
+      require(
+        !(effectiveIncludeColumns.nonEmpty && effectiveExcludeColumns.nonEmpty),
+        "Cannot have both INCLUDE COLUMNS and EXCLUDE COLUMNS — check stored companion metadata for corruption."
+      )
 
       // Helper: format available columns truncated at 20
       def formatAvailableColumns(cols: Seq[String]): String = {
@@ -856,40 +873,45 @@ case class SyncToExternalCommand(
 
       // R2: Validate INDEXING MODES type compatibility
       if (effectiveIndexingModes.nonEmpty) {
-        effectiveIndexingModes.foreach { case (field, mode) =>
-          val fieldType = fieldByLowerName.get(field.toLowerCase).map(_.dataType)
-          fieldType.foreach { dt =>
-            val modeLower = mode.toLowerCase
-            val requiresString = modeLower == "text" || modeLower == "ip" || modeLower == "ipaddress" ||
-              modeLower == "exact_only" || modeLower == "string" ||
-              IndexingModes.isCompactStringMode(mode)
-            val isJsonMode = modeLower == "json"
+        effectiveIndexingModes.foreach {
+          case (field, mode) =>
+            val fieldType = fieldByLowerName.get(field.toLowerCase).map(_.dataType)
+            fieldType.foreach { dt =>
+              val modeLower = mode.toLowerCase
+              val requiresString = modeLower == "text" || modeLower == "ip" || modeLower == "ipaddress" ||
+                modeLower == "exact_only" || modeLower == "string" ||
+                IndexingModes.isCompactStringMode(mode)
+              val isJsonMode = modeLower == "json"
 
-            if (requiresString && dt != org.apache.spark.sql.types.StringType) {
-              throw new IllegalArgumentException(
-                s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode '$mode'. " +
-                  s"Mode '$mode' requires string type."
-              )
-            }
-            if (isJsonMode && dt != org.apache.spark.sql.types.StringType &&
+              if (requiresString && dt != org.apache.spark.sql.types.StringType) {
+                throw new IllegalArgumentException(
+                  s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode '$mode'. " +
+                    s"Mode '$mode' requires string type."
+                )
+              }
+              if (
+                isJsonMode && dt != org.apache.spark.sql.types.StringType &&
                 !dt.isInstanceOf[org.apache.spark.sql.types.StructType] &&
                 !dt.isInstanceOf[org.apache.spark.sql.types.ArrayType] &&
-                !dt.isInstanceOf[org.apache.spark.sql.types.MapType]) {
-              throw new IllegalArgumentException(
-                s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode 'json'. " +
-                  s"Mode 'json' requires string, struct, array, or map type."
-              )
+                !dt.isInstanceOf[org.apache.spark.sql.types.MapType]
+              ) {
+                throw new IllegalArgumentException(
+                  s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode 'json'. " +
+                    s"Mode 'json' requires string, struct, array, or map type."
+                )
+              }
+              // Struct/Array/Map columns must use 'json' mode if explicitly set
+              if (
+                !isJsonMode && (dt.isInstanceOf[org.apache.spark.sql.types.StructType] ||
+                  dt.isInstanceOf[org.apache.spark.sql.types.ArrayType] ||
+                  dt.isInstanceOf[org.apache.spark.sql.types.MapType])
+              ) {
+                throw new IllegalArgumentException(
+                  s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode '$mode'. " +
+                    s"Struct, array, and map types require mode 'json'."
+                )
+              }
             }
-            // Struct/Array/Map columns must use 'json' mode if explicitly set
-            if (!isJsonMode && (dt.isInstanceOf[org.apache.spark.sql.types.StructType] ||
-                dt.isInstanceOf[org.apache.spark.sql.types.ArrayType] ||
-                dt.isInstanceOf[org.apache.spark.sql.types.MapType])) {
-              throw new IllegalArgumentException(
-                s"Field '$field' has type ${dt.simpleString} which is not compatible with indexing mode '$mode'. " +
-                  s"Struct, array, and map types require mode 'json'."
-              )
-            }
-          }
         }
       }
 
@@ -957,7 +979,8 @@ case class SyncToExternalCommand(
         }
         // Validate hashed fastfields are not text fields — hashing a tokenized text field is meaningless
         val fieldMode = effectiveIndexingModes
-          .find(_._1.equalsIgnoreCase(field)).map(_._2)
+          .find(_._1.equalsIgnoreCase(field))
+          .map(_._2)
         fieldMode.foreach { mode =>
           if (mode.toLowerCase == "text") {
             throw new IllegalArgumentException(
@@ -993,12 +1016,14 @@ case class SyncToExternalCommand(
       // When no HASHED FASTFIELDS clause is specified, tantivy4java hashes ALL string columns by default,
       // which can produce oversized splits with many useless hashed columns.
       if (effectiveHfInclude.isEmpty && effectiveHfExclude.isEmpty) {
-        val textFields = effectiveIndexingModes.collect { case (f, m) if m.toLowerCase == "text" => f.toLowerCase }.toSet
+        val textFields = effectiveIndexingModes.collect {
+          case (f, m) if m.toLowerCase == "text" => f.toLowerCase
+        }.toSet
         val hashableStringColumns = sourceSchema.fields.count { field =>
           field.dataType == StringType &&
-            !textFields.contains(field.name.toLowerCase) &&
-            !partitionColumnsLower.contains(field.name.toLowerCase) &&
-            !skipFieldsLower.contains(field.name.toLowerCase)
+          !textFields.contains(field.name.toLowerCase) &&
+          !partitionColumnsLower.contains(field.name.toLowerCase) &&
+          !skipFieldsLower.contains(field.name.toLowerCase)
         }
         val maxAutomaticHashedFastfields = mergedConfigs
           .get("spark.indextables.companion.maxAutomaticHashedFastfields")
@@ -1543,7 +1568,7 @@ case class SyncToExternalCommand(
     storedConfig: Map[String, String] = Map.empty
   ): MetadataAction = {
     val existingMetadata = transactionLog.getMetadata()
-    val builder = Map.newBuilder[String, String]
+    val builder          = Map.newBuilder[String, String]
 
     builder ++= Map(
       "indextables.companion.enabled"           -> "true",
@@ -1607,9 +1632,10 @@ case class SyncToExternalCommand(
         )
     }
 
-    tableRoots.foreach { case (name, path) =>
-      builder += TableRootUtils.rootKey(name)      -> path
-      builder += TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
+    tableRoots.foreach {
+      case (name, path) =>
+        builder += TableRootUtils.rootKey(name)      -> path
+        builder += TableRootUtils.timestampKey(name) -> System.currentTimeMillis().toString
     }
 
     existingMetadata.copy(configuration = existingMetadata.configuration ++ builder.result())
@@ -1863,9 +1889,8 @@ case class SyncToExternalCommand(
    * Build Iceberg catalog configuration from merged Spark configs and source credentials. Maps
    * spark.indextables.iceberg.* properties to IcebergTableReader config keys.
    *
-   * Catalog config fallback order: SQL clause > stored companion metadata > SparkConf. The
-   * `storedConfig` parameter lets incremental syncs reuse CATALOG/TYPE/WAREHOUSE from a prior
-   * sync without the user having to re-specify them.
+   * Catalog config fallback order: SQL clause > stored companion metadata > SparkConf. The `storedConfig` parameter
+   * lets incremental syncs reuse CATALOG/TYPE/WAREHOUSE from a prior sync without the user having to re-specify them.
    */
   private def buildIcebergConfig(
     mergedConfigs: Map[String, String],
@@ -1992,7 +2017,12 @@ case class SyncToExternalCommand(
             val (ns, tbl) = (parts(0), parts(1))
             Some(
               io.indextables.tantivy4java.iceberg.IcebergTableReader
-                .getCurrentSnapshotId(effectiveCatalogName(cheapStoredConfig).getOrElse("default"), ns, tbl, icebergConfig)
+                .getCurrentSnapshotId(
+                  effectiveCatalogName(cheapStoredConfig).getOrElse("default"),
+                  ns,
+                  tbl,
+                  icebergConfig
+                )
             )
           }
         case _ => None

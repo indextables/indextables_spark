@@ -497,15 +497,15 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
    * OAuth mirror: verify that OAuth client-credential keys propagate end-to-end through Spark session →
    * ConfigNormalization → merged config → UnityCatalogAWSCredentialProvider, identical to the apiToken path.
    *
-   * The provider will fail to connect (fake workspace URL) but the error proves it received the OAuth config
-   * rather than failing with "not configured" — the same assertion pattern used in the apiToken regression tests.
+   * The provider will fail to connect (fake workspace URL) but the error proves it received the OAuth config rather
+   * than failing with "not configured" — the same assertion pattern used in the apiToken regression tests.
    */
   test("OAuth: clientId/clientSecret propagate end-to-end through ConfigNormalization") {
     import io.indextables.spark.util.ConfigNormalization
 
     // Set OAuth keys at session level (no apiToken)
     spark.conf.unset("spark.indextables.databricks.apiToken")
-    spark.conf.set("spark.indextables.databricks.clientId",     "e2e-client-id")
+    spark.conf.set("spark.indextables.databricks.clientId", "e2e-client-id")
     spark.conf.set("spark.indextables.databricks.clientSecret", "e2e-client-secret")
 
     try {
@@ -516,9 +516,9 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
       // OAuth keys must survive the Spark → merged-config pipeline
       mergedConfigs should contain key "spark.indextables.databricks.clientId"
       mergedConfigs should contain key "spark.indextables.databricks.clientSecret"
-      mergedConfigs("spark.indextables.databricks.clientId")  shouldBe "e2e-client-id"
+      mergedConfigs("spark.indextables.databricks.clientId") shouldBe "e2e-client-id"
       // apiToken must be absent (OAuth path, not static-token path)
-      mergedConfigs should not contain key ("spark.indextables.databricks.apiToken")
+      mergedConfigs should not contain key("spark.indextables.databricks.apiToken")
 
       logger.info("OAuth keys present in merged config — provider will receive them")
 

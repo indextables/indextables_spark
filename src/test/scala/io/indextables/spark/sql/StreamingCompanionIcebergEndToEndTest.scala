@@ -20,10 +20,11 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.sync.EmbeddedIcebergRestServer
 import io.indextables.spark.transaction.TransactionLogFactory
@@ -287,7 +288,7 @@ class StreamingCompanionIcebergEndToEndTest
   private def readCompanionConfig(indexPath: String): Map[String, String] = {
     flushCaches()
     val options = new CaseInsensitiveStringMap(new java.util.HashMap[String, String]())
-    val txLog = TransactionLogFactory.create(new Path(indexPath), spark, options)
+    val txLog   = TransactionLogFactory.create(new Path(indexPath), spark, options)
     try {
       txLog.invalidateCache()
       txLog.getMetadata().configuration
@@ -351,16 +352,23 @@ class StreamingCompanionIcebergEndToEndTest
           )
           server.catalog.buildTable(tableId, icebergSchema).create()
 
-          val wideSchema = StructType(Seq(
-            StructField("id", LongType, nullable = true),
-            StructField("name", StringType, nullable = true),
-            StructField("score", DoubleType, nullable = true),
-            StructField("secret", StringType, nullable = true)
-          ))
+          val wideSchema = StructType(
+            Seq(
+              StructField("id", LongType, nullable = true),
+              StructField("name", StringType, nullable = true),
+              StructField("score", DoubleType, nullable = true),
+              StructField("secret", StringType, nullable = true)
+            )
+          )
 
           // Snapshot 1
-          appendWideIcebergSnapshot(server, tableId, wideSchema,
-            Seq(Row(1L, "alice", 100.0, "secret_a"), Row(2L, "bob", 200.0, "secret_b")), batchId = 1)
+          appendWideIcebergSnapshot(
+            server,
+            tableId,
+            wideSchema,
+            Seq(Row(1L, "alice", 100.0, "secret_a"), Row(2L, "bob", 200.0, "secret_b")),
+            batchId = 1
+          )
 
           configureSparkForEmbeddedCatalog(server)
 
@@ -395,8 +403,13 @@ class StreamingCompanionIcebergEndToEndTest
             }
 
             // Snapshot 2: append more rows while streaming.
-            appendWideIcebergSnapshot(server, tableId, wideSchema,
-              Seq(Row(3L, "charlie", 300.0, "secret_c")), batchId = 2)
+            appendWideIcebergSnapshot(
+              server,
+              tableId,
+              wideSchema,
+              Seq(Row(3L, "charlie", 300.0, "secret_c")),
+              batchId = 2
+            )
 
             val secondSynced = waitUntil(30000)(countCompanionRows(indexPath) == 3)
             withClue("second cycle should index appended row within 30 s") {

@@ -22,8 +22,8 @@ package io.indextables.spark.util
  *
  * Spark 3.5 calls ScanBuilder.build() twice for a failing query: once on an explain/logging path (its exception is
  * swallowed) and once on the body-execution path (its exception reaches the user). Stale IndexQuery cleanup must
- * therefore only happen on the second call, so the first call's failure doesn't erase the queries the second call
- * needs in order to raise the same user-visible error.
+ * therefore only happen on the second call, so the first call's failure doesn't erase the queries the second call needs
+ * in order to raise the same user-visible error.
  */
 object SparkBuildSemantics {
   val singleBuildPerQuery: Boolean = false

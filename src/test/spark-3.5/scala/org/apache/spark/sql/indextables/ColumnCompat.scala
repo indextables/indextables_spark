@@ -17,14 +17,14 @@
 
 package org.apache.spark.sql.indextables
 
-import org.apache.spark.sql.Column
 import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.Column
 
 /**
  * Test-only Column <-> catalyst Expression conversions (spark-3.5 variant). In Spark 3.5, Column wraps an Expression
  * directly.
  */
 object ColumnCompat {
-  def expr(c: Column): Expression      = c.expr
-  def column(e: Expression): Column    = new Column(e)
+  def expr(c: Column): Expression   = c.expr
+  def column(e: Expression): Column = new Column(e)
 }
