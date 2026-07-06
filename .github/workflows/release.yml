@@ -103,7 +103,7 @@ jobs:
           gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
       - name: Download tantivy4java jars
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: tantivy4java-linux-x86_64
           path: ~/.m2/repository/io/indextables/tantivy4java/${{ needs.native.outputs.t4j-version }}/
