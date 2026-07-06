@@ -57,7 +57,7 @@ jobs:
 
       - name: Cache tantivy4java build
         id: t4j-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository/io/indextables/tantivy4java
           key: tantivy4java-${{ steps.t4j.outputs.version }}-linux-x86_64
