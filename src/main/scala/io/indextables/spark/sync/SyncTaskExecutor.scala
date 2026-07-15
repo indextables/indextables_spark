@@ -26,7 +26,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.indextables.OutputMetricsUpdater
 
 import io.indextables.spark.transaction.AddAction
-import io.indextables.spark.util.CloudPathUtils
+import io.indextables.spark.util.{CloudPathUtils, PathContainment}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.ParquetCompanionConfig
 import org.slf4j.LoggerFactory
@@ -103,7 +103,10 @@ object SyncTaskExecutor {
         downloadPool.submit(new java.util.concurrent.Callable[String] {
           override def call(): String = {
             val relativePath = extractRelativePath(parquetPath, group.parquetTableRoot)
-            val localFile    = new File(tempDir, relativePath)
+            // VULN-001 (CWE-22): confine the local destination to tempDir so a '..'-laden
+            // relativePath (attacker-controlled via the external table listing) cannot escape and
+            // write to an arbitrary executor path.
+            val localFile = PathContainment.resolveContained(tempDir, relativePath)
             localFile.getParentFile.mkdirs()
 
             val bytesDownloaded = downloadFile(parquetPath, localFile, config.storageConfig, group.parquetTableRoot)
