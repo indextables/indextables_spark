@@ -296,6 +296,11 @@ object SyncTaskExecutor {
   ): Long = {
     logger.debug(s"Downloading $sourcePath to ${destFile.getAbsolutePath}")
 
+    // VULN-002 (CWE-22): confine the source path to the declared table root before dereferencing
+    // it with the operator's credentials. Blocks file:// local-file disclosure and cross-bucket
+    // confused-deputy reads injected via the external table's file listing.
+    PathContainment.assertSourceUnderRoot(sourcePath, tableRoot)
+
     if (sourcePath.startsWith("s3://") || sourcePath.startsWith("s3a://")) {
       downloadFromS3(sourcePath, destFile, storageConfig, tableRoot)
     } else if (sourcePath.startsWith("abfss://") || sourcePath.startsWith("wasbs://")) {
