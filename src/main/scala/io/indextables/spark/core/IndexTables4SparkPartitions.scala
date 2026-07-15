@@ -27,6 +27,7 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.util.PathContainment
 import org.slf4j.LoggerFactory
 
 /** Utility for consistent path resolution across different scan types. */
@@ -42,20 +43,27 @@ object PathResolutionUtils {
    * @return
    *   Resolved Hadoop Path object
    */
-  def resolveSplitPath(splitPath: String, tablePath: String): Path =
-    if (isAbsolutePath(splitPath)) {
-      // Already absolute path - handle file:/ URIs properly
-      if (splitPath.startsWith("file:")) {
-        // For file:/ URIs, use the URI directly rather than Hadoop Path constructor
-        // to avoid path resolution issues
-        new Path(java.net.URI.create(splitPath))
+  def resolveSplitPath(splitPath: String, tablePath: String): Path = {
+    val resolved =
+      if (isAbsolutePath(splitPath)) {
+        // Already absolute path - handle file:/ URIs properly
+        if (splitPath.startsWith("file:")) {
+          // For file:/ URIs, use the URI directly rather than Hadoop Path constructor
+          // to avoid path resolution issues
+          new Path(java.net.URI.create(splitPath))
+        } else {
+          new Path(splitPath)
+        }
       } else {
-        new Path(splitPath)
+        // Relative path, resolve against table path
+        new Path(tablePath, splitPath)
       }
-    } else {
-      // Relative path, resolve against table path
-      new Path(tablePath, splitPath)
-    }
+    // VULN-003 (CWE-22): reject AddAction split paths that resolve outside the table root — an
+    // absolute/scheme redirect or a '..' traversal would otherwise read a split from an
+    // attacker-chosen location with the querying user's credentials (confused-deputy read).
+    PathContainment.assertSplitUnderTable(resolved.toString, tablePath)
+    resolved
+  }
 
   /**
    * Resolves a path and returns it as a string suitable for tantivy4java.
@@ -67,26 +75,33 @@ object PathResolutionUtils {
    * @return
    *   Resolved path as string
    */
-  def resolveSplitPathAsString(splitPath: String, tablePath: String): String =
-    if (isAbsolutePath(splitPath)) {
-      // Already absolute path - handle file:/ URIs properly
-      if (splitPath.startsWith("file:")) {
-        // Keep file URIs as URIs for tantivy4java to avoid working directory resolution issues
-        splitPath
+  def resolveSplitPathAsString(splitPath: String, tablePath: String): String = {
+    val resolved =
+      if (isAbsolutePath(splitPath)) {
+        // Already absolute path - handle file:/ URIs properly
+        if (splitPath.startsWith("file:")) {
+          // Keep file URIs as URIs for tantivy4java to avoid working directory resolution issues
+          splitPath
+        } else {
+          splitPath
+        }
       } else {
-        splitPath
+        // Relative path, resolve against table path
+        // Handle case where tablePath might already be a file:/ URI to avoid double-prefixing
+        if (tablePath.startsWith("file:")) {
+          // Convert file URI to local path, resolve, then convert back to avoid Path constructor issues
+          val tableDirPath = new java.io.File(java.net.URI.create(tablePath)).getAbsolutePath
+          new java.io.File(tableDirPath, splitPath).getAbsolutePath
+        } else {
+          new Path(tablePath, splitPath).toString
+        }
       }
-    } else {
-      // Relative path, resolve against table path
-      // Handle case where tablePath might already be a file:/ URI to avoid double-prefixing
-      if (tablePath.startsWith("file:")) {
-        // Convert file URI to local path, resolve, then convert back to avoid Path constructor issues
-        val tableDirPath = new java.io.File(java.net.URI.create(tablePath)).getAbsolutePath
-        new java.io.File(tableDirPath, splitPath).getAbsolutePath
-      } else {
-        new Path(tablePath, splitPath).toString
-      }
-    }
+    // VULN-003 (CWE-22): reject AddAction split paths that resolve outside the table root — an
+    // absolute/scheme redirect or a '..' traversal would otherwise read a split from an
+    // attacker-chosen location with the querying user's credentials (confused-deputy read).
+    PathContainment.assertSplitUnderTable(resolved, tablePath)
+    resolved
+  }
 
   /** Checks if a path is absolute (starts with "/", contains "://" for URLs, or starts with "file:"). */
   private def isAbsolutePath(path: String): Boolean =
