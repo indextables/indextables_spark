@@ -42,7 +42,7 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -92,7 +92,7 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Java 17 (with Central credentials + GPG key)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
