@@ -1,0 +1,621 @@
+# MEASUREMENT ONLY - this is not the project's CI.
+#
+# Question it answers: does the existing local test suite (`make test`) fit on
+# GitHub's free standard hosted runners, and how long do setup, compile and
+# test take there? The numbers feed the decision on how CI is split between
+# GitHub-hosted runners and the self-hosted Mac. The real CI result is the
+# `CI` workflow (ci.yml), which this file does not replace or modify.
+#
+# Shape:
+#   - Same steps as ci.yml (setup-java 17, ./scripts/setup.sh, make compile,
+#     make test) with MAVEN_ARGS=-P<spark profile>, on standard hosted runners
+#     only. Never use a larger-runner label here: those are billed.
+#   - Cold run on purpose: no dependency caching, so the numbers are the
+#     worst case. A cached variant can be added later.
+#   - Each phase is timed and sampled (free disk, memory, swap, Java RSS) by a
+#     small helper that this workflow writes to $RUNNER_TEMP; project scripts,
+#     the Makefile and the pom are used unchanged. Results go to the job
+#     summary and to a `measure-data-*` artifact.
+#   - Runs on workflow_dispatch, and on pull requests that touch this file
+#     only, so it never appears as a check on ordinary PRs.
+name: "Measurement: hosted-runner fit (not CI)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs_linux:
+        description: "JOBS for the ubuntu-24.04 legs (empty = script default, one per core)"
+        required: false
+        type: string
+        default: ''
+      jobs_macos:
+        description: "JOBS for the macos-15 legs (empty = 2)"
+        required: false
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - .github/workflows/ci-hosted-measure.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Explicit so every run: block gets `bash -eo pipefail`.
+    shell: bash
+
+env:
+  # Parallel test JVMs on macos-15 (3 vCPU / 7 GB) when no input is given.
+  # run-tests.sh would auto-detect 3; each job is a Maven launcher JVM plus a
+  # forked test JVM with -Xmx2g, so 3 jobs can ask for 6 GB of heap alone on a
+  # 7 GB machine. 2 leaves headroom; 1 would be safest but roughly doubles the
+  # test time and risks the timeout instead. Linux (4 vCPU / 16 GB) keeps the
+  # script default of one job per core.
+  DEFAULT_JOBS_MACOS: '2'
+
+jobs:
+  measure:
+    name: measure-only (${{ matrix.os }}, ${{ matrix.spark-profile }})
+    runs-on: ${{ matrix.os }}
+    # Backstop only. The per-phase step timeouts below are sized so that a
+    # stuck phase fails its own step first and the summary still gets written.
+    timeout-minutes: ${{ matrix.job-timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Standard (free for public repos) labels only.
+        #   ubuntu-24.04: x86_64, 4 vCPU / 16 GB / 14 GB SSD
+        #   macos-15:     arm64 (M1), 3 vCPU / 7 GB / 14 GB SSD
+        # 3 macOS legs stay within the Free plan's 5 concurrent macOS jobs.
+        os: [ubuntu-24.04, macos-15]
+        spark-profile: [spark-3.5, spark-4.0, spark-4.1]
+        include:
+          # Linux: tantivy4java is on Maven Central, so setup should take about
+          # a minute; 45 leaves room for an unexpected source-build fallback.
+          - os: ubuntu-24.04
+            job-timeout: 240
+            setup-timeout: 45
+            compile-timeout: 30
+            test-timeout: 150
+          # macOS: no darwin-aarch64 jar on Central, so setup includes a Rust
+          # release build of tantivy4java on 3 vCPU / 7 GB.
+          - os: macos-15
+            job-timeout: 300
+            setup-timeout: 110
+            compile-timeout: 30
+            test-timeout: 150
+    env:
+      # Same as ci.yml: honored by Maven >= 3.9 for every mvn invocation.
+      MAVEN_ARGS: -P${{ matrix.spark-profile }}
+      MATRIX_OS: ${{ matrix.os }}
+      SPARK_PROFILE: ${{ matrix.spark-profile }}
+
+    steps:
+      - name: Install measurement helper and start the clock
+        run: |
+          mkdir -p "$RUNNER_TEMP/measure"
+          echo "MEASURE_DIR=$RUNNER_TEMP/measure" >> "$GITHUB_ENV"
+          echo "MEASURE=$RUNNER_TEMP/measure.sh" >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/measure.sh" <<'MEASURE_EOF'
+          #!/usr/bin/env bash
+          # Measurement helper for .github/workflows/ci-hosted-measure.yml.
+          # Kept bash 3.2 compatible (macOS system bash). Every value is written to a
+          # small file under $MEASURE_DIR as soon as it is known, so the summary can
+          # still be rendered when a phase fails, times out or is cancelled.
+          set -uo pipefail
+
+          MEASURE_DIR="${MEASURE_DIR:?MEASURE_DIR is not set}"
+          WORKSPACE="${GITHUB_WORKSPACE:-$PWD}"
+          OS_NAME="$(uname -s)"
+          SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-5}"
+          mkdir -p "$MEASURE_DIR"
+
+          put() { printf '%s\n' "$2" > "$MEASURE_DIR/$1"; }
+          get() { if [[ -f "$MEASURE_DIR/$1" ]]; then cat "$MEASURE_DIR/$1"; fi; }
+
+          # --- samplers ---------------------------------------------------------------
+          # Free space (MB) on the volume holding the workspace (same volume as $HOME
+          # and the temp dir on both hosted images).
+          free_disk_mb() { df -Pk "$WORKSPACE" | awk 'NR==2 {printf "%d", $4/1024}'; }
+
+          # Prints "<used_mb> <swap_used_mb>" for the whole machine.
+          #   Linux: MemTotal - MemAvailable (reclaimable page cache is not counted).
+          #   macOS: active + wired + compressor pages (approximates "Memory Used").
+          mem_sample() {
+              local used swap
+              case "$OS_NAME" in
+                  Linux)
+                      awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2}
+                           /^SwapTotal:/ {st=$2} /^SwapFree:/ {sf=$2}
+                           END {printf "%d %d", (t-a)/1024, (st-sf)/1024}' /proc/meminfo
+                      ;;
+                  Darwin)
+                      used="$(vm_stat | awk '
+                          /page size of/ {for (i = 1; i <= NF; i++) if ($i == "of") ps = $(i+1)}
+                          /^Pages active:/ {v = $3; sub(/\.$/, "", v); a = v}
+                          /^Pages wired down:/ {v = $4; sub(/\.$/, "", v); w = v}
+                          /^Pages occupied by compressor:/ {v = $5; sub(/\.$/, "", v); c = v}
+                          END {printf "%d", (a + w + c) * ps / 1048576}')"
+                      swap="$(sysctl -n vm.swapusage 2>/dev/null | awk '
+                          {for (i = 1; i <= NF; i++) if ($i == "used") {v = $(i+2); sub(/M$/, "", v); printf "%d", v}}')"
+                      printf '%s %s' "${used:-0}" "${swap:-0}"
+                      ;;
+                  *) printf '0 0' ;;
+              esac
+          }
+
+          # Prints "<total_java_rss_mb> <java_process_count>".
+          java_sample() {
+              ps -eo rss=,comm= 2>/dev/null \
+                  | awk '$NF ~ /(^|\/)java$/ {s += $1; n++} END {printf "%d %d", s/1024, n}'
+          }
+
+          # Background sampler. Columns: epoch free_disk_mb used_mb swap_mb java_rss_mb java_count
+          # Exits by itself if the helper process that started it goes away.
+          sampler() {
+              local out="$MEASURE_DIR/$1.samples"
+              while kill -0 "$$" 2>/dev/null; do
+                  printf '%s %s %s %s\n' "$(date +%s)" "$(free_disk_mb)" "$(mem_sample)" "$(java_sample)" >> "$out"
+                  sleep "$SAMPLE_INTERVAL"
+              done
+          }
+
+          # --- phase runner -----------------------------------------------------------
+          # cmd_phase <name> <command...>: runs the command unchanged, streams its
+          # output (stdout and stderr merged) to the step log, keeps an epoch-prefixed
+          # copy in <name>.log and returns the command's exit status.
+          cmd_phase() {
+              local phase="$1"
+              shift
+              local log="$MEASURE_DIR/$phase.log" rc=0 spid lpid line i
+              # The FIFO lives outside $MEASURE_DIR so it can never end up in the
+              # uploaded artifact directory if the step is killed.
+              local fifo="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/measure-$phase.fifo"
+              : > "$log"
+              rm -f "$fifo"
+              mkfifo "$fifo"
+              put "$phase.cmd" "$*"
+              put "$phase.disk_before" "$(free_disk_mb)"
+              put "$phase.start" "$(date +%s)"
+              sampler "$phase" > /dev/null 2>&1 &
+              spid=$!
+              while IFS= read -r line || [[ -n "$line" ]]; do
+                  printf '%s\n' "$line"
+                  printf '%s %s\n' "$(date +%s)" "$line" >> "$log"
+              done < "$fifo" &
+              lpid=$!
+              "$@" > "$fifo" 2>&1
+              rc=$?
+              # Timing stops when the command exits, as it would for a plain step.
+              put "$phase.end" "$(date +%s)"
+              put "$phase.rc" "$rc"
+              put "$phase.disk_after" "$(free_disk_mb)"
+              kill "$spid" 2> /dev/null
+              wait "$spid" 2> /dev/null
+              # Let the logger drain, but do not wait for EOF: a leftover child of the
+              # command can hold the pipe open (run-tests.sh's progress reporter leaves
+              # a `sleep 30` behind), which would inflate the time or hang the step.
+              i=0
+              while kill -0 "$lpid" 2> /dev/null && [[ "$i" -lt 25 ]]; do
+                  sleep 0.2
+                  i=$((i + 1))
+              done
+              kill "$lpid" 2> /dev/null
+              wait "$lpid" 2> /dev/null
+              rm -f "$fifo"
+              return "$rc"
+          }
+
+          # --- runner facts and JOBS decision -----------------------------------------
+          cmd_facts() {
+              local cores ram_mb swap_mb cpu_model script_default jobs jobs_source jobs_input
+              case "$OS_NAME" in
+                  Linux)
+                      cores="$(nproc)"
+                      ram_mb="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
+                      swap_mb="$(awk '/^SwapTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
+                      cpu_model="$(awk -F': *' '/^model name/ {print $2; exit}' /proc/cpuinfo)"
+                      jobs_input="${JOBS_INPUT_LINUX:-}"
+                      ;;
+                  Darwin)
+                      cores="$(sysctl -n hw.ncpu)"
+                      ram_mb="$(($(sysctl -n hw.memsize) / 1048576))"
+                      swap_mb="$(sysctl -n vm.swapusage 2>/dev/null | awk '
+                          {for (i = 1; i <= NF; i++) if ($i == "total") {v = $(i+2); sub(/M$/, "", v); printf "%d", v}}')"
+                      cpu_model="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+                      jobs_input="${JOBS_INPUT_MACOS:-}"
+                      ;;
+                  *)
+                      echo "::error::Unsupported OS for this measurement: $OS_NAME"
+                      return 1
+                      ;;
+              esac
+
+              # What scripts/run-tests.sh would pick with no -j (same detection order).
+              if command -v nproc > /dev/null 2>&1; then
+                  script_default="$(nproc)"
+              elif command -v sysctl > /dev/null 2>&1; then
+                  script_default="$(sysctl -n hw.ncpu)"
+              else
+                  script_default=4
+              fi
+
+              if [[ -n "$jobs_input" ]]; then
+                  if ! [[ "$jobs_input" =~ ^[1-9][0-9]*$ ]]; then
+                      echo "::error::JOBS override must be a positive integer, got '$jobs_input'"
+                      return 1
+                  fi
+                  jobs="$jobs_input"
+                  jobs_source="workflow_dispatch input"
+              elif [[ "$OS_NAME" == "Darwin" ]]; then
+                  jobs="${DEFAULT_JOBS_MACOS:-2}"
+                  if [[ "$jobs" -gt "$cores" ]]; then jobs="$cores"; fi
+                  jobs_source="workflow default for macOS, deliberately below the script default (rationale below)"
+              else
+                  jobs="$script_default"
+                  jobs_source="same as the script default (one job per core)"
+              fi
+
+              # Forked test JVM heap cap, read from the pom rather than assumed.
+              local xmx heap_mb=""
+              xmx="$(grep -o -- '-Xmx[0-9]*[gGmM]' pom.xml | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+              case "$xmx" in
+                  *" "*) ;; # more than one distinct value in the pom: report, do not compute
+                  -Xmx*[gG]) heap_mb="$(($(printf '%s' "$xmx" | tr -dc '0-9') * 1024))" ;;
+                  -Xmx*[mM]) heap_mb="$(printf '%s' "$xmx" | tr -dc '0-9')" ;;
+              esac
+
+              # Same extraction and classifier mapping as scripts/setup.sh.
+              local t4j_version t4j_classifier
+              t4j_version="$(grep -A2 '<artifactId>tantivy4java</artifactId>' pom.xml \
+                  | grep '<version>' | sed 's/.*<version>\(.*\)<\/version>.*/\1/' | tr -d '[:space:]')"
+              case "$OS_NAME-$(uname -m)" in
+                  Darwin-arm64) t4j_classifier="darwin-aarch64" ;;
+                  Darwin-x86_64) t4j_classifier="darwin-x86_64" ;;
+                  Linux-x86_64) t4j_classifier="linux-x86_64" ;;
+                  Linux-aarch64) t4j_classifier="linux-aarch64" ;;
+                  *) t4j_classifier="unknown" ;;
+              esac
+
+              put facts.uname "$(uname -sm)"
+              put facts.image "${ImageOS:-unknown} ${ImageVersion:-}"
+              put facts.cores "$cores"
+              put facts.cpu_model "${cpu_model:-unknown}"
+              put facts.ram_mb "$ram_mb"
+              put facts.swap_mb "${swap_mb:-0}"
+              put facts.disk_free_mb "$(free_disk_mb)"
+              put facts.script_default_jobs "$script_default"
+              put facts.jobs "$jobs"
+              put facts.jobs_source "$jobs_source"
+              put facts.xmx "${xmx:-not found in pom.xml}"
+              put facts.heap_mb "$heap_mb"
+              put facts.java "$(java -version 2>&1 | head -1)"
+              put facts.maven "$(mvn --version 2>/dev/null | head -1)"
+              put facts.rustc "$(rustc --version 2>/dev/null || echo 'not preinstalled')"
+              put t4j.version "$t4j_version"
+              put t4j.classifier "$t4j_classifier"
+
+              if [[ -n "${GITHUB_ENV:-}" ]]; then echo "JOBS=$jobs" >> "$GITHUB_ENV"; fi
+
+              echo "cores=$cores ram_mb=$ram_mb swap_mb=${swap_mb:-0} free_disk_mb=$(free_disk_mb)"
+              echo "script default JOBS=$script_default, using JOBS=$jobs ($jobs_source)"
+              echo "test JVM heap cap: ${xmx:-unknown}; tantivy4java $t4j_version ($t4j_classifier)"
+              echo "--- df -h"
+              df -h
+          }
+
+          # --- tantivy4java: use Maven Central when the platform jar is published -----
+          # scripts/setup.sh only looks in ~/.m2 and otherwise builds from source; it
+          # never asks Maven Central. Pre-resolving here (without touching setup.sh)
+          # lets a platform with a published jar skip the Rust build. Never fails the
+          # job: if resolution does not work, setup.sh falls back to the source build.
+          cmd_resolve() {
+              local ver classifier jar url
+              ver="$(get t4j.version)"
+              classifier="$(get t4j.classifier)"
+              jar="$HOME/.m2/repository/io/indextables/tantivy4java/$ver/tantivy4java-$ver-$classifier.jar"
+              url="https://repo1.maven.org/maven2/io/indextables/tantivy4java/$ver/tantivy4java-$ver-$classifier.jar"
+
+              if [[ -z "$ver" ]]; then
+                  put t4j.origin "unknown (could not read the tantivy4java version from pom.xml)"
+              elif [[ -f "$jar" ]]; then
+                  put t4j.origin "already in ~/.m2 before this run (runner was not clean)"
+              elif curl -fsIL --retry 2 --max-time 30 -o /dev/null "$url"; then
+                  if cmd_phase resolve mvn -B org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get \
+                      "-Dartifact=io.indextables:tantivy4java:$ver:jar:$classifier" -Dtransitive=false \
+                      && [[ -f "$jar" ]]; then
+                      put t4j.origin "Maven Central"
+                  else
+                      put t4j.origin "Maven Central download FAILED, fell back to setup.sh"
+                  fi
+              else
+                  put t4j.origin "not published on Maven Central for $classifier"
+                  echo "No $classifier jar for tantivy4java $ver on Maven Central; setup.sh will build from source."
+              fi
+              echo "tantivy4java origin: $(get t4j.origin)"
+              return 0
+          }
+
+          # --- summary ----------------------------------------------------------------
+          fmt_dur() {
+              if [[ -z "${1:-}" ]]; then printf 'n/a'; else printf '%dm %02ds' "$(($1 / 60))" "$(($1 % 60))"; fi
+          }
+          fmt_gb() {
+              if [[ -z "${1:-}" ]]; then printf 'n/a'; else awk -v m="$1" 'BEGIN {printf "%.1f GB", m / 1024}'; fi
+          }
+          # col_stat <file> <column> <min|max>
+          col_stat() {
+              if [[ ! -s "$1" ]]; then return 0; fi
+              awk -v c="$2" -v op="$3" '
+                  NR == 1 {v = $c}
+                  op == "min" && $c < v {v = $c}
+                  op == "max" && $c > v {v = $c}
+                  END {if (NR > 0) printf "%d", v}' "$1"
+          }
+          # First epoch at which a line matching <regex> was logged in <file>.
+          log_epoch() {
+              if [[ ! -f "$1" ]]; then return 0; fi
+              grep -E -m1 -- "$2" "$1" | awk '{print $1}'
+          }
+
+          phase_row() {
+              local phase="$1" label="$2" start end rc result dur last samples jvms
+              start="$(get "$phase.start")"
+              end="$(get "$phase.end")"
+              rc="$(get "$phase.rc")"
+              samples="$MEASURE_DIR/$phase.samples"
+              if [[ -z "$start" ]]; then
+                  echo "| $label | not run | - | - | - | - | - | - | - |"
+                  return 0
+              fi
+              if [[ -n "$end" ]]; then
+                  dur="$(fmt_dur "$((end - start))")"
+                  if [[ "$rc" == "0" ]]; then
+                      result="ok"
+                  elif [[ "$rc" =~ ^[0-9]+$ && "$rc" -gt 128 ]]; then
+                      result="KILLED (signal $((rc - 128)); step timeout or cancel)"
+                  else
+                      result="FAILED (exit $rc)"
+                  fi
+              else
+                  last="$(col_stat "$samples" 1 max)"
+                  dur="at least $(fmt_dur "$((${last:-$start} - start))")"
+                  result="DID NOT FINISH (timed out or cancelled)"
+              fi
+              jvms="$(col_stat "$samples" 6 max)"
+              if [[ -n "$jvms" ]]; then
+                  jvms="$(fmt_gb "$(col_stat "$samples" 5 max)"), up to $jvms JVMs"
+              else
+                  jvms="n/a"
+              fi
+              echo "| $label | $result | $dur | $(fmt_gb "$(get "$phase.disk_before")") | $(fmt_gb "$(col_stat "$samples" 2 min)") | $(fmt_gb "$(get "$phase.disk_after")") | $(fmt_gb "$(col_stat "$samples" 3 max)") | $(fmt_gb "$(col_stat "$samples" 4 max)") | $jvms |"
+          }
+
+          render_summary() {
+              local jobs heap_mb ram_mb cores now job_start
+              jobs="$(get facts.jobs)"
+              heap_mb="$(get facts.heap_mb)"
+              ram_mb="$(get facts.ram_mb)"
+              cores="$(get facts.cores)"
+              now="$(date +%s)"
+              job_start="$(get job.start)"
+
+              echo "## Hosted-runner measurement (not a CI result): ${MATRIX_OS:-?} / ${SPARK_PROFILE:-?}"
+              echo ""
+              echo "> Measurement only. This job answers \"does the existing suite fit on a free standard hosted runner, and how long does it take\". It is not the project's CI verdict; that is the \`CI\` workflow."
+              echo ">"
+              echo "> **Cold run:** no dependency caching. \`~/.m2\`, the Rust toolchain state and Homebrew downloads all start from the stock runner image. A cached run would be faster in setup and compile."
+              echo ""
+
+              # tantivy4java origin, as observed (setup.log), not as intended.
+              local setup_log="$MEASURE_DIR/setup.log" t4j t4j_start t4j_end res_start res_end
+              t4j="$(get t4j.origin)"
+              res_start="$(get resolve.start)"
+              res_end="$(get resolve.end)"
+              if [[ "$t4j" == "Maven Central" && -n "$res_start" && -n "$res_end" ]]; then
+                  t4j="Maven Central, resolved in $(fmt_dur "$((res_end - res_start))") by this workflow's pre-resolve step (setup.sh itself never queries Central)"
+              fi
+              t4j_start="$(log_epoch "$setup_log" 'Building tantivy4java .* from source')"
+              if [[ -n "$t4j_start" ]]; then
+                  t4j_end="$(log_epoch "$setup_log" 'tantivy4java .* installed to local Maven cache')"
+                  if [[ -n "$t4j_end" ]]; then
+                      t4j="SOURCE BUILD by setup.sh, $(fmt_dur "$((t4j_end - t4j_start))") (clone + cargo release build + mvn install; included in the setup phase). Central probe: ${t4j:-not run}"
+                  else
+                      t4j="SOURCE BUILD by setup.sh, did not complete. Central probe: ${t4j:-not run}"
+                  fi
+              fi
+
+              echo "### Runner and configuration"
+              echo ""
+              echo "| Item | Value |"
+              echo "|---|---|"
+              echo "| Runner label | \`${MATRIX_OS:-?}\` (image: $(get facts.image)) |"
+              echo "| OS / arch | $(get facts.uname) |"
+              echo "| CPU reported | ${cores:-?} cores ($(get facts.cpu_model)) |"
+              echo "| RAM reported | $(fmt_gb "$ram_mb") (swap configured: $(fmt_gb "$(get facts.swap_mb)")) |"
+              echo "| Free disk at job start | $(fmt_gb "$(get facts.disk_free_mb)") |"
+              echo "| Spark profile | \`${SPARK_PROFILE:-?}\` (\`MAVEN_ARGS=${MAVEN_ARGS:-}\`) |"
+              echo "| JOBS used | **${jobs:-?}**: $(get facts.jobs_source). \`make test\` with no JOBS would use $(get facts.script_default_jobs). |"
+              if [[ -n "$jobs" && -n "$heap_mb" && -n "$ram_mb" ]]; then
+                  echo "| Test JVM heap cap | \`$(get facts.xmx)\` per forked JVM (from pom.xml). JOBS x heap cap = $(fmt_gb "$((jobs * heap_mb))") of $(fmt_gb "$ram_mb") RAM, before metaspace, native memory and one Maven launcher JVM per job. |"
+              else
+                  echo "| Test JVM heap cap | $(get facts.xmx) |"
+              fi
+              echo "| tantivy4java $(get t4j.version) ($(get t4j.classifier)) | ${t4j:-unknown} |"
+              echo "| Toolchain | $(get facts.java); $(get facts.maven); rustc at job start: $(get facts.rustc) |"
+              echo "| Dependency cache | none (cold run) |"
+              if [[ -n "$job_start" ]]; then
+                  echo "| Measured wall time, job start to this summary | $(fmt_dur "$((now - job_start))") |"
+              fi
+              echo ""
+              echo "JOBS rationale: each job is one \`mvn scalatest:test\`, i.e. a Maven launcher JVM plus a forked test JVM capped by the heap setting above (plus up to 512 MB metaspace and native tantivy memory), so budget roughly 3 GB per job in the worst case. On the standard Linux runner (nominally 4 vCPU / 16 GB) the script default of one job per core fits and is used unchanged. On the standard macOS runner (nominally 3 vCPU / 7 GB) the script default of 3 would allow 6 GB of heap alone, so this workflow defaults to 2 there; 1 is the safe floor but roughly doubles the test time. Both can be overridden with the workflow_dispatch inputs."
+              echo ""
+
+              echo "### Phases"
+              echo ""
+              echo "| Phase | Result | Wall time | Free disk before | Lowest free disk during | Free disk after | Peak memory used | Peak swap used | Peak total Java RSS |"
+              echo "|---|---|---|---|---|---|---|---|---|"
+              phase_row resolve "tantivy4java from Maven Central (only if published)"
+              phase_row setup "setup: \`./scripts/setup.sh\`"
+              phase_row compile "compile: \`make compile\`"
+              phase_row test "test: \`make test JOBS=${jobs:-?}\`"
+              echo ""
+              echo "Memory, swap, disk and Java RSS are sampled every ${SAMPLE_INTERVAL}s machine-wide, so short spikes can be missed. \"Lowest free disk during\" matters for setup: a source build deletes its multi-GB build directory before the phase ends."
+              echo ""
+
+              # Test results as printed by scripts/run-tests.sh.
+              local test_log="$MEASURE_DIR/test.log" total passed failed elapsed progress log_dir discovered
+              echo "### Test results (from scripts/run-tests.sh output)"
+              echo ""
+              if [[ ! -s "$test_log" ]]; then
+                  echo "The test phase produced no output (it did not run, or failed before printing anything)."
+                  echo ""
+                  return 0
+              fi
+              total="$(sed -n 's/^[0-9]* \[INFO\] Total: *//p' "$test_log" | tail -1)"
+              passed="$(sed -n 's/^[0-9]* \[INFO\] Passed: *//p' "$test_log" | tail -1)"
+              failed="$(sed -n 's/^[0-9]* \[INFO\] Failed: *//p' "$test_log" | tail -1)"
+              elapsed="$(sed -n 's/^[0-9]* \[INFO\] Elapsed: *//p' "$test_log" | tail -1)"
+              discovered="$(sed -n 's/^[0-9]* \[INFO\] \(Found .*\)$/\1/p' "$test_log" | head -1)"
+              log_dir="$(sed -n 's/^[0-9]* \[INFO\] Per-test log files: //p' "$test_log" | head -1)"
+              if [[ -n "$total" ]]; then
+                  echo "| Test classes run | Passed | Failed | Elapsed (script's own timer, excludes its test-compile) |"
+                  echo "|---|---|---|---|"
+                  echo "| $total | $passed | $failed | $elapsed |"
+              else
+                  progress="$(grep -E '\[INFO\] Progress:' "$test_log" | tail -1 | sed 's/^[0-9]* \[INFO\] Progress: //')"
+                  echo "**The run did not reach the script's final summary.** Last progress line: ${progress:-none (failed before any test class finished)}."
+              fi
+              echo ""
+              if [[ -n "$discovered" ]]; then
+                  echo "Discovery: $discovered."
+                  echo ""
+              fi
+
+              if [[ -n "$log_dir" && -n "${GITHUB_OUTPUT:-}" ]]; then
+                  echo "log_dir=$log_dir" >> "$GITHUB_OUTPUT"
+              fi
+              if [[ -n "$log_dir" && -s "$log_dir/.timings" ]]; then
+                  cp "$log_dir/.timings" "$MEASURE_DIR/test-class-timings.txt"
+                  local sum
+                  sum="$(awk -F'|' '{s += $1} END {printf "%d", s}' "$log_dir/.timings")"
+                  echo "Sum of per-class durations: $(fmt_dur "$sum") across $(wc -l < "$log_dir/.timings" | tr -d ' ') finished classes (roughly the sequential cost; useful for sizing shards)."
+                  echo ""
+                  echo "<details><summary>Ten slowest test classes</summary>"
+                  echo ""
+                  echo "| Class | Duration | Result |"
+                  echo "|---|---|---|"
+                  sort -t'|' -k1,1nr "$log_dir/.timings" | head -10 | while IFS='|' read -r dur name status; do
+                      echo "| ${name##*.} | $(fmt_dur "$dur") | $status |"
+                  done
+                  echo ""
+                  echo "</details>"
+                  echo ""
+              fi
+              if [[ -n "$log_dir" && -s "$log_dir/.fail_list" ]]; then
+                  echo "<details><summary>Failed test classes (first 40)</summary>"
+                  echo ""
+                  head -40 "$log_dir/.fail_list" | while IFS='|' read -r name _path; do
+                      echo "- \`$name\`"
+                  done
+                  echo ""
+                  echo "</details>"
+                  echo ""
+              fi
+              return 0
+          }
+
+          cmd_summary() {
+              render_summary > "$MEASURE_DIR/summary.md"
+              cat "$MEASURE_DIR/summary.md"
+              if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+                  cat "$MEASURE_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              return 0
+          }
+
+          command="${1:-}"
+          if [[ $# -gt 0 ]]; then shift; fi
+          case "$command" in
+              start) put job.start "$(date +%s)" ;;
+              facts) cmd_facts ;;
+              resolve) cmd_resolve ;;
+              phase) cmd_phase "$@" ;;
+              summary) cmd_summary ;;
+              *)
+                  echo "usage: measure.sh {start|facts|resolve|phase <name> <command...>|summary}" >&2
+                  exit 2
+                  ;;
+          esac
+          exit $?
+          MEASURE_EOF
+          MEASURE_DIR="$RUNNER_TEMP/measure" bash "$RUNNER_TEMP/measure.sh" start
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # No `cache:` input on purpose: this is the cold measurement.
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Runner facts and JOBS decision
+        env:
+          JOBS_INPUT_LINUX: ${{ inputs.jobs_linux }}
+          JOBS_INPUT_MACOS: ${{ inputs.jobs_macos }}
+        run: bash "$MEASURE" facts
+
+      # setup.sh only checks ~/.m2 and otherwise builds tantivy4java from
+      # source; it never asks Maven Central. Where the platform jar is
+      # published (linux-x86_64 today), fetch it first so setup.sh finds it.
+      # On macOS arm64 this is a no-op and setup.sh does the source build.
+      - name: "Phase: tantivy4java from Maven Central (if published)"
+        timeout-minutes: 5
+        run: bash "$MEASURE" resolve
+
+      - name: "Phase: setup (./scripts/setup.sh)"
+        timeout-minutes: ${{ matrix.setup-timeout }}
+        run: bash "$MEASURE" phase setup ./scripts/setup.sh
+
+      - name: "Phase: compile (make compile)"
+        timeout-minutes: ${{ matrix.compile-timeout }}
+        run: bash "$MEASURE" phase compile make compile
+
+      - name: "Phase: test (make test JOBS=n)"
+        timeout-minutes: ${{ matrix.test-timeout }}
+        run: bash "$MEASURE" phase test make test "JOBS=$JOBS"
+
+      - name: Write measurement summary
+        id: summary
+        if: always() && env.MEASURE != ''
+        run: bash "$MEASURE" summary
+
+      - name: Upload measurement data
+        if: always() && env.MEASURE_DIR != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: measure-data-${{ matrix.os }}-${{ matrix.spark-profile }}
+          path: ${{ env.MEASURE_DIR }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Same as ci.yml: per-test logs only when something went wrong. The
+      # path comes from the summary step so it is also available when the
+      # test step was killed by its timeout.
+      - name: Upload test logs
+        if: (failure() || cancelled()) && steps.summary.outputs.log_dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: measure-test-logs-${{ matrix.os }}-${{ matrix.spark-profile }}
+          path: ${{ steps.summary.outputs.log_dir }}/
+          if-no-files-found: warn
+          retention-days: 7
