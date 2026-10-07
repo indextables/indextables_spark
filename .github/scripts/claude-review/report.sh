@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Turn the review job's result into a verdict: validate the reviewer's
-# structured output, write verdict.json and the comment body, append the job
-# summary, and set the step outputs `verdict` (pass|fail|none) and `reason`.
+# structured output, write the comment body, append the job summary, and set
+# the step outputs `verdict` (pass|fail|none) and `reason`.
 #
 # Fails closed: anything other than a schema-valid output from a review job
 # that succeeded yields `none`, never `pass`. This script does not itself fail
 # on a missing or bad verdict; the workflow's last step makes the job
-# conclusion follow the `verdict` output, after the artifact is uploaded.
+# conclusion follow the `verdict` output.
 #
 # Reviewer output is untrusted. It is only ever parsed by jq and written to
 # files through render.jq; it is never echoed to the log, never written to
@@ -17,11 +17,12 @@
 #   PRECHECK_REASON    `reason` output of fetch-diff.sh ("ok" when a review ran)
 #   STRUCTURED_OUTPUT  raw structured output of the review step (may be empty)
 #   PR_NUMBER, HEAD_SHA
-#   OUT_DIR            where verdict.json and comment.md are written
+#   OUT_DIR            where comment.md is written
 #   GITHUB_OUTPUT, GITHUB_STEP_SUMMARY
 #   GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID   (set by the runner)
 # Optional:
-#   COMMENT_MAX_CHARS  cap for the comment body (GitHub rejects > 65536)
+#   OPENED_BY_DEPENDABOT  "true" adds the fixed note on dependency updates
+#   COMMENT_MAX_CHARS     cap for the comment body (GitHub rejects > 65536)
 set -euo pipefail
 
 : "${PR_NUMBER:?}" "${HEAD_SHA:?}" "${OUT_DIR:?}" "${GITHUB_OUTPUT:?}" "${GITHUB_STEP_SUMMARY:?}"
@@ -32,6 +33,8 @@ REVIEW_RESULT="${REVIEW_RESULT:-}"
 PRECHECK_REASON="${PRECHECK_REASON:-}"
 STRUCTURED_OUTPUT="${STRUCTURED_OUTPUT:-}"
 COMMENT_MAX_CHARS="${COMMENT_MAX_CHARS:-60000}"
+# Anything but the literal "true" counts as false.
+if [ "${OPENED_BY_DEPENDABOT:-false}" = "true" ]; then dependabot=true; else dependabot=false; fi
 
 case "$PR_NUMBER" in ''|*[!0-9]*) echo "PR_NUMBER is not a number" >&2; exit 1 ;; esac
 if ! printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then echo "HEAD_SHA is not a commit id" >&2; exit 1; fi
@@ -114,24 +117,12 @@ jq -n -r -f "$here/render.jq" \
   --arg status "$verdict" \
   --arg reason_text "$(reason_text "$reason")" \
   --arg note "$note" \
+  --argjson dependabot "$dependabot" \
   --argjson review "$review" \
   --arg pr "$PR_NUMBER" \
   --arg sha "$HEAD_SHA" \
   --arg run_url "$run_url" \
   --argjson max_chars "$COMMENT_MAX_CHARS" > "$OUT_DIR/comment.md"
-
-jq -n \
-  --argjson pr "$PR_NUMBER" \
-  --arg head_sha "$HEAD_SHA" \
-  --arg verdict "$verdict" \
-  --arg reason "$reason" \
-  --arg model_verdict "$model_verdict" \
-  --argjson findings "$findings" \
-  --argjson blocking_findings "$blocking" \
-  --arg run_url "$run_url" \
-  '{pr: $pr, head_sha: $head_sha, verdict: $verdict, reason: $reason,
-    model_verdict: (if $model_verdict == "" then null else $model_verdict end),
-    findings: $findings, blocking_findings: $blocking_findings, run_url: $run_url}' > "$OUT_DIR/verdict.json"
 
 # The job summary shows the same text as the comment, without the marker line.
 tail -n +2 "$OUT_DIR/comment.md" >> "$GITHUB_STEP_SUMMARY"

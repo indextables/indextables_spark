@@ -4,6 +4,8 @@
 #   --arg status       pass | fail | none
 #   --arg reason_text  fixed explanation, used when status is none
 #   --arg note         fixed extra sentence, may be empty
+#   --argjson dependabot  true adds the fixed note on what a verdict covers
+#                      for a dependency update
 #   --argjson review   output of validate.jq, or null
 #   --arg pr, --arg sha, --arg run_url
 #   --argjson max_chars  upper bound for the whole body
@@ -51,6 +53,9 @@ def body($shown):
             end)
          + (if $shown < ($all | length)
             then ["", "_" + (($all | length) - $shown | tostring) + " more finding(s) not shown (comment length limit)._"]
+            else [] end)
+         + (if $dependabot
+            then ["", "**Dependency update:** this review checks the version changes against the project's pinning and major-version rules. It cannot assess the contents of the new releases."]
             else [] end)
        end)
     + [

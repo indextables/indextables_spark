@@ -20,15 +20,42 @@ name: Claude Code Review
 #   HTML.
 # * Anything other than a valid verdict from a successful review is reported
 #   as "did not complete" and fails the `verdict` job. Only `pass` is green.
+#   A Verdict check that is missing or skipped is not a pass either.
+# * Actions and the runner image are pinned. The pinned release of the Claude
+#   action fixes the CLI version, and with it how the tool list, the
+#   permission mode and the deny rules below are enforced. See the README next
+#   to the scripts before changing a pin.
 #
-# Do not add a `pull_request`-triggered workflow that uses the same credential:
-# that definition would come from the pull request itself.
+# Not yet verified on a runner
+# ----------------------------
+# The reviewer's read confinement (no --allowedTools, the permission mode, the
+# settings deny list) was probed with a local CLI on macOS only. It has not
+# been exercised on a Linux runner, where the credential is also present in
+# the reviewer's process environment under /proc. Re-check it whenever the
+# Claude action pin, claude_args or settings change.
 #
-# Dependabot: runs started by Dependabot are subject to GitHub's restrictions
-# on secrets. If such a run does not receive CLAUDE_CODE_OAUTH_TOKEN, it ends
-# as "did not complete (credential_unavailable)". The "Set up job" log of the
-# run shows `Secret source:`. Should it be `Dependabot`, a Dependabot secret
-# with the same name makes this workflow work unchanged.
+# Known gap, outside this workflow
+# --------------------------------
+# The same credential is still used by claude.yml on `pull_request_review` and
+# `pull_request_review_comment`. Those events run the workflow definition from
+# the pull request's merge ref, so for a branch in this repository that
+# definition, and its use of the credential, is under the pull request's
+# control. The intended fix is a separate change: keep the credential in an
+# environment restricted to the default branch, and drop those two triggers.
+# Until then, do not add any further workflow that uses the credential on an
+# event whose definition comes from the pull request (`pull_request` and the
+# two above).
+#
+# Dependabot
+# ----------
+# Runs started by Dependabot are subject to GitHub's restrictions on secrets.
+# If such a run does not receive CLAUDE_CODE_OAUTH_TOKEN, it ends as "did not
+# complete (credential_unavailable)"; the "Set up job" log of the run shows
+# `Secret source:`. Should that turn out to be the case, the options are a
+# dedicated, spend-capped key stored as a Dependabot secret, or a different
+# trigger design. Do not put a personal subscription token into Dependabot
+# secrets: they are handed to every workflow run that Dependabot triggers,
+# including `pull_request` runs whose definition comes from the branch.
 #
 # Scripts and their offline tests: .github/scripts/claude-review/
 
@@ -63,7 +90,7 @@ jobs:
       github.event.pull_request.base.ref == github.event.repository.default_branch &&
       github.event.pull_request.draft == false &&
       contains(fromJSON('["dependabot[bot]", "rbrenton", "schenksj", "chrisfauerbach"]'), github.event.pull_request.user.login)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read        # check out the default branch
@@ -73,7 +100,7 @@ jobs:
       structured_output: ${{ steps.claude.outputs.structured_output }}
     steps:
       - name: Check out the default branch (never the pull request)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
@@ -97,7 +124,10 @@ jobs:
         # A step timeout fails the step, so the verdict job still runs and
         # reports "did not complete".
         timeout-minutes: 20
-        uses: anthropics/claude-code-action@v1
+        # This release installs Claude Code 2.1.292, which is what enforces
+        # the tool and path limits below. Re-check them on every change of
+        # this pin (see the README next to the scripts).
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The job's own read-only token. Passing it also keeps the action
@@ -205,6 +235,10 @@ jobs:
             - A change to a build plugin (anything under <build> or
               <pluginManagement>) or to a GitHub Action version is at least `medium`;
               `high` if it is a major-version jump.
+            - A change to the pinned commit of anthropics/claude-code-action in
+              .github/workflows/claude-review.yml is `high`: that release decides
+              how this review is confined, and the maintainers must re-check the
+              confinement before merging it.
             - pom.xml has one profile per supported Spark line. Check that a bump
               applies to the profile or property it claims to, and say so when a
               version is now inconsistent across profiles.
@@ -263,14 +297,14 @@ jobs:
     # skipped by its condition, and when the run was cancelled (a newer commit
     # superseded it).
     if: ${{ !cancelled() && needs.review.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read         # check out the scripts
       pull-requests: write   # the one comment on the pull request
     steps:
       - name: Check out the review scripts from the default branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
@@ -286,6 +320,8 @@ jobs:
           STRUCTURED_OUTPUT: ${{ needs.review.outputs.structured_output }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Adds a fixed note on what a verdict covers for a dependency update.
+          OPENED_BY_DEPENDABOT: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
           OUT_DIR: ${{ runner.temp }}/claude-review-report
         run: bash .github/scripts/claude-review/report.sh
 
@@ -300,14 +336,8 @@ jobs:
           COMMENT_FILE: ${{ runner.temp }}/claude-review-report/comment.md
         run: bash .github/scripts/claude-review/post-comment.sh
 
-      - name: Upload verdict.json
-        uses: actions/upload-artifact@v7
-        with:
-          name: claude-review-verdict
-          path: ${{ runner.temp }}/claude-review-report/verdict.json
-          if-no-files-found: error
-          retention-days: 30
-
+      # The machine-readable result is this job's conclusion on the head commit
+      # (check run "Verdict"): success only for a pass.
       - name: Enforce the verdict
         env:
           VERDICT: ${{ steps.report.outputs.verdict }}

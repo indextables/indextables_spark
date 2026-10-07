@@ -2,8 +2,8 @@
 # Post the rendered review as ONE comment on the pull request: update the
 # comment a previous run left, or create it.
 #
-# Best effort by design. The verdict is carried by the job conclusion, the job
-# summary and the verdict.json artifact; a comment that cannot be written
+# Best effort by design. The verdict is carried by the job conclusion and the
+# job summary; a comment that cannot be written
 # (for example because the token is read-only for this run) produces a warning
 # and must not change the verdict in either direction.
 #

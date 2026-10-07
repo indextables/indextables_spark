@@ -190,8 +190,7 @@ run_report() { # run_report <case> <review_result> <precheck> <structured_output
 }
 report_is() { # report_is <name> <verdict> <reason>
   if [ "$RC" -eq 0 ] && [ "$(cat "$OUT/gh_output")" = "verdict=$2
-reason=$3" ] &&
-     [ "$(jq -r '.verdict + " " + .reason + " " + (.pr | tostring) + " " + .head_sha' "$OUT/report/verdict.json" 2>/dev/null)" = "$2 $3 7 $SHA" ]; then
+reason=$3" ] && [ -s "$OUT/report/comment.md" ]; then
     ok "report: $1"
   else
     bad "report: $1 (rc=$RC, output: $(tr '\n' ' ' < "$OUT/gh_output"))"
@@ -209,7 +208,8 @@ run_report pass success ok "$(review pass '[]')"
 report_is "valid pass" pass reviewer_pass
 check "report: pass comment says PASS and carries the marker" test "$(sed -n 1p "$OUT/report/comment.md")" = '<!-- claude-review-verdict -->' -a "$(sed -n 2p "$OUT/report/comment.md")" = '### Automated review: PASS'
 check "report: job summary is the comment without the marker" cmp -s <(tail -n +2 "$OUT/report/comment.md") "$OUT/summary"
-check "report: verdict.json has exactly the expected keys" is "$(jq -c 'keys' "$OUT/report/verdict.json")" '["blocking_findings","findings","head_sha","model_verdict","pr","reason","run_url","verdict"]'
+check "report: the only file written is the comment" is "$(ls "$OUT/report" | tr '\n' ' ')" 'comment.md '
+check "report: no dependency-update note unless the pull request is Dependabot's" hasnt "$OUT/report/comment.md" 'Dependency update'
 
 run_report fail success ok "$(review fail "[$(finding high 'Hadoop is pinned to 3.3.4 and must not be bumped.')]")"
 report_is "valid fail" fail reviewer_fail
@@ -230,6 +230,19 @@ check "report: location without a line has no colon suffix" has "$OUT/report/com
 
 run_report maxmsg success ok "$(review pass "[$(finding low "$(repeat 500 x)")]")"
 report_is "message of exactly 500 characters is accepted" pass reviewer_pass
+
+# --- fixed note on dependency updates --------------------------------------
+DEP_NOTE="**Dependency update:** this review checks the version changes against the project's pinning and major-version rules. It cannot assess the contents of the new releases."
+run_report dep.pass success ok "$(review pass '[]')" OPENED_BY_DEPENDABOT=true
+report_is "Dependabot pull request, pass" pass reviewer_pass
+check "report: a Dependabot pass says what the review cannot assess" grep -qxF -- "$DEP_NOTE" "$OUT/report/comment.md"
+check "report: the note is in the job summary too" grep -qxF -- "$DEP_NOTE" "$OUT/summary"
+run_report dep.fail success ok "$(review fail "[$(finding high 'Pinned.')]")" OPENED_BY_DEPENDABOT=true
+check "report: a Dependabot fail carries the note as well" grep -qxF -- "$DEP_NOTE" "$OUT/report/comment.md"
+run_report dep.none failure ok '' OPENED_BY_DEPENDABOT=true
+check "report: no note when there is no verdict" hasnt "$OUT/report/comment.md" 'Dependency update'
+run_report dep.other success ok "$(review pass '[]')" OPENED_BY_DEPENDABOT=True
+check "report: only the literal true enables the note" hasnt "$OUT/report/comment.md" 'Dependency update'
 
 # --- everything below must end without a verdict --------------------------
 invalid() { # invalid <case> <name> <structured_output>
@@ -305,12 +318,11 @@ check "report: only one heading line" is "$(grep -c '^#' "$C")" 1
 check "report: no line starts a workflow command" test -z "$(grep -E '^::' "$C" "$OUT/log" "$OUT/summary")"
 check "report: reviewer text is not echoed to the log" hasnt "$OUT/log" CANARY-MODEL-TEXT
 check "report: reviewer text is not in the step outputs" hasnt "$OUT/gh_output" CANARY
-check "report: reviewer text is not in verdict.json" hasnt "$OUT/report/verdict.json" CANARY
 check "report: step outputs are exactly two lines" is "$(wc -l < "$OUT/gh_output" | tr -d ' ')" 2
 
 run_report hostileinvalid success ok '{"verdict":"pass","summary":"CANARY-MODEL-TEXT","findings":[],"x":"CANARY-MODEL-TEXT\n::error::x"}'
 report_is "hostile text in an invalid output" none invalid_output
-check "report: invalid output is not quoted anywhere" test -z "$(grep -l CANARY "$OUT/log" "$OUT/report/comment.md" "$OUT/summary" "$OUT/gh_output" "$OUT/report/verdict.json")"
+check "report: invalid output is not quoted anywhere" test -z "$(grep -l CANARY "$OUT/log" "$OUT/report/comment.md" "$OUT/summary" "$OUT/gh_output")"
 
 many=$(jq -n -c --arg m "$(repeat 500 y)" '{verdict: "fail", summary: "s", findings: [range(30) | {severity: "high", path: "p", message: $m}]}')
 run_report capped success ok "$many" COMMENT_MAX_CHARS=3000
@@ -389,7 +401,7 @@ if command -v ruby > /dev/null 2>&1; then
   check "workflow: credential is referenced only by the review job" is "$(wf '.jobs.verdict | tostring | test("CLAUDE_CODE_OAUTH_TOKEN")')" false
   check "workflow: per-pull-request concurrency with cancel-in-progress" is "$(wf '.concurrency["cancel-in-progress"]')" true
   check "workflow: both jobs have a timeout" is "$(wf '[.jobs[] | has("timeout-minutes")] | all')" true
-  check "workflow: hosted runner only" is "$(wf '[.jobs[]["runs-on"]] | unique | join(",")')" ubuntu-latest
+  check "workflow: hosted runner, pinned image" is "$(wf '[.jobs[]["runs-on"]] | unique | join(",")')" ubuntu-24.04
   cond="$(wf '.jobs.review.if')"
   check "workflow: gate excludes forks" grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' <<< "$cond"
   check "workflow: gate excludes drafts" grep -qF 'github.event.pull_request.draft == false' <<< "$cond"
@@ -425,6 +437,12 @@ if command -v ruby > /dev/null 2>&1; then
                  verdicts: .properties.verdict.enum}' <<< "$schema" 2> /dev/null)"
   check "workflow: schema limits and enumerations match validate.jq" test -n "$got" -a "$got" = "$want"
   check "workflow: schema forbids extra fields at both levels" is "$(jq -c '[.additionalProperties, .properties.findings.items.additionalProperties]' <<< "$schema")" '[false,false]'
+  check "workflow: the verdict job tells report.sh whether Dependabot opened the pull request" is "$(wf '.jobs.verdict.steps[] | select(.id == "report") | .env.OPENED_BY_DEPENDABOT')" "\${{ github.event.pull_request.user.login == 'dependabot[bot]' }}"
+  check "workflow: nothing is uploaded" is "$(wf '[.jobs[].steps[] | .uses // empty | select(test("upload-artifact"))] | length')" 0
+  check "workflow: header no longer suggests reusing the credential as a Dependabot secret" test -z "$(grep -F 'makes this workflow work unchanged' "$workflow")"
+  check "workflow: header states the known gap in claude.yml" grep -qF 'pull_request_review_comment' "$workflow"
+  check "workflow: header states that confinement is untested on Linux" grep -qF 'been exercised on a Linux runner' "$workflow"
+
   # The last step turns the verdict into the job conclusion: only "pass" exits 0.
   enforce="$(wf '.jobs.verdict.steps[-1].run')"
   enforce_rc() { VERDICT="$1" REASON="$2" bash -eo pipefail -c "$enforce" > /dev/null 2>&1; echo $?; }
@@ -452,6 +470,19 @@ elif [ "${REQUIRE_WORKFLOW_CHECKS:-0}" = "1" ]; then
 else
   echo "skip  workflow checks (ruby not available)"
 fi
+
+# ---------------------------------------------------------------------------
+# Pinned actions and runner image
+# ---------------------------------------------------------------------------
+scripts_wf="$here/../../workflows/claude-review-scripts.yml"
+unpinned=""
+for f in "$workflow" "$scripts_wf"; do
+  n=$(grep -c -E '^[[:space:]]*(- )?uses:' "$f")
+  m=$(grep -c -E '^[[:space:]]*(- )?uses: [A-Za-z0-9._/-]+@[0-9a-f]{40} # v[0-9]+(\.[0-9]+)*$' "$f")
+  if [ "$n" -eq 0 ] || [ "$n" -ne "$m" ]; then unpinned="$unpinned $(basename "$f")"; fi
+done
+check "pins: every action is a full commit id with its version tag in a comment" test -z "$unpinned"
+check "pins: no floating runner label" test -z "$(grep -h -E 'runs-on:' "$workflow" "$scripts_wf" | grep -v -E 'runs-on: ubuntu-24\.04$')"
 
 echo
 echo "$pass passed, $fail failed"
