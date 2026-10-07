@@ -20,10 +20,13 @@ package io.indextables.spark.sync
 import java.io.File
 import java.nio.file.{Files, StandardCopyOption}
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.jdk.CollectionConverters._
 
+import org.apache.spark.TaskContext
 import org.apache.spark.sql.indextables.OutputMetricsUpdater
+import org.apache.spark.util.{TaskCompletionListener, TaskFailureListener}
 
 import io.indextables.spark.transaction.AddAction
 import io.indextables.spark.util.CloudPathUtils
@@ -73,6 +76,13 @@ case class SyncTaskResult(
 object SyncTaskExecutor {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /** Config key controlling how old an orphaned `sync-*` scratch dir must be before the executor-init sweep removes it. */
+  private val LocalScratchMaxAgeMinutesKey = "spark.indextables.companion.sync.localScratch.maxAgeMinutes"
+  private val DefaultLocalScratchMaxAgeMinutes = 360L // 6 hours
+
+  /** Guards the orphan sweep so it only runs once per executor JVM (first task execution), not once per task. */
+  private val orphanSweepPerformed = new AtomicBoolean(false)
+
   /**
    * Execute a sync task for one indexing group.
    *
@@ -87,13 +97,34 @@ object SyncTaskExecutor {
     // Initialize native memory pool before any tantivy4java native calls
     io.indextables.spark.memory.NativeMemoryInitializer.ensureInitialized()
 
+    sweepOrphanedScratchDirsOnce(config)
+
     val startTime = System.currentTimeMillis()
     val tempDir   = createTempDir()
     logger.info(
       s"Sync task ${group.groupIndex}: indexing ${group.parquetFiles.size} parquet files into companion split"
     )
 
-    try {
+    // Kill-safe cleanup: register via TaskContext instead of a plain try/finally. Spark invokes these
+    // listeners on task completion (success, exception, or TaskContext#kill()) even when the calling
+    // thread never gets to unwind through a Scala finally block — e.g. FORCE_KILL and stage-cancel/retry,
+    // which route through Spark's own task lifecycle before the process is torn down. A raw SIGKILL still
+    // prevents any JVM code from running; that residual gap is closed separately by the orphan sweep above.
+    val cleanupDone = new AtomicBoolean(false)
+    def cleanupTempDir(): Unit =
+      if (cleanupDone.compareAndSet(false, true)) {
+        deleteRecursively(tempDir)
+      }
+    Option(TaskContext.get()).foreach { tc =>
+      tc.addTaskCompletionListener(new TaskCompletionListener {
+        override def onTaskCompletion(context: TaskContext): Unit = cleanupTempDir()
+      })
+      tc.addTaskFailureListener(new TaskFailureListener {
+        override def onTaskFailure(context: TaskContext, error: Throwable): Unit = cleanupTempDir()
+      })
+    }
+
+    {
       // 1. Download parquet files to local temp in parallel, preserving relative paths
       val downloadParallelism  = math.min(8, math.max(1, group.parquetFiles.size))
       val downloadPool         = java.util.concurrent.Executors.newFixedThreadPool(downloadParallelism)
@@ -253,8 +284,7 @@ object SyncTaskExecutor {
         bytesUploaded = splitSize,
         parquetFilesIndexed = group.parquetFiles.size
       )
-    } finally
-      deleteRecursively(tempDir)
+    }
   }
 
   private def createTempDir(): File = {
@@ -268,6 +298,83 @@ object SyncTaskExecutor {
     val tempDir = new File(baseDir, s"sync-${UUID.randomUUID()}")
     tempDir.mkdirs()
     tempDir
+  }
+
+  /**
+   * Resolves the configured orphan-sweep max-age, in minutes. Falls back to the default (with a warning) if the
+   * config value is present but not a valid number.
+   */
+  private[sync] def resolveScratchMaxAgeMinutes(storageConfig: Map[String, String]): Long =
+    storageConfig.get(LocalScratchMaxAgeMinutesKey) match {
+      case None => DefaultLocalScratchMaxAgeMinutes
+      case Some(raw) =>
+        scala.util.Try(raw.trim.toLong) match {
+          case scala.util.Success(minutes) if minutes >= 0 => minutes
+          case _ =>
+            logger.warn(
+              s"Invalid value '$raw' for $LocalScratchMaxAgeMinutesKey; " +
+                s"falling back to default of $DefaultLocalScratchMaxAgeMinutes minutes"
+            )
+            DefaultLocalScratchMaxAgeMinutes
+        }
+    }
+
+  /**
+   * Pure sweep core: deletes and returns the subdirectories of `baseDir` whose name starts with `prefix` and whose
+   * last-modified time is older than `maxAgeMillis` relative to `now`. No Spark dependency — safe to unit test
+   * directly. No-ops (returns empty) if `baseDir` doesn't exist or isn't a directory.
+   */
+  private[sync] def sweepOrphanedDirs(baseDir: File, prefix: String, maxAgeMillis: Long, now: Long): Seq[File] = {
+    if (!baseDir.isDirectory) {
+      return Seq.empty
+    }
+    val candidates = Option(baseDir.listFiles((f: File) => f.isDirectory && f.getName.startsWith(prefix)))
+      .getOrElse(Array.empty[File])
+    val orphaned = candidates.filter(dir => (now - dir.lastModified()) > maxAgeMillis).toSeq
+    orphaned.foreach { dir =>
+      try {
+        deleteRecursively(dir)
+        logger.info(s"Removed orphaned sync scratch directory: ${dir.getAbsolutePath}")
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to remove orphaned sync scratch directory ${dir.getAbsolutePath}: ${e.getMessage}")
+      }
+    }
+    orphaned
+  }
+
+  /**
+   * Sweeps `/local_disk0/temp` for orphaned `sync-*` scratch directories left behind by executors that were killed
+   * before the per-task cleanup listeners could run (e.g. a prior JVM's SIGKILL, or a pre-fix code path). Runs at
+   * most once per executor JVM — subsequent calls (one per task) are a cheap no-op check. A generous default age
+   * threshold (6h) ensures a currently in-flight download's scratch dir — whose mtime keeps advancing as new files
+   * land inside it — is never touched; this stands in for tracking live task-attempt IDs without the bookkeeping.
+   * Never lets a sweep failure fail the calling sync task.
+   */
+  private def sweepOrphanedScratchDirsOnce(config: SyncConfig): Unit = {
+    if (!orphanSweepPerformed.compareAndSet(false, true)) {
+      return
+    }
+    try {
+      val localDisk0 = new File("/local_disk0")
+      if (!localDisk0.isDirectory) {
+        return
+      }
+      val tempBase      = new File(localDisk0, "temp")
+      val maxAgeMinutes = resolveScratchMaxAgeMinutes(config.storageConfig)
+      val removed       = sweepOrphanedDirs(tempBase, "sync-", maxAgeMinutes * 60L * 1000L, System.currentTimeMillis())
+      if (removed.nonEmpty) {
+        logger.warn(
+          s"Executor-init sweep removed ${removed.size} orphaned sync scratch directories " +
+            s"under ${tempBase.getAbsolutePath} (older than ${maxAgeMinutes}m)"
+        )
+      } else {
+        logger.debug(s"Executor-init sweep found no orphaned sync scratch directories under ${tempBase.getAbsolutePath}")
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Orphaned sync scratch sweep failed (non-fatal): ${e.getMessage}", e)
+    }
   }
 
   private def extractRelativePath(absolutePath: String, tableRoot: String): String = {
