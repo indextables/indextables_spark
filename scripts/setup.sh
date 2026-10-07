@@ -6,7 +6,7 @@
 #   ./scripts/setup.sh          # Install/verify all dependencies
 #   ./scripts/setup.sh -h       # Show help
 #
-# Supports macOS (Homebrew) and Linux (apt-get, yum, dnf).
+# Supports macOS (Homebrew for Java/Maven) and Linux (apt-get, yum, dnf).
 
 set -euo pipefail
 
@@ -22,11 +22,21 @@ set -euo pipefail
 REQUIRED_JAVA_MAJOR=17
 SUPPORTED_JAVA_MAJORS=(11 17)
 
-# Protoc version to install from GitHub releases (Linux only).
+# Protoc version to install from GitHub releases (macOS and Linux).
 # Must support --experimental_allow_proto3_optional (used by quickwit proto build).
-# Flag added in 3.12, no-op in 22+. Distro packages are unreliable; pin a known-good version.
+# Flag added in 3.12, no-op in 22+. Distro/Homebrew packages are unreliable (Homebrew
+# can also be unwritable or have its dylibs drift out from under protoc); pin a known-good
+# version.
+#   macOS: unpacked into a user-local dir, no brew and no sudo (see install_protoc_macos).
+#   Linux: installed into /usr/local with sudo.
 PROTOC_VERSION="25.5"
 PROTOC_MIN_VERSION="3.15.0"
+
+# macOS install dir for the pinned protoc (bin/ and include/ together, because protoc
+# resolves well-known types like google/protobuf/*.proto relative to its own binary).
+# Version-named so bumping PROTOC_VERSION installs side by side. Fixed (not overridable)
+# because install_protoc_macos recursively replaces this directory.
+PROTOC_INSTALL_DIR="$HOME/.local/share/indextables/protoc-${PROTOC_VERSION}"
 
 # tantivy4java build-from-source configuration
 TANTIVY4JAVA_REPO="https://github.com/indextables/tantivy4java.git"
@@ -85,12 +95,12 @@ while [[ $# -gt 0 ]]; do
             echo "  - Java ${REQUIRED_JAVA_MAJOR} (OpenJDK ${REQUIRED_JAVA_MAJOR})"
             echo "  - Maven"
             echo "  - Rust toolchain (rustc, cargo via rustup)"
-            echo "  - Protobuf compiler (protoc)"
+            echo "  - Protobuf compiler (protoc ${PROTOC_VERSION}, pinned GitHub release, checksum-verified)"
             echo "  - tantivy4java ${TANTIVY4JAVA_VERSION} (built from source)"
             echo ""
             echo "Supported platforms:"
-            echo "  - macOS (via Homebrew)"
-            echo "  - Linux (apt-get, yum, or dnf)"
+            echo "  - macOS (Java and Maven via Homebrew; protoc unpacked to ${PROTOC_INSTALL_DIR}, no sudo)"
+            echo "  - Linux (apt-get, yum, or dnf; protoc installed to /usr/local)"
             exit 0
             ;;
         *)
@@ -229,6 +239,67 @@ check_protoc() {
     return 1
 }
 
+# SHA-256 of each pinned protoc release asset, keyed by asset suffix
+# (protoc-${PROTOC_VERSION}-<suffix>.zip). Trust-on-first-use: computed from the
+# official v25.5 GitHub release assets when pinned. Recompute when bumping PROTOC_VERSION.
+protoc_expected_sha256() {
+    case "$1" in
+        osx-aarch_64)   echo "781a6fc4c265034872cadc65e63dd3c0fc49245b70917821b60e2d457a6876ab" ;;
+        osx-x86_64)     echo "c5447e4f0d5caffb18d9ff21eae7bc7faf2bb2000083d6f49e5b6000b30fceae" ;;
+        linux-x86_64)   echo "e1ed237a17b2e851cf9662cb5ad02b46e70ff8e060e05984725bc4b4228c6b28" ;;
+        linux-aarch_64) echo "dc715bb5aab2ebf9653d7d3efbe55e01a035e45c26f391ff6d9b7923e22914b7" ;;
+        *) return 1 ;;
+    esac
+}
+
+# SHA-256 of a file (sha256sum on Linux, shasum on macOS).
+sha256_of() {
+    if command -v sha256sum &>/dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+# Download protoc-${PROTOC_VERSION}-<asset>.zip, verify its SHA-256 against the pinned
+# value, and unpack it (bin/ and include/) into <dest_dir>. Exits on any failure so a
+# bad download is never unpacked. No traps are set (callers own the EXIT trap).
+download_protoc() {
+    local asset="$1" dest_dir="$2"
+    local expected
+    if ! expected=$(protoc_expected_sha256 "$asset"); then
+        error "No pinned SHA-256 for protoc asset: $asset"
+        exit 1
+    fi
+    local url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${asset}.zip"
+    local tmp
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/protoc-dl.XXXXXX")
+
+    # -f: fail on HTTP errors instead of saving the error page as the "zip".
+    if ! curl -fsSL --retry 3 "$url" -o "$tmp/protoc.zip"; then
+        error "Failed to download $url"
+        rm -rf "$tmp"
+        exit 1
+    fi
+    local actual
+    actual=$(sha256_of "$tmp/protoc.zip")
+    if [[ "$actual" != "$expected" ]]; then
+        error "SHA-256 mismatch for protoc-${PROTOC_VERSION}-${asset}.zip"
+        error "  expected: $expected"
+        error "  actual:   $actual"
+        rm -rf "$tmp"
+        exit 1
+    fi
+    if ! command -v unzip &>/dev/null; then
+        error "unzip is required to unpack protoc but was not found."
+        rm -rf "$tmp"
+        exit 1
+    fi
+    mkdir -p "$dest_dir"
+    unzip -q "$tmp/protoc.zip" -d "$dest_dir"
+    rm -rf "$tmp"
+}
+
 # Check if OpenSSL dev headers and pkg-config are available
 check_openssl_dev() {
     command -v pkg-config &>/dev/null && pkg-config --exists openssl 2>/dev/null
@@ -297,12 +368,62 @@ install_macos() {
     fi
 
     # --- Protobuf compiler ---
+    install_protoc_macos
+}
+
+# Put the pinned protoc's bin dir first on PATH for the rest of this script, and (in
+# GitHub Actions) for later workflow steps via GITHUB_PATH. Called on both the fresh
+# install and the reuse path, since GITHUB_PATH is per-job and the install dir persists.
+use_pinned_protoc() {
+    local bin_dir="$1/bin"
+    export PATH="$bin_dir:$PATH"
+    if [[ -n "${GITHUB_PATH:-}" ]]; then
+        echo "$bin_dir" >> "$GITHUB_PATH"
+    fi
+}
+
+# macOS protoc: Homebrew is not used here. On shared/self-hosted runners the Homebrew
+# prefix is often owned by another user (brew install fails with "not writable"), and a
+# brew upgrade of a dependency (e.g. abseil) can break the installed protoc with a dyld
+# "Library not loaded" error. A pinned release in a user-local dir needs neither.
+#
+# A working protoc already on PATH is left alone. Only when it is missing, broken, or
+# too old do we fall to the pinned copy, which is prepended to PATH so it wins over the
+# broken one that may still sit earlier on PATH.
+install_protoc_macos() {
     if check_protoc; then
-        ok "Protobuf compiler (protoc) already installed"
+        ok "Protobuf compiler (protoc) already installed: $(protoc --version)"
+        return
+    fi
+
+    local protoc_asset
+    case "$ARCH" in
+        arm64)  protoc_asset="osx-aarch_64" ;;
+        x86_64) protoc_asset="osx-x86_64" ;;
+        *)      error "Unsupported architecture for protoc: $ARCH"; exit 1 ;;
+    esac
+
+    # Reuse a previous install if it still runs; otherwise (re)install it.
+    if [[ -x "$PROTOC_INSTALL_DIR/bin/protoc" ]] && "$PROTOC_INSTALL_DIR/bin/protoc" --version &>/dev/null; then
+        info "Using existing pinned protoc ${PROTOC_VERSION} at $PROTOC_INSTALL_DIR"
     else
-        info "Installing protobuf via Homebrew..."
-        brew install protobuf
-        ok "Protobuf compiler installed"
+        info "Installing protoc ${PROTOC_VERSION} (${protoc_asset}) to $PROTOC_INSTALL_DIR..."
+        # Unpack to a staging dir and rename, so an interrupted run never leaves a
+        # half-extracted dir that looks installed.
+        local staging="${PROTOC_INSTALL_DIR}.tmp.$$"
+        rm -rf "$staging" "$PROTOC_INSTALL_DIR"
+        mkdir -p "$(dirname "$PROTOC_INSTALL_DIR")"
+        download_protoc "$protoc_asset" "$staging"
+        chmod +x "$staging/bin/protoc"
+        mv "$staging" "$PROTOC_INSTALL_DIR"
+    fi
+
+    use_pinned_protoc "$PROTOC_INSTALL_DIR"
+    if check_protoc; then
+        ok "Protobuf compiler (protoc) installed: $(protoc --version) ($PROTOC_INSTALL_DIR)"
+    else
+        error "Pinned protoc at $PROTOC_INSTALL_DIR is not usable."
+        exit 1
     fi
 }
 
@@ -396,7 +517,6 @@ install_linux() {
             aarch64) protoc_arch="linux-aarch_64" ;;
             *)       error "Unsupported architecture for protoc: $ARCH"; exit 1 ;;
         esac
-        local protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${protoc_arch}.zip"
         local protoc_tmp
         protoc_tmp=$(mktemp -d)
         cleanup_protoc_tmp() { rm -rf "$protoc_tmp"; }
@@ -409,8 +529,7 @@ install_linux() {
                 yum)     $sudo_cmd yum install -y unzip ;;
             esac
         fi
-        curl -sL "$protoc_url" -o "$protoc_tmp/protoc.zip"
-        unzip -q "$protoc_tmp/protoc.zip" -d "$protoc_tmp/protoc"
+        download_protoc "$protoc_arch" "$protoc_tmp/protoc"
         $sudo_cmd install -m 755 "$protoc_tmp/protoc/bin/protoc" /usr/local/bin/protoc
         $sudo_cmd cp -r "$protoc_tmp/protoc/include/"* /usr/local/include/ 2>/dev/null || true
         rm -rf "$protoc_tmp"
