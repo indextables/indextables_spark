@@ -477,7 +477,7 @@ case class SyncToExternalCommand(
       var allFiles       = collectedFiles
       allFiles = applyWhereFilter(allFiles, partitionColumns, sparkSession, fullSchema = sourceSchemaOpt)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
-      val groups       = planIndexingGroups(allFiles, maxGroupSize)
+      val groups       = planIndexingGroups(allFiles, maxGroupSize, partitionColumns)
       val durationMs   = System.currentTimeMillis() - startTime
       return Seq(
         Row(
@@ -1151,7 +1151,7 @@ case class SyncToExternalCommand(
 
       // 8. Plan indexing groups (respecting partition boundaries and target size)
       val maxGroupSize = targetInputSize.getOrElse(DEFAULT_TARGET_INPUT_SIZE)
-      val groups       = planIndexingGroups(parquetFilesToIndex, maxGroupSize)
+      val groups       = planIndexingGroups(parquetFilesToIndex, maxGroupSize, partitionColumns)
 
       logger.info(
         s"Sync plan: ${groups.size} indexing groups, " +
@@ -1333,7 +1333,8 @@ case class SyncToExternalCommand(
           parquetFiles = plan.files.map(f => resolveAbsolutePath(f.path, effectiveParquetTableRoot)),
           parquetTableRoot = effectiveParquetTableRoot,
           partitionValues = plan.partitionValues,
-          groupIndex = idx
+          groupIndex = idx,
+          partitionColumns = plan.partitionColumns
         )
     }
 
@@ -1808,7 +1809,8 @@ case class SyncToExternalCommand(
   /** Group parquet files into indexing groups, respecting partition boundaries and target input size. */
   private def planIndexingGroups(
     files: Seq[CompanionSourceFile],
-    maxGroupSize: Long
+    maxGroupSize: Long,
+    partitionColumns: Seq[String] = Seq.empty
   ): Seq[SyncIndexingGroupPlan] = {
     // Group by partition values
     val byPartition = files.groupBy(_.partitionValues)
@@ -1820,7 +1822,7 @@ case class SyncToExternalCommand(
 
         if (numGroups == 1) {
           // All files fit in one group
-          Seq(SyncIndexingGroupPlan(partFiles.toSeq, partValues))
+          Seq(SyncIndexingGroupPlan(partFiles.toSeq, partValues, partitionColumns))
         } else {
           // Distribute files evenly: target per group = totalBytes / numGroups
           val targetPerGroup = totalBytes.toDouble / numGroups
@@ -1853,7 +1855,7 @@ case class SyncToExternalCommand(
               s"Partition $partValues: $numGroups groups, target ${targetPerGroup / 1024 / 1024}MB each, actual: [$sizesStr]"
             )
           }
-          nonEmpty.map(g => SyncIndexingGroupPlan(g.toSeq, partValues)).toSeq
+          nonEmpty.map(g => SyncIndexingGroupPlan(g.toSeq, partValues, partitionColumns)).toSeq
         }
     }.toSeq
   }
@@ -2081,4 +2083,5 @@ case class SyncToExternalCommand(
 /** Internal grouping plan for BUILD COMPANION operation (driver-side only, not serialized). */
 private[sql] case class SyncIndexingGroupPlan(
   files: Seq[CompanionSourceFile],
-  partitionValues: Map[String, String])
+  partitionValues: Map[String, String],
+  partitionColumns: Seq[String] = Seq.empty)
