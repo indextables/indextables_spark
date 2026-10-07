@@ -6,14 +6,26 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    # One grouped PR per ecosystem per week: every version update that survives the
+    # `ignore` rules below lands in this single PR (major, minor and patch alike).
+    # Spark/Delta/Iceberg and test-scope deps used to have their own groups; they now
+    # travel together because CI is slow enough that separate PRs force a rebase-and-rerun
+    # cascade. A bump that breaks CI should be dropped from the PR with
+    # "@dependabot ignore <dependency>" rather than splitting the group.
+    # Dependabot assigns a dependency to the first matching group and gives anything
+    # unmatched its own PR, so the catch-all pattern must stay in place.
     groups:
-      spark-ecosystem:
+      all-maven-updates:
+        applies-to: version-updates
         patterns:
-          - "org.apache.spark:*"
-          - "io.delta:*"
-          - "org.apache.iceberg:*"
-      test-dependencies:
-        dependency-type: development
+          - "*"
+      # Security updates are raised when an advisory is published, not on the weekly
+      # schedule, and are not grouped unless asked. Keep them in their own group so they
+      # are never held behind (or blocked by) the weekly PR.
+      maven-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
     # These dependencies are pinned in pom.xml to match what Spark 3.5.x bundles.
     # Bumping them independently breaks at runtime/build time, so they must move
     # only as part of a deliberate Spark upgrade — not via dependabot. See the
@@ -30,7 +42,7 @@ updates:
       - dependency-name: "org.antlr:antlr4-maven-plugin"
       # Pin 1.6.x: iceberg-core 1.10.1+ requires Avro 1.12, but Spark 3.5.x ships Avro 1.11.x.
       # Range-scoped so in-minor 1.6.x security patches still surface (and 1.6.x bumps
-      # group correctly under spark-ecosystem rather than being fully ignored).
+      # are grouped into the weekly Maven PR rather than being fully ignored).
       - dependency-name: "org.apache.iceberg:*"
         versions: [">=1.7.0"]
       # Pin 12.0.1 to match Spark 3.5.x's bundled Arrow.
@@ -47,5 +59,14 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      all-github-actions-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      github-actions-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
     labels:
       - "type: chore"
