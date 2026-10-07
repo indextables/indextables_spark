@@ -384,12 +384,31 @@ echo "[INFO] Logs:    $LOG_DIR"
 # ---------------------------------------------------------------------------
 # Slowest Tests (top 5)
 # ---------------------------------------------------------------------------
-if [[ -s "$TIMINGS_FILE" ]]; then
-    echo ""
-    echo "------------------------------------------------------------------"
-    echo "[INFO] Slowest Tests"
-    echo "------------------------------------------------------------------"
-    sort -t'|' -k1 -nr "$TIMINGS_FILE" | head -5 | while IFS='|' read -r dur name status; do
+# Informational only. The exit status of this script is decided solely by the
+# pass/fail counters below, so nothing in this report may change it.
+#
+# The sorted timings are written to a file and the first five lines are read
+# back from it. Do not turn this back into `sort ... | head -5`: head exits
+# after five lines, sort can then fail while writing the rest (killed by
+# SIGPIPE, or "write error: Broken pipe" where SIGPIPE is ignored), and under
+# `set -o pipefail` that failure becomes the status of the whole pipeline.
+# With `set -e` the script then exits non-zero after every test has passed.
+# Whether it happens depends on timing and on the size of the timings file.
+print_slowest_tests() {
+    local sorted="$LOG_DIR/.timings_sorted"
+    local shown=0
+    local dur name status short tag mins secs
+
+    if ! sort -t'|' -k1 -nr "$TIMINGS_FILE" > "$sorted"; then
+        echo "  (could not sort $TIMINGS_FILE)"
+        return 0
+    fi
+
+    while [[ "$shown" -lt 5 ]] && IFS='|' read -r dur name status; do
+        # Skip anything that is not a "seconds|class|status" line.
+        case "$dur" in
+            ''|*[!0-9]*) continue ;;
+        esac
         short="${name##*.}"
         if [[ "$status" == "PASS" ]]; then
             tag="[PASS]"
@@ -403,7 +422,20 @@ if [[ -s "$TIMINGS_FILE" ]]; then
         else
             printf "  %s %6ds  %s\n" "$tag" "$dur" "$short"
         fi
-    done
+        shown=$((shown + 1))
+    done < "$sorted"
+    return 0
+}
+
+if [[ -s "$TIMINGS_FILE" ]]; then
+    echo ""
+    echo "------------------------------------------------------------------"
+    echo "[INFO] Slowest Tests"
+    echo "------------------------------------------------------------------"
+    # Subshell with its status discarded: even an unexpected failure inside the
+    # report (errexit is also off in a `||` list) cannot end the script before
+    # the verdict below is printed and returned.
+    ( print_slowest_tests ) || true
 fi
 
 if [[ "$failed" -gt 0 ]]; then
