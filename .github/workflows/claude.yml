@@ -1,20 +1,55 @@
 name: Claude Code
 
+# Runs Claude when a comment on an issue, or on the conversation of a pull
+# request, mentions @claude.
+#
+# Trigger
+# -------
+# Only `issue_comment`. GitHub runs that event with the workflow definition of
+# the default branch, so a pull request cannot change what runs here or how
+# the credential is used. `pull_request_review` and
+# `pull_request_review_comment` were removed for that reason: they run the
+# definition found on the pull request's merge ref. An @claude mention inside
+# a review comment or a review body therefore no longer starts a run; mention
+# @claude in an ordinary comment on the pull request instead.
+#
+# Credential
+# ----------
+# The job runs in the `claude` environment. Once that environment holds
+# CLAUDE_CODE_OAUTH_TOKEN and its deployment-branch rule admits only the
+# default branch, a workflow defined on any other branch cannot read the
+# token: the rule is matched against the ref a run executes on, which for
+# `issue_comment` is the default branch.
+#
+# * `deployment: false` uses the environment for its secrets and branch rule
+#   only. No deployment record is created and nothing appears on pull requests
+#   or in the deployment history.
+# * The environment must have no required reviewers and no wait timer, or
+#   every mention would wait for them.
+# * Until the token has been moved, the job falls back to the repository
+#   secret of the same name, so this file works before and after the move.
+#   If neither exists the action stops with an authentication error.
+
 on:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
-  pull_request_review:
-    types: [submitted]
 
 jobs:
   claude:
-    if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
-    runs-on: ubuntu-latest
+    # The event check is redundant today; it keeps the job from running if
+    # another trigger is ever added without revisiting the notes above.
+    if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: claude
+      deployment: false
+    # One run at a time per issue or pull request. Further mentions wait their
+    # turn (up to 100) instead of replacing each other.
+    concurrency:
+      group: claude-${{ github.event.issue.number }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       pull-requests: write
@@ -23,11 +58,11 @@ jobs:
       actions: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
