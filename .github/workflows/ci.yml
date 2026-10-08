@@ -1,15 +1,13 @@
 name: CI
 
-# Every event runs on GitHub-hosted runners:
+# Every event (pull request, push to main, workflow_dispatch) runs the same
+# legs on GitHub-hosted runners:
 #
-#                                   pull request   push to main, workflow_dispatch
-#   linux         ubuntu-24.04      3 profiles     3 profiles
-#   macos-hosted  macos-15, arm64   spark-3.5      3 profiles
-#
-# The three profiles are spark-3.5, spark-4.0 and spark-4.1.
+#   linux         ubuntu-24.04, x86_64   spark-3.5, spark-4.0, spark-4.1
+#   macos-hosted  macos-15, arm64        spark-3.5, spark-4.0, spark-4.1
 #
 # `ci-ok` is the one check to require for merging. It passes only when every
-# leg that ran for the event has succeeded.
+# one of those six legs has succeeded.
 #
 # Standard runner labels only (ubuntu-24.04, macos-15). Larger runners are
 # billed; do not use them here.
@@ -153,34 +151,23 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # GitHub-hosted macOS arm64: every event. One Spark profile on pull requests,
-  # all three on pushes to main and on workflow_dispatch.
+  # GitHub-hosted macOS arm64: every event, every Spark profile.
   #
   # Measured on macos-15 (3 cores, 7 GB) with JOBS=2: all local test classes
   # pass on all three profiles; the tests take 51 to 58 minutes and peak at
   # about 4.5 GB of memory. No darwin-aarch64 tantivy4java jar is published,
   # so a leg that has to build it from source takes about 17 minutes longer.
   #
-  # Why one profile on pull requests. What this leg adds to the Linux legs is
-  # the darwin-aarch64 tantivy4java library and macOS itself, which are the
-  # same for every profile; the JVM-side differences between profiles (Spark
-  # and Scala versions, shim sources) are covered on Linux in full. At most
-  # five hosted macOS jobs run at a time and each takes about an hour, so with
-  # three profiles per pull request a second run that overlaps the first would
-  # already wait for a free runner. spark-3.5 is the pom's default
-  # configuration, which is what `make test` runs without a profile.
+  # All three profiles run on pull requests as well, so a failure that needs
+  # both macOS and a particular Spark profile is seen before the merge. That
+  # can happen, for example, in a dependency that ships its own native code in
+  # a version that follows the profile (arrow-c-data is one).
   #
-  # What that leaves out, and where it is caught. On pull requests macOS with
-  # spark-4.0 and macOS with spark-4.1 are not run. A failure that needs both
-  # macOS and a Spark 4.x profile, for example in a dependency that ships its
-  # own native code in a version that follows the profile (arrow-c-data is
-  # one), therefore passes the pull request and shows up after the merge, in
-  # the run on main, which covers all three profiles on macOS. ci-ok of that
-  # run fails; nothing reverts the merge. workflow_dispatch also runs all
-  # three, so a branch can be given the full macOS run before it is merged.
-  #
-  # The matrix expression falls back to the full list for every event that is
-  # not a pull request.
+  # The cost is runner capacity. At most five hosted macOS jobs run at a time
+  # and each leg takes about an hour, so one run holds three of the five for
+  # that long. A second run that overlaps it gets the other two and has to
+  # wait for its third; further overlapping runs queue behind them, and their
+  # ci-ok reports later by as long as the macOS legs waited.
   # ---------------------------------------------------------------------------
   macos-hosted:
     name: Build & Test (macOS ARM64 hosted, ${{ matrix.spark-profile }})
@@ -189,7 +176,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        spark-profile: ${{ fromJSON(github.event_name == 'pull_request' && '["spark-3.5"]' || '["spark-3.5", "spark-4.0", "spark-4.1"]') }}
+        spark-profile: [spark-3.5, spark-4.0, spark-4.1]
     defaults:
       run:
         shell: bash
@@ -268,11 +255,11 @@ jobs:
       # every event: the entry is small, and one saved by a pull request can be
       # restored by later runs of that same pull request only.
       #
-      # The key has no Spark profile in it, so the three legs of a run on main
-      # share one entry. When none exists yet (a new tantivy4java version, or a
-      # change to setup.sh) each of the three builds the jar and tries to save
-      # it. The first save wins; the others log that the key is already taken
-      # and carry on with the jar they built.
+      # The key has no Spark profile in it, so the three legs of a run share one
+      # entry. When none exists yet (a new tantivy4java version, or a change to
+      # setup.sh) each of the three builds the jar and tries to save it. The
+      # first save wins; the others log that the key is already taken and carry
+      # on with the jar they built.
       - name: Save tantivy4java built from source
         if: steps.t4j-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
