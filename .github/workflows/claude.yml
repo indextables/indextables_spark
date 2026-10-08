@@ -15,10 +15,11 @@ name: Claude Code
 #
 # Credential
 # ----------
-# The job runs in the `claude` environment. Once that environment holds
-# CLAUDE_CODE_OAUTH_TOKEN and its deployment-branch rule admits only the
-# default branch, a workflow defined on any other branch cannot read the
-# token: the rule is matched against the ref a run executes on, which for
+# The job runs in the `claude` environment, as does the review job in
+# claude-review.yml. Once that environment is the only place where
+# CLAUDE_CODE_OAUTH_TOKEN is stored, and its deployment-branch rule admits
+# only the default branch, a workflow defined on any other branch cannot read
+# the token: the rule is matched against the ref a run executes on, which for
 # `issue_comment` is the default branch.
 #
 # * `deployment: false` uses the environment for its secrets and branch rule
@@ -26,9 +27,10 @@ name: Claude Code
 #   or in the deployment history.
 # * The environment must have no required reviewers and no wait timer, or
 #   every mention would wait for them.
-# * Until the token has been moved, the job falls back to the repository
-#   secret of the same name, so this file works before and after the move.
-#   If neither exists the action stops with an authentication error.
+# * While a repository-level secret of the same name still exists, the job
+#   falls back to it, so this file works before and after the move. That copy
+#   remains readable by every workflow until it is deleted. If neither exists
+#   the action stops with an authentication error.
 
 on:
   issue_comment:

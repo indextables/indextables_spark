@@ -13,7 +13,8 @@ name: Claude Code Review
 #   Title, description, commit messages and release notes are not passed on.
 # * The `review` job holds the Claude credential and a read-only token. The
 #   reviewer has file-reading tools only: no shell, no network, no GitHub
-#   write access.
+#   write access. The job takes the credential from the `claude` environment
+#   (see "Credential scope" below).
 # * The `verdict` job holds a token that can comment on pull requests and no
 #   Claude credential. It treats the reviewer's output as untrusted data:
 #   strict validation, then rendering that cannot produce mentions, links or
@@ -26,36 +27,49 @@ name: Claude Code Review
 #   permission mode and the deny rules below are enforced. See the README next
 #   to the scripts before changing a pin.
 #
-# Not yet verified on a runner
-# ----------------------------
-# The reviewer's read confinement (no --allowedTools, the permission mode, the
-# settings deny list) was probed with a local CLI on macOS only. It has not
-# been exercised on a Linux runner, where the credential is also present in
-# the reviewer's process environment under /proc. Re-check it whenever the
-# Claude action pin, claude_args or settings change.
+# Observed on a runner, and not
+# -----------------------------
+# The first run on the default branch (2026-10-08, started by Dependabot on a
+# Dependabot pull request, ubuntu-24.04, Claude Code 2.1.292) showed that the
+# workflow runs end to end on Linux with the pinned CLI: the arguments were
+# accepted, the credential reached the job, a schema-valid verdict came back
+# and the comment was posted.
 #
-# Known gap, outside this workflow
-# --------------------------------
-# The same credential is still used by claude.yml on `pull_request_review` and
-# `pull_request_review_comment`. Those events run the workflow definition from
-# the pull request's merge ref, so for a branch in this repository that
-# definition, and its use of the credential, is under the pull request's
-# control. The intended fix is a separate change: keep the credential in an
-# environment restricted to the default branch, and drop those two triggers.
-# Until then, do not add any further workflow that uses the credential on an
-# event whose definition comes from the pull request (`pull_request` and the
-# two above).
+# That run does not test the reviewer's read confinement (no --allowedTools,
+# the permission mode, the settings deny list): the reviewer attempted nothing
+# outside its two locations, so nothing was there to be refused. Confinement
+# has been probed with a local CLI on macOS only. Whether it holds on a Linux
+# runner, where the credential is also present in the reviewer's process
+# environment under /proc, remains unobserved. Re-check it whenever the Claude
+# action pin, claude_args or settings change.
+#
+# Credential scope
+# ----------------
+# The `review` job, like the job in claude.yml, runs in the `claude`
+# environment. When CLAUDE_CODE_OAUTH_TOKEN is stored in that environment
+# only, and the environment's deployment-branch rule admits only the default
+# branch, a workflow defined on any other branch cannot read it: the rule is
+# matched against the ref a run executes on, which for pull_request_target is
+# the default branch. `deployment: false` uses the environment for its secret
+# and branch rule without creating deployment records. The environment must
+# have no required reviewers and no wait timer.
+#
+# This holds only once the repository-level secret of the same name has been
+# deleted. While that copy exists, every workflow in the repository can still
+# read it, and this job falls back to it. Any other workflow that needs the
+# credential must use the same environment and an event that runs the default
+# branch's definition; test.sh checks both.
 #
 # Dependabot
 # ----------
-# Runs started by Dependabot are subject to GitHub's restrictions on secrets.
-# If such a run does not receive CLAUDE_CODE_OAUTH_TOKEN, it ends as "did not
-# complete (credential_unavailable)"; the "Set up job" log of the run shows
-# `Secret source:`. Should that turn out to be the case, the options are a
-# dedicated, spend-capped key stored as a Dependabot secret, or a different
-# trigger design. Do not put a personal subscription token into Dependabot
-# secrets: they are handed to every workflow run that Dependabot triggers,
-# including `pull_request` runs whose definition comes from the branch.
+# The run above was started by Dependabot and received Actions secrets
+# ("Secret source: Actions" in its "Set up job" log), so no Dependabot secret
+# is needed. If a later run does not receive the credential, it ends as "did
+# not complete (credential_unavailable)". The options then are a dedicated,
+# spend-capped key stored as a Dependabot secret, or a different trigger
+# design. Do not put a personal subscription token into Dependabot secrets:
+# they are handed to every workflow run that Dependabot triggers, including
+# `pull_request` runs whose definition comes from the branch.
 #
 # Scripts and their offline tests: .github/scripts/claude-review/
 
@@ -92,6 +106,10 @@ jobs:
       contains(fromJSON('["dependabot[bot]", "rbrenton", "schenksj", "chrisfauerbach"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # Source of CLAUDE_CODE_OAUTH_TOKEN; see "Credential scope" in the header.
+    environment:
+      name: claude
+      deployment: false
     permissions:
       contents: read        # check out the default branch
       pull-requests: read   # read the pull request and its diff
