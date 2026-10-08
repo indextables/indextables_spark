@@ -59,9 +59,14 @@ property-only Maven profiles. Released artifacts encode the Spark version in the
 - **Always `mvn clean` when switching Spark profiles**: the ANTLR-generated parser sources are
   not regenerated on profile switch, and 4.9.3-generated code fails at runtime against the
   4.13.1 runtime ("Could not deserialize ATN with version 3").
-- **Release**: pushing a `v*` tag runs `.github/workflows/release.yml` — builds tantivy4java
-  (linux-x86_64) once, then publishes each Spark leg to Maven Central and attaches shaded jars
-  to a GitHub Release. For local builds of all three legs:
+- **Release**: run `.github/workflows/release.yml` from `main` with an existing `v*` tag
+  (Actions → Release → Run workflow). `dry-run` is ticked by default and publishes nothing;
+  untick it to publish. Pushing a tag does not start a release. The run builds tantivy4java
+  (linux-x86_64) from source at the commits pinned in
+  `.github/scripts/release/native-pins.txt` (add a line there when bumping tantivy4java in
+  `pom.xml`), builds each Spark leg unsigned, and only then signs and uploads from a separate
+  job that runs no project code. Runbook: `.github/scripts/release/README.md`. For local
+  builds of all three legs:
   `dev/build-release.sh <base-version>` (shaded jars land in `dist/`, platform classifier
   auto-detected for the current machine).
 
