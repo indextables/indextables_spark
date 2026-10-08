@@ -1,27 +1,68 @@
 name: CI
 
+# Every event runs on GitHub-hosted runners:
+#
+#                                   pull request   push to main, workflow_dispatch
+#   linux         ubuntu-24.04      3 profiles     3 profiles
+#   macos-hosted  macos-15, arm64   spark-3.5      3 profiles
+#
+# The three profiles are spark-3.5, spark-4.0 and spark-4.1.
+#
+# `ci-ok` is the one check to require for merging. It passes only when every
+# leg that ran for the event has succeeded.
+#
+# Standard runner labels only (ubuntu-24.04, macos-15). Larger runners are
+# billed; do not use them here.
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A newer commit on a pull request cancels the run for the older one. Every
+# other run (push to main, workflow_dispatch) gets a group of its own, so it
+# is never cancelled and never queued behind another run: a group shared by
+# all pushes to main would keep only the newest waiting run and drop the rest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build-and-test-macos:
-    name: Build & Test (macOS ARM64, ${{ matrix.spark-profile }})
-    runs-on: [self-hosted, macOS, ARM64]
-    environment: test-runners
+  # ---------------------------------------------------------------------------
+  # GitHub-hosted Linux x86_64: every event, every Spark profile.
+  #
+  # Measured on ubuntu-24.04 (4 cores, 16 GB) with JOBS=4: all local test
+  # classes pass on all three profiles; a cold leg takes 40 to 70 minutes,
+  # nearly all of it the tests, and peaks at about 8.5 GB of memory.
+  # ---------------------------------------------------------------------------
+  linux:
+    name: Build & Test (Linux x86_64, ${{ matrix.spark-profile }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         spark-profile: [spark-3.5, spark-4.0, spark-4.1]
+    defaults:
+      run:
+        shell: bash
     env:
       # Honored by Maven >= 3.9 for every mvn invocation (make + run-tests.sh)
       MAVEN_ARGS: -P${{ matrix.spark-profile }}
+      # Parallel test JVMs. 4 is what was measured on this runner size; it is
+      # set explicitly so a change in the runner's core count cannot silently
+      # change the memory needed.
+      TEST_JOBS: '4'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Java 17
         uses: actions/setup-java@v6
@@ -29,17 +70,56 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # setup-java only adds the JDK to PATH; it does not restore Homebrew.
-      # Ensure brew/mvn/protoc are discoverable for the run: steps below,
-      # even when the runner's service environment omits Homebrew from PATH.
-      - name: Ensure Homebrew on PATH
+      # Same extraction as scripts/setup.sh and scripts/run-tests.sh. The value
+      # is checked before it is used in a file path below.
+      - name: Read tantivy4java version from pom.xml
+        id: t4j
         run: |
-          for prefix in /opt/homebrew /usr/local; do
-            if [[ -x "$prefix/bin/brew" ]]; then
-              echo "$prefix/bin" >> "$GITHUB_PATH"
-              echo "$prefix/sbin" >> "$GITHUB_PATH"
-            fi
-          done
+          version="$(grep -A2 '<artifactId>tantivy4java</artifactId>' pom.xml \
+            | grep '<version>' \
+            | sed 's/.*<version>\(.*\)<\/version>.*/\1/' \
+            | tr -d '[:space:]' || true)"
+          if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Could not read the tantivy4java version from pom.xml (got '$version')"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Downloaded dependencies, one entry per runner type, Spark profile and
+      # pom.xml content. When pom.xml has changed (a dependency bump, for
+      # example) the newest entry for the same runner type and profile is
+      # restored instead and Maven downloads only what is missing.
+      #
+      # Restore only: see "Save Maven repository" at the end of the job.
+      - name: Restore Maven repository
+        id: m2
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.m2/repository
+          key: ci-m2-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.spark-profile }}-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ci-m2-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.spark-profile }}-
+
+      # scripts/setup.sh looks for the tantivy4java jar in ~/.m2 only and
+      # otherwise builds it from source. The linux-x86_64 jar is published on
+      # Maven Central, so fetch it first (about 10 seconds). If that does not
+      # work, for example because pom.xml names a version that is not published
+      # yet, setup.sh still builds from source and the job only gets slower.
+      - name: Fetch published tantivy4java
+        timeout-minutes: 5
+        env:
+          T4J_VERSION: ${{ steps.t4j.outputs.version }}
+        run: |
+          jar="$HOME/.m2/repository/io/indextables/tantivy4java/$T4J_VERSION/tantivy4java-$T4J_VERSION-linux-x86_64.jar"
+          if [[ -f "$jar" ]]; then
+            echo "tantivy4java $T4J_VERSION (linux-x86_64) is already in the local Maven repository"
+          elif mvn -B org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get \
+              "-Dartifact=io.indextables:tantivy4java:$T4J_VERSION:jar:linux-x86_64" -Dtransitive=false \
+              && [[ -f "$jar" ]]; then
+            echo "tantivy4java $T4J_VERSION (linux-x86_64) fetched from Maven Central"
+          else
+            echo "::warning::tantivy4java $T4J_VERSION (linux-x86_64) could not be fetched from Maven Central; setup.sh will build it from source, which takes much longer."
+          fi
 
       - name: Setup dependencies
         run: ./scripts/setup.sh
@@ -48,54 +128,213 @@ jobs:
         run: make compile
 
       - name: Test
-        id: test-macos
-        run: make test
+        id: test
+        run: make test JOBS="$TEST_JOBS"
+
+      # Only runs on main save this entry. An entry saved on the default branch
+      # can be restored by every pull request; one saved by a pull request
+      # could be restored by that pull request alone and would only use up the
+      # repository's cache quota. Saved after a green run so that the entry is
+      # complete (it includes what the test phase downloads).
+      - name: Save Maven repository
+        if: github.ref == 'refs/heads/main' && steps.m2.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.m2/repository
+          key: ${{ steps.m2.outputs.cache-primary-key }}
 
       - name: Upload test logs
-        if: failure() && steps.test-macos.outputs.log_dir != ''
+        if: (failure() || cancelled()) && steps.test.outputs.log_dir != ''
         uses: actions/upload-artifact@v7
         with:
-          name: macos-test-logs-${{ matrix.spark-profile }}
-          path: ${{ steps.test-macos.outputs.log_dir }}/
+          name: linux-test-logs-${{ matrix.spark-profile }}
+          path: ${{ steps.test.outputs.log_dir }}/
           if-no-files-found: warn
           retention-days: 7
 
-  # Linux X64 CI is disabled pending a host-OS upgrade on the self-hosted
-  # runner (bluegill, currently Ubuntu 16.04 / runner v2.321.0). The current
-  # runner cannot load actions/checkout@v6 because that action requires
-  # node24, which the runner does not support. Re-enable by uncommenting
-  # the job below once the runner host has been upgraded.
+  # ---------------------------------------------------------------------------
+  # GitHub-hosted macOS arm64: every event. One Spark profile on pull requests,
+  # all three on pushes to main and on workflow_dispatch.
   #
-  # build-and-test-linux:
-  #   name: Build & Test (Linux X64)
-  #   runs-on: [self-hosted, Linux, X64]
-  #   environment: test-runners
+  # Measured on macos-15 (3 cores, 7 GB) with JOBS=2: all local test classes
+  # pass on all three profiles; the tests take 51 to 58 minutes and peak at
+  # about 4.5 GB of memory. No darwin-aarch64 tantivy4java jar is published,
+  # so a leg that has to build it from source takes about 17 minutes longer.
   #
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v7
+  # Why one profile on pull requests. What this leg adds to the Linux legs is
+  # the darwin-aarch64 tantivy4java library and macOS itself, which are the
+  # same for every profile; the JVM-side differences between profiles (Spark
+  # and Scala versions, shim sources) are covered on Linux in full. At most
+  # five hosted macOS jobs run at a time and each takes about an hour, so with
+  # three profiles per pull request a second run that overlaps the first would
+  # already wait for a free runner. spark-3.5 is the pom's default
+  # configuration, which is what `make test` runs without a profile.
   #
-  #     - name: Set up Java 17
-  #       uses: actions/setup-java@v6
-  #       with:
-  #         distribution: 'temurin'
-  #         java-version: '17'
+  # What that leaves out, and where it is caught. On pull requests macOS with
+  # spark-4.0 and macOS with spark-4.1 are not run. A failure that needs both
+  # macOS and a Spark 4.x profile, for example in a dependency that ships its
+  # own native code in a version that follows the profile (arrow-c-data is
+  # one), therefore passes the pull request and shows up after the merge, in
+  # the run on main, which covers all three profiles on macOS. ci-ok of that
+  # run fails; nothing reverts the merge. workflow_dispatch also runs all
+  # three, so a branch can be given the full macOS run before it is merged.
   #
-  #     - name: Setup dependencies
-  #       run: ./scripts/setup.sh
+  # The matrix expression falls back to the full list for every event that is
+  # not a pull request.
+  # ---------------------------------------------------------------------------
+  macos-hosted:
+    name: Build & Test (macOS ARM64 hosted, ${{ matrix.spark-profile }})
+    runs-on: macos-15
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        spark-profile: ${{ fromJSON(github.event_name == 'pull_request' && '["spark-3.5"]' || '["spark-3.5", "spark-4.0", "spark-4.1"]') }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Honored by Maven >= 3.9 for every mvn invocation (make + run-tests.sh)
+      MAVEN_ARGS: -P${{ matrix.spark-profile }}
+      # Parallel test JVMs. run-tests.sh would pick 3 (one per core), but each
+      # one is a Maven launcher plus a forked test JVM with a 2 GB heap, on a
+      # 7 GB machine. 2 is what was measured; 3 has not been tried.
+      TEST_JOBS: '2'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # Same extraction as scripts/setup.sh and scripts/run-tests.sh. The value
+      # is checked before it is used in a cache key below.
+      - name: Read tantivy4java version from pom.xml
+        id: t4j
+        run: |
+          version="$(grep -A2 '<artifactId>tantivy4java</artifactId>' pom.xml \
+            | grep '<version>' \
+            | sed 's/.*<version>\(.*\)<\/version>.*/\1/' \
+            | tr -d '[:space:]' || true)"
+          if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Could not read the tantivy4java version from pom.xml (got '$version')"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # See the linux job for how this entry is keyed, restored and saved.
+      - name: Restore Maven repository
+        id: m2
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.m2/repository
+          key: ci-m2-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.spark-profile }}-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ci-m2-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.spark-profile }}-
+
+      # The tantivy4java jar that setup.sh builds from source, so that the
+      # build happens once per tantivy4java version instead of in every run.
+      # The key names everything in this repository that decides what gets
+      # built: the version in pom.xml and scripts/setup.sh itself. Exact match
+      # only (no restore-keys): a jar for another version is of no use.
+      # Restored after the Maven repository so that this entry wins for the
+      # directory they share.
+      - name: Restore tantivy4java built from source
+        id: t4j-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.m2/repository/io/indextables/tantivy4java
+          key: ci-t4j-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.t4j.outputs.version }}-${{ hashFiles('scripts/setup.sh') }}
+
+      # The Maven repository entry above can also contain a tantivy4java jar,
+      # carried over from the run that saved it. Without an exact match on the
+      # key above, remove it, so that setup.sh builds the jar again and the
+      # entry saved below holds what its key says.
+      - name: Discard tantivy4java that does not match the key
+        if: steps.t4j-cache.outputs.cache-hit != 'true'
+        run: rm -rf "$HOME/.m2/repository/io/indextables/tantivy4java"
+
+      - name: Setup dependencies
+        run: ./scripts/setup.sh
+
+      # Saved right after the build rather than at the end of the job, so that
+      # a test failure does not throw away 17 minutes of compilation. Saved on
+      # every event: the entry is small, and one saved by a pull request can be
+      # restored by later runs of that same pull request only.
+      #
+      # The key has no Spark profile in it, so the three legs of a run on main
+      # share one entry. When none exists yet (a new tantivy4java version, or a
+      # change to setup.sh) each of the three builds the jar and tries to save
+      # it. The first save wins; the others log that the key is already taken
+      # and carry on with the jar they built.
+      - name: Save tantivy4java built from source
+        if: steps.t4j-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.m2/repository/io/indextables/tantivy4java
+          key: ${{ steps.t4j-cache.outputs.cache-primary-key }}
+
+      - name: Build
+        run: make compile
+
+      - name: Test
+        id: test
+        run: make test JOBS="$TEST_JOBS"
+
+      # See the linux job for why only runs on main save this entry.
+      - name: Save Maven repository
+        if: github.ref == 'refs/heads/main' && steps.m2.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.m2/repository
+          key: ${{ steps.m2.outputs.cache-primary-key }}
+
+      - name: Upload test logs
+        if: (failure() || cancelled()) && steps.test.outputs.log_dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-hosted-test-logs-${{ matrix.spark-profile }}
+          path: ${{ steps.test.outputs.log_dir }}/
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The single check to require for merging.
   #
-  #     - name: Build
-  #       run: make compile
+  # `if: always()` is essential. Without it this job would be skipped whenever
+  # a leg fails or the run is cancelled, and a skipped required check counts
+  # as passing. With it the job always runs and decides from the results.
   #
-  #     - name: Test
-  #       id: test-linux
-  #       run: make test
-  #
-  #     - name: Upload test logs
-  #       if: failure() && steps.test-linux.outputs.log_dir != ''
-  #       uses: actions/upload-artifact@v7
-  #       with:
-  #         name: linux-test-logs
-  #         path: ${{ steps.test-linux.outputs.log_dir }}/
-  #         if-no-files-found: warn
-  #         retention-days: 7
+  # Every job in `needs` must have the result `success`; failure, cancelled
+  # and skipped all fail this check. A matrix job reports `success` only if
+  # every one of its legs succeeded. The step reads the results of whatever
+  # `needs` lists, so to put another job under this check, add it to `needs`
+  # and nothing else.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [linux, macos-hosted]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require every hosted leg to have succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          if jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null; then
+            echo "Every hosted leg succeeded."
+          else
+            echo "::error::Not every hosted leg succeeded (results above). Failed, cancelled and skipped legs all count as not passed."
+            exit 1
+          fi
