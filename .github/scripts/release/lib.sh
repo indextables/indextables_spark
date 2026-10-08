@@ -26,6 +26,49 @@ SHA_RE='^[0-9a-f]{40}$'
 die() { echo "::error::$*" >&2; exit 1; }
 warn() { echo "::warning::$*" >&2; }
 
+# Where the scripts reach out to. Fixed: there is no variable that redirects
+# them. test.sh puts stubs for curl and git redirection in front instead.
+CENTRAL_API=https://central.sonatype.com/api/v1/publisher
+CENTRAL_REPO=https://repo1.maven.org/maven2
+CENTRAL_PORTAL=https://central.sonatype.com/publishing/deployments
+TANTIVY4JAVA_URL=https://github.com/indextables/tantivy4java.git
+QUICKWIT_URL=https://github.com/indextables/quickwit
+TANTIVY_URL=https://github.com/indextables/tantivy
+
+# The local Maven repository, where Maven puts it for this user.
+M2_REPO="$HOME/.m2/repository"
+
+# test_setting <NAME> <default>: the value of a timing setting. Only test.sh
+# may change one, by also setting RELEASE_SCRIPTS_TESTING=1, which release.yml
+# never does; a setting that is present without it stops the script.
+test_setting() {
+  local value
+  eval "value=\${$1:-}"
+  if [ -z "$value" ]; then
+    printf '%s\n' "$2"
+  elif [ "${RELEASE_SCRIPTS_TESTING:-}" = 1 ]; then
+    printf '%s\n' "$value"
+  else
+    die "$1 is a test-only setting; it must not be set in a real run"
+  fi
+}
+
+# profile_version <versions> <profile>: the entry of a space-separated list
+# of versions (one per profile, in PROFILES order) that belongs to <profile>.
+profile_version() {
+  local p
+  # shellcheck disable=SC2086
+  set -- "$2" $1
+  local want="$1"
+  shift
+  for p in $PROFILES; do
+    [ $# -gt 0 ] || break
+    if [ "$p" = "$want" ]; then printf '%s\n' "$1"; return 0; fi
+    shift
+  done
+  die "no version for profile $want in the plan's version list"
+}
+
 # need <command...>: fail unless every command is on PATH.
 need() {
   local c

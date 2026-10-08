@@ -61,7 +61,9 @@ property-only Maven profiles. Released artifacts encode the Spark version in the
   4.13.1 runtime ("Could not deserialize ATN with version 3").
 - **Release**: run `.github/workflows/release.yml` from `main` with an existing `v*` tag
   (Actions → Release → Run workflow). `dry-run` is ticked by default and publishes nothing;
-  untick it to publish. Pushing a tag does not start a release. The run builds tantivy4java
+  untick it to publish. Pushing a tag does not start a release. The artifact names carry
+  `spark.version` from `pom.xml`; when that differs from the last release, a publish run asks
+  for the `expected-spark-versions` input (the dry run prints the value). The run builds tantivy4java
   (linux-x86_64) from source at the commits pinned in
   `.github/scripts/release/native-pins.txt` (add a line there when bumping tantivy4java in
   `pom.xml`), builds each Spark leg unsigned, and only then signs and uploads from a separate

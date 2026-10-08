@@ -6,6 +6,7 @@
 # Environment:
 #   MANIFEST_SHA256  the digest the assemble job reported as a job output
 #   BASE_VERSION     the tag without its "v"
+#   EXPECTED_VERSIONS  the versions plan.sh announced, one per profile
 #
 # The staging directory travels between jobs as a workflow artifact. Its
 # manifest digest travels separately, as a job output, so the two can be
@@ -18,7 +19,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/lib.sh"
 
 staging="${1:?usage: verify-staging.sh <staging dir>}"
-: "${MANIFEST_SHA256:?}" "${BASE_VERSION:?}"
+: "${MANIFEST_SHA256:?}" "${BASE_VERSION:?}" "${EXPECTED_VERSIONS:?}"
 [[ "$MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "MANIFEST_SHA256 is not a SHA-256 digest"
 
 [ -f "$staging/MANIFEST.sha256" ] || die "$staging has no MANIFEST.sha256"
@@ -38,6 +39,8 @@ while IFS= read -r version; do
   shift
 done < "$staging/versions.txt"
 [ $# -eq 0 ] || die "the staging directory has no version for: $*"
+[ "$(tr '\n' ' ' < "$staging/versions.txt" | sed 's/ $//')" = "$EXPECTED_VERSIONS" ] \
+  || die "the staged versions are not the versions the plan announced ($EXPECTED_VERSIONS)"
 
 expected="$(
   {

@@ -8,14 +8,19 @@ name: Release
 #     (pom, jar, sources, javadoc, linux-x86_64-shaded, jar-with-dependencies)
 #   - the linux-x86_64-shaded jars attached to the GitHub Release for the tag
 # <SPARKVER> is the spark.version that the profile sets in pom.xml at the tag.
+# It changes when the Spark dependency is bumped. The Plan summary shows the
+# exact versions next to the ones last published, and a publish run whose
+# Spark versions differ from the last release stops in `plan` until the
+# releaser has typed them into `expected-spark-versions`.
 #
 # How to run it
 # -------------
 # Actions -> Release -> Run workflow, on `main`, with the tag to release.
 # `dry-run` is ticked by default: the run then builds, assembles and rehearses
 # signing, and stops. Untick it to publish. Pushing a tag does not start a
-# release. The runbook, including the first-release checklist and how to
-# abort, is in .github/scripts/release/README.md.
+# release. The runbook, including how to adopt this workflow, the release
+# candidate rehearsal and how to abort, is in
+# .github/scripts/release/README.md.
 #
 # Trust model
 # -----------
@@ -29,20 +34,35 @@ name: Release
 #   started on, on files the build jobs produced. `assemble` treats those
 #   files as untrusted: it accepts only the expected coordinates and file
 #   names and writes a manifest of digests.
-# * `publish` is the only job that names the `release` environment, reads a
-#   secret or holds a token that can write. Beside the signing key and the
-#   Central token it runs: the pinned checkout and download-artifact actions,
-#   the release scripts, and gpg, zip, unzip, curl, jq and gh from the runner
-#   image. No Maven, no JVM, nothing from the tagged commit. It signs and
-#   uploads exactly the files in the manifest whose digest `assemble`
-#   reported, and nothing else.
+# * In this file, `publish` is the only job that names the `release`
+#   environment, reads a secret or holds a token that can write. Beside the
+#   signing key and the Central token it runs: the pinned checkout and
+#   download-artifact actions, the release scripts, and gpg, zip, unzip, curl,
+#   jq and gh from the runner image. No Maven, no JVM, nothing from the tagged
+#   commit. It signs and uploads exactly the files in the manifest whose
+#   digest `assemble` reported, and nothing else.
 # * A dry run never starts `publish`, so it requests no approval and reads no
 #   secret. `rehearse` runs the same verification, signing and bundle checks
 #   as `publish`, with a throwaway key it generates and deletes.
 #
-# What this depends on outside this file: the `release` environment must
-# admit only `main` and require a reviewer, and the four publishing secrets
-# must exist in that environment only. See the README.
+# What this file cannot guarantee
+# ------------------------------
+# All of the above describes this file on `main`. It says nothing about other
+# workflow files or other refs, and two things outside it decide whether the
+# separation protects anything:
+#
+# * While GPG_PRIVATE_KEY, GPG_PASSPHRASE, CENTRAL_USERNAME and
+#   CENTRAL_PASSWORD exist as repository-level secrets, every workflow on
+#   every ref can read them, whatever this file does.
+# * The tags v0.6.0-rc1 and v0.6.0-rc2 carry the previous release.yml, which
+#   has a workflow_dispatch trigger. It can be dispatched on the tag ref and
+#   then runs the old build beside the key. Only an environment that admits
+#   `main` alone, holding the only copy of the secrets, closes that.
+#
+# The order in which to get there (secrets into the environment, environment
+# narrowed to `main` with administrator bypass off, dry run, release candidate
+# rehearsal, repository-level copies deleted) is in the README under
+# "Adopting this workflow".
 
 on:
   workflow_dispatch:
@@ -55,8 +75,16 @@ on:
         description: 'Dry run: build, assemble and rehearse signing; upload nothing. Untick to publish.'
         type: boolean
         default: true
+      expected-spark-versions:
+        description: 'Spark versions expected in the artifact names, e.g. "3.5.9 4.0.4 4.1.3". Needed to publish when they differ from the last release; the dry run prints the value.'
+        type: string
+        default: ''
       skip-central:
         description: 'Skip Maven Central (GitHub Release only). No effect in a dry run.'
+        type: boolean
+        default: false
+      replace-release-assets:
+        description: 'Replace jars already attached to the GitHub Release when their content differs. Unticked: stop instead.'
         type: boolean
         default: false
   # To start a release from a pushed tag as well, add:
@@ -79,8 +107,9 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Validate the request and resolve the tag to a commit. Every later job uses
-  # that commit, so a tag that moves during the run changes nothing.
+  # Validate the request, resolve the tag to a commit and work out the versions
+  # to publish. Every later job uses that commit and must arrive at those
+  # versions, so a tag that moves during the run changes nothing.
   # ---------------------------------------------------------------------------
   plan:
     name: Plan
@@ -93,6 +122,7 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       commit: ${{ steps.plan.outputs.commit }}
       base: ${{ steps.plan.outputs.base }}
+      versions: ${{ steps.plan.outputs.versions }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
       central: ${{ steps.plan.outputs.central }}
     steps:
@@ -113,6 +143,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry-run }}
+          INPUT_EXPECTED_SPARK: ${{ inputs.expected-spark-versions }}
           INPUT_SKIP_CENTRAL: ${{ inputs.skip-central }}
         run: bash .github/scripts/release/plan.sh
 
@@ -221,6 +252,7 @@ jobs:
           SRC: src
           PROFILE: ${{ matrix.profile }}
           BASE_VERSION: ${{ needs.plan.outputs.base }}
+          EXPECTED_VERSIONS: ${{ needs.plan.outputs.versions }}
           NATIVE_DIR: in/native
           OUT: out/artifacts
         run: bash "$SCRIPTS/build-artifacts.sh"
@@ -279,6 +311,7 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
           COMMIT: ${{ needs.plan.outputs.commit }}
           BASE_VERSION: ${{ needs.plan.outputs.base }}
+          EXPECTED_VERSIONS: ${{ needs.plan.outputs.versions }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash "$SCRIPTS/assemble.sh"
 
@@ -306,6 +339,7 @@ jobs:
       contents: read
     env:
       BASE_VERSION: ${{ needs.plan.outputs.base }}
+      EXPECTED_VERSIONS: ${{ needs.plan.outputs.versions }}
       # Protects the throwaway key only; it is not a secret.
       GPG_PASSPHRASE: rehearsal
     steps:
@@ -392,6 +426,7 @@ jobs:
       contents: write
     env:
       BASE_VERSION: ${{ needs.plan.outputs.base }}
+      EXPECTED_VERSIONS: ${{ needs.plan.outputs.versions }}
     steps:
       - name: Checkout release scripts (workflow commit)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -456,11 +491,14 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
           COMMIT: ${{ needs.plan.outputs.commit }}
           PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          REPLACE_ASSETS: ${{ inputs.replace-release-assets }}
         run: bash "$SCRIPTS/github-release.sh" staging
 
-      # If the job stops after bundles were uploaded (the GitHub Release step
-      # failed, or the run was cancelled), do not leave validated deployments
-      # waiting in the Portal: a re-run uploads them again.
+      # If the job stops after bundles were uploaded (a step failed, or the run
+      # was cancelled, also in the middle of the upload step), do not leave
+      # deployments waiting in the Portal: a re-run uploads them again. A
+      # deployment that is still being validated is polled until it can be
+      # dropped; what cannot be dropped is listed in the job summary.
       - name: Drop Maven Central deployments after a failure
         if: ${{ (failure() || cancelled()) && needs.plan.outputs.central == 'true' }}
         env:

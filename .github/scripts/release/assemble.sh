@@ -17,7 +17,7 @@
 #                                         version: the six files and their
 #                                         md5/sha1/sha256/sha512 (no signatures)
 #                   MANIFEST.sha256       SHA-256 of every file above
-#   TAG, COMMIT, BASE_VERSION   from plan.sh
+#   TAG, COMMIT, BASE_VERSION, EXPECTED_VERSIONS   from plan.sh
 #   RUN_URL       link to this workflow run (optional, for the notes)
 #
 # Step outputs: manifest_sha256 (digest of MANIFEST.sha256), versions.
@@ -26,7 +26,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 
-: "${IN:?}" "${OUT:?}" "${TAG:?}" "${COMMIT:?}" "${BASE_VERSION:?}"
+: "${IN:?}" "${OUT:?}" "${TAG:?}" "${COMMIT:?}" "${BASE_VERSION:?}" "${EXPECTED_VERSIONS:?}"
 need unzip python3
 [[ "$TAG" =~ $TAG_RE ]] || die "'$TAG' is not a release tag"
 [ "v$BASE_VERSION" = "$TAG" ] || die "base version $BASE_VERSION does not belong to tag $TAG"
@@ -101,6 +101,8 @@ for profile in $PROFILES; do
   [ "$(kv "$info" profile)" = "$profile" ] || die "artifacts-$profile was not built with profile $profile"
   version="$(kv "$info" version)"
   check_version "$BASE_VERSION" "$profile" "$version"
+  [ "$version" = "$(profile_version "$EXPECTED_VERSIONS" "$profile")" ] \
+    || die "artifacts-$profile holds $version, which is not the version the plan announced for $profile"
   [ "${BASE_VERSION}_spark_$(kv "$info" spark_version)" = "$version" ] \
     || die "artifacts-$profile: version $version does not match its recorded Spark version"
 

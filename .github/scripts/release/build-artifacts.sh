@@ -7,6 +7,7 @@
 #   SRC           checkout of the commit being released
 #   PROFILE       spark-3.5 | spark-4.0 | spark-4.1
 #   BASE_VERSION  the tag without its "v" (0.6.0)
+#   EXPECTED_VERSIONS  the versions plan.sh announced, one per profile
 #   NATIVE_DIR    the native job's artifact (build-native.sh output)
 #   OUT           output directory; becomes the job's artifact:
 #                   files/           the six files of this version, under the
@@ -17,13 +18,14 @@
 # The published version is <BASE_VERSION>_spark_<spark.version>, where
 # spark.version is what the profile sets in pom.xml at the released commit,
 # so the suffix always names the Spark version the jar was compiled against.
+# It must be the version plan.sh worked out from the same pom.xml and showed
+# in the Plan summary; if Maven disagrees, the build stops.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 
-: "${SRC:?}" "${PROFILE:?}" "${BASE_VERSION:?}" "${NATIVE_DIR:?}" "${OUT:?}"
-M2_REPO="${M2_REPO:-$HOME/.m2/repository}"
+: "${SRC:?}" "${PROFILE:?}" "${BASE_VERSION:?}" "${EXPECTED_VERSIONS:?}" "${NATIVE_DIR:?}" "${OUT:?}"
 
 # Pinned here because they are invoked by coordinate, not through pom.xml.
 VERSIONS_PLUGIN=org.codehaus.mojo:versions-maven-plugin:2.22.0
@@ -56,6 +58,9 @@ spark_version="$(cd "$SRC" && "${mvn_cmd[@]}" -q "-P$PROFILE" "$HELP_PLUGIN:eval
   -Dexpression=spark.version -DforceStdout | tail -n 1 | tr -d '[:space:]')"
 version="${BASE_VERSION}_spark_${spark_version}"
 check_version "$BASE_VERSION" "$PROFILE" "$version"
+announced="$(profile_version "$EXPECTED_VERSIONS" "$PROFILE")"
+[ "$version" = "$announced" ] \
+  || die "Maven derives $version for $PROFILE, but the plan announced $announced"
 echo "Building $ARTIFACT_ID $version (profile $PROFILE, Spark $spark_version)"
 
 (cd "$SRC" && "${mvn_cmd[@]}" "$VERSIONS_PLUGIN:set" "-DnewVersion=$version" -DgenerateBackupPoms=false)

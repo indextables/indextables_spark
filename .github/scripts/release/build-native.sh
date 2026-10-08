@@ -8,7 +8,9 @@
 #   build-native.sh toolchain        install the pinned protoc, check and record
 #                                    the rest of the toolchain
 #   build-native.sh build            build, collect the jars, record digests
-#   build-native.sh print-pin <ver>  print a native-pins.txt line for a version
+#   build-native.sh print-pin <ver>  print a native-pins.txt line for a version,
+#                                    after checking where the fork commits
+#                                    it names can be reached from
 #
 # Environment (resolve, toolchain, build):
 #   POM    pom.xml of the commit being released
@@ -25,11 +27,6 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 
-T4J_REPO="${T4J_REPO:-https://github.com/indextables/tantivy4java.git}"
-QUICKWIT_URL=https://github.com/indextables/quickwit
-TANTIVY_URL=https://github.com/indextables/tantivy
-M2_REPO="${M2_REPO:-$HOME/.m2/repository}"
-
 # Same release and digest as scripts/setup.sh (test.sh checks that they agree).
 PROTOC_VERSION=25.5
 PROTOC_SHA256=e1ed237a17b2e851cf9662cb5ad02b46e70ff8e060e05984725bc4b4228c6b28
@@ -38,8 +35,8 @@ PROTOC_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PRO
 # tag_commit <version>: the commit refs/tags/v<version> points to right now.
 tag_commit() {
   local refs commit
-  refs="$(git ls-remote "$T4J_REPO" "refs/tags/v$1" "refs/tags/v$1^{}")" \
-    || die "could not list tags of $T4J_REPO"
+  refs="$(git ls-remote "$TANTIVY4JAVA_URL" "refs/tags/v$1" "refs/tags/v$1^{}")" \
+    || die "could not list tags of $TANTIVY4JAVA_URL"
   # An annotated tag has a second, peeled line; that is the commit.
   commit="$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1 }' | head -n 1)"
   [ -n "$commit" ] || commit="$(printf '%s\n' "$refs" | awk 'NF == 2 { print $1 }' | head -n 1)"
@@ -51,7 +48,7 @@ tag_commit() {
 fetch_commit() {
   rm -rf "$2"
   git init -q "$2"
-  git -C "$2" remote add origin "$T4J_REPO"
+  git -C "$2" remote add origin "$TANTIVY4JAVA_URL"
   git -C "$2" fetch -q --depth 1 origin "$1" || die "could not fetch tantivy4java commit $1"
   git -C "$2" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
   [ "$(git -C "$2" rev-parse HEAD)" = "$1" ] || die "fetched commit is not $1"
@@ -101,6 +98,27 @@ check_sources() {
   done
 }
 
+# fork_reachability <name> <url> <commit>: say (on standard error) where a
+# fork commit can be reached from. A commit id alone proves little: GitHub
+# serves a commit that exists only in someone's fork of a repository through
+# the repository's own URL, so a pin must be on a branch or tag of the fork
+# itself, and normally on its default branch.
+fork_reachability() {
+  local name="$1" url="$2" commit="$3" dir default refs
+  [ "$commit" != "-" ] || return 0
+  dir="$tmp/$name.git"
+  git clone -q --bare --filter=tree:0 "$url" "$dir" 2> /dev/null || die "could not clone $url to check commit $commit"
+  default="$(git -C "$dir" symbolic-ref --short HEAD)"
+  if git -C "$dir" merge-base --is-ancestor "$commit" "refs/heads/$default" 2> /dev/null; then
+    echo "$name $commit: reachable from the default branch ($default) of $url" >&2
+    return 0
+  fi
+  refs="$(git -C "$dir" for-each-ref --contains "$commit" --format='%(refname:short)' refs/heads refs/tags 2> /dev/null | tr '\n' ' ' || true)"
+  [ -n "$refs" ] \
+    || die "$name commit $commit is not reachable from any branch or tag of $url. It may exist only in a fork of that repository. Do not pin it."
+  warn "$name $commit is NOT reachable from the default branch ($default) of $url; it is on: $refs. Pin it only if building from that branch is intended."
+}
+
 cmd="${1:-}"
 case "$cmd" in
   print-pin)
@@ -115,6 +133,9 @@ case "$cmd" in
     sources="$(lock_git_sources "$tmp/src/native/Cargo.lock")"
     quickwit="$(fork_commit "$sources" "$QUICKWIT_URL")"
     tantivy="$(fork_commit "$sources" "$TANTIVY_URL")"
+    echo "tantivy4java $commit: what tag v$version of $TANTIVY4JAVA_URL points to" >&2
+    fork_reachability quickwit "$QUICKWIT_URL" "$quickwit"
+    fork_reachability tantivy "$TANTIVY_URL" "$tantivy"
     echo "$version $commit $quickwit $tantivy"
     exit 0
     ;;

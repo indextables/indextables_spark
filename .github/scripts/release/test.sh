@@ -21,6 +21,7 @@ T="$(cd "$T" && pwd -P)"
 trap 'rm -rf "$T"' EXIT
 # shellcheck source=lib.sh
 . "$here/lib.sh"
+SCRIPTS_UNDER_TEST="$(ls "$here"/*.sh | grep -v '/test\.sh$')"
 
 pass=0
 fail=0
@@ -53,6 +54,12 @@ SHA_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SHA_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 SHA_C=cccccccccccccccccccccccccccccccccccccccc
 SHA_D=dddddddddddddddddddddddddddddddddddddddd
+# The versions the plan announces in most tests below.
+EV="1.2.3_spark_3.5.8 1.2.3_spark_4.0.3 1.2.3_spark_4.1.2"
+# Variables that used to redirect the scripts, or might be expected to. None
+# of them may have any effect; they are set here for every test.
+export CENTRAL_API_URL=https://override.invalid/api CENTRAL_REPO_URL=https://override.invalid/maven2
+export T4J_REPO=file:///override/invalid M2_REPO=/override/invalid
 
 # ---------------------------------------------------------------------------
 # lib.sh
@@ -83,34 +90,113 @@ check "lib: verify_sums refuses a symbolic link" bash -c "! (. '$here/lib.sh'; v
 # plan.sh
 # ---------------------------------------------------------------------------
 P="$T/plan"
-mkdir -p "$P"
+mkdir -p "$P/bin"
+# Stub curl: serves the Maven Central metadata fixture, or fails like an
+# unreachable host when there is none. Every plan.sh call below uses it.
+cat > "$P/bin/curl" << 'STUB'
+#!/usr/bin/env bash
+o=""; url=""
+while [ $# -gt 0 ]; do case "$1" in -o) o="$2"; shift 2 ;; --connect-timeout | --max-time) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done
+echo "$url" >> "$PFAKE/calls.log"
+[ "$url" = "https://repo1.maven.org/maven2/io/indextables/indextables_spark/maven-metadata.xml" ] || exit 97
+[ -f "$PFAKE/metadata.xml" ] || exit 6
+cp "$PFAKE/metadata.xml" "$o"
+STUB
+chmod +x "$P/bin/curl"
+PFAKE="$P/fake"; mkdir -p "$PFAKE"; export PFAKE
+central_has() { # central_has <version>...: what Maven Central has published
+  { echo "<metadata><versioning><versions>"; for v in "$@"; do echo "      <version>$v</version>"; done; echo "</versions></versioning></metadata>"; } > "$PFAKE/metadata.xml"
+}
+central_has 0.9.0_spark_3.5.3 1.0.0_spark_3.5.8 1.0.0_spark_4.0.3 1.0.0_spark_4.1.2
+plan_pom() { # plan_pom <3.5 version> <4.0 version> <4.1 version>
+  cat << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <properties>
+    <!-- <spark.version>9.9.9</spark.version> -->
+    <spark.version>$1</spark.version>
+  </properties>
+  <profiles>
+    <profile><id>spark-3.5</id></profile>
+    <profile><id>spark-4.0</id><properties><spark.version>$2</spark.version></properties></profile>
+    <profile><id>spark-4.1</id><properties><spark.version>$3</spark.version></properties></profile>
+  </profiles>
+</project>
+EOF
+}
 git init -q -b main "$P/upstream"
 (
   cd "$P/upstream"
-  echo 1 > f && git add f && git commit -q -m one && git tag v1.2.3
-  echo 2 > f && git commit -q -am two && git tag -a v1.3.0-rc1 -m rc
-  git checkout -q -b side && echo 3 > f && git commit -q -am three && git tag v9.9.9
+  plan_pom 3.5.8 4.0.3 4.1.2 > pom.xml && git add pom.xml && git commit -q -m one && git tag v1.2.3
+  plan_pom 3.5.9 4.0.3 4.1.2 > pom.xml && git commit -q -am two && git tag -a v1.3.0-rc1 -m rc
+  plan_pom 3.5.8 4.1.9 4.1.2 > pom.xml && git commit -q -am wrongline && git tag v1.3.1
+  plan_pom 3.5.8 4.0.3 4.1.2-SNAPSHOT > pom.xml && git commit -q -am snapshot && git tag v1.3.2
+  echo "<project/>" > pom.xml && git commit -q -am noprofiles && git tag v1.4.0
+  git rm -q pom.xml && git commit -q -m nopom && git tag v1.5.0
+  git checkout -q -b side && echo 3 > f && git add f && git commit -q -m three && git tag v9.9.9
   git checkout -q main
 )
 git clone -q "$P/upstream" "$P/repo"
 V123="$(git -C "$P/upstream" rev-parse 'v1.2.3^{commit}')"
 RC1="$(git -C "$P/upstream" rev-parse 'v1.3.0-rc1^{commit}')"
-plan() { # plan <log> EVENT REF REF_TYPE REF_NAME TAG DRY SKIP
+OLDPATH="$PATH"
+PATH="$P/bin:$PATH"
+plan() { # plan <log> EVENT REF REF_TYPE REF_NAME TAG DRY SKIP [EXPECTED]
   run "$1" env EVENT_NAME="$2" REF="$3" REF_TYPE="$4" REF_NAME="$5" INPUT_TAG="$6" INPUT_DRY_RUN="$7" \
-    INPUT_SKIP_CENTRAL="$8" DEFAULT_BRANCH=main REPO_DIR="$P/repo" bash "$here/plan.sh"
+    INPUT_SKIP_CENTRAL="$8" INPUT_EXPECTED_SPARK="${9:-}" DEFAULT_BRANCH=main REPO_DIR="$P/repo" bash "$here/plan.sh"
 }
+dispatch() { plan "$1" workflow_dispatch refs/heads/main branch main "$2" "$3" false "${4:-}"; } # dispatch <log> TAG DRY [EXPECTED]
 L="$P/log"
 check "plan: dispatch with dry-run ticked is a dry run" plan "$L.1" workflow_dispatch refs/heads/main branch main v1.2.3 true false
 check "plan: ... mode dry-run" is "$(out "$L.1" mode)" dry-run
 check "plan: ... tag resolved to its commit" is "$(out "$L.1" commit)" "$V123"
 check "plan: ... base version" is "$(out "$L.1" base)" 1.2.3
+check "plan: ... versions from pom.xml at the tag, one per profile" is "$(out "$L.1" versions)" "1.2.3_spark_3.5.8 1.2.3_spark_4.0.3 1.2.3_spark_4.1.2"
 check "plan: ... not a pre-release" is "$(out "$L.1" prerelease)" false
 check "plan: ... summary says nothing is uploaded" has "$L.1.summary" "Nothing is uploaded"
-check "plan: dispatch from main with dry-run unticked publishes" plan "$L.2" workflow_dispatch refs/heads/main branch main v1.3.0-rc1 false false
+check "plan: ... summary lists each version with the one last published" has "$L.1.summary" '| `1.2.3_spark_3.5.8` | 3.5.8 | unchanged |'
+check "plan: ... and gives the value for expected-spark-versions" has "$L.1.summary" '`3.5.8 4.0.3 4.1.2`'
+check "plan: dispatch from main with dry-run unticked publishes" dispatch "$L.2" v1.2.3 false
 check "plan: ... mode publish" is "$(out "$L.2" mode)" publish
-check "plan: ... annotated tag resolved to its commit" is "$(out "$L.2" commit)" "$RC1"
-check "plan: ... pre-release" is "$(out "$L.2" prerelease)" true
 check "plan: ... Central included" is "$(out "$L.2" central)" true
+check "plan: ... only the Maven Central metadata was fetched" is "$(sort -u "$PFAKE/calls.log")" "https://repo1.maven.org/maven2/io/indextables/indextables_spark/maven-metadata.xml"
+
+# The Spark version in the artifact names changed since the last release.
+check "plan: a dry run with changed Spark versions goes ahead" dispatch "$L.20" v1.3.0-rc1 true
+check "plan: ... with a warning" has "$L.20" "::warning::The Spark version in the artifact names differs from the last release for Spark 3.5"
+check "plan: ... the summary marks the changed line" has "$L.20.summary" '| `1.3.0-rc1_spark_3.5.9` | 3.5.8 | **changed** from 3.5.8 |'
+check "plan: ... and leaves the others as unchanged" has "$L.20.summary" '| `1.3.0-rc1_spark_4.0.3` | 4.0.3 | unchanged |'
+check "plan: ... and says what a publish run needs" has "$L.20.summary" 'set `expected-spark-versions` to `3.5.9 4.0.3 4.1.2`'
+check "plan: publishing changed Spark versions without confirming them is refused" fails_with "dispatch again with expected-spark-versions set to: 3.5.9 4.0.3 4.1.2" "$L.21" dispatch "$L.21" v1.3.0-rc1 false
+check "plan: ... and sets no mode" test -z "$(out "$L.21" mode)"
+check "plan: ... the message names what would be published" has "$L.21" "1.3.0-rc1_spark_3.5.9 1.3.0-rc1_spark_4.0.3 1.3.0-rc1_spark_4.1.2"
+check "plan: publishing them with expected-spark-versions goes ahead" dispatch "$L.22" v1.3.0-rc1 false "3.5.9 4.0.3 4.1.2"
+check "plan: ... mode publish" is "$(out "$L.22" mode)" publish
+check "plan: ... annotated tag resolved to its commit" is "$(out "$L.22" commit)" "$RC1"
+check "plan: ... pre-release" is "$(out "$L.22" prerelease)" true
+check "plan: ... versions" is "$(out "$L.22" versions)" "1.3.0-rc1_spark_3.5.9 1.3.0-rc1_spark_4.0.3 1.3.0-rc1_spark_4.1.2"
+check "plan: ... the summary says they were confirmed" has "$L.22.summary" "confirmed with"
+check "plan: expected-spark-versions in another order, with commas" dispatch "$L.23" v1.3.0-rc1 false "4.1.2, 4.0.3,3.5.9"
+check "plan: expected-spark-versions that does not match pom.xml is refused" fails_with "but pom.xml at v1.3.0-rc1 gives '3.5.9 4.0.3 4.1.2'" "$L.24" dispatch "$L.24" v1.3.0-rc1 false "3.5.8 4.0.3 4.1.2"
+check "plan: ... in a dry run as well" fails_with "but pom.xml at v1.3.0-rc1 gives" "$L.25" dispatch "$L.25" v1.3.0-rc1 true "3.5.8 4.0.3 4.1.2"
+check "plan: ... also when the versions are unchanged" fails_with "but pom.xml at v1.2.3 gives" "$L.26" dispatch "$L.26" v1.2.3 false "3.5.9 4.0.3 4.1.2"
+check "plan: an incomplete expected-spark-versions is refused" fails_with "but pom.xml at" "$L.27" dispatch "$L.27" v1.3.0-rc1 false "3.5.9"
+central_has 0.9.0_spark_3.5.3 1.0.0_spark_3.5.8 1.0.0_spark_4.0.3
+check "plan: a Spark line that was never published is not a change" dispatch "$L.28" v1.2.3 false
+check "plan: ... the summary says it is the first" has "$L.28.summary" "first release for Spark 4.1"
+central_has 0.9.0_spark_3.5.3 1.0.0_spark_3.5.8 1.0.0_spark_4.0.3 1.0.0_spark_4.1.2 1.1.0_spark_3.5.9 1.1.0_spark_4.0.3 1.1.0_spark_4.1.2
+check "plan: the comparison is with the version published last" fails_with "expected-spark-versions set to: 3.5.8 4.0.3 4.1.2" "$L.29" dispatch "$L.29" v1.2.3 false
+rm "$PFAKE/metadata.xml"
+check "plan: publishing is refused when Maven Central cannot be read" fails_with "could not be read" "$L.30" dispatch "$L.30" v1.2.3 false
+check "plan: ... unless the versions are confirmed" dispatch "$L.31" v1.2.3 false "3.5.8 4.0.3 4.1.2"
+check "plan: ... a dry run goes ahead with a warning" dispatch "$L.32" v1.2.3 true
+check "plan: ... (the warning)" has "$L.32" "::warning::The versions last published to Maven Central could not be read"
+central_has 0.9.0_spark_3.5.3 1.0.0_spark_3.5.8 1.0.0_spark_4.0.3 1.0.0_spark_4.1.2
+check "plan: a profile whose Spark version is outside its Spark line is refused" fails_with "version '1.3.1_spark_4.1.9' is not 1.3.1_spark_4.0.<patch>" "$L.33a" dispatch "$L.33a" v1.3.1 true
+check "plan: a Spark version that is not a plain release is refused" fails_with "is not 1.3.2_spark_4.1.<patch>" "$L.33b" dispatch "$L.33b" v1.3.2 true
+check "plan: a pom.xml without the Spark profiles is refused" fails_with "pom.xml at the tag has no profile spark-3.5" "$L.33" dispatch "$L.33" v1.4.0 true
+check "plan: a commit without pom.xml is refused" fails_with "the tagged commit has no pom.xml" "$L.34" dispatch "$L.34" v1.5.0 true
+
 check "plan: publish from another branch is refused" fails_with "can only be dispatched from main" "$L.3" \
   env EVENT_NAME=workflow_dispatch REF=refs/heads/feature/x INPUT_TAG=v1.2.3 INPUT_DRY_RUN=false DEFAULT_BRANCH=main REPO_DIR="$P/repo" bash "$here/plan.sh"
 check "plan: ... and sets no mode" test -z "$(out "$L.3" mode)"
@@ -145,6 +231,7 @@ check "plan: a tag that is not on main is refused" fails_with "is not an ancesto
   env EVENT_NAME=workflow_dispatch REF=refs/heads/main INPUT_TAG=v9.9.9 INPUT_DRY_RUN=false DEFAULT_BRANCH=main REPO_DIR="$P/repo" bash "$here/plan.sh"
 check "plan: ... in a dry run as well" fails_with "is not an ancestor of main" "$L.13" \
   env EVENT_NAME=workflow_dispatch REF=refs/heads/main INPUT_TAG=v9.9.9 INPUT_DRY_RUN=true DEFAULT_BRANCH=main REPO_DIR="$P/repo" bash "$here/plan.sh"
+PATH="$OLDPATH"
 
 # ---------------------------------------------------------------------------
 # Stubs for the build tools. $FAKE holds fixtures and switches.
@@ -248,9 +335,19 @@ EOF
 # build-native.sh
 # ---------------------------------------------------------------------------
 N="$T/native"; mkdir -p "$N"
-QW=1111111111111111111111111111111111111111
-TV=2222222222222222222222222222222222222222
 MR=3333333333333333333333333333333333333333
+new_fork() { # new_fork <dir>: a fork-like repository, one commit on main and one on a side branch
+  rm -rf "$1"; git init -q -b main "$1"
+  (cd "$1" && echo "$1" > f && git add f && git commit -q -m main && git checkout -q -b upgrade && echo side >> f && git commit -q -am side && git checkout -q main)
+  git -C "$1" config uploadpack.allowAnySHA1InWant true
+  git -C "$1" config uploadpack.allowFilter true
+}
+new_fork "$N/quickwit"; new_fork "$N/tantivy"
+QW="$(git -C "$N/quickwit" rev-parse main)"; QW_SIDE="$(git -C "$N/quickwit" rev-parse upgrade)"
+TV="$(git -C "$N/tantivy" rev-parse main)"
+# The scripts always name the real repositories; git is told to fetch them
+# from the fixtures instead.
+redirect() { echo "GIT_CONFIG_KEY_0=url.file://$1.insteadOf"; }
 new_t4j() { # new_t4j <dir>: a tantivy4java-like repository with tag v0.34.4
   rm -rf "$1"; git init -q -b main "$1"
   mkdir -p "$1/native" "$1/.cargo"
@@ -291,8 +388,16 @@ printf '# comment\n0.34.4 %s %s %s\n0.1.0 %s - -\n' "$T4J_COMMIT" "$QW" "$TV" "$
 echo 0.34.4 > "$FAKE/t4j.version"
 native() { # native <log> <subcommand> [VAR=value...]
   local log="$1" sub="$2"; shift 2
-  run "$log" env PATH="$STUBPATH" T4J_REPO="file://$N/t4j" POM="$N/pom.xml" PINS="$N/pins.txt" WORK="$N/work" OUT="$N/out" \
-    M2_REPO="$N/m2" "$@" bash "$here/build-native.sh" "$sub"
+  run "$log" env PATH="$STUBPATH" HOME="$N/home" GIT_CONFIG_COUNT=1 "$(redirect "$N/t4j")" \
+    GIT_CONFIG_VALUE_0=https://github.com/indextables/tantivy4java.git \
+    POM="$N/pom.xml" PINS="$N/pins.txt" WORK="$N/work" OUT="$N/out" "$@" bash "$here/build-native.sh" "$sub"
+}
+pin() { # pin <log> <tantivy4java fixture>: print-pin, with all three repositories redirected
+  run "$1" env PATH="$STUBPATH" HOME="$N/home" GIT_CONFIG_COUNT=3 "$(redirect "$2")" \
+    GIT_CONFIG_VALUE_0=https://github.com/indextables/tantivy4java.git \
+    GIT_CONFIG_KEY_1="url.file://$N/quickwit.insteadOf" GIT_CONFIG_VALUE_1=https://github.com/indextables/quickwit \
+    GIT_CONFIG_KEY_2="url.file://$N/tantivy.insteadOf" GIT_CONFIG_VALUE_2=https://github.com/indextables/tantivy \
+    bash "$here/build-native.sh" print-pin 0.34.4
 }
 L="$N/log"
 check "native: resolve accepts the pinned tag" native "$L.1" resolve
@@ -301,12 +406,18 @@ check "native: ... records the quickwit fork commit" has "$N/out/native-inputs.t
 check "native: ... records the tantivy fork commit" has "$N/out/native-inputs.txt" "tantivy_commit=$TV"
 check "native: ... records other git dependencies with their commit" has "$N/out/native-inputs.txt" "other_git_dependencies=https://github.com/quickwit-oss/mrecordlog@$MR"
 check "native: ... checked out exactly the pinned commit" is "$(git -C "$N/work/tantivy4java" rev-parse HEAD)" "$T4J_COMMIT"
-check "native: print-pin prints the pin line" is "$(PATH="$STUBPATH" T4J_REPO="file://$N/t4j" bash "$here/build-native.sh" print-pin 0.34.4 2> /dev/null)" "0.34.4 $T4J_COMMIT $QW $TV"
+# shellcheck disable=SC2086
+check "native: no variable redirects the repositories or the local Maven repository" test -z "$(grep -n -E 'T4J_REPO|M2_REPO:-|TANTIVY4JAVA_URL:-|QUICKWIT_URL:-|TANTIVY_URL:-' $SCRIPTS_UNDER_TEST)"
+check "native: ... T4J_REPO and M2_REPO in the environment changed nothing" test "$T4J_REPO" = file:///override/invalid -a "$M2_REPO" = /override/invalid -a ! -e /override
+check "native: print-pin prints the pin line" pin "$L.p1" "$N/t4j"
+check "native: ... (the line)" test "$(grep -c -x "0.34.4 $T4J_COMMIT $QW $TV" "$L.p1")" = 1
+check "native: ... says the quickwit commit is on the fork's default branch" has "$L.p1" "quickwit $QW: reachable from the default branch (main) of https://github.com/indextables/quickwit"
+check "native: ... and the tantivy commit" has "$L.p1" "tantivy $TV: reachable from the default branch (main) of https://github.com/indextables/tantivy"
 
 check "native: build needs the toolchain step first" fails_with "toolchain" "$L.2" native "$L.2" build
 mkdir -p "$N/work/protoc/bin" "$N/work/protoc/include" && printf '#!/bin/sh\necho "libprotoc 25.5"\n' > "$N/work/protoc/bin/protoc" && chmod +x "$N/work/protoc/bin/protoc"
-mkdir -p "$N/m2/io/indextables/tantivy4java/0.34.4" && echo stale > "$N/m2/io/indextables/tantivy4java/0.34.4/tantivy4java-0.34.4-linux-x86_64.jar"
-echo stale > "$N/m2/io/indextables/tantivy4java/0.34.4/tantivy4java-0.34.4-left-over.jar"
+mkdir -p "$N/home/.m2/repository/io/indextables/tantivy4java/0.34.4" && echo stale > "$N/home/.m2/repository/io/indextables/tantivy4java/0.34.4/tantivy4java-0.34.4-linux-x86_64.jar"
+echo stale > "$N/home/.m2/repository/io/indextables/tantivy4java/0.34.4/tantivy4java-0.34.4-left-over.jar"
 check "native: build collects the jar" native "$L.3" build
 check "native: ... a jar that was there before the build is not reused" has "$L.3" "removing it before the build"
 check "native: ... the collected jar is the one this build installed" is "$(hash_of sha256 "$N/out/repository/tantivy4java-0.34.4-linux-x86_64.jar")" "$(hash_of sha256 "$T/fx/t4j.jar")"
@@ -342,16 +453,22 @@ variant() { # variant <name> <edit command>: a repository that differs in one wa
   printf '0.34.4 %s %s %s\n' "$(git -C "$N/v-$1" rev-parse HEAD)" "$QW" "$TV" > "$N/pins.$1"
 }
 variant path "echo 'quickwit-common = { path = \"../../quickwit/quickwit-common\" }' >> native/Cargo.toml"
-check "native: a dependency on a sibling checkout is refused" fails_with "outside the tantivy4java checkout" "$L.12" native "$L.12" resolve T4J_REPO="file://$N/v-path" PINS="$N/pins.path"
+check "native: a dependency on a sibling checkout is refused" fails_with "outside the tantivy4java checkout" "$L.12" native "$L.12" resolve "$(redirect "$N/v-path")" PINS="$N/pins.path"
 variant patch "printf '[patch.crates-io]\nserde = { path = \"/tmp/serde\" }\n' >> .cargo/config.toml"
-check "native: a cargo config that overrides sources is refused" fails_with "overrides dependency sources" "$L.13" native "$L.13" resolve T4J_REPO="file://$N/v-patch" PINS="$N/pins.patch"
+check "native: a cargo config that overrides sources is refused" fails_with "overrides dependency sources" "$L.13" native "$L.13" resolve "$(redirect "$N/v-patch")" PINS="$N/pins.patch"
 variant two "printf '[[package]]\nname = \"quickwit-x\"\nsource = \"git+https://github.com/indextables/quickwit?rev=$SHA_C#$SHA_C\"\n' >> native/Cargo.lock"
-check "native: a lock file with two quickwit commits is refused" fails_with "more than one commit" "$L.14" native "$L.14" resolve T4J_REPO="file://$N/v-two" PINS="$N/pins.two"
+check "native: a lock file with two quickwit commits is refused" fails_with "more than one commit" "$L.14" native "$L.14" resolve "$(redirect "$N/v-two")" PINS="$N/pins.two"
 variant short "printf '[[package]]\nname = \"y\"\nsource = \"git+https://github.com/indextables/quickwit?branch=main\"\n' >> native/Cargo.lock"
-check "native: a git dependency without a resolved commit is refused" fails_with "without a resolved commit" "$L.15" native "$L.15" resolve T4J_REPO="file://$N/v-short" PINS="$N/pins.short"
+check "native: a git dependency without a resolved commit is refused" fails_with "without a resolved commit" "$L.15" native "$L.15" resolve "$(redirect "$N/v-short")" PINS="$N/pins.short"
+variant side "sed -i.bak 's/$QW/$QW_SIDE/g' native/Cargo.lock native/Cargo.toml && rm native/Cargo.lock.bak native/Cargo.toml.bak"
+check "native: print-pin accepts a fork commit on another branch" pin "$L.p2" "$N/v-side"
+check "native: ... but says it is not on the default branch, and where it is" has "$L.p2" "quickwit $QW_SIDE is NOT reachable from the default branch (main) of https://github.com/indextables/quickwit; it is on: upgrade"
+variant orphan "sed -i.bak 's/$QW/$SHA_C/g' native/Cargo.lock native/Cargo.toml && rm native/Cargo.lock.bak native/Cargo.toml.bak"
+check "native: print-pin refuses a fork commit that is on no branch or tag of the fork" fails_with "is not reachable from any branch or tag" "$L.p3" pin "$L.p3" "$N/v-orphan"
+check "native: ... and prints no pin line" test -z "$(grep -E '^0\.34\.4 ' "$L.p3")"
 new_t4j "$N/v-annot"; git -C "$N/v-annot" tag -a v0.34.4 -m annotated
 printf '0.34.4 %s %s %s\n' "$(git -C "$N/v-annot" rev-parse HEAD)" "$QW" "$TV" > "$N/pins.annot"
-check "native: an annotated tag is resolved to its commit" native "$L.16" resolve T4J_REPO="file://$N/v-annot" PINS="$N/pins.annot"
+check "native: an annotated tag is resolved to its commit" native "$L.16" resolve "$(redirect "$N/v-annot")" PINS="$N/pins.annot"
 
 # toolchain: a download with the wrong digest is never unpacked.
 cat > "$T/bin/curl" << 'STUB'
@@ -383,9 +500,9 @@ B="$T/build"; mkdir -p "$B"
 echo 3.5.8 > "$FAKE/spark.spark-3.5"; echo 4.0.3 > "$FAKE/spark.spark-4.0"; echo 4.1.2 > "$FAKE/spark.spark-4.1"
 artifacts() { # artifacts <log> <profile> [VAR=value...]
   local log="$1" profile="$2"; shift 2
-  rm -rf "$B/src-$profile" "$B/m2-$profile"; mkdir -p "$B/src-$profile"; cp "$N/pom.xml" "$B/src-$profile/pom.xml"
-  run "$log" env PATH="$STUBPATH" SRC="$B/src-$profile" PROFILE="$profile" BASE_VERSION=1.2.3 NATIVE_DIR="$N/out.good" \
-    OUT="$B/out/artifacts-$profile" M2_REPO="$B/m2-$profile" "$@" bash "$here/build-artifacts.sh"
+  rm -rf "$B/src-$profile" "$B/home-$profile"; mkdir -p "$B/src-$profile"; cp "$N/pom.xml" "$B/src-$profile/pom.xml"
+  run "$log" env PATH="$STUBPATH" SRC="$B/src-$profile" PROFILE="$profile" BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" NATIVE_DIR="$N/out.good" \
+    OUT="$B/out/artifacts-$profile" HOME="$B/home-$profile" "$@" bash "$here/build-artifacts.sh"
 }
 L="$B/log"
 : > "$FAKE/mvn.log"
@@ -401,13 +518,15 @@ check "build: the release profile runs with signing off" has "$FAKE/mvn.log" "-P
 check "build: plugins invoked by coordinate are pinned" test -z "$(grep -E ':(evaluate|set)' "$FAKE/mvn.log" | grep -v -E '[a-z.-]+:[a-z-]+:[0-9.]+:(evaluate|set)')"
 cp -R "$B/out" "$B/out.good"
 
-mkdir -p "$B/m2-pre/io/indextables/tantivy4java/0.34.4"
+mkdir -p "$B/home-pre/.m2/repository/io/indextables/tantivy4java/0.34.4"
 check "build: a tantivy4java already in the local repository is refused" fails_with "already in the local Maven repository" "$L.1" \
-  env PATH="$STUBPATH" SRC="$B/src-spark-3.5" PROFILE=spark-3.5 BASE_VERSION=1.2.3 NATIVE_DIR="$N/out.good" OUT="$B/out/x" M2_REPO="$B/m2-pre" bash "$here/build-artifacts.sh"
+  env PATH="$STUBPATH" SRC="$B/src-spark-3.5" PROFILE=spark-3.5 BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" NATIVE_DIR="$N/out.good" OUT="$B/out/x" HOME="$B/home-pre" bash "$here/build-artifacts.sh"
 cp -R "$N/out.good" "$B/native.bad" && echo tampered >> "$B/native.bad/repository/tantivy4java-0.34.4-linux-x86_64.jar"
 check "build: a native artifact that does not match its digests is refused" fails_with "digest mismatch" "$L.2" artifacts "$L.2" spark-3.5 NATIVE_DIR="$B/native.bad"
 echo 4.0.3 > "$FAKE/spark.spark-3.5"
 check "build: a Spark version outside the profile's line is refused" fails_with "is not 1.2.3_spark_3.5.<patch>" "$L.3" artifacts "$L.3" spark-3.5
+echo 3.5.9 > "$FAKE/spark.spark-3.5"
+check "build: a version other than the one the plan announced is refused" fails_with "Maven derives 1.2.3_spark_3.5.9 for spark-3.5, but the plan announced 1.2.3_spark_3.5.8" "$L.3b" artifacts "$L.3b" spark-3.5
 echo 3.5.8 > "$FAKE/spark.spark-3.5"
 check "build: an unknown profile is refused" fails_with "unknown Spark profile" "$L.4" artifacts "$L.4" spark-5.0
 touch "$FAKE/no-javadoc"
@@ -426,7 +545,7 @@ A="$T/assemble"; mkdir -p "$A"
 new_in() { rm -rf "$A/in"; mkdir -p "$A/in"; cp -R "$N/out.good" "$A/in/native"; cp -R "$B/out.good/"* "$A/in/"; }
 assemble() { # assemble <log> [VAR=value...]
   local log="$1"; shift
-  run "$log" env IN="$A/in" OUT="$A/staging" TAG=v1.2.3 COMMIT="$SHA_D" BASE_VERSION=1.2.3 RUN_URL=https://example.invalid/run/1 "$@" bash "$here/assemble.sh"
+  run "$log" env IN="$A/in" OUT="$A/staging" TAG=v1.2.3 COMMIT="$SHA_D" BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" RUN_URL=https://example.invalid/run/1 "$@" bash "$here/assemble.sh"
 }
 resum() { (. "$here/lib.sh"; write_sums "$1"); }
 L="$A/log"
@@ -446,6 +565,7 @@ check "assemble: summary shows the manifest digest" has "$L.1.summary" "$(out "$
 MANIFEST="$(out "$L.1" manifest_sha256)"
 rm -rf "$A/staging.good" && cp -R "$A/staging" "$A/staging.good"
 
+check "assemble: versions other than the ones the plan announced are refused" fails_with "is not the version the plan announced for spark-4.1" "$L.2a" assemble "$L.2a" EXPECTED_VERSIONS="1.2.3_spark_3.5.8 1.2.3_spark_4.0.3 1.2.3_spark_4.1.3"
 check "assemble: a tag that does not match the base version is refused" fails_with "does not belong to tag" "$L.2" assemble "$L.2" TAG=v1.2.4
 new_in; rm -rf "$A/in/artifacts-spark-4.1"
 check "assemble: a missing profile is refused" fails_with "no build output for spark-4.1" "$L.3" assemble "$L.3"
@@ -487,7 +607,7 @@ check "assemble: ... a placeholder is shown instead" has "$A/staging/release-not
 check "assemble: ... the text itself is absent" hasnt "$A/staging/release-notes.md" "<img"
 
 staging_copy() { rm -rf "$A/s"; cp -R "$A/staging.good" "$A/s"; }
-verify() { run "$1" env MANIFEST_SHA256="${2:-$MANIFEST}" BASE_VERSION="${3:-1.2.3}" bash "$here/verify-staging.sh" "$A/s"; }
+verify() { run "$1" env MANIFEST_SHA256="${2:-$MANIFEST}" BASE_VERSION="${3:-1.2.3}" EXPECTED_VERSIONS="${4:-$EV}" bash "$here/verify-staging.sh" "$A/s"; }
 L="$A/vlog"
 staging_copy
 check "verify-staging: accepts the assembled directory" verify "$L.1"
@@ -501,6 +621,7 @@ staging_copy; rm "$A/s/release-notes.md"
 check "verify-staging: a removed file is refused" fails_with "not exactly the files listed" "$L.6" verify "$L.6"
 staging_copy
 check "verify-staging: versions of another tag are refused" fails_with "is not 1.2.4_spark_3.5.<patch>" "$L.7" verify "$L.7" "$MANIFEST" 1.2.4
+check "verify-staging: versions other than the ones the plan announced are refused" fails_with "are not the versions the plan announced" "$L.7b" verify "$L.7b" "$MANIFEST" 1.2.3 "1.2.3_spark_3.5.8 1.2.3_spark_4.0.3 1.2.3_spark_4.1.9"
 # A self-consistent directory for other coordinates: valid manifest, wrong content.
 staging_copy
 mkdir -p "$A/s/bundles/1.2.3_spark_3.5.8/io/indextables/tantivy4java/9.9.9" && echo x > "$A/s/bundles/1.2.3_spark_3.5.8/io/indextables/tantivy4java/9.9.9/tantivy4java-9.9.9.jar"
@@ -640,7 +761,7 @@ check "check: the restored bundles pass again" chk "$L.13"
 # Signing writes nothing but signatures into the staging directory: with
 # those removed it verifies against the original manifest again.
 find "$S/staging" -name '*.asc' -exec rm {} +
-check "sign: nothing but signatures is written into the staging directory" run "$L.14" env MANIFEST_SHA256="$MANIFEST" BASE_VERSION=1.2.3 bash "$here/verify-staging.sh" "$S/staging"
+check "sign: nothing but signatures is written into the staging directory" run "$L.14" env MANIFEST_SHA256="$MANIFEST" BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" bash "$here/verify-staging.sh" "$S/staging"
 
 # The publish job's path: import a passphrase-protected private key from the
 # environment, then sign with it. The key is the throwaway key, exported.
@@ -666,12 +787,18 @@ rm -f "$S/key.asc"
 # central-upload.sh, against a stub curl
 # ---------------------------------------------------------------------------
 C="$T/central"; mkdir -p "$C/bin"
+PORTAL_API=https://central.sonatype.com/api/v1/publisher
+REPO1=https://repo1.maven.org/maven2
 cat > "$C/bin/curl" << 'STUB'
 #!/usr/bin/env bash
-# Stub curl for the Portal API (https://portal.test/api) and the public
-# repository (https://repo.test/maven2). Records "<method> <url> [auth]".
+# Stub curl for the Portal API and the public repository, under their real
+# addresses (nothing here reaches the network). Records "<method> <url>
+# [auth]". Like the Portal, it accepts a drop only for a deployment that is
+# VALIDATED or FAILED.
 set -u
-method=GET; out=""; fmt=""; hdr=""; form=""; url=""; failflag=0
+API=https://central.sonatype.com/api/v1/publisher
+REPO=https://repo1.maven.org/maven2
+method=GET; out=""; fmt=""; hdr=""; form=""; url=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -X) method="$2"; shift 2 ;;
@@ -680,8 +807,7 @@ while [ $# -gt 0 ]; do
     -w) fmt="$2"; shift 2 ;;
     -F) form="$2"; shift 2 ;;
     --connect-timeout | --max-time | --retry) shift 2 ;;
-    -sS) shift ;;
-    -fsS) failflag=1; shift ;;
+    -sS | -fsS) shift ;;
     -*) echo "stub curl: unexpected option $1" >&2; exit 97 ;;
     *) url="$1"; shift ;;
   esac
@@ -697,36 +823,41 @@ respond() { # respond <code> <body>
   if [ -n "$out" ]; then printf '%s' "$2" > "$out"; else printf '%s' "$2"; fi
   [ -z "$fmt" ] || printf '%s' "$1"
 }
+state_of() { if [ -f "$CFAKE/status.$1" ]; then head -n 1 "$CFAKE/status.$1"; else echo VALIDATED; fi; }
 case "$url" in
-  https://repo.test/maven2/*.pom)
+  "$REPO"/*.pom)
     v="$(basename "$(dirname "$url")")"
     respond "$(cat "$CFAKE/repo.$v.code" 2> /dev/null || echo 404)" "" ;;
-  https://repo.test/maven2/*.sha1)
+  "$REPO"/*.sha1)
     f="$CFAKE/repo.$(basename "$url")"
     [ -f "$f" ] || exit 22
     cat "$f" ;;
-  "https://portal.test/api/upload?name="*"&publishingType=USER_MANAGED")
+  "$API/upload?name="*"&publishingType=USER_MANAGED")
     [ "$method" = POST ] || exit 97
-    n="$(grep -c 'POST https://portal.test/api/upload' "$CFAKE/calls.log")"
+    n="$(grep -c "POST $API/upload" "$CFAKE/calls.log")"
     echo "$form" >> "$CFAKE/forms.log"
     if [ -f "$CFAKE/upload.$n.exit" ]; then exit "$(cat "$CFAKE/upload.$n.exit")"; fi
     respond "$(cat "$CFAKE/upload.$n.code" 2> /dev/null || echo 201)" "$(cat "$CFAKE/upload.$n.body" 2> /dev/null || echo "00000000-0000-4000-8000-00000000000$n")" ;;
-  "https://portal.test/api/status?id="*)
+  "$API/status?id="*)
     [ "$method" = POST ] || exit 97
     id="${url##*id=}"; f="$CFAKE/status.$id"
-    [ -f "$f" ] || echo VALIDATED > "$f"
-    st="$(head -n 1 "$f")"
-    [ "$(grep -c . "$f")" -le 1 ] || { tail -n +2 "$f" > "$f.next" && mv "$f.next" "$f"; }
+    st="$(state_of "$id")"
+    # A status file is a sequence: each call moves on one line; the last stays.
+    if [ -f "$f" ] && [ "$(grep -c . "$f")" -gt 1 ]; then tail -n +2 "$f" > "$f.next" && mv "$f.next" "$f"; fi
     case "$st" in
       HTTP*) respond "${st#HTTP}" "upstream error" ;;
       *) respond 200 "{\"deploymentId\":\"$id\",\"deploymentState\":\"$st\",\"errors\":{\"pkg\":[\"reason from the Portal\"]}}" ;;
     esac ;;
-  https://portal.test/api/deployment/*)
+  "$API"/deployment/*)
     id="${url##*/}"
-    case "$method" in
-      DELETE) respond "$(cat "$CFAKE/drop.$id.code" 2> /dev/null || echo 204)" "" ;;
-      *) echo "stub curl: $method on a deployment is the Publish call" >&2; exit 97 ;;
-    esac ;;
+    [ "$method" = DELETE ] || { echo "stub curl: $method on a deployment is the Publish call" >&2; exit 97; }
+    if [ -f "$CFAKE/drop.$id.code" ]; then respond "$(cat "$CFAKE/drop.$id.code")" "drop failed"
+    else
+      case "$(state_of "$id")" in
+        VALIDATED | FAILED) echo "$id" >> "$CFAKE/dropped.log"; respond 204 "" ;;
+        *) respond 400 "Can only drop deployments that are in a VALIDATED or FAILED state" ;;
+      esac
+    fi ;;
   *) echo "stub curl: unexpected request: $method $url" >&2; exit 97 ;;
 esac
 STUB
@@ -735,87 +866,180 @@ TOKEN="$(printf 'user:pass' | base64 | tr -d '\n')"
 new_central() { CFAKE="$C/fake.$1"; rm -rf "$CFAKE" "$C/state"; mkdir -p "$CFAKE"; : > "$CFAKE/calls.log"; export CFAKE; }
 central() { # central <log> <subcommand args...>
   local log="$1"; shift
-  run "$log" env PATH="$C/bin:$PATH" CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass CENTRAL_API_URL=https://portal.test/api \
-    CENTRAL_REPO_URL=https://repo.test/maven2 CENTRAL_POLL_SECONDS=0 CENTRAL_WAIT_SECONDS="${WAIT_SECONDS:-5}" bash "$here/central-upload.sh" "$@"
+  run "$log" env PATH="$C/bin:$PATH" CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass GITHUB_RUN_ID=777 GITHUB_RUN_ATTEMPT="${RUN_ATTEMPT:-2}" \
+    RELEASE_SCRIPTS_TESTING=1 CENTRAL_POLL_SECONDS=0 CENTRAL_WAIT_SECONDS="${WAIT_SECONDS:-5}" CENTRAL_DROP_WAIT_SECONDS="${DROP_WAIT_SECONDS:-5}" \
+    bash "$here/central-upload.sh" "$@"
 }
 up() { central "$1" upload "$S/bundles" "$S/staging" "$C/state"; }
+drop() { central "$1" drop "$C/state"; }
 calls() { grep -c -- "$1" "$CFAKE/calls.log" || true; }
+dropped() { tr '\n' ' ' < "$CFAKE/dropped.log" 2> /dev/null || true; }
 ID1=00000000-0000-4000-8000-000000000001; ID2=00000000-0000-4000-8000-000000000002; ID3=00000000-0000-4000-8000-000000000003
+N1=indextables_spark-1.2.3_spark_3.5.8-run777-2; N2=indextables_spark-1.2.3_spark_4.0.3-run777-2; N3=indextables_spark-1.2.3_spark_4.1.2-run777-2
 L="$C/log"
 
 new_central ok; printf 'PENDING\nVALIDATING\nVALIDATED\n' > "$CFAKE/status.$ID1"
 check "central: three uploads, each validated" up "$L.1"
-check "central: ... three upload calls" is "$(calls 'POST https://portal.test/api/upload')" 3
-check "central: ... as USER_MANAGED, named after the version" has "$CFAKE/calls.log" "POST https://portal.test/api/upload?name=indextables_spark-1.2.3_spark_3.5.8&publishingType=USER_MANAGED"
+check "central: ... three upload calls" is "$(calls "POST $PORTAL_API/upload")" 3
+check "central: ... as USER_MANAGED, named after the version, the run and the attempt" has "$CFAKE/calls.log" "POST $PORTAL_API/upload?name=$N1&publishingType=USER_MANAGED"
 check "central: ... the bundle is the form field" has "$CFAKE/forms.log" "bundle=@$S/bundles/indextables_spark-1.2.3_spark_4.1.2-bundle.zip;type=application/octet-stream"
 check "central: ... one version at a time: validated before the next upload" is \
-  "$(grep -n -E 'upload\?name|status\?id' "$CFAKE/calls.log" | sed -e 's/^[0-9]*:POST https:\/\/portal.test\/api\///' -e 's/[?].*//' | tr '\n' ' ')" "upload status status status upload status upload status "
+  "$(grep -E 'upload\?name|status\?id' "$CFAKE/calls.log" | sed -e 's/^POST [^ ]*\/publisher\///' -e 's/[?].*//' | tr '\n' ' ')" "upload status status status upload status upload status "
 check "central: ... nothing is dropped" is "$(calls '^DELETE')" 0
-check "central: ... the Publish call is never made" is "$(calls '^POST https://portal.test/api/deployment/')" 0
-check "central: ... the token goes to the Portal as a Bearer header" is "$(grep -c "portal.test.* auth:$TOKEN\$" "$CFAKE/calls.log")" "$(grep -c 'portal.test' "$CFAKE/calls.log")"
-check "central: ... and never to the public repository" is "$(grep 'repo.test' "$CFAKE/calls.log" | grep -c 'auth:')" 0
+check "central: ... the Publish call is never made" is "$(calls "^POST $PORTAL_API/deployment/")" 0
+check "central: ... the token goes to the Portal as a Bearer header" is "$(grep -c "central.sonatype.com.* auth:$TOKEN\$" "$CFAKE/calls.log")" "$(grep -c 'central.sonatype.com' "$CFAKE/calls.log")"
+check "central: ... and never to the public repository" is "$(grep 'repo1.maven.org' "$CFAKE/calls.log" | grep -c 'auth:')" 0
 check "central: ... and never on a command line" hasnt "$CFAKE/calls.log" "header passed on the command line"
+check "central: ... every request went to the Portal API or repo1, whatever CENTRAL_API_URL says" test -z "$(grep -v -E "^[A-Z]+ ($PORTAL_API|$REPO1)/" "$CFAKE/calls.log")"
 check "central: ... the encoded token is masked before use" has "$L.1" "::add-mask::$TOKEN"
 check "central: ... the summary says it is not public yet" has "$L.1.summary" "Not public yet"
-check "central: ... deployments are recorded" is "$(cat "$C/state/deployments.txt" | tr '\n' ' ')" "1.2.3_spark_3.5.8 $ID1 1.2.3_spark_4.0.3 $ID2 1.2.3_spark_4.1.2 $ID3 "
+check "central: ... each deployment id is in the summary as soon as it is known, with its name" has "$L.1.summary" "- Uploaded \`$N2\`: deployment \`$ID2\`"
+check "central: ... the final table lists id, name and state" has "$L.1.summary" "| \`1.2.3_spark_4.1.2\` | \`$ID3\` | \`$N3\` | VALIDATED |"
+check "central: ... and says to publish only those" has "$L.1.summary" "Publish **only** the deployments whose id is in this table"
+check "central: ... deployments are recorded with their names" is "$(tr '\n' ' ' < "$C/state/deployments.txt")" "1.2.3_spark_3.5.8 $ID1 $N1 1.2.3_spark_4.0.3 $ID2 $N2 1.2.3_spark_4.1.2 $ID3 $N3 "
 check "central: a second upload from the same job is refused" fails_with "refusing to upload twice" "$L.1b" up "$L.1b"
-: > "$CFAKE/calls.log"
-check "central: drop removes this run's deployments" central "$L.1c" drop "$C/state"
-check "central: ... all three" is "$(calls '^DELETE https://portal.test/api/deployment/')" 3
-check "central: ... and a second drop has nothing left to do" central "$L.1d" drop "$C/state"
-check "central: ... (no further calls)" is "$(calls '^DELETE')" 3
+check "central: drop (a later step failed) removes this job's deployments" drop "$L.1c"
+check "central: ... all three" is "$(dropped)" "$ID1 $ID2 $ID3 "
+check "central: ... and a second drop has nothing left to do" drop "$L.1d"
+check "central: ... (no further drop)" is "$(calls '^DELETE')" 3
+rm -rf "$C/state"
+check "central: drop before the upload step ran has nothing to do" drop "$L.1e"
+check "central: ... (no request at all)" is "$(calls '^DELETE')" 3
+
+# A deployment left in the Portal by an earlier run, for the same version.
+STALE=99999999-0000-4000-8000-999999999999
+new_central stale; echo VALIDATED > "$CFAKE/status.$STALE"
+check "central: an earlier run's deployment for the same version does not get in the way" up "$L.s1"
+check "central: ... it is never touched" is "$(calls "$STALE")" 0
+check "central: ... this run's deployments carry this run's id and attempt" is "$(grep -c -- '-run777-2&publishingType' "$CFAKE/calls.log")" 3
+check "central: ... the summary tells them apart" has "$L.s1.summary" "with any other id or name comes from a different run: drop it, do not publish it"
+check "central: ... dropping after a failure leaves the earlier run's deployment alone" drop "$L.s2"
+check "central: ... (dropped: this job's three)" is "$(dropped)" "$ID1 $ID2 $ID3 "
+new_central stale2
+RUN_ATTEMPT=3
+check "central: a re-run of the job uploads under another name" up "$L.s3"
+unset RUN_ATTEMPT
+check "central: ... (attempt 3)" has "$CFAKE/calls.log" "upload?name=indextables_spark-1.2.3_spark_3.5.8-run777-3&"
 
 new_central rejected; echo FAILED > "$CFAKE/status.$ID2"
 check "central: a rejected bundle fails the step" fails_with "Maven Central rejected the bundle for 1.2.3_spark_4.0.3" "$L.2" up "$L.2"
 check "central: ... the Portal's reasons are shown" has "$L.2" "reason from the Portal"
-check "central: ... the third version is not uploaded" is "$(calls 'POST https://portal.test/api/upload')" 2
-check "central: ... both deployments of this run are dropped" is "$(grep '^DELETE' "$CFAKE/calls.log" | sed 's/.*deployment\///' | sed 's/ auth.*//' | tr '\n' ' ')" "$ID1 $ID2 "
+check "central: ... the third version is not uploaded" is "$(calls "POST $PORTAL_API/upload")" 2
+check "central: ... both deployments of this job are dropped" is "$(dropped)" "$ID1 $ID2 "
 check "central: ... nothing is left recorded as waiting" test ! -s "$C/state/deployments.txt"
+check "central: ... the last step then has nothing to do" drop "$L.2b"
+check "central: ... and raises no alarm" hasnt "$L.2b.summary" "Action needed"
 
 new_central refused; echo 401 > "$CFAKE/upload.1.code"; echo "invalid token" > "$CFAKE/upload.1.body"
 check "central: a refused upload fails the step" fails_with "was refused: HTTP 401 invalid token" "$L.3" up "$L.3"
-check "central: ... nothing else is attempted" is "$(calls 'POST https://portal.test/api/upload')$(calls 'status')$(calls '^DELETE')" 100
+check "central: ... nothing else is attempted" is "$(calls "POST $PORTAL_API/upload")$(calls 'status')$(calls '^DELETE')" 100
+check "central: ... nothing is left to drop" drop "$L.3b"
 
 new_central broken; echo 28 > "$CFAKE/upload.2.exit"
 check "central: an upload that does not complete fails the step" fails_with "may or may not have reached the Portal" "$L.4" up "$L.4"
-check "central: ... the earlier deployment is dropped" is "$(grep -c "^DELETE https://portal.test/api/deployment/$ID1" "$CFAKE/calls.log")" 1
+check "central: ... the message names the deployment to look for" has "$L.4" "look for a deployment named $N2"
+check "central: ... the earlier deployment is dropped" is "$(dropped)" "$ID1 "
+check "central: ... the last step fails, because a deployment may exist that has no id" fails_with "was cut off before the Portal answered" "$L.4b" drop "$L.4b"
+check "central: ... and puts its name in the summary" has "$L.4b.summary" "| \`1.2.3_spark_4.0.3\` | unknown | \`$N2\` |"
 
 new_central garbled; echo "<html>ok</html>" > "$CFAKE/upload.1.body"
 check "central: an upload answer that is not a deployment id fails the step" fails_with "unexpected response" "$L.5" up "$L.5"
+check "central: ... the last step reports the deployment that may exist" fails_with "$N1" "$L.5b" drop "$L.5b"
 
-new_central slow; echo VALIDATING > "$CFAKE/status.$ID1"; echo 400 > "$CFAKE/drop.$ID1.code"
+# Validation takes longer than the step waits. The Portal refuses to drop a
+# deployment that is still being validated.
+new_central slow1; printf 'VALIDATING\nVALIDATING\nVALIDATING\nVALIDATED\n' > "$CFAKE/status.$ID1"
 WAIT_SECONDS=0
 check "central: a validation that does not finish in time fails the step" fails_with "was not validated within 0 seconds" "$L.6" up "$L.6"
-unset WAIT_SECONDS
-check "central: ... a drop that is refused is reported, with what to do" has "$L.6" "Could not drop deployment $ID1"
-check "central: ... 'do not publish it'" has "$L.6" "do not publish it"
+check "central: ... the deployment is polled until it can be dropped, then dropped" is "$(dropped)" "$ID1 "
+check "central: ... no drop was attempted while it was still validating" is "$(calls '^DELETE')" 1
+check "central: ... nothing is left recorded" test ! -s "$C/state/deployments.txt"
+check "central: ... the last step has nothing to do" drop "$L.6b"
+
+new_central slow2; echo VALIDATING > "$CFAKE/status.$ID1"
+DROP_WAIT_SECONDS=0
+check "central: a validation that outlasts the drop wait as well fails the step" fails_with "was not validated within 0 seconds" "$L.7" up "$L.7"
+check "central: ... the drop is refused by the Portal" has "$L.7" "Could not drop deployment $ID1 ($N1), state VALIDATING: HTTP 400"
+check "central: ... the deployment stays recorded, for the last step" is "$(cat "$C/state/deployments.txt")" "1.2.3_spark_3.5.8 $ID1 $N1"
+check "central: ... and the log says the last step tries again" has "$L.7" "the last step of this job tries again"
+check "central: the last step, with validation still running, fails" fails_with "Could not drop deployment $ID1" "$L.7b" drop "$L.7b"
+check "central: ... the summary says what to drop by hand, by id and name" has "$L.7b.summary" "| \`1.2.3_spark_3.5.8\` | \`$ID1\` | \`$N1\` | VALIDATING; the drop was refused (HTTP 400). **Drop it by hand. Do not publish it.** |"
+check "central: ... under a heading that cannot be missed" has "$L.7b.summary" "### Action needed: deployments left in the Central Portal"
+check "central: ... and it stays recorded" is "$(cat "$C/state/deployments.txt")" "1.2.3_spark_3.5.8 $ID1 $N1"
+echo VALIDATED > "$CFAKE/status.$ID1"
+check "central: once validation has finished, the same step drops it" drop "$L.7c"
+check "central: ... (dropped)" is "$(dropped)" "$ID1 "
+unset DROP_WAIT_SECONDS WAIT_SECONDS
+
+# The job is cancelled while a deployment is being validated: the upload step
+# is killed where it stands, and the last step has to clean up.
+new_central cancelled; echo VALIDATING > "$CFAKE/status.$ID1"
+env PATH="$C/bin:$PATH" CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass GITHUB_RUN_ID=777 GITHUB_RUN_ATTEMPT=2 RELEASE_SCRIPTS_TESTING=1 \
+  CENTRAL_POLL_SECONDS=1 CENTRAL_WAIT_SECONDS=600 bash "$here/central-upload.sh" upload "$S/bundles" "$S/staging" "$C/state" > "$L.8" 2>&1 &
+victim=$!
+i=0; while [ ! -s "$C/state/deployments.txt" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+kill -KILL "$victim" 2> /dev/null; wait "$victim" 2> /dev/null
+check "central: an upload step killed during validation leaves its deployment recorded" is "$(cat "$C/state/deployments.txt")" "1.2.3_spark_3.5.8 $ID1 $N1"
+check "central: ... and nothing dropped yet" is "$(calls '^DELETE')" 0
+printf 'VALIDATING\nVALIDATING\nVALIDATED\n' > "$CFAKE/status.$ID1"
+check "central: the last step waits for the validation to finish and drops it" drop "$L.8b"
+check "central: ... (dropped)" is "$(dropped)" "$ID1 "
+check "central: ... without an alarm" hasnt "$L.8b.summary" "Action needed"
+
+# The Portal refuses a drop for another reason.
+new_central droprefused; echo FAILED > "$CFAKE/status.$ID2"; echo 500 > "$CFAKE/drop.$ID1.code"
+check "central: a refused drop does not hide the original failure" fails_with "Maven Central rejected the bundle for 1.2.3_spark_4.0.3" "$L.9" up "$L.9"
+check "central: ... the other deployment is still dropped" is "$(dropped)" "$ID2 "
+check "central: ... the refused one stays recorded" is "$(cat "$C/state/deployments.txt")" "1.2.3_spark_3.5.8 $ID1 $N1"
+check "central: ... the last step tries again and, refused again, fails" fails_with "Could not drop deployment $ID1" "$L.9b" drop "$L.9b"
+check "central: ... listing only that one" is "$(grep -c '^| `1.2.3' "$L.9b.summary")" 1
+rm "$CFAKE/drop.$ID1.code"
+check "central: ... and succeeds once the Portal accepts the drop" drop "$L.9c"
+
+# Someone publishes a deployment by hand while the job is failing.
+new_central raced2; printf 'VALIDATED\nPUBLISHED\n' > "$CFAKE/status.$ID1"; echo FAILED > "$CFAKE/status.$ID2"
+check "central: a deployment published by hand before the job failed cannot be dropped" fails_with "is PUBLISHED and can no longer be dropped" "$L.10" up "$L.10"
+check "central: ... no drop is attempted for it" is "$(calls "^DELETE $PORTAL_API/deployment/$ID1")" 0
+check "central: ... the last step says so in the summary" fails_with "can no longer be dropped" "$L.10b" drop "$L.10b"
+check "central: ... (the row)" has "$L.10b.summary" "| \`1.2.3_spark_3.5.8\` | \`$ID1\` | \`$N1\` | PUBLISHED: it can no longer be dropped."
 
 new_central flaky; printf 'HTTP502\nHTTP502\nVALIDATED\n' > "$CFAKE/status.$ID1"
-check "central: a few failed status calls are tolerated" up "$L.7"
+check "central: a few failed status calls are tolerated" up "$L.11"
 new_central down; echo HTTP503 > "$CFAKE/status.$ID1"
-check "central: status calls that keep failing fail the step" fails_with "could not be read six times in a row" "$L.8" up "$L.8"
+check "central: status calls that keep failing fail the step" fails_with "could not be read six times in a row" "$L.12" up "$L.12"
 
 new_central raced; echo PUBLISHED > "$CFAKE/status.$ID1"
-check "central: a deployment published by hand during the run is not an error" up "$L.9"
-check "central: ... but is called out" has "$L.9" "someone pressed Publish"
+check "central: a deployment published by hand during the run is not an error" up "$L.13"
+check "central: ... but is called out" has "$L.13" "someone pressed Publish"
 
 # Re-run after a partial publish: 3.5.8 is already public with these files.
 vd="$S/staging/bundles/1.2.3_spark_3.5.8/io/indextables/indextables_spark/1.2.3_spark_3.5.8"
 same_on_central() { echo 200 > "$CFAKE/repo.1.2.3_spark_3.5.8.code"; for n in $(artifact_names 1.2.3_spark_3.5.8); do hash_of sha1 "$vd/$n" > "$CFAKE/repo.$n.sha1"; done; }
 new_central partial; same_on_central
-check "central: a version already public with identical files is skipped" up "$L.10"
-check "central: ... only the other two are uploaded" is "$(grep 'upload?name' "$CFAKE/calls.log" | sed -e 's/.*name=indextables_spark-//' -e 's/&.*//' | tr '\n' ' ')" "1.2.3_spark_4.0.3 1.2.3_spark_4.1.2 "
-check "central: ... and the summary says so" has "$L.10.summary" "ALREADY_PUBLISHED"
+check "central: a version already public with identical files is skipped" up "$L.14"
+check "central: ... only the other two are uploaded" is "$(grep 'upload?name' "$CFAKE/calls.log" | sed -e 's/.*name=indextables_spark-//' -e 's/-run.*//' | tr '\n' ' ')" "1.2.3_spark_4.0.3 1.2.3_spark_4.1.2 "
+check "central: ... and the summary says so" has "$L.14.summary" "ALREADY_PUBLISHED"
 new_central differs; same_on_central; echo 0000000000000000000000000000000000000000 > "$CFAKE/repo.indextables_spark-1.2.3_spark_3.5.8-javadoc.jar.sha1"
-check "central: a version already public with other files stops the release" fails_with "cannot be replaced" "$L.11" up "$L.11"
-check "central: ... before anything is uploaded" is "$(calls 'portal.test')" 0
+check "central: a version already public with other files stops the release" fails_with "cannot be replaced" "$L.15" up "$L.15"
+check "central: ... before anything is uploaded" is "$(calls 'central.sonatype.com')" 0
 new_central unknown; echo 503 > "$CFAKE/repo.1.2.3_spark_4.1.2.code"
-check "central: an unreadable public repository stops the release" fails_with "could not tell whether 1.2.3_spark_4.1.2 is already on Maven Central" "$L.12" up "$L.12"
-check "central: ... before anything is uploaded" is "$(calls 'portal.test')" 0
+check "central: an unreadable public repository stops the release" fails_with "could not tell whether 1.2.3_spark_4.1.2 is already on Maven Central" "$L.16" up "$L.16"
+check "central: ... before anything is uploaded" is "$(calls 'central.sonatype.com')" 0
 new_central nocreds
-check "central: missing credentials fail before any upload" bash -c "! PATH='$C/bin:$PATH' CENTRAL_USERNAME= CENTRAL_PASSWORD= CENTRAL_API_URL=https://portal.test/api CENTRAL_REPO_URL=https://repo.test/maven2 bash '$here/central-upload.sh' upload '$S/bundles' '$S/staging' '$C/state'"
-check "central: ... (no Portal call)" is "$(calls 'portal.test')" 0
-check "central: the default endpoints are the Portal API and repo1" test -n "$(grep -F 'CENTRAL_API_URL:-https://central.sonatype.com/api/v1/publisher}' "$here/central-upload.sh")" -a -n "$(grep -F 'CENTRAL_REPO_URL:-https://repo1.maven.org/maven2}' "$here/central-upload.sh")"
+check "central: missing credentials fail before any upload" bash -c "! PATH='$C/bin:$PATH' CENTRAL_USERNAME= CENTRAL_PASSWORD= bash '$here/central-upload.sh' upload '$S/bundles' '$S/staging' '$C/state'"
+check "central: ... (no request)" is "$(grep -c . "$CFAKE/calls.log")" 0
+new_central knob
+check "central: a timing setting without the test flag stops the script" fails_with "CENTRAL_POLL_SECONDS is a test-only setting" "$L.17" \
+  env PATH="$C/bin:$PATH" CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass CENTRAL_POLL_SECONDS=0 bash "$here/central-upload.sh" upload "$S/bundles" "$S/staging" "$C/state"
+check "central: ... before any request" is "$(grep -c . "$CFAKE/calls.log")" 0
+check "central: ... the same for the drop wait" fails_with "CENTRAL_DROP_WAIT_SECONDS is a test-only setting" "$L.18" \
+  env PATH="$C/bin:$PATH" CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass CENTRAL_DROP_WAIT_SECONDS=0 bash "$here/central-upload.sh" drop "$C/state"
+check "central: the endpoints are constants" test -n "$(grep -x 'CENTRAL_API=https://central.sonatype.com/api/v1/publisher' "$here/lib.sh")" -a -n "$(grep -x 'CENTRAL_REPO=https://repo1.maven.org/maven2' "$here/lib.sh")"
+check "central: no variable redirects them" test -z "$(grep -l -E 'CENTRAL_API_URL|CENTRAL_REPO_URL' "$here"/*.sh | grep -v test.sh)"
+# shellcheck disable=SC2086
+check "central: the only settings a test may change are the three timings" is \
+  "$(grep -h -o 'test_setting [A-Z_][A-Z_]*' $SCRIPTS_UNDER_TEST | sort -u | tr '\n' ' ')" \
+  "test_setting CENTRAL_DROP_WAIT_SECONDS test_setting CENTRAL_POLL_SECONDS test_setting CENTRAL_WAIT_SECONDS "
 check "central: AUTOMATIC publishing appears nowhere" test -z "$(grep -l 'AUTOMATIC' "$here"/*.sh | grep -v test.sh)"
 
 # ---------------------------------------------------------------------------
@@ -824,20 +1048,42 @@ check "central: AUTOMATIC publishing appears nowhere" test -z "$(grep -l 'AUTOMA
 G="$T/gh"; mkdir -p "$G/bin"
 cat > "$G/bin/gh" << 'STUB'
 #!/usr/bin/env bash
-# Stub gh: tag lookups and release view/create/upload/edit from $GFAKE.
+# Stub gh: tag lookups and a release kept in $GFAKE: body.md (its notes; the
+# release exists when this file does), assets.json (name and digest of each
+# attached file) and files/ (their content, for downloads).
 set -u
 echo "gh $*" >> "$GFAKE/calls.log"
+h() { if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+attach() { # attach <file>...: record the files as assets, replacing same names
+  local f name
+  [ -f "$GFAKE/assets.json" ] || echo '[]' > "$GFAKE/assets.json"
+  mkdir -p "$GFAKE/files"
+  for f in "$@"; do
+    case "$f" in -*) continue ;; esac
+    [ -f "$f" ] || continue
+    name="$(basename "$f")"
+    cp "$f" "$GFAKE/files/$name"
+    jq --arg n "$name" --arg d "sha256:$(h "$f")" '[.[] | select(.name != $n)] + [{name: $n, digest: $d}]' "$GFAKE/assets.json" > "$GFAKE/assets.tmp" \
+      && mv "$GFAKE/assets.tmp" "$GFAKE/assets.json"
+  done
+}
 case "$1 ${2:-}" in
   "api repos/o/r/git/ref/tags/"*) [ -f "$GFAKE/ref.json" ] || exit 1; cat "$GFAKE/ref.json" ;;
   "api repos/o/r/git/tags/"*) cat "$GFAKE/tagobj.sha" ;;
   "release view")
+    if [ ! -f "$GFAKE/body.md" ]; then cat "$GFAKE/view.err" >&2; exit 1; fi
     case "$*" in
-      *"--json body"*) if [ -f "$GFAKE/body.md" ]; then cat "$GFAKE/body.md"; else cat "$GFAKE/view.err" >&2; exit 1; fi ;;
+      *"--json body,assets"*)
+        [ -f "$GFAKE/assets.json" ] || echo '[]' > "$GFAKE/assets.json"
+        jq -n --rawfile body "$GFAKE/body.md" --slurpfile assets "$GFAKE/assets.json" '{body: $body, assets: $assets[0]}' ;;
+      *"--json body"*) cat "$GFAKE/body.md" ;;
       *"--json url"*) echo "https://example.invalid/releases/$3" ;;
     esac ;;
-  "release upload") ;;
+  "release upload") shift 3; attach "$@" ;;
+  "release download") # release download TAG --pattern NAME --dir DIR
+    cp "$GFAKE/files/$5" "$7/$5" ;;
   "release edit") shift 3; [ "$1" = --notes-file ] && cp "$2" "$GFAKE/body.md" ;;
-  "release create") printf "## What's Changed\n* a change\n" > "$GFAKE/body.md" ;;
+  "release create") printf "## What's Changed\n* a change\n" > "$GFAKE/body.md"; shift 3; attach "$@" ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 97 ;;
 esac
 STUB
@@ -847,6 +1093,15 @@ new_gh() { GFAKE="$G/fake.$1"; rm -rf "$GFAKE"; mkdir -p "$GFAKE"; : > "$GFAKE/c
 release() { # release <log> [VAR=value...]
   local log="$1"; shift
   run "$log" env PATH="$G/bin:$PATH" GH_TOKEN=t GH_REPO=o/r TAG=v1.2.3 COMMIT="$SHA_D" PRERELEASE=false "$@" bash "$here/github-release.sh" "$A/staging.good"
+}
+uploads() { grep -c 'gh release upload' "$GFAKE/calls.log" || true; }
+J35=indextables_spark-1.2.3_spark_3.5.8-linux-x86_64-shaded.jar
+staged35="$A/staging.good/bundles/1.2.3_spark_3.5.8/io/indextables/indextables_spark/1.2.3_spark_3.5.8/$J35"
+# An earlier build of the same jar: same name, other bytes.
+mkdir -p "$G/old" && cp "$T/fx/other-native.jar" "$G/old/$J35"
+old_release() { # a published release that already carries an earlier build of the 3.5 jar
+  new_gh "$1"; printf 'Published notes.\n' > "$GFAKE/body.md"
+  PATH="$G/bin:$PATH" gh release upload v1.2.3 "$G/old/$J35"; : > "$GFAKE/calls.log"
 }
 L="$G/log"
 new_gh create
@@ -861,14 +1116,48 @@ new_gh pre
 check "release: a pre-release tag creates a pre-release" release "$L.2" PRERELEASE=true
 check "release: ... flag passed" has "$GFAKE/calls.log" "--prerelease"
 new_gh existing; printf 'Hand-written notes.\r\n\r\n- item\r\n\r\n' > "$GFAKE/body.md"
-check "release: an existing release gets the jars" release "$L.3"
-check "release: ... replacing assets of the same name" has "$GFAKE/calls.log" "gh release upload v1.2.3 --clobber"
+check "release: an existing release without jars gets them" release "$L.3"
+check "release: ... in one upload that replaces nothing" is "$(grep 'gh release upload' "$GFAKE/calls.log" | grep -c -v -- '--clobber')" 1
+check "release: ... all three" is "$(jq -r 'length' "$GFAKE/assets.json")" 3
 check "release: ... it is not created again" test -z "$(grep 'release create' "$GFAKE/calls.log")"
 check "release: ... its notes are kept" has "$GFAKE/body.md" "Hand-written notes."
 check "release: ... and gain the build inputs" has "$GFAKE/body.md" "$T4J_COMMIT"
-release "$L.4" > /dev/null 2>&1
-check "release: a re-run replaces the build inputs instead of adding a second block" is "$(grep -c 'release-build-inputs:start' "$GFAKE/body.md")" 1
+: > "$GFAKE/calls.log"
+check "release: a re-run with the same staged jars" release "$L.4"
+check "release: ... uploads nothing, the jars are identical" is "$(uploads)" 0
+check "release: ... and says so" has "$L.4" "$J35 is already attached with identical content."
+check "release: ... replaces the build inputs instead of adding a second block" is "$(grep -c 'release-build-inputs:start' "$GFAKE/body.md")" 1
 check "release: ... and keeps the notes" is "$(grep -c 'Hand-written notes.' "$GFAKE/body.md")" 1
+
+# The release already has one of the jars from an earlier build (the
+# skip-central case: nothing on the Maven Central side stops the run).
+old_release differs
+check "release: a jar already attached with other content stops the step" fails_with "already has 1 of these jars with different content" "$L.10" release "$L.10"
+check "release: ... it names the jar" has "$L.10" "$J35 is already attached with different content"
+check "release: ... and the input that would allow it" has "$L.10" "replace-release-assets"
+check "release: ... nothing was uploaded, not even the jars that were missing" is "$(uploads)" 0
+check "release: ... the attached jar is still the earlier one" is "$(jq -r --arg n "$J35" '.[] | select(.name == $n) | .digest' "$GFAKE/assets.json")" "sha256:$(hash_of sha256 "$G/old/$J35")"
+check "release: ... the notes were not touched" is "$(cat "$GFAKE/body.md")" "Published notes."
+for v in "" false TRUE 1 yes; do
+  old_release "differs-$v"
+  check "release: replace-release-assets '$v' does not allow it either" fails_with "with different content" "$L.11" release "$L.11" REPLACE_ASSETS="$v"
+done
+old_release replace
+check "release: with replace-release-assets the jar is replaced" release "$L.12" REPLACE_ASSETS=true
+check "release: ... with a warning" has "$L.12" "::warning::Replacing 1 jar(s) on release v1.2.3"
+check "release: ... only that jar is uploaded with --clobber" is "$(grep -- '--clobber' "$GFAKE/calls.log" | tr ' ' '\n' | grep -c 'shaded.jar$')" 1
+check "release: ... (it is the 3.5 jar)" test -n "$(grep -- '--clobber' "$GFAKE/calls.log" | grep -F "$J35")"
+check "release: ... the other two are uploaded without it" is "$(grep 'gh release upload' "$GFAKE/calls.log" | grep -v -- '--clobber' | tr ' ' '\n' | grep -c 'shaded.jar$')" 2
+check "release: ... the attached jar is now the staged one" is "$(jq -r --arg n "$J35" '.[] | select(.name == $n) | .digest' "$GFAKE/assets.json")" "sha256:$(hash_of sha256 "$staged35")"
+# An asset without a recorded digest is downloaded and hashed.
+old_release nodigest; jq 'map(del(.digest))' "$GFAKE/assets.json" > "$GFAKE/a.tmp" && mv "$GFAKE/a.tmp" "$GFAKE/assets.json"
+check "release: a differing jar without a recorded digest is still caught" fails_with "with different content" "$L.13" release "$L.13"
+check "release: ... by downloading it" has "$GFAKE/calls.log" "gh release download v1.2.3 --pattern $J35"
+new_gh nodigest2; printf 'Notes.\n' > "$GFAKE/body.md"
+PATH="$G/bin:$PATH" gh release upload v1.2.3 "$staged35"; jq 'map(del(.digest))' "$GFAKE/assets.json" > "$GFAKE/a.tmp" && mv "$GFAKE/a.tmp" "$GFAKE/assets.json"; : > "$GFAKE/calls.log"
+check "release: an identical jar without a recorded digest is recognised" release "$L.14"
+check "release: ... and not uploaded again" test -z "$(grep 'gh release upload' "$GFAKE/calls.log" | grep -F "$J35")"
+
 new_gh moved; printf '{"object":{"type":"commit","sha":"%s"}}\n' "$SHA_A" > "$GFAKE/ref.json"
 check "release: a tag that moved since the build is not released" fails_with "now points to $SHA_A" "$L.5" release "$L.5"
 check "release: ... no release call is made" test -z "$(grep 'gh release' "$GFAKE/calls.log")"
@@ -894,29 +1183,30 @@ chain() { # chain <log> <command...>: run in $E with the stubs on PATH
   (cd "$E" && GITHUB_OUTPUT="$log.out" GITHUB_STEP_SUMMARY="$log.summary" PATH="$C/bin:$G/bin:$T/bin:${SIGNPATH}" "$@") > "$log" 2>&1
 }
 L="$E/log"
-check "chain: native resolve" chain "$L.1" env T4J_REPO="file://$N/t4j" POM=src/pom.xml PINS="$ES/native-pins.txt" WORK=work/native OUT=out/native M2_REPO="$E/m2-native" bash "$ES/build-native.sh" resolve
+check "chain: native resolve" chain "$L.1" env HOME="$E/home-native" GIT_CONFIG_COUNT=1 "$(redirect "$N/t4j")" GIT_CONFIG_VALUE_0=https://github.com/indextables/tantivy4java.git POM=src/pom.xml PINS="$ES/native-pins.txt" WORK=work/native OUT=out/native bash "$ES/build-native.sh" resolve
 mkdir -p "$E/work/native/protoc/bin" && cp "$N/work/protoc/bin/protoc" "$E/work/native/protoc/bin/protoc" 2> /dev/null \
   || { printf '#!/bin/sh\necho "libprotoc 25.5"\n' > "$E/work/native/protoc/bin/protoc"; chmod +x "$E/work/native/protoc/bin/protoc"; }
-check "chain: native build" chain "$L.2" env T4J_REPO="file://$N/t4j" POM=src/pom.xml PINS="$ES/native-pins.txt" WORK=work/native OUT=out/native M2_REPO="$E/m2-native" bash "$ES/build-native.sh" build
+check "chain: native build" chain "$L.2" env HOME="$E/home-native" POM=src/pom.xml PINS="$ES/native-pins.txt" WORK=work/native OUT=out/native bash "$ES/build-native.sh" build
 mkdir -p "$E/in" && cp -R "$E/out/native" "$E/in/native"
 for profile in $PROFILES; do
   rm -rf "$E/src/target" "$E/src/.stamped" "$E/src/dependency-reduced-pom.xml"
-  check "chain: build $profile" chain "$L.3" env SRC=src PROFILE="$profile" BASE_VERSION=1.2.3 NATIVE_DIR=in/native OUT=out/artifacts M2_REPO="$E/m2-$profile" bash "$ES/build-artifacts.sh"
+  check "chain: build $profile" chain "$L.3" env SRC=src PROFILE="$profile" BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" NATIVE_DIR=in/native OUT=out/artifacts HOME="$E/home-$profile" bash "$ES/build-artifacts.sh"
   cp -R "$E/out/artifacts" "$E/in/artifacts-$profile"
 done
-check "chain: assemble" chain "$L.4" env IN=in OUT=staging TAG=v1.2.3 COMMIT="$SHA_D" BASE_VERSION=1.2.3 bash "$ES/assemble.sh"
+check "chain: assemble" chain "$L.4" env IN=in OUT=staging TAG=v1.2.3 COMMIT="$SHA_D" BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" bash "$ES/assemble.sh"
 CM="$(out "$L.4" manifest_sha256)"
-check "chain: verify" chain "$L.5" env MANIFEST_SHA256="$CM" BASE_VERSION=1.2.3 bash "$ES/verify-staging.sh" staging
+check "chain: verify" chain "$L.5" env MANIFEST_SHA256="$CM" BASE_VERSION=1.2.3 EXPECTED_VERSIONS="$EV" bash "$ES/verify-staging.sh" staging
 check "chain: generate a key" chain "$L.6" env GNUPGHOME="$KEYHOME" GPG_PASSPHRASE=rehearsal bash "$ES/signing-key.sh" generate
 CK="$(out "$L.6" fingerprint)"
 check "chain: sign" chain "$L.7" env GNUPGHOME="$KEYHOME" SIGNING_KEY="$CK" GPG_PASSPHRASE=rehearsal bash "$ES/sign-bundles.sh" staging bundles
 check "chain: check" chain "$L.8" env GNUPGHOME="$KEYHOME" SIGNING_KEY="$CK" BASE_VERSION=1.2.3 bash "$ES/check-bundles.sh" bundles staging
 check "chain: remove the key" chain "$L.9" env GNUPGHOME="$KEYHOME" bash "$ES/signing-key.sh" remove
 new_central chain; rm -rf "$E/state"
-check "chain: upload" chain "$L.10" env CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass CENTRAL_API_URL=https://portal.test/api CENTRAL_REPO_URL=https://repo.test/maven2 \
-  CENTRAL_POLL_SECONDS=0 bash "$ES/central-upload.sh" upload bundles staging "$E/state"
-check "chain: ... three bundles went up" is "$(calls 'POST https://portal.test/api/upload')" 3
+check "chain: upload" chain "$L.10" env CENTRAL_USERNAME=user CENTRAL_PASSWORD=pass GITHUB_RUN_ID=4242 GITHUB_RUN_ATTEMPT=1 RELEASE_SCRIPTS_TESTING=1 CENTRAL_POLL_SECONDS=0 \
+  bash "$ES/central-upload.sh" upload bundles staging "$E/state"
+check "chain: ... three bundles went up" is "$(calls "POST $PORTAL_API/upload")" 3
 check "chain: ... as form uploads of the relative bundle paths" has "$CFAKE/forms.log" "bundle=@bundles/indextables_spark-1.2.3_spark_4.0.3-bundle.zip;type=application/octet-stream"
+check "chain: ... named after the runner's run id and attempt" has "$CFAKE/calls.log" "upload?name=indextables_spark-1.2.3_spark_4.0.3-run4242-1&"
 new_gh chain
 check "chain: release" chain "$L.11" env GH_TOKEN=t GH_REPO=o/r TAG=v1.2.3 COMMIT="$SHA_D" PRERELEASE=false bash "$ES/github-release.sh" staging
 check "chain: ... with the staged shaded jars" is "$(grep 'release create' "$GFAKE/calls.log" | tr ' ' '\n' | grep -c '^staging/bundles/.*-linux-x86_64-shaded.jar$')" 3
@@ -965,7 +1255,17 @@ if command -v ruby > /dev/null 2>&1 && ruby -ryaml -rjson -e 'puts JSON.generate
     "$(wf '[.jobs.rehearse.steps[] | .run? // empty | select(test("verify-staging|sign-bundles|check-bundles"))] | join("|")')" \
     "$(wf '[.jobs.publish.steps[] | .run? // empty | select(test("verify-staging|sign-bundles|check-bundles"))] | join("|")')"
   check "workflow: both take the manifest digest from the assemble job's output" is "$(wf '[.jobs.rehearse, .jobs.publish | .steps[] | select(.name == "Verify staging directory") | .env.MANIFEST_SHA256] | unique | join(",")')" '${{ needs.assemble.outputs.manifest-sha256 }}'
-  check "workflow: plan gets the inputs as strings, through the environment" is "$(wf '.jobs.plan.steps[] | select(.id == "plan") | .env | [.INPUT_TAG, .INPUT_DRY_RUN, .EVENT_NAME, .REF] | join(" ")')" '${{ inputs.tag }} ${{ inputs.dry-run }} ${{ github.event_name }} ${{ github.ref }}'
+  check "workflow: plan gets the inputs as strings, through the environment" is "$(wf '.jobs.plan.steps[] | select(.id == "plan") | .env | [.INPUT_TAG, .INPUT_DRY_RUN, .INPUT_EXPECTED_SPARK, .EVENT_NAME, .REF] | join(" ")')" '${{ inputs.tag }} ${{ inputs.dry-run }} ${{ inputs.expected-spark-versions }} ${{ github.event_name }} ${{ github.ref }}'
+  check "workflow: inputs" is "$(wf '(.on // .["true"]).workflow_dispatch.inputs | keys | join(",")')" dry-run,expected-spark-versions,replace-release-assets,skip-central,tag
+  check "workflow: expected-spark-versions is optional and empty by default" is "$(wf '(.on // .["true"]).workflow_dispatch.inputs["expected-spark-versions"] | [.type, (.required // false | tostring), .default] | join(",")')" string,false,
+  check "workflow: replace-release-assets is a boolean that defaults to false" is "$(wf '(.on // .["true"]).workflow_dispatch.inputs["replace-release-assets"] | [.type, (.default | tostring)] | join(",")')" boolean,false
+  check "workflow: ... and reaches the GitHub Release step only" is "$(wf '[.jobs[].steps[] | select(tostring | test("replace-release-assets")) | .name + ":" + .env.REPLACE_ASSETS] | join(",")')" 'GitHub Release:${{ inputs.replace-release-assets }}'
+  check "workflow: the plan publishes the versions it worked out" is "$(wf '.jobs.plan.outputs.versions')" '${{ steps.plan.outputs.versions }}'
+  check "workflow: build, assemble, rehearse and publish are all held to those versions" is "$(wf '[.jobs | to_entries[] | select(tostring | test("EXPECTED_VERSIONS")) | .key] | sort | join(",")')" assemble,build,publish,rehearse
+  check "workflow: ... taken from the plan job and nowhere else" is "$(wf '[.. | objects | .EXPECTED_VERSIONS? // empty] | unique | join(",")')" '${{ needs.plan.outputs.versions }}'
+  check "workflow: no test-only setting and no redirection is ever set" test -z "$(grep -n -E 'RELEASE_SCRIPTS_TESTING|CENTRAL_(POLL|WAIT|DROP_WAIT)_SECONDS|CENTRAL_API_URL|CENTRAL_REPO_URL|T4J_REPO|M2_REPO|GIT_CONFIG' "$workflow")"
+  check "workflow: the last step runs after a failure and after a cancellation" is "$(wf '.jobs.publish.steps[-1] | [.name, .if] | join("|")')" "Drop Maven Central deployments after a failure|\${{ (failure() || cancelled()) && needs.plan.outputs.central == 'true' }}"
+  check "workflow: header does not claim more than this file can guarantee" test -n "$(grep -F '# * In this file, `publish` is the only job that names the `release`' "$workflow")" -a -n "$(grep -F 'every workflow on' "$workflow")" -a -n "$(grep -F 'v0.6.0-rc1 and v0.6.0-rc2 carry the previous release.yml' "$workflow")"
   check "workflow: no continue-on-error anywhere" is "$(wf '[.. | objects | select(has("continue-on-error"))] | length')" 0
   # Every `run:` step, as the runner would start it (bash -eo pipefail).
   # Steps that call a release script must name one that exists; the other

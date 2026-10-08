@@ -8,16 +8,24 @@
 #   GH_TOKEN, GH_REPO   token with contents: write, and owner/repository
 #   TAG, COMMIT         from plan.sh
 #   PRERELEASE          true marks a newly created release as a pre-release
+#   REPLACE_ASSETS      true allows replacing a jar that is already attached
+#                       with different content (the replace-release-assets
+#                       input); anything else refuses
 #
 # The tag must still point to COMMIT: the artifacts were built from that
 # commit, and a tag that moved since the run started is not released.
 #
 # Assets are the same as before: one
-# indextables_spark-<version>-linux-x86_64-shaded.jar per Spark version,
-# replacing an asset of the same name if the release already has one. The
-# notes (hand-written for an existing release, generated for a new one) are
-# kept; only the block between the release-build-inputs markers is added or
-# replaced.
+# indextables_spark-<version>-linux-x86_64-shaded.jar per Spark version. A jar
+# that is already attached is left alone when its SHA-256 is that of the
+# staged jar (a re-run). When it differs, the release is not touched unless
+# REPLACE_ASSETS is true: a jar on a published release may already have been
+# downloaded, and a rebuild is never byte-identical. The comparison is made
+# for all jars before anything is uploaded.
+#
+# The notes (hand-written for an existing release, generated for a new one)
+# are kept; only the block between the release-build-inputs markers is added
+# or replaced.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
@@ -49,9 +57,43 @@ while IFS= read -r version; do
   assets+=("$f")
 done < "$staging/versions.txt"
 
-if gh release view "$TAG" --json body --jq '.body' > "$tmp/body.md" 2> "$tmp/view.err"; then
-  echo "Release $TAG exists; attaching the jars."
-  gh release upload "$TAG" --clobber "${assets[@]}"
+if gh release view "$TAG" --json body,assets > "$tmp/release.json" 2> "$tmp/view.err"; then
+  echo "Release $TAG exists."
+  jq -r '.body // ""' "$tmp/release.json" > "$tmp/body.md"
+  # Sort the jars into: not attached yet, attached and identical, attached
+  # with other content. Nothing is uploaded until all three are known.
+  missing=()
+  differing=()
+  for f in "${assets[@]}"; do
+    name="$(basename "$f")"
+    if [ "$(jq -r --arg n "$name" '[.assets[] | select(.name == $n)] | length' "$tmp/release.json")" = 0 ]; then
+      missing+=("$f")
+      continue
+    fi
+    attached="$(jq -r --arg n "$name" '.assets[] | select(.name == $n) | .digest // ""' "$tmp/release.json" | head -n 1)"
+    if [ -z "$attached" ]; then
+      # No digest recorded for this asset: fetch it and compute one.
+      rm -rf "$tmp/dl"
+      mkdir -p "$tmp/dl"
+      gh release download "$TAG" --pattern "$name" --dir "$tmp/dl" || die "could not download $name from release $TAG to compare it"
+      attached="sha256:$(hash_of sha256 "$tmp/dl/$name")"
+    fi
+    if [ "$attached" = "sha256:$(hash_of sha256 "$f")" ]; then
+      echo "$name is already attached with identical content."
+    else
+      differing+=("$f")
+      echo "$name is already attached with different content ($attached)."
+    fi
+  done
+  if [ "${#differing[@]}" -gt 0 ]; then
+    if [ "${REPLACE_ASSETS:-false}" = true ]; then
+      warn "Replacing ${#differing[@]} jar(s) on release $TAG that had different content, as requested by replace-release-assets"
+      gh release upload "$TAG" --clobber "${differing[@]}"
+    else
+      die "Release $TAG already has ${#differing[@]} of these jars with different content (above). They may have been downloaded already, and a rebuild is never byte-identical. Nothing was changed. If replacing them is intended, dispatch again with replace-release-assets ticked."
+    fi
+  fi
+  if [ "${#missing[@]}" -gt 0 ]; then gh release upload "$TAG" "${missing[@]}"; fi
 elif grep -qi 'not found' "$tmp/view.err"; then
   echo "Creating release $TAG."
   flags=(--verify-tag --generate-notes)
