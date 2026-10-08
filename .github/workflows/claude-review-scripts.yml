@@ -1,23 +1,22 @@
 name: Claude Review Scripts
 
 # Offline tests for the scripts behind claude-review.yml, run on the same
-# runner image those scripts run on. Uses no secrets and a read-only token, so
-# it is safe as an ordinary pull_request workflow. The review workflow itself
-# cannot be exercised from a pull request: it always runs from the default
-# branch.
+# runner image those scripts run on. They also check every workflow file for
+# how it uses the Claude credential, hence the path filter on all workflows.
+# Uses no secrets and a read-only token, so it is safe as an ordinary
+# pull_request workflow. The review workflow itself cannot be exercised from a
+# pull request: it always runs from the default branch.
 
 on:
   pull_request:
     paths:
       - .github/scripts/claude-review/**
-      - .github/workflows/claude-review.yml
-      - .github/workflows/claude-review-scripts.yml
+      - .github/workflows/**
   push:
     branches: [main]
     paths:
       - .github/scripts/claude-review/**
-      - .github/workflows/claude-review.yml
-      - .github/workflows/claude-review-scripts.yml
+      - .github/workflows/**
 
 permissions:
   contents: read
