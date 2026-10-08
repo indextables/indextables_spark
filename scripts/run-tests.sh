@@ -229,6 +229,27 @@ echo "[INFO] Compilation complete"
 echo ""
 
 # ---------------------------------------------------------------------------
+# Create the ScalaTest report directory before any test starts
+# ---------------------------------------------------------------------------
+# Every `mvn scalatest:test` below writes its reports to the directory that
+# pom.xml sets as <reportsDirectory>, target/surefire-reports. The plugin
+# creates it with a check followed by a create (`!dir.exists() && !dir.mkdirs()`)
+# and treats a false result from mkdirs as fatal. mkdirs also returns false
+# when the directory already exists. So when the directory is missing, as it
+# is after `mvn clean`, two invocations that start together can both see it
+# missing; one creates it, the other is told false, and that test class fails
+# with "Cannot create directory ..." without running a single test.
+#
+# Creating it here, once, before the parallel start means every invocation
+# finds it and none tries to create it. This is the only directory the plugin
+# creates with the current pom.xml; keep the path in step with it. Failing to
+# create it is not treated as an error here: the tests would report it.
+REPORTS_DIR="target/surefire-reports"
+if ! mkdir -p "$REPORTS_DIR"; then
+    echo "[WARN] Could not create $REPORTS_DIR" >&2
+fi
+
+# ---------------------------------------------------------------------------
 # Prepare temp directory for per-test logs
 # ---------------------------------------------------------------------------
 LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/indextables-tests.XXXXXX")
