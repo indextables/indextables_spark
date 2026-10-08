@@ -1291,4 +1291,60 @@ class CompanionCompactStringTest
       groupMap("tech") shouldBe 2L
     }
   }
+
+  test("wildcard IndexQuery on exact_only field should throw a clear error") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_wildcard").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_wildcard").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 5)
+
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()
+
+      spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .load(indexPath)
+        .createOrReplaceTempView("exact_only_wildcard_test")
+
+      val ex = intercept[Exception] {
+        spark.sql("SELECT * FROM exact_only_wildcard_test WHERE trace_id indexquery 'abc*'").collect()
+      }
+      assert(ex.getMessage.contains("Wildcard queries are not supported on exact_only field"))
+      assert(ex.getMessage.contains("trace_id"))
+    }
+  }
+
+  test("range IndexQuery on exact_only field should throw a clear error") {
+    withTempPath { tempDir =>
+      val parquetPath = new File(tempDir, "parquet_range_iq").getAbsolutePath
+      val indexPath   = new File(tempDir, "companion_range_iq").getAbsolutePath
+
+      createUuidParquetData(parquetPath, numRows = 5)
+
+      spark
+        .sql(
+          s"BUILD INDEXTABLES COMPANION FOR PARQUET '$parquetPath' " +
+            s"INDEXING MODES ('trace_id':'exact_only') " +
+            s"AT LOCATION '$indexPath'"
+        )
+        .collect()
+
+      spark.read
+        .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
+        .load(indexPath)
+        .createOrReplaceTempView("exact_only_range_iq_test")
+
+      val ex = intercept[Exception] {
+        spark.sql("SELECT * FROM exact_only_range_iq_test WHERE trace_id indexquery '[a TO z]'").collect()
+      }
+      assert(ex.getMessage.contains("Range queries are not supported on exact_only field"))
+      assert(ex.getMessage.contains("trace_id"))
+    }
+  }
 }
