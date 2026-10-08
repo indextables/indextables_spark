@@ -1,0 +1,44 @@
+name: Claude Review Scripts
+
+# Offline tests for the scripts behind claude-review.yml, run on the same
+# runner image those scripts run on. Uses no secrets and a read-only token, so
+# it is safe as an ordinary pull_request workflow. The review workflow itself
+# cannot be exercised from a pull request: it always runs from the default
+# branch.
+
+on:
+  pull_request:
+    paths:
+      - .github/scripts/claude-review/**
+      - .github/workflows/claude-review.yml
+      - .github/workflows/claude-review-scripts.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/scripts/claude-review/**
+      - .github/workflows/claude-review.yml
+      - .github/workflows/claude-review-scripts.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-review-scripts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Offline tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the tests
+        env:
+          # Fail, rather than skip, if the workflow-file checks cannot run.
+          REQUIRE_WORKFLOW_CHECKS: '1'
+        run: bash .github/scripts/claude-review/test.sh
