@@ -145,7 +145,7 @@ jobs:
         # This release installs Claude Code 2.1.292, which is what enforces
         # the tool and path limits below. Re-check them on every change of
         # this pin (see the README next to the scripts).
-        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The job's own read-only token. Passing it also keeps the action
