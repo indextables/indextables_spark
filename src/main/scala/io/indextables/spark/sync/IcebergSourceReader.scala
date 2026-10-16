@@ -52,6 +52,32 @@ object IcebergSourceReader {
   private val decimalPattern = """decimal\((\d+),\s*(\d+)\)""".r
   private val fixedPattern   = """fixed\[(\d+)\]""".r
 
+  /**
+   * Extract partition column names, in declared spec order, from Iceberg's `partition-spec` JSON (as returned by
+   * `IcebergSnapshotInfo.getPartitionSpecJson()`), e.g. `{"spec-id":0,"fields":[{"name":"region",...},
+   * {"name":"day",...}]}` -> `Seq("region", "day")`. Returns empty (rather than throwing) on null/blank/malformed
+   * input, so callers can fall back to alphabetical ordering — matching prior behavior — instead of failing sync.
+   */
+  def parsePartitionSpecFieldNames(partitionSpecJson: String): Seq[String] =
+    if (partitionSpecJson == null || partitionSpecJson.isBlank) {
+      Seq.empty
+    } else {
+      try {
+        val fields = JsonUtil.mapper.readTree(partitionSpecJson).get("fields")
+        if (fields == null || !fields.isArray) {
+          Seq.empty
+        } else {
+          (0 until fields.size()).flatMap { i =>
+            Option(fields.get(i).get("name")).map(_.asText())
+          }
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to parse Iceberg partition-spec JSON for column ordering: ${e.getMessage}")
+          Seq.empty
+      }
+    }
+
   /** Parse schema JSON to Spark StructType, trying Spark format first and falling back to Iceberg format conversion. */
   def parseSchemaJson(schemaJson: String): StructType =
     try
@@ -288,10 +314,26 @@ class IcebergSourceReader(
     }
   }
 
-  override def partitionColumns(): Seq[String] =
-    getAllFiles().headOption
-      .map(_.partitionValues.keys.toSeq.sorted)
-      .getOrElse(Seq.empty)
+  /**
+   * Declared partition columns, in spec order — sourced from the snapshot's partition-spec JSON rather than an
+   * arbitrary file entry's partition-value-map keys (which has no defined order and was previously sorted
+   * alphabetically, discarding the true declared order). Falls back to alphabetical-from-first-file if the spec
+   * JSON is unavailable or unparsable, preserving prior behavior in that edge case.
+   */
+  override def partitionColumns(): Seq[String] = {
+    val info = snapshotId match {
+      case Some(id) => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, id)
+      case None     => IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig)
+    }
+    val declaredOrder = IcebergSourceReader.parsePartitionSpecFieldNames(info.getPartitionSpecJson)
+    if (declaredOrder.nonEmpty) {
+      declaredOrder
+    } else {
+      getAllFiles().headOption
+        .map(_.partitionValues.keys.toSeq.sorted)
+        .getOrElse(Seq.empty)
+    }
+  }
 
   /**
    * Extract Hive-style partition values from a file path relative to a base path. E.g., for base="s3://bucket/data" and

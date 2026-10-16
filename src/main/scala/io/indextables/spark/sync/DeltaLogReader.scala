@@ -145,14 +145,25 @@ class DeltaLogReader(deltaTablePath: String, sourceCredentials: Map[String, Stri
   }
 
   /**
-   * Get partition columns from Delta table file entries. Column mapping (physical→logical) is handled by tantivy4java
-   * 0.31.0 in listFiles(), so partition value keys are already logical names.
+   * Get the table's declared partition columns, in declared order (not alphabetical). Prefers Delta metadata via
+   * getSnapshotInfo() over the first listed file's partition-value-map keys — that approach (the old implementation)
+   * discarded declared order entirely, since Map key iteration has no defined ordering. getSnapshotInfo() requires a
+   * `_last_checkpoint`, which small/freshly-written tables don't have yet, so this falls back to the already-fetched
+   * `fileEntries` (alphabetical, matching prior behavior) when it's unavailable, rather than failing the sync.
+   * Column mapping (physical→logical) is applied natively by tantivy4java before this returns, matching the logical
+   * names already used in getAllFiles()'s partition values.
    */
-  def partitionColumns(): Seq[String] = {
-    val entries = fileEntries
-    if (entries.isEmpty) return Seq.empty
-    entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
-  }
+  def partitionColumns(): Seq[String] =
+    try {
+      val snapshotInfo = DeltaTableReader.getSnapshotInfo(deltaKernelPath, deltaConfig)
+      snapshotInfo.getPartitionColumns.asScala.toSeq
+    } catch {
+      case e: Exception =>
+        logger.debug(s"getSnapshotInfo unavailable for declared partition-column order, falling back to first file's keys (alphabetical): ${e.getMessage}")
+        val entries = fileEntries
+        if (entries.isEmpty) Seq.empty
+        else entries.get(0).getPartitionValues.keySet.asScala.toSeq.sorted
+    }
 
   /** Get the schema from Delta table metadata as a Spark StructType. */
   def schema(): StructType = {
