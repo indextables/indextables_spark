@@ -239,7 +239,7 @@
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.34.4</version>
+            <version>0.34.4.1</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 
