@@ -72,7 +72,7 @@
             S3AFileSystem.initialize.
         -->
         <hadoop.version>3.3.4</hadoop.version>
-        <aws.sdk.version>2.55.11</aws.sdk.version>
+        <aws.sdk.version>2.56.0</aws.sdk.version>
         <scalatest.version>3.2.20</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>
@@ -273,7 +273,7 @@
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob</artifactId>
-            <version>12.35.1</version>
+            <version>12.36.0</version>
         </dependency>
 
         <!-- Azure Identity SDK for authentication -->
@@ -520,7 +520,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>3.10.3</version>
+                <version>3.10.4</version>
                 <configuration>
                     <scala>
                         <includes>
@@ -910,7 +910,7 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.11.0</version>
+                        <version>0.12.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
