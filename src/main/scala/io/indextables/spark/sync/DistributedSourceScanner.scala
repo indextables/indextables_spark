@@ -20,6 +20,7 @@ package io.indextables.spark.sync
 import java.time.LocalDate
 
 import scala.jdk.CollectionConverters._
+import scala.util.control.NonFatal
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{DataType, DateType, StructType}
@@ -51,9 +52,9 @@ case class DistributedScanResult(
    */
   isIncremental: Boolean = false,
   /**
-   * Source file paths removed from the source table since the last sync (Delta only). Companion splits that indexed
-   * these files must be invalidated. Empty for full-scan results and for Iceberg (Iceberg deletion tracking is a
-   * follow-up).
+   * Source file paths removed from the source table since the last sync. Companion splits that indexed these files
+   * must be invalidated. Populated for Delta (via getChangesBetween) and Iceberg (via manifest set-difference).
+   * Empty for full-scan results and Parquet.
    */
   removedSourcePaths: Seq[String] = Seq.empty,
   /**
@@ -84,17 +85,12 @@ object DistributedSourceScanner {
     val absolutePath    = entry.getPath
     val partitionValues = entry.getPartitionValues.asScala.toMap
 
-    // Convert absolute paths to relative (bucket-independent for cross-region failover)
+    // Relativize using the same 3-branch logic as Parquet paths. Iceberg paths are typically
+    // catalog-normalized (consistent scheme+prefix), but on S3 with certain configurations the
+    // object-key fallback is needed — using the shared method prevents add vs remove mismatches.
     val relativePath = storageRoot match {
-      case Some(basePath) =>
-        val normalizedBase = basePath.stripSuffix("/")
-        val normalizedPath = absolutePath.stripSuffix("/")
-        if (normalizedPath.startsWith(normalizedBase)) {
-          normalizedPath.substring(normalizedBase.length).stripPrefix("/")
-        } else {
-          absolutePath
-        }
-      case None => absolutePath
+      case Some(basePath) => relativizeToStorageRoot(absolutePath, basePath)
+      case None           => absolutePath
     }
 
     val effectivePartitionValues = resolvePartitionValues(partitionValues, absolutePath, storageRoot, dateColumns)
@@ -106,34 +102,43 @@ object DistributedSourceScanner {
     )
   }
 
-  private[sync] def parquetEntryToCompanionFile(entry: ParquetFileEntry, basePath: String): CompanionSourceFile = {
-    val rawPath = entry.getPath
-    // Normalize: strip file: URI scheme, ensure consistent leading-slash handling.
-    // The native ParquetTableReader may return local paths without leading slash (e.g. "var/folders/...")
-    // while the basePath has one ("/var/folders/...").
-    val absolutePath   = normalizeLocalPath(CloudPathUtils.stripFileScheme(rawPath))
+  private[sync] def parquetEntryToCompanionFile(entry: ParquetFileEntry, basePath: String): CompanionSourceFile =
+    CompanionSourceFile(
+      path = relativizeToStorageRoot(entry.getPath, basePath),
+      partitionValues = entry.getPartitionValues.asScala.toMap,
+      size = entry.getSize
+    )
+
+  /**
+   * Relativize an absolute file path against a storage root, producing the relative path used as a companion split
+   * key. This is the single source of truth for path relativization — called by `parquetEntryToCompanionFile`,
+   * `icebergEntryToCompanionFile`, and the incremental-deletion removed-paths normalization.
+   *
+   * Three strategies, tried in order:
+   *   1. Prefix match after scheme-stripping (`file://` → bare path) + leading-slash normalization
+   *   2. S3 object-key match (bare keys without scheme+bucket prefix)
+   *   3. Filename only (last resort — lossy but better than an absolute path that matches nothing)
+   */
+  private[sync] def relativizeToStorageRoot(rawPath: String, basePath: String): String = {
+    val normalizedPath = normalizeLocalPath(CloudPathUtils.stripFileScheme(rawPath)).stripSuffix("/")
     val normalizedBase = normalizeLocalPath(CloudPathUtils.stripFileScheme(basePath)).stripSuffix("/")
-    val normalizedAbs  = absolutePath.stripSuffix("/")
-    val relativePath = if (normalizedAbs.startsWith(normalizedBase)) {
-      normalizedAbs.substring(normalizedBase.length).stripPrefix("/")
+    if (normalizedPath.startsWith(normalizedBase)) {
+      normalizedPath.substring(normalizedBase.length).stripPrefix("/")
     } else {
-      // The native ParquetTableReader may return S3 object keys without the scheme+bucket prefix
-      // (e.g. "path/to/data/part.parquet" instead of "s3a://bucket/path/to/data/part.parquet").
+      // Middle branch: S3 object keys may lack the scheme+bucket prefix (e.g., Iceberg returns
+      // "path/to/data/part.parquet" instead of "s3a://bucket/path/to/data/part.parquet").
       // Extract the key portion from basePath and try matching against the raw path.
+      // S3 object-key fallback for paths that lack the scheme+bucket prefix.
       val baseKey       = ParquetDirectoryReader.extractObjectKey(basePath)
       val rawNormalized = rawPath.stripSuffix("/")
       if (baseKey.nonEmpty && rawNormalized.startsWith(baseKey)) {
         rawNormalized.substring(baseKey.length).stripPrefix("/")
       } else {
-        // Last resort: use filename only
+        // Last resort: use filename only. Returning the raw absolute path would never match
+        // a relative companion split key.
         rawPath.substring(rawPath.lastIndexOf('/') + 1)
       }
     }
-    CompanionSourceFile(
-      path = relativePath,
-      partitionValues = entry.getPartitionValues.asScala.toMap,
-      size = entry.getSize
-    )
   }
 
   /** Ensure local filesystem paths have a leading slash for consistent comparison. */
@@ -711,10 +716,10 @@ class DistributedSourceScanner(spark: SparkSession) {
     val dateCols = extractDateColumns(icebergSchemaOpt)
 
     // ── Incremental fast-path ──────────────────────────────────────────────
-    // When fromSnapshotId is provided (streaming incremental cycle), compute new files via
-    // manifest-path set-difference (current snapshot manifests minus old snapshot manifests).
-    // Iceberg snapshot IDs are random 64-bit longs (non-monotonic), so addedSnapshotId numeric
-    // comparison is unreliable.
+    // When fromSnapshotId is provided (streaming incremental cycle), compute changes via
+    // manifest-path set-difference. Reads entries from changed manifests only (old-only and
+    // new-only), then computes file-level adds and deletes. Shared manifests are skipped
+    // entirely since their contents are unchanged.
     fromSnapshotId match {
       case Some(fsnap) =>
         val currentSnapId = snapshotInfo.getSnapshotId
@@ -733,55 +738,134 @@ class DistributedSourceScanner(spark: SparkSession) {
           )
         } else {
           logger.info(s"Iceberg incremental: reading changes since snapshot $fsnap (current=$currentSnapId)")
-          // Use path-based set-difference instead of addedSnapshotId comparison, because Iceberg
-          // snapshot IDs are random 64-bit longs (non-monotonic) — numeric comparison is incorrect.
           val oldManifestPaths: Set[String] = {
             val oldInfo = IcebergTableReader.getSnapshotInfo(catalogName, namespace, tableName, icebergConfig, fsnap)
             oldInfo.getManifestFilePaths.asScala.toSet
           }
-          val newManifestPaths = snapshotInfo.getManifestFilePaths.asScala
-            .filterNot(oldManifestPaths.contains)
-            .toSeq
+          val currentManifestPaths: Set[String] = snapshotInfo.getManifestFilePaths.asScala.toSet
 
-          // Check whether the manifest delta is small enough for incremental driver-side reads.
-          // For large catch-up scenarios a full distributed scan is faster.
+          // Partition manifests into old-only (removed/replaced), new-only (added/replacement),
+          // and shared (unchanged — skip entirely).
+          val oldOnlyManifests = (oldManifestPaths -- currentManifestPaths).toSeq
+          val newOnlyManifests = (currentManifestPaths -- oldManifestPaths).toSeq
+          val totalChangedManifests = oldOnlyManifests.size + newOnlyManifests.size
+
+          // Check whether each side of the manifest delta is small enough for driver-side reads.
+          // Old-only and new-only are capped independently (default 50 each) so that:
+          //   - Pure appends (0 old, N new): capped at 50 new manifests (same as before)
+          //   - Compaction-heavy (N old, 1 new): capped at 50 old manifests (prevents driver OOM)
+          //   - Mixed (N old, M new): each side capped independently
+          // NOTE: prior to this change, only new manifests were counted against the threshold.
+          // The per-side cap means compaction workloads (many old manifests) now fall back to
+          // full scan earlier than before, which is the intended safety behavior.
           val maxIncrementalManifests = scala.util
             .Try(
               spark.conf.get("spark.indextables.companion.sync.iceberg.maxIncrementalManifests", "50").toInt
             )
             .getOrElse(50)
-          if (newManifestPaths.size > maxIncrementalManifests) {
+          if (oldOnlyManifests.size > maxIncrementalManifests || newOnlyManifests.size > maxIncrementalManifests) {
             logger.warn(
-              s"Iceberg incremental: new manifest count ${newManifestPaths.size} exceeds " +
-                s"maxIncrementalManifests=$maxIncrementalManifests — " +
+              s"Iceberg incremental: manifest count exceeds per-side limit " +
+                s"(${oldOnlyManifests.size} old, ${newOnlyManifests.size} new, limit=$maxIncrementalManifests each) — " +
                 s"falling back to full scan (from=$fsnap, current=$currentSnapId)"
             )
             // fall through to full scan below
           } else {
+            // Filter: only Parquet data files (same as the full-scan path)
+            def isParquetEntry(e: io.indextables.tantivy4java.iceberg.IcebergFileEntry): Boolean = {
+              val fmt = e.getFileFormat; fmt == null || fmt.equalsIgnoreCase("parquet")
+            }
 
-            val newEntries = newManifestPaths.flatMap { manifestPath =>
-              IcebergTableReader
-                .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
-                .asScala
-            }.toSeq
-            val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
-            val partCols =
-              newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
-            val files = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot, dateCols)).toSeq
-            logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
-            val sc = spark.sparkContext
-            return DistributedScanResult(
-              filesRDD = sc.parallelize(files),
-              version = Some(currentSnapId),
-              partitionColumns = partCols,
-              storageRoot = storageRoot,
-              sampleFilePath = newEntries.headOption.map(_.getPath),
-              numDistributedParts = 0,
-              schema = icebergSchemaOpt,
-              isIncremental = true,
-              driverFiles = Some(files)
-            )
-          } // end else (incremental path — newManifestPaths.size <= maxIncrementalManifests)
+            // Read entries from old-only manifests (files that WERE in the old snapshot's changed manifests).
+            // If an old manifest has been garbage-collected (expire_snapshots), fall back to full scan.
+            val oldOnlyEntriesOpt: Option[Seq[io.indextables.tantivy4java.iceberg.IcebergFileEntry]] = try {
+              Some(oldOnlyManifests.flatMap { manifestPath =>
+                IcebergTableReader
+                  .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+                  .asScala
+                  .filter(isParquetEntry)
+              }.toSeq)
+            } catch {
+              case NonFatal(e) =>
+                logger.warn(
+                  s"Iceberg incremental: cannot read old manifest (expired/GC'd?): ${e.getMessage} — falling back to full scan"
+                )
+                None
+            }
+            oldOnlyEntriesOpt match {
+              case Some(oldOnlyEntries) =>
+                val oldOnlyFilePaths: Set[String] = oldOnlyEntries.map(_.getPath).toSet
+
+                // Read entries from new-only manifests (files that ARE in the current snapshot's changed manifests).
+                // Same NonFatal guard as old-only reads — a corrupt or unreadable manifest should
+                // trigger a full scan fallback, not propagate to the single-call reader path.
+                val newOnlyEntriesOpt: Option[Seq[io.indextables.tantivy4java.iceberg.IcebergFileEntry]] = try {
+                  Some(newOnlyManifests.flatMap { manifestPath =>
+                    IcebergTableReader
+                      .readManifestFile(catalogName, namespace, tableName, icebergConfig, manifestPath)
+                      .asScala
+                      .filter(isParquetEntry)
+                  }.toSeq)
+                } catch {
+                  case NonFatal(e) =>
+                    logger.warn(
+                      s"Iceberg incremental: cannot read new manifest: ${e.getMessage} — falling back to full scan"
+                    )
+                    None
+                }
+                newOnlyEntriesOpt match {
+                  case Some(newOnlyEntries) =>
+                    val newOnlyFilePaths: Set[String] = newOnlyEntries.map(_.getPath).toSet
+
+                    // Set difference: added = in new but not old, deleted = in old but not new
+                    val addedEntries = newOnlyEntries.filter(e => !oldOnlyFilePaths.contains(e.getPath))
+                    val removedPaths = (oldOnlyFilePaths -- newOnlyFilePaths).toSeq
+
+                    // Derive storageRoot and partCols from any available entry (added, new-only, or
+                    // old-only). Old-only entries are needed for the pure-deletion case where no new
+                    // entries exist, so that removed paths can be correctly relativized.
+                    val anyEntry = addedEntries.headOption
+                      .orElse(newOnlyEntries.headOption)
+                      .orElse(oldOnlyEntries.headOption)
+                    val storageRoot = anyEntry.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
+                    val partCols = anyEntry
+                      .map(_.getPartitionValues.keySet.asScala.toSeq.sorted)
+                      .getOrElse(Seq.empty)
+                    val files = addedEntries.map(e => icebergEntryToCompanionFile(e, storageRoot, dateCols)).toSeq
+
+                    // Normalize removed paths to relative companion-split-key format using the
+                    // same `relativizeToStorageRoot` method that added files go through via
+                    // `icebergEntryToCompanionFile`. This guarantees add and remove paths use
+                    // identical normalization — no silent deletion misses from format mismatches.
+                    val normalizedRemovedPaths = storageRoot match {
+                      case Some(basePath) => removedPaths.map(relativizeToStorageRoot(_, basePath))
+                      case None           => removedPaths
+                    }
+
+                    logger.info(
+                      s"Iceberg incremental: ${files.size} added, ${normalizedRemovedPaths.size} removed " +
+                        s"from ${totalChangedManifests} changed manifests (${oldOnlyManifests.size} old, ${newOnlyManifests.size} new)"
+                    )
+                    val sc = spark.sparkContext
+                    return DistributedScanResult(
+                      filesRDD = sc.parallelize(files),
+                      version = Some(currentSnapId),
+                      partitionColumns = partCols,
+                      storageRoot = storageRoot,
+                      sampleFilePath = addedEntries.headOption.orElse(newOnlyEntries.headOption).map(_.getPath),
+                      numDistributedParts = 0,
+                      schema = icebergSchemaOpt,
+                      isIncremental = true,
+                      removedSourcePaths = normalizedRemovedPaths,
+                      driverFiles = Some(files)
+                    )
+                  case None =>
+                    logger.warn("Iceberg incremental: new manifest entries unavailable — falling back to full scan")
+                } // end newOnlyEntriesOpt match
+              case None =>
+                logger.warn("Iceberg incremental: old manifest entries unavailable — falling back to full scan")
+            } // end oldOnlyEntriesOpt match
+          } // end else (incremental path)
         }   // end else (currentSnapId != fsnap)
       case None => // fall through to full scan below
     }

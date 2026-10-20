@@ -30,7 +30,6 @@ import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.BeforeAndAfterAll
 
 /**
  * Tests for bucket aggregations (Histogram, DateHistogram, Range) on companion tables built from Delta and Iceberg
@@ -42,48 +41,7 @@ import org.scalatest.BeforeAndAfterAll
 class CompanionBucketAggregationTest
     extends AnyFunSuite
     with Matchers
-    with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
-
-  protected var spark: SparkSession = _
-
-  override def beforeAll(): Unit = {
-    SparkSession.getActiveSession.foreach(_.stop())
-    SparkSession.getDefaultSession.foreach(_.stop())
-
-    spark = SparkSession
-      .builder()
-      .appName("CompanionBucketAggregationTest")
-      .master("local[2]")
-      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
-      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.driver.host", "127.0.0.1")
-      .config("spark.driver.bindAddress", "127.0.0.1")
-      .config(
-        "spark.sql.extensions",
-        "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-          "io.delta.sql.DeltaSparkSessionExtension"
-      )
-      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-      .config("spark.sql.adaptive.enabled", "false")
-      .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-      .config("spark.indextables.aws.accessKey", "test-default-access-key")
-      .config("spark.indextables.aws.secretKey", "test-default-secret-key")
-      .config("spark.indextables.aws.sessionToken", "test-default-session-token")
-      .config("spark.indextables.s3.pathStyleAccess", "true")
-      .config("spark.indextables.aws.region", "us-east-1")
-      .config("spark.indextables.s3.endpoint", "http://localhost:10101")
-      .getOrCreate()
-
-    spark.sparkContext.setLogLevel("WARN")
-
-    _root_.io.indextables.spark.storage.SplitConversionThrottle.initialize(
-      maxParallelism = Runtime.getRuntime.availableProcessors() max 1
-    )
-  }
-
-  override def afterAll(): Unit =
-    if (spark != null) spark.stop()
+    with CompanionTestBase {
 
   // ── Test data ──────────────────────────────────────────────────────────────
   //
@@ -126,21 +84,6 @@ class CompanionBucketAggregationTest
   )
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-
-  private def flushCaches(): Unit = {
-    import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
-    GlobalSplitCacheManager.flushAllCaches()
-    DriverSplitLocalityManager.clear()
-  }
-
-  private def withTempPath(f: String => Unit): Unit = {
-    val path = Files.createTempDirectory("companion-bucket-agg").toString
-    try {
-      flushCaches()
-      f(path)
-    } finally
-      deleteRecursively(new File(path))
-  }
 
   private def createDeltaSource(deltaPath: String): Unit = {
     val df = spark.createDataFrame(spark.sparkContext.parallelize(testRows), sparkSchema)
