@@ -1,0 +1,56 @@
+name: Release Scripts
+
+# Offline tests for the scripts behind release.yml and for the shape of
+# release.yml itself, run on the runner image those scripts run on, with the
+# gpg that will do the signing (a throwaway key in a temporary keyring).
+# Uses no secrets, no environment and a read-only token, and uploads nothing,
+# so it is safe as an ordinary pull_request workflow. The release workflow
+# itself cannot be exercised from a pull request; see the dry run in
+# .github/scripts/release/README.md.
+#
+# pom.xml and scripts/setup.sh are in the path filter because the tests check
+# them against the pins: the tantivy4java version in pom.xml needs a line in
+# native-pins.txt, and the protoc pin must match the one in setup.sh.
+
+on:
+  pull_request:
+    paths:
+      - .github/scripts/release/**
+      - .github/workflows/release.yml
+      - .github/workflows/release-scripts.yml
+      - pom.xml
+      - scripts/setup.sh
+  push:
+    branches: [main]
+    paths:
+      - .github/scripts/release/**
+      - .github/workflows/release.yml
+      - .github/workflows/release-scripts.yml
+      - pom.xml
+      - scripts/setup.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-scripts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Offline tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the tests
+        env:
+          # Fail, rather than fall back or skip, if gpg or the workflow-file
+          # checks are not available.
+          REQUIRE_GPG: '1'
+          REQUIRE_WORKFLOW_CHECKS: '1'
+        run: bash .github/scripts/release/test.sh

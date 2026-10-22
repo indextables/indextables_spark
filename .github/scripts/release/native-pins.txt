@@ -1,0 +1,25 @@
+# What the release compiles for the tantivy4java native library.
+#
+# One line per tantivy4java version that pom.xml may name:
+#
+#   <version> <tantivy4java commit> <quickwit fork commit> <tantivy fork commit>
+#
+# build-native.sh fetches exactly the tantivy4java commit listed here, and
+# refuses to build unless
+#   * the tag v<version> in indextables/tantivy4java still points to it, and
+#   * the Cargo.lock at that commit resolves indextables/quickwit and
+#     indextables/tantivy to the two fork commits listed here.
+# A fork column is "-" when that tantivy4java version does not use the fork.
+#
+# When pom.xml moves to a new tantivy4java version, add a line for it in the
+# same pull request (keep the old lines: they are needed to dry-run or
+# re-run older tags):
+#
+#   bash .github/scripts/release/build-native.sh print-pin <version>
+#
+# print-pin also says, on standard error, whether each fork commit is on the
+# fork's default branch, warns when it is only on another branch or tag, and
+# refuses when it is on none (such a commit can come from somebody's fork of
+# the fork). Review that output and the printed commits before committing
+# the line; from then on they are what a release is allowed to build.
+0.34.4 be2d885a5b6d2e7438d88ea7f9818c5086e74a52 3026b228a71bfb6be16f3966ff80c8641834cb21 d491895f1cd54d166c8010469d4625ae81c636f3
