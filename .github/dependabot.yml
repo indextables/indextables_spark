@@ -68,5 +68,18 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+    ignore:
+      # Bumped by hand, not weekly by Dependabot. Each release of the Claude action
+      # bundles a fixed Claude Code version, and that CLI is what confines the
+      # automated reviewer (tool list, permission mode, deny rules). A bump needs a
+      # check of what changed: the action's diff between the two commits and the
+      # Claude Code changelog for the bundled versions in between.
+      # To bump: update the commit SHA and the version comment of the pin in both
+      # .github/workflows/claude-review.yml and .github/workflows/claude.yml, in the
+      # same PR, and the Claude Code version named in the comment above the pin in
+      # claude-review.yml. See .github/scripts/claude-review/README.md.
+      # Ignore rules also apply to Dependabot security updates, so no security PR
+      # is raised for this action either; watch its releases and advisories.
+      - dependency-name: "anthropics/claude-code-action"
     labels:
       - "type: chore"
