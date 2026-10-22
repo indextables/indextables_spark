@@ -69,8 +69,10 @@ comment, and the runner image is `ubuntu-24.04` rather than `ubuntu-latest`.
 
 The commit and its version live together on each `uses:` line, for example
 `actions/checkout@<commit> # v7.0.1`, so there is no second list to keep in
-step. Dependabot updates both parts. To bump one by hand, resolve the tag and
-replace the commit and the comment wherever the action is used:
+step. Dependabot updates both parts for every action except the Claude action,
+which `.github/dependabot.yml` ignores so that it is bumped by hand. To bump one
+by hand, resolve the tag and replace the commit and the comment wherever the
+action is used:
 
 ```bash
 gh api repos/OWNER/REPO/commits/TAG --jq .sha
@@ -78,10 +80,14 @@ gh api repos/OWNER/REPO/commits/TAG --jq .sha
 
 The Claude action is not an ordinary bump. Each release hard-codes a CLI
 version, and the CLI is what enforces the tool list, the permission mode and
-the deny rules that keep the reviewer away from its own credential. The
-reviewer itself reports a change of that pin as `high`, so such a pull request
-does not get a green verdict on its own. Before merging one, re-check the
-confinement described below.
+the deny rules that keep the reviewer away from its own credential. Before
+bumping it, check what changed: the action's diff between the two commits and
+the Claude Code changelog for the bundled versions in between. Then update the
+commit and the version comment in both `claude-review.yml` and `claude.yml` in
+the same pull request, along with the Claude Code version named in the comment
+above the pin in `claude-review.yml`. The reviewer itself reports a change of
+that pin as `high`, so such a pull request does not get a green verdict on its
+own. Before merging one, re-check the confinement described below.
 
 ## Credential scope
 
