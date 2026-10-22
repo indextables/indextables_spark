@@ -10,11 +10,21 @@
 # by import/generate and deleted by remove. import and generate set the step
 # output `fingerprint` to the primary key's fingerprint; the keyring must hold
 # exactly one secret key.
+#
+# remove runs in an always() step, also when the job failed before GNUPGHOME
+# was set. With GNUPGHOME unset or empty, or naming a directory that does not
+# exist, no keyring was set up and there is nothing to remove: it says so and
+# succeeds. Whenever a keyring exists, a removal that does not leave it gone
+# fails the step.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 
+if [ "${1:-}" = remove ] && [ -z "${GNUPGHOME:-}" ]; then
+  echo "GNUPGHOME is not set: no keyring was set up in this job, nothing to remove."
+  exit 0
+fi
 : "${GNUPGHOME:?}"
 [ "$(basename "$GNUPGHOME")" = release-gnupg ] || die "GNUPGHOME must be a directory named release-gnupg (got $GNUPGHOME)"
 export GNUPGHOME
@@ -42,8 +52,13 @@ case "${1:-}" in
       || die "could not generate a throwaway key"
     ;;
   remove)
+    if [ ! -e "$GNUPGHOME" ]; then
+      echo "No keyring at $GNUPGHOME: nothing to remove."
+      exit 0
+    fi
     if command -v gpgconf > /dev/null 2>&1; then gpgconf --kill all > /dev/null 2>&1 || true; fi
-    rm -rf "$GNUPGHOME"
+    rm -rf "$GNUPGHOME" || die "could not remove the keyring at $GNUPGHOME"
+    [ ! -e "$GNUPGHOME" ] || die "the keyring at $GNUPGHOME is still there after removal"
     echo "Keyring removed."
     exit 0
     ;;

@@ -769,6 +769,33 @@ PATH="$SIGNPATH" GNUPGHOME="$KEYHOME" gpg --batch --no-tty --pinentry-mode loopb
   --export-secret-keys "$FPR" 3<<< rehearsal > "$S/key.asc" 2> /dev/null
 check "signing-key: remove deletes the keyring" key "$L.15" remove
 check "signing-key: ... it is gone" test ! -e "$KEYHOME"
+check "signing-key: ... and says so" has "$L.15" "Keyring removed."
+# remove runs in an always() step, also after a job failed before GNUPGHOME
+# was set.
+check "signing-key: remove with GNUPGHOME unset succeeds" run "$L.15a" env -u GNUPGHOME PATH="$SIGNPATH" bash "$here/signing-key.sh" remove
+check "signing-key: ... and says there was nothing to remove" has "$L.15a" "GNUPGHOME is not set: no keyring was set up in this job, nothing to remove."
+check "signing-key: remove with GNUPGHOME empty succeeds" run "$L.15b" env PATH="$SIGNPATH" GNUPGHOME= bash "$here/signing-key.sh" remove
+check "signing-key: ... with the same line" has "$L.15b" "GNUPGHOME is not set: no keyring was set up in this job, nothing to remove."
+check "signing-key: remove when the keyring directory does not exist succeeds" run "$L.15c" env PATH="$SIGNPATH" GNUPGHOME="$KEYHOME" bash "$here/signing-key.sh" remove
+check "signing-key: ... and says there was none" has "$L.15c" "No keyring at $KEYHOME: nothing to remove."
+check "signing-key: ... and creates nothing" test ! -e "$KEYHOME"
+check "signing-key: the name check still applies when the directory is missing" fails_with "must be a directory named release-gnupg" "$L.15d" \
+  env PATH="$SIGNPATH" GNUPGHOME="$S/missing/gnupg" bash "$here/signing-key.sh" remove
+check "signing-key: import with GNUPGHOME unset still fails" bash -c "! env -u GNUPGHOME PATH='$SIGNPATH' GPG_PRIVATE_KEY=x bash '$here/signing-key.sh' import"
+check "signing-key: generate with GNUPGHOME empty still fails" bash -c "! env PATH='$SIGNPATH' GNUPGHOME= GPG_PASSPHRASE=x bash '$here/signing-key.sh' generate"
+if [ "$(id -u)" != 0 ]; then
+  # A keyring whose contents cannot be deleted (read-only directories) must
+  # fail the step, not pass as a no-op.
+  stuck="$S/stuck/release-gnupg"
+  mkdir -p "$stuck/private-keys-v1.d" && echo key > "$stuck/private-keys-v1.d/k.key"
+  chmod 555 "$stuck/private-keys-v1.d" "$stuck"
+  check "signing-key: a keyring that cannot be removed fails the step" fails_with "could not remove the keyring at $stuck" "$L.15e" \
+    env PATH="$SIGNPATH" GNUPGHOME="$stuck" bash "$here/signing-key.sh" remove
+  check "signing-key: ... (it is still there)" test -e "$stuck/private-keys-v1.d/k.key"
+  chmod 755 "$stuck" "$stuck/private-keys-v1.d"; rm -rf "$S/stuck"
+else
+  echo "skip  signing-key: removal failure (running as root, permissions do not apply)"
+fi
 check "signing-key: import without a key fails" bash -c "! PATH='$SIGNPATH' GNUPGHOME='$KEYHOME' GPG_PRIVATE_KEY= bash '$here/signing-key.sh' import"
 check "signing-key: import of something that is not a key fails" fails_with "could not import the signing key" "$L.16" \
   env PATH="$SIGNPATH" GNUPGHOME="$KEYHOME" GPG_PRIVATE_KEY="not a key" bash "$here/signing-key.sh" import
