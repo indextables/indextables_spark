@@ -316,6 +316,11 @@ spark.indextables.companion.sync.arrowFfi.enabled: true (default: true)
   // Eliminates per-entry JNI overhead. Set to false to use the TANT buffer path.
 spark.indextables.companion.sync.batchSize: <auto> (default: defaultParallelism)
 spark.indextables.companion.sync.maxConcurrentBatches: 6 (default: 6)
+spark.indextables.companion.sync.localScratch.maxAgeMinutes: 360 (default: 360, i.e. 6 hours)
+  // Age threshold for the executor-init sweep of orphaned `/local_disk0/temp/sync-*` scratch
+  // directories left behind by a killed sync task (SIGKILL, FORCE_KILL, or cancel/retry bypass
+  // the per-task cleanup listeners). Runs once per executor JVM; never removes a directory whose
+  // mtime is within the threshold, so an in-flight download is never touched.
 spark.indextables.companion.writerHeapSize: "1G" (default: 1GB)
 spark.indextables.companion.readerBatchSize: 8192 (default: 8192)
 spark.indextables.companion.schedulerPool: "indextables-companion" (default)
