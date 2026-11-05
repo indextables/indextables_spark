@@ -596,10 +596,30 @@ ensure_cargo_on_system_path() {
         fi
     done
 
-    local cargo_bin="$HOME/.cargo/bin/cargo"
-    local rustc_bin="$HOME/.cargo/bin/rustc"
-    if [[ ! -x "$cargo_bin" ]]; then
-        error "cargo not found at $cargo_bin"
+    # Resolve the real cargo/rustc binaries to symlink from.  Prefer the
+    # rustup default location ($CARGO_HOME, or ~/.cargo), but fall back to
+    # `command -v` when the toolchain lives elsewhere -- some hosted CI
+    # images (e.g. GitHub's macos-15-arm64 runner) ship cargo/rustc on PATH
+    # outside ~/.cargo.  Here `command -v` is fine as a *locator* of the
+    # installed binary: it is only unreliable as a test of "will Maven
+    # subprocesses see it on their default PATH" (that is why the system-dir
+    # check above does not use it), and we re-expose whatever it finds via
+    # the symlink below, which is exactly what makes it visible to Maven.
+    local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    local cargo_bin=""
+    local rustc_bin=""
+    if [[ -x "$cargo_home/bin/cargo" ]]; then
+        cargo_bin="$cargo_home/bin/cargo"
+    else
+        cargo_bin="$(command -v cargo || true)"
+    fi
+    if [[ -x "$cargo_home/bin/rustc" ]]; then
+        rustc_bin="$cargo_home/bin/rustc"
+    else
+        rustc_bin="$(command -v rustc || true)"
+    fi
+    if [[ ! -x "$cargo_bin" ]] || [[ ! -x "$rustc_bin" ]]; then
+        error "cargo/rustc not found (tried $cargo_home/bin and 'command -v cargo'/'command -v rustc')"
         exit 1
     fi
 
