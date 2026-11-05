@@ -765,8 +765,14 @@ class DistributedSourceScanner(spark: SparkSession) {
                 .asScala
             }.toSeq
             val storageRoot = newEntries.headOption.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
-            val partCols =
+            // Declared spec order (not alphabetical) from the snapshot's partition-spec JSON; fall back to
+            // alphabetical-from-first-entry if unavailable, preserving prior behavior in that edge case.
+            val specOrderCols = IcebergSourceReader.parsePartitionSpecFieldNames(snapshotInfo.getPartitionSpecJson)
+            val partCols = if (specOrderCols.nonEmpty) {
+              specOrderCols
+            } else {
               newEntries.headOption.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
+            }
             val files = newEntries.map(e => icebergEntryToCompanionFile(e, storageRoot, dateCols)).toSeq
             logger.info(s"Iceberg incremental: ${files.size} new files from ${newEntries.size} new manifest entries")
             val sc = spark.sparkContext
@@ -800,7 +806,14 @@ class DistributedSourceScanner(spark: SparkSession) {
     val firstEntry          = firstManifestEntries.headOption
     val computedStorageRoot = firstEntry.map(e => SyncTaskExecutor.extractTableBasePath(e.getPath))
     val sampleFilePath      = firstEntry.map(_.getPath)
-    val partitionColumns    = firstEntry.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
+    // Declared spec order (not alphabetical) from the snapshot's partition-spec JSON; fall back to
+    // alphabetical-from-first-entry if unavailable, preserving prior behavior in that edge case.
+    val specOrderCols  = IcebergSourceReader.parsePartitionSpecFieldNames(snapshotInfo.getPartitionSpecJson)
+    val partitionColumns = if (specOrderCols.nonEmpty) {
+      specOrderCols
+    } else {
+      firstEntry.map(_.getPartitionValues.keySet.asScala.toSeq.sorted).getOrElse(Seq.empty)
+    }
 
     // Distributed: read all manifests on executors
     val sc                = spark.sparkContext

@@ -233,11 +233,27 @@ class ParquetDirectoryReader(
     partitions.toMap
   }
 
-  /** Discover partition columns from the first file's relative path. */
+  /**
+   * Discover partition columns from the first file's relative path, in the order the `key=value` segments actually
+   * appear in the directory structure (the declared order for Hive-style partitioning) — not alphabetically, since
+   * that order was already lost once by routing through `partitionValues.keys` (a Map, whose key iteration order is
+   * not defined).
+   */
   private def discoverPartitionColumns(): Seq[String] =
     discoveredFiles.headOption
-      .map(_.partitionValues.keys.toSeq.sorted)
+      .map(f => extractPartitionKeysInOrder(f.path))
       .getOrElse(Seq.empty)
+
+  /** Extract Hive-style partition key names from a relative path, in path-segment order. */
+  private def extractPartitionKeysInOrder(relativePath: String): Seq[String] =
+    relativePath
+      .split("/")
+      .dropRight(1) // exclude filename
+      .flatMap { component =>
+        val eqIdx = component.indexOf('=')
+        if (eqIdx > 0) Some(component.substring(0, eqIdx)) else None
+      }
+      .toSeq
 
   /**
    * Read schema from a single parquet file via tantivy4java's ParquetSchemaReader.

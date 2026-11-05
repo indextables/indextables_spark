@@ -55,7 +55,8 @@ case class SyncIndexingGroup(
   parquetFiles: Seq[String],
   parquetTableRoot: String,
   partitionValues: Map[String, String],
-  groupIndex: Int)
+  groupIndex: Int,
+  partitionColumns: Seq[String] = Seq.empty)
     extends Serializable
 
 /** Result of indexing a single group of parquet files into a companion split. Returned from executor to driver. */
@@ -207,13 +208,7 @@ object SyncTaskExecutor {
       )
 
       // 4. Upload companion split to destination
-      val partitionPrefix = if (group.partitionValues.nonEmpty) {
-        group.partitionValues.toSeq.sorted
-          .map { case (k, v) => s"$k=$v" }
-          .mkString("/") + "/"
-      } else {
-        ""
-      }
+      val partitionPrefix = buildPartitionPrefix(group.partitionValues, group.partitionColumns)
       val destSplitPath = s"${config.splitTablePath.stripSuffix("/")}/$partitionPrefix$splitFileName"
       val splitSize     = uploadSplit(localSplitPath, destSplitPath, config.storageConfig, config.splitTablePath)
 
@@ -269,6 +264,23 @@ object SyncTaskExecutor {
     tempDir.mkdirs()
     tempDir
   }
+
+  /**
+   * Build the Hive-style partition path prefix (e.g. "a=1/b=2/") for a companion split, ordering segments by the
+   * table's declared partition-column order rather than alphabetically. Falls back to alphabetical-by-key when
+   * `partitionColumns` is empty (declared order unavailable — e.g. Iceberg sources today), which preserves the
+   * previous behavior exactly. A `partitionValues` key absent from `partitionColumns` is defensively dropped rather
+   * than crashing (should not normally happen). Pure and Spark-independent — safe to unit test directly.
+   */
+  private[sync] def buildPartitionPrefix(partitionValues: Map[String, String], partitionColumns: Seq[String]): String =
+    if (partitionValues.isEmpty) {
+      ""
+    } else {
+      val orderedKeys = if (partitionColumns.nonEmpty) partitionColumns else partitionValues.keys.toSeq.sorted
+      orderedKeys
+        .flatMap(k => partitionValues.get(k).map(v => s"$k=$v"))
+        .mkString("/") + "/"
+    }
 
   private def extractRelativePath(absolutePath: String, tableRoot: String): String = {
     val normalizedPath = absolutePath.stripSuffix("/")
