@@ -1185,6 +1185,7 @@ object FiltersToQueryConverter {
       // Note: Field validation happens earlier in isMixedFilterValidForSchema
       case indexQuery: IndexQueryFilter =>
         queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
+        validateIndexQueryOnExactOnlyField(indexQuery.columnName, indexQuery.queryString, schema)
 
         // Use parseQuery with the specified field
         val fieldNames = List(indexQuery.columnName).asJava
@@ -1245,6 +1246,7 @@ object FiltersToQueryConverter {
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
         queryLog(s"MixedBooleanFilter->Query: Converting MixedIndexQuery: ${indexQueryFilter.columnName} indexquery '${indexQueryFilter.queryString}'")
+        validateIndexQueryOnExactOnlyField(indexQueryFilter.columnName, indexQueryFilter.queryString, schema)
         val fieldNames = List(indexQueryFilter.columnName).asJava
         withTemporaryIndex(schema) { index =>
           try
@@ -1318,6 +1320,35 @@ object FiltersToQueryConverter {
         logger.warn(s"Could not determine field type for '$fieldName', defaulting to TEXT: ${e.getMessage}")
         FieldType.TEXT
     }
+
+  /**
+   * Reject wildcard and range patterns on exact_only fields before the native layer is called. exact_only stores values
+   * as U64 hashes so only exact match is meaningful -- wildcard and range queries produce meaningless results or
+   * cryptic JNI errors after exhausting task retries. Best-effort: checks for common patterns (* ? and [ TO ]).
+   */
+  private def validateIndexQueryOnExactOnlyField(
+    columnName: String,
+    queryString: String,
+    schema: Schema
+  ): Unit = {
+    if (getFieldType(schema, columnName) != FieldType.UNSIGNED) return
+
+    val trimmed     = queryString.trim
+    val hasWildcard = trimmed.contains("*") || trimmed.contains("?")
+    val hasRange    = (trimmed.contains("[") || trimmed.contains("{")) && trimmed.toUpperCase.contains(" TO ")
+
+    if (hasWildcard || hasRange) {
+      val kind = if (hasWildcard) "Wildcard" else "Range"
+      throw new IndexQueryParseException(
+        queryString,
+        Some(columnName),
+        new UnsupportedOperationException(
+          s"$kind queries are not supported on exact_only field '$columnName': " +
+            "values are stored as U64 hashes, only exact match (EqualTo) is meaningful."
+        )
+      )
+    }
+  }
 
   /** Check if a field type is numeric (should use range queries instead of term queries for equality) */
   private def isNumericFieldType(fieldType: FieldType): Boolean =
@@ -1957,7 +1988,7 @@ object FiltersToQueryConverter {
         // Parse the custom IndexQuery using the split searcher with field-specific parsing
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
-        //
+        validateIndexQueryOnExactOnlyField(columnName, queryString, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         // (e.g., columnName:*Configuration) which Tantivy's wildcard query builder supports
         val transformedQuery = transformLeadingWildcardQuery(queryString, columnName)
@@ -2017,7 +2048,7 @@ object FiltersToQueryConverter {
         // Handle V2 IndexQuery expressions from temp views
         // Note: Field validation happens earlier in isMixedFilterValidForSchema
         // Note: Driver-side validation should have already caught syntax errors
-        //
+        validateIndexQueryOnExactOnlyField(indexQueryV2.columnName, indexQueryV2.queryString, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         val transformedQuery = transformLeadingWildcardQuery(indexQueryV2.queryString, indexQueryV2.columnName)
         queryLog(
@@ -2092,6 +2123,7 @@ object FiltersToQueryConverter {
     filter match {
       case MixedIndexQuery(indexQueryFilter) =>
         // Delegate to existing IndexQueryFilter handling
+        validateIndexQueryOnExactOnlyField(indexQueryFilter.columnName, indexQueryFilter.queryString, schema)
         // Transform leading wildcard queries (e.g., *Configuration) to use explicit field syntax
         val transformedQuery = transformLeadingWildcardQuery(indexQueryFilter.queryString, indexQueryFilter.columnName)
         queryLog(
