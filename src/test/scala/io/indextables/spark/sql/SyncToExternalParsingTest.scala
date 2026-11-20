@@ -888,6 +888,18 @@ class SyncToExternalParsingTest extends TestBase {
     cmd.streamingPollIntervalMs shouldBe Some(30000L)
   }
 
+  test("parse WITH STREAMING combined with FROM SNAPSHOT for ICEBERG") {
+    val cmd = parseSync(
+      """BUILD INDEXTABLES COMPANION FOR ICEBERG 'ns.events'
+        |  FROM SNAPSHOT 9876543210
+        |  AT LOCATION 's3://bucket/index'
+        |  WITH STREAMING POLL INTERVAL 30 SECONDS""".stripMargin
+    )
+    cmd.sourceFormat shouldBe "iceberg"
+    cmd.fromSnapshot shouldBe Some(9876543210L)
+    cmd.streamingPollIntervalMs shouldBe Some(30000L)
+  }
+
   test("parse WITH STREAMING combined with INDEXING MODES and FASTFIELDS") {
     val cmd = parseSync(
       """BUILD INDEXTABLES COMPANION FOR DELTA 's3://bucket/delta'

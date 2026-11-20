@@ -33,7 +33,6 @@ import org.apache.iceberg.catalog.{Namespace, TableIdentifier}
 import org.apache.iceberg.types.Types
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.BeforeAndAfterAll
 
 /**
  * Tests for TRUNCATE INDEXTABLES TIME TRAVEL on companion tables built from Delta and Iceberg.
@@ -44,67 +43,15 @@ import org.scalatest.BeforeAndAfterAll
 class CompanionTruncateTimeTravelTest
     extends AnyFunSuite
     with Matchers
-    with BeforeAndAfterAll
-    with io.indextables.spark.testutils.FileCleanupHelper {
-
-  protected var spark: SparkSession = _
+    with CompanionTestBase {
 
   override def beforeAll(): Unit = {
-    SparkSession.getActiveSession.foreach(_.stop())
-    SparkSession.getDefaultSession.foreach(_.stop())
-
-    spark = SparkSession
-      .builder()
-      .appName("CompanionTruncateTimeTravelTest")
-      .master("local[2]")
-      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
-      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.driver.host", "127.0.0.1")
-      .config("spark.driver.bindAddress", "127.0.0.1")
-      .config(
-        "spark.sql.extensions",
-        "io.indextables.spark.extensions.IndexTables4SparkExtensions," +
-          "io.delta.sql.DeltaSparkSessionExtension"
-      )
-      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-      .config("spark.sql.adaptive.enabled", "false")
-      .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-      .config("spark.indextables.state.format", "json")
-      .config("spark.indextables.checkpoint.interval", "5")
-      .config("spark.indextables.aws.accessKey", "test-default-access-key")
-      .config("spark.indextables.aws.secretKey", "test-default-secret-key")
-      .config("spark.indextables.aws.sessionToken", "test-default-session-token")
-      .config("spark.indextables.s3.pathStyleAccess", "true")
-      .config("spark.indextables.aws.region", "us-east-1")
-      .config("spark.indextables.s3.endpoint", "http://localhost:10101")
-      .getOrCreate()
-
-    spark.sparkContext.setLogLevel("WARN")
-
-    _root_.io.indextables.spark.storage.SplitConversionThrottle.initialize(
-      maxParallelism = Runtime.getRuntime.availableProcessors() max 1
-    )
+    super.beforeAll()
+    spark.conf.set("spark.indextables.state.format", "json")
+    spark.conf.set("spark.indextables.checkpoint.interval", "5")
   }
-
-  override def afterAll(): Unit =
-    if (spark != null) spark.stop()
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
-
-  private def flushCaches(): Unit = {
-    import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
-    GlobalSplitCacheManager.flushAllCaches()
-    DriverSplitLocalityManager.clear()
-  }
-
-  private def withTempPath(f: String => Unit): Unit = {
-    val path = Files.createTempDirectory("companion-truncate-tt").toString
-    try {
-      flushCaches()
-      f(path)
-    } finally
-      deleteRecursively(new File(path))
-  }
 
   private val sparkSchema = StructType(
     Seq(
@@ -129,12 +76,6 @@ class CompanionTruncateTimeTravelTest
     val checkpointCount   = files.count(f => checkpointPattern.findFirstIn(f.getName).isDefined)
     (versionCount, checkpointCount)
   }
-
-  private def readCompanion(indexPath: String) =
-    spark.read
-      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
-      .option("spark.indextables.read.defaultLimit", "1000")
-      .load(indexPath)
 
   /**
    * Write initial Delta data (5 rows), build companion, then append 1 row and re-sync `extraSyncs` times to create

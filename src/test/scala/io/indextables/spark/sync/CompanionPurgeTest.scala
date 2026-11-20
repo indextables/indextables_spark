@@ -40,11 +40,15 @@ import org.scalatest.BeforeAndAfterEach
 class CompanionPurgeTest
     extends AnyFunSuite
     with Matchers
-    with BeforeAndAfterEach
-    with io.indextables.spark.testutils.FileCleanupHelper {
+    with CompanionTestBase
+    with BeforeAndAfterEach {
 
-  var spark: SparkSession = _
-  var tempDir: String     = _
+  var tempDir: String = _
+
+  // This test creates a fresh SparkSession per test via beforeEach/afterEach,
+  // so suppress the trait's once-per-suite lifecycle.
+  override def beforeAll(): Unit = ()
+  override def afterAll(): Unit  = ()
 
   override def beforeEach(): Unit = {
     spark = SparkSession
@@ -74,12 +78,6 @@ class CompanionPurgeTest
       spark = null
     }
     if (tempDir != null) deleteRecursively(new File(tempDir))
-  }
-
-  private def flushCaches(): Unit = {
-    import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
-    GlobalSplitCacheManager.flushAllCaches()
-    DriverSplitLocalityManager.clear()
   }
 
   // ── Shared schema & data ────────────────────────────────────────────────────
@@ -118,12 +116,6 @@ class CompanionPurgeTest
     result(0).getString(2) shouldBe "success"
     flushCaches()
   }
-
-  private def readCompanion(indexPath: String): org.apache.spark.sql.DataFrame =
-    spark.read
-      .format(io.indextables.spark.TestBase.INDEXTABLES_FORMAT)
-      .option("spark.indextables.read.defaultLimit", "1000")
-      .load(indexPath)
 
   private def createOrphanFile(
     indexPath: String,
